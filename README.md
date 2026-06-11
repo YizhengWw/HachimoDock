@@ -1,5 +1,7 @@
 # Hachimiao
 
+[English](README.en.md) | 简体中文
+
 Agent 的专属小屏：桌面常驻、实体陪伴，把 CLI Agent 的状态与回应变成可见、可触碰的桌面宠物。
 
 ![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)
