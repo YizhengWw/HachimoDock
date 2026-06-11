@@ -2,7 +2,10 @@
 
 Agent 的专属小屏：桌面常驻、实体陪伴，把 CLI Agent 的状态与回应变成可见、可触碰的桌面宠物。
 
-`Preview` `Raspberry Pi Zero 2 WH` `Tauri 2 + React` `License TBD`
+![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)
+![Desktop](https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24292f)
+![Hardware](https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20WH-2ea44f)
+![Version](https://img.shields.io/badge/version-0.1.0-orange)
 
 ![Hachimiao cover][img-cover]
 
