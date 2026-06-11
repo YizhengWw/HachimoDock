@@ -56,7 +56,9 @@ The desktop app keeps the pet display in sync with the agent in real time. Expre
 
 When the agent is idle, the pet plays on its own with multiple idle states. You can also touch the screen to interact with it.
 
-![Idle interaction][img-idle-gif]
+<p align="center">
+  <img src="assets/readme/idle-touch-feedback.gif" alt="Idle and touch feedback" />
+</p>
 
 ### Voice Interaction With Agents
 
@@ -68,7 +70,7 @@ Hachimiao includes a built-in Westie avatar with 16 animated states. You can als
 
 | Avatar generation | Avatar collection |
 | --- | --- |
-| ![Custom avatar poster][img-custom-avatar-1] | ![Custom avatar dense poster][img-custom-avatar-2] |
+| <img src="assets/readme/custom-avatar-poster.webp" alt="Avatar generation" /> | <img src="assets/readme/custom-avatar-collection.webp" alt="Avatar collection" /> |
 
 ### Custom Widgets
 
@@ -225,15 +227,12 @@ If you discover a security issue, please do not disclose sensitive details publi
 <!-- Images -->
 
 [img-intro-1]: assets/image_02.jpeg
-[img-intro-2]: assets/image_03.png
+[img-intro-2]: assets/readme/intro-system-overview.webp
 [img-status-gif]: assets/image_04.gif
-[img-status-1]: assets/image_05.png
-[img-status-2]: assets/image_06.png
-[img-idle-gif]: assets/image_07.gif
-[img-custom-avatar-1]: assets/petclaw-custom-crowd-product-poster.png
-[img-custom-avatar-2]: assets/petclaw-custom-crowd-product-poster-white-dense.png
+[img-status-1]: assets/readme/status-screen-1.webp
+[img-status-2]: assets/readme/status-screen-2.webp
 [img-components-1]: assets/image_10.jpeg
-[img-components-2]: assets/image_11.png
+[img-components-2]: assets/readme/component-preview.webp
 
 <!-- Purchase links -->
 
