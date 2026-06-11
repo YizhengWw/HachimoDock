@@ -1,8 +1,8 @@
-# User Guide
+﻿# User Guide
 
 [Back to README](../README.en.md)
 
-For installation, build, configuration, secondary development, and troubleshooting, refer to the project documentation. This page is for users who already have Hachimiao hardware or have assembled the device following the reproduction guide.
+For installation, build, configuration, secondary development, and troubleshooting, refer to the project documentation. This page is for users who already have HachimoDock hardware or have assembled the device following the reproduction guide.
 
 ![First-use preparation](../assets/image_18.png)
 

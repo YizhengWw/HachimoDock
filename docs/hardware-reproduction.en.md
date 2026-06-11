@@ -1,8 +1,8 @@
-# Hardware Reproduction
+﻿# Hardware Reproduction
 
 [Back to README](../README.en.md)
 
-This page collects Hachimiao hardware reproduction materials, including the complete-device BOM, enclosure and assembly notes, and PCB process information. Please verify models, dimensions, and supply status against the project files before purchasing or batch production.
+This page collects HachimoDock hardware reproduction materials, including the complete-device BOM, enclosure and assembly notes, and PCB process information. Please verify models, dimensions, and supply status against the project files before purchasing or batch production.
 
 Hardware design files are released under `CERN-OHL-S-2.0`. Modifications and redistribution based on the hardware design files should follow that license and the notes in [LICENSE.md](../LICENSE.md).
 

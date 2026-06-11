@@ -1,6 +1,6 @@
-<div align="center">
+﻿<div align="center">
 
-# Hachimiao
+# HachimoDock
 
 [简体中文](README.md) | English
 
@@ -14,7 +14,7 @@ A dedicated companion display for CLI agents: always present on your desk, physi
   <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version: 0.1.0" />
 </p>
 
-<img src="assets/image_01.png" alt="Hachimiao cover" />
+<img src="assets/image_01.png" alt="HachimoDock cover" />
 
 </div>
 
@@ -29,9 +29,9 @@ A dedicated companion display for CLI agents: always present on your desk, physi
 
 ## 1. Overview
 
-Hachimiao is a dedicated small display for agents. It turns CLI agents running on your PC, such as Codex, Claude Code, and OpenClaw, into a visible and touchable desktop companion.
+HachimoDock is a dedicated small display for agents. It turns CLI agents running on your PC, such as Codex, Claude Code, and OpenClaw, into a visible and touchable desktop companion.
 
-When the agent thinks, the pet thinks with it. When the agent calls tools, the pet starts working. When a task finishes, it celebrates; when something fails, it reacts. Hachimiao is not just another virtual assistant window. It gives agent activity a persistent, glanceable, physical presence.
+When the agent thinks, the pet thinks with it. When the agent calls tools, the pet starts working. When a task finishes, it celebrates; when something fails, it reacts. HachimoDock is not just another virtual assistant window. It gives agent activity a persistent, glanceable, physical presence.
 
 | Product Photo | System Overview |
 | --- | --- |
@@ -67,7 +67,7 @@ The device microphone can be used to talk to any agent session, reducing the nee
 
 ### Custom Pet Avatars
 
-Hachimiao includes a built-in Westie avatar with 16 animated states. You can also upload pet photos, profile images, or original characters to generate new avatars, and import avatars from the local Codex pet library or the pet community.
+HachimoDock includes a built-in Westie avatar with 16 animated states. You can also upload pet photos, profile images, or original characters to generate new avatars, and import avatars from the local Codex pet library or the pet community.
 
 | Avatar generation | Avatar collection |
 | --- | --- |
@@ -83,7 +83,7 @@ Built-in widgets include a slack-off countdown, Pomodoro timer, water reminder, 
 
 ## 3. Software Development
 
-Hachimiao consists of a PC-side manager, a device runtime, and an agent integration layer:
+HachimoDock consists of a PC-side manager, a device runtime, and an agent integration layer:
 
 - **Pet Manager desktop app**: built with Tauri 2, React, and Vite. It handles device binding, agent state following, avatar management, the widget center, button configuration, voice entry, and connection diagnostics.
 - **Device runtime**: runs on Raspberry Pi hardware and handles screen rendering, touch/rotary/button input, state reception, widget runtime, and local resource management.
@@ -100,7 +100,7 @@ Pet Manager desktop app
 Board runtime on Raspberry Pi
   |  state files, widget runtime, touch/rotary/button input
   v
-Hachimiao hardware display
+HachimoDock hardware display
 ```
 
 ### 3.1 Quick Start
@@ -201,7 +201,7 @@ Contribution workflow, license obligations, and the planned CLA process are desc
 
 ### 6.2 License
 
-Hachimiao uses layered software and hardware licensing:
+HachimoDock uses layered software and hardware licensing:
 
 - Software code License: `GPL-3.0-only`
 - Hardware design: `CERN-OHL-S-2.0`
@@ -226,7 +226,7 @@ If you discover a security issue, please do not disclose sensitive details publi
 - Community group: scan the QR code below.
 
 <p align="center">
-  <img src="assets/community-qr.png" alt="Hachimiao community QR code" width="220" />
+  <img src="assets/community-qr.png" alt="HachimoDock community QR code" width="220" />
 </p>
 
 ### 6.5 Acknowledgements

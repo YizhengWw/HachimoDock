@@ -1,6 +1,6 @@
-# License
+﻿# License
 
-Hachimiao uses layered licensing because the repository contains software, hardware design materials, documentation, and media assets.
+HachimoDock uses layered licensing because the repository contains software, hardware design materials, documentation, and media assets.
 
 ## Software
 

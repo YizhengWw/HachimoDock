@@ -1,6 +1,6 @@
-# Contributing / 贡献指南
+﻿# Contributing / 贡献指南
 
-感谢你关注 Hachimiao。我们欢迎 issue、discussion 和 pull request，也欢迎围绕硬件复刻、软件适配、形象素材、负一屏组件和文档改进展开社区协作。
+感谢你关注 HachimoDock。我们欢迎 issue、discussion 和 pull request，也欢迎围绕硬件复刻、软件适配、形象素材、负一屏组件和文档改进展开社区协作。
 
 ## 贡献方向
 
@@ -41,7 +41,7 @@
 
 ## English Summary
 
-Hachimiao welcomes issues, discussions, and pull requests.
+HachimoDock welcomes issues, discussions, and pull requests.
 
 Main outbound licenses:
 
