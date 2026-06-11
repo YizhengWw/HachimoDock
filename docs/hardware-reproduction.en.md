@@ -4,13 +4,15 @@
 
 This page collects Hachimiao hardware reproduction materials, including the complete-device BOM, enclosure and assembly notes, and PCB process information. Please verify models, dimensions, and supply status against the project files before purchasing or batch production.
 
+Hardware design files are released under `CERN-OHL-S-2.0`. Modifications and redistribution based on the hardware design files should follow that license and the notes in [LICENSE.md](../LICENSE.md).
+
 ## Hardware BOM
 
 ![Hardware overview](../assets/image_12.png)
 
 ### Option 1: One-click LCSC Order
 
-Use this when ordering the custom board and electronic materials together. Replace the placeholder with the real LCSC order link before release.
+Use this when ordering the custom board and electronic materials together. If a one-click order entry is provided later, follow the OSHWHub project page or the latest repository notes.
 
 ### Option 2: Buy Parts Manually
 
@@ -36,7 +38,7 @@ Use the table below to check and purchase the complete-device materials item by 
 
 ## Enclosure and Assembly
 
-The MakerWorld model link should be replaced with the real release page before publishing.
+Enclosure model files are provided with the project materials when available. If they are mirrored to MakerWorld or another model platform later, follow the latest repository link.
 
 ![Assembly overview](../assets/1aa4e315-fe70-44ae-853e-b72996ee1aae.png)
 

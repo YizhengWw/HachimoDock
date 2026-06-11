@@ -7,9 +7,10 @@
 A dedicated companion display for CLI agents: always present on your desk, physically visible, and able to turn agent state into expressive pet behavior.
 
 <p>
-  <img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only" />
+  <img src="https://img.shields.io/badge/software-GPL--3.0--only-blue" alt="Software license: GPL-3.0-only" />
+  <img src="https://img.shields.io/badge/hardware-CERN--OHL--S--2.0-2ea44f" alt="Hardware license: CERN-OHL-S-2.0" />
   <img src="https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24292f" alt="Desktop: Tauri 2 + React" />
-  <img src="https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20WH-2ea44f" alt="Hardware: Raspberry Pi Zero 2 WH" />
+  <img src="https://img.shields.io/badge/board-Raspberry%20Pi%20Zero%202%20WH-24292f" alt="Board: Raspberry Pi Zero 2 WH" />
   <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version: 0.1.0" />
 </p>
 
@@ -196,15 +197,23 @@ GitHub issues, discussions, and pull requests are welcome. Suggested contributio
 - Improve assembly guides, flashing guides, and troubleshooting docs.
 - Improve the agent state protocol and third-party agent integrations.
 
+Contribution workflow, license obligations, and the planned CLA process are described in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ### 6.2 License
 
-The README badge marks the software code as `GPL-3.0-only`. Before a formal release, the repository should include a complete root-level `LICENSE` file and separate notices for hardware designs, enclosure files, official pet assets, and third-party resources.
+Hachimiao uses layered software and hardware licensing:
 
 - Software code License: `GPL-3.0-only`
-- Hardware design: follow the OSHWHub project page and the engineering files published with the repository.
+- Hardware design: `CERN-OHL-S-2.0`
 - 3D enclosure files: follow the license notice shipped with the model files.
 - Official pet assets: intended for this project's examples and demos; keep source attribution before reuse or redistribution.
 - Third-party resources: document external models, assets, widgets, or libraries in their files or a future `THIRD_PARTY_NOTICES.md`.
+
+Both `GPL-3.0-only` and `CERN-OHL-S-2.0` are reciprocal/copyleft-style licenses. If you distribute modifications based on this project, you need to publish the corresponding modifications under the applicable license. This does not mean you must submit those changes back to this repository; maintaining a fork or downstream project is fine as long as the license obligations are satisfied.
+
+Before formally accepting external contributions at scale, the project plans to introduce a CLA process so contributions can be accepted in a compliant way.
+
+See [LICENSE.md](LICENSE.md) for the complete licensing overview and [LICENSES/](LICENSES/) for full license texts.
 
 ### 6.3 Security Issues
 

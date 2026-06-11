@@ -7,9 +7,10 @@
 Agent 的专属小屏：桌面常驻、实体陪伴，把 CLI Agent 的状态与回应变成可见、可触碰的桌面宠物。
 
 <p>
-  <img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only" />
+  <img src="https://img.shields.io/badge/software-GPL--3.0--only-blue" alt="Software license: GPL-3.0-only" />
+  <img src="https://img.shields.io/badge/hardware-CERN--OHL--S--2.0-2ea44f" alt="Hardware license: CERN-OHL-S-2.0" />
   <img src="https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24292f" alt="Desktop: Tauri 2 + React" />
-  <img src="https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20WH-2ea44f" alt="Hardware: Raspberry Pi Zero 2 WH" />
+  <img src="https://img.shields.io/badge/board-Raspberry%20Pi%20Zero%202%20WH-24292f" alt="Board: Raspberry Pi Zero 2 WH" />
   <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version: 0.1.0" />
 </p>
 
@@ -196,15 +197,23 @@ assets/               图标等资源
 - 补充装配教程、烧录说明和故障排查。
 - 改进 Agent 状态协议和第三方 Agent 接入。
 
+贡献流程、许可证义务和 CLA 计划见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ### 6.2 License
 
-本仓库 README 顶部以 `GPL-3.0-only` 标注软件代码许可。正式发布时建议在仓库根目录补充完整 `LICENSE` 文件，并按内容类型分别说明硬件、结构件、素材和第三方资源的授权边界。
+本项目采用软硬件分层授权：
 
 - 软件代码：`GPL-3.0-only`
-- 硬件设计：以嘉立创开源硬件项目页及随仓库发布的工程文件说明为准。
+- 硬件设计：`CERN-OHL-S-2.0`
 - 3D 结构件：以随模型文件发布的授权说明为准。
 - 官方宠物素材：仅随本项目示例和演示使用，复用或二次分发前请保留来源说明。
 - 第三方资源：若引入外部模型、素材、组件或库，请在对应文件或后续 `THIRD_PARTY_NOTICES.md` 中补充声明。
+
+`GPL-3.0-only` 与 `CERN-OHL-S-2.0` 都是 reciprocal / copyleft 风格的许可证：基于本项目开源内容做修改并对外分发时，需要按对应许可证公开修改内容；但这不等于必须向本仓库提交 PR。你可以维护自己的 fork 或派生项目，只要满足相应许可证要求。
+
+正式开放外部贡献后，项目计划搭建 CLA 流程，以便合规接受外部开发者贡献。
+
+完整授权说明见 [LICENSE.md](LICENSE.md)，许可证正文见 [LICENSES/](LICENSES/)。
 
 ### 6.3 Security Issues
 
