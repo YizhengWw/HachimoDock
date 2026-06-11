@@ -36,6 +36,10 @@ When the agent thinks, the pet thinks with it. When the agent calls tools, the p
 | --- | --- |
 | Agent state, progress, pending decisions, and results are translated into pet expressions, animations, colors, and short labels. A quick look tells you what the agent is doing. | No need to switch back to a terminal or chat window first. Speak to the device to talk to the agent, issue commands, capture thoughts, or continue work. |
 
+| Hardware Parts | First-Use Flow |
+| --- | --- |
+| ![Hardware overview][img-hardware-overview] | ![First use preparation][img-first-use] |
+
 ![Desktop companion][img-intro-1]
 
 ## 2. Highlights
@@ -45,6 +49,8 @@ When the agent thinks, the pet thinks with it. When the agent calls tools, the p
 The desktop app keeps the pet display in sync with the agent in real time. Expressions, animations, colors, captions, and subtle prompts communicate current agent state.
 
 ![Agent status demo][img-status-gif]
+
+![Pet Manager dashboard][img-dashboard]
 
 | Status screen | Prompt screen |
 | --- | --- |
@@ -64,6 +70,10 @@ The device microphone can be used to talk to any agent session, reducing the nee
 
 Hachimiao includes a built-in Westie avatar with 16 animated states. You can also upload pet photos, profile images, or original characters to generate new avatars, and import avatars from the local Codex pet library or the pet community.
 
+| Avatar gallery | Custom avatar wizard |
+| --- | --- |
+| ![Avatar gallery][img-avatar-gallery] | ![Custom avatar wizard][img-avatar-wizard] |
+
 | Avatar generation | Avatar collection |
 | --- | --- |
 | ![Custom avatar poster][img-custom-avatar-1] | ![Custom avatar dense poster][img-custom-avatar-2] |
@@ -75,6 +85,10 @@ Built-in widgets include a slack-off countdown, Pomodoro timer, water reminder, 
 | Widget center | Widget preview |
 | --- | --- |
 | ![Component center][img-components-1] | ![Component preview][img-components-2] |
+
+| Widget library | AI widget generation |
+| --- | --- |
+| ![Widget center screenshot][img-widget-center] | ![Widget generation screenshot][img-widget-generation] |
 
 ## 3. Software Development
 
@@ -223,14 +237,21 @@ If you discover a security issue, please do not disclose sensitive details publi
 <!-- Images -->
 
 [img-intro-1]: assets/image_02.jpeg
+[img-hardware-overview]: assets/image_12.png
+[img-first-use]: assets/image_18.png
 [img-status-gif]: assets/image_04.gif
+[img-dashboard]: assets/image_20.png
 [img-status-1]: assets/image_05.png
 [img-status-2]: assets/image_06.png
 [img-idle-gif]: assets/image_07.gif
+[img-avatar-gallery]: assets/image_21.png
+[img-avatar-wizard]: assets/image_22.png
 [img-custom-avatar-1]: assets/petclaw-custom-crowd-product-poster.png
 [img-custom-avatar-2]: assets/petclaw-custom-crowd-product-poster-white-dense.png
 [img-components-1]: assets/image_10.jpeg
 [img-components-2]: assets/image_11.png
+[img-widget-center]: assets/image_23.png
+[img-widget-generation]: assets/image_24.png
 
 <!-- Purchase links -->
 
