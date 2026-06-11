@@ -1,15 +1,21 @@
+<div align="center">
+
 # Hachimiao
 
 [简体中文](README.md) | English
 
 A dedicated companion display for CLI agents: always present on your desk, physically visible, and able to turn agent state into expressive pet behavior.
 
-![License](https://img.shields.io/badge/license-GPL--3.0--only-blue)
-![Desktop](https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24292f)
-![Hardware](https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20WH-2ea44f)
-![Version](https://img.shields.io/badge/version-0.1.0-orange)
+<p>
+  <img src="https://img.shields.io/badge/license-GPL--3.0--only-blue" alt="License: GPL-3.0-only" />
+  <img src="https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24292f" alt="Desktop: Tauri 2 + React" />
+  <img src="https://img.shields.io/badge/hardware-Raspberry%20Pi%20Zero%202%20WH-2ea44f" alt="Hardware: Raspberry Pi Zero 2 WH" />
+  <img src="https://img.shields.io/badge/version-0.1.0-orange" alt="Version: 0.1.0" />
+</p>
 
-![Hachimiao cover][img-cover]
+<img src="assets/image_01.png" alt="Hachimiao cover" />
+
+</div>
 
 ## Table of Contents
 
@@ -332,7 +338,6 @@ If you discover a security issue, please do not disclose sensitive details publi
 
 <!-- Images -->
 
-[img-cover]: assets/image_01.png
 [img-intro-1]: assets/image_02.jpeg
 [img-status-gif]: assets/image_04.gif
 [img-status-1]: assets/image_05.png
