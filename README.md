@@ -187,7 +187,7 @@ assets/               图标等资源
 
 ### 6.1 Contributing
 
-欢迎提交 issue、discussion 和 pull request。建议贡献方向：
+欢迎通过 GitHub issue、discussion 和 pull request 参与项目。建议贡献方向：
 
 - 修复 Pet Manager 或板端运行时问题。
 - 适配新的硬件屏、主控板、结构件或外壳形态。
@@ -198,30 +198,30 @@ assets/               图标等资源
 
 ### 6.2 License
 
-本项目建议按内容类型分别声明许可证，不建议只使用一个笼统协议。
+本仓库 README 顶部以 `GPL-3.0-only` 标注软件代码许可。正式发布时建议在仓库根目录补充完整 `LICENSE` 文件，并按内容类型分别说明硬件、结构件、素材和第三方资源的授权边界。
 
-- 软件代码 License：`[待补充，例如 Apache-2.0 / MIT]`
-- 硬件设计 License：`[待补充，例如 CERN-OHL-S-2.0 / CERN-OHL-P-2.0]`
-- 3D 结构件 License：`[待补充，例如 CC BY-SA 4.0]`
-- 官方宠物素材 License：`[待补充]`
-- 第三方资源声明：`THIRD_PARTY_NOTICES.md`
+- 软件代码：`GPL-3.0-only`
+- 硬件设计：以嘉立创开源硬件项目页及随仓库发布的工程文件说明为准。
+- 3D 结构件：以随模型文件发布的授权说明为准。
+- 官方宠物素材：仅随本项目示例和演示使用，复用或二次分发前请保留来源说明。
+- 第三方资源：若引入外部模型、素材、组件或库，请在对应文件或后续 `THIRD_PARTY_NOTICES.md` 中补充声明。
 
 ### 6.3 Security Issues
 
-如果发现安全问题，请不要直接公开敏感细节。请通过项目维护者提供的安全反馈渠道联系，我们会尽快确认和处理。
+如果发现安全问题，请不要直接公开敏感细节。当前优先在社群中联系项目维护者确认处理方式；若只能通过 GitHub issue 反馈，请先描述影响范围，不要贴出可复现的敏感细节。后续若启用 GitHub Security Advisory 或专用安全邮箱，请以仓库最新说明为准。
 
-### 6.4 Contact
+### 6.4 项目入口
 
-- Maintainer：`[待补充]`
-- Collaborator：`[待补充]`
-- GitHub：`[待补充]`
-- 嘉立创项目页：`[待补充]`
-- 社区 / 交流群：`[待补充]`
-- 安全反馈邮箱：`[待补充]`
+- GitHub：<https://github.com/Skylerww/Hachimiao>
+- 嘉立创开源硬件项目：<https://oshwhub.com/eda_lfilxkob/project_ukwrttbk>
+- 社区 / 交流群：扫描下方二维码加入。
 
-### 更多信息
+<p align="center">
+  <img src="assets/community-qr.png" alt="Hachimiao 社群二维码" width="220" />
+</p>
 
-- 项目主页、交流群、模型/资源下载入口可在发布前替换为真实链接。
+### 6.5 致谢
+
 - 感谢嘉立创 / 立创生态、OpenClaw、MiMo、Petdex / Codex Pet 及相关开源项目和社区贡献者。
 
 <!-- Images -->

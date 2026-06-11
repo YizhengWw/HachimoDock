@@ -187,7 +187,7 @@ The user guide has been split into a dedicated document and now includes the ful
 
 ### 6.1 Contributing
 
-Issues, discussions, and pull requests are welcome. Suggested contribution areas:
+GitHub issues, discussions, and pull requests are welcome. Suggested contribution areas:
 
 - Fix Pet Manager or board runtime issues.
 - Adapt new screens, main boards, enclosures, or hardware forms.
@@ -198,30 +198,30 @@ Issues, discussions, and pull requests are welcome. Suggested contribution areas
 
 ### 6.2 License
 
-This project currently uses `GPL-3.0-only` for software code. Hardware designs, 3D structure files, official pet assets, and third-party resources may need separate notices as the project is organized for release.
+The README badge marks the software code as `GPL-3.0-only`. Before a formal release, the repository should include a complete root-level `LICENSE` file and separate notices for hardware designs, enclosure files, official pet assets, and third-party resources.
 
 - Software code License: `GPL-3.0-only`
-- Hardware design License: `[TBD, for example CERN-OHL-S-2.0 / CERN-OHL-P-2.0]`
-- 3D structure License: `[TBD, for example CC BY-SA 4.0]`
-- Official pet assets License: `[TBD]`
-- Third-party notices: `THIRD_PARTY_NOTICES.md`
+- Hardware design: follow the OSHWHub project page and the engineering files published with the repository.
+- 3D enclosure files: follow the license notice shipped with the model files.
+- Official pet assets: intended for this project's examples and demos; keep source attribution before reuse or redistribution.
+- Third-party resources: document external models, assets, widgets, or libraries in their files or a future `THIRD_PARTY_NOTICES.md`.
 
 ### 6.3 Security Issues
 
-If you discover a security issue, please do not disclose sensitive details publicly. Contact the maintainers through the security channel once it is available, and we will confirm and handle the issue as soon as possible.
+If you discover a security issue, please do not disclose sensitive details publicly. For now, contact the maintainers through the community group first. If you must use a GitHub issue, describe the impact without posting sensitive reproduction details. If GitHub Security Advisory or a dedicated security email is enabled later, follow the latest repository instructions.
 
-### 6.4 Contact
+### 6.4 Project Links
 
-- Maintainer: `[TBD]`
-- Collaborator: `[TBD]`
-- GitHub: `[TBD]`
-- LCSC / OSHWHub project page: `[TBD]`
-- Community / chat group: `[TBD]`
-- Security contact: `[TBD]`
+- GitHub: <https://github.com/Skylerww/Hachimiao>
+- OSHWHub hardware project: <https://oshwhub.com/eda_lfilxkob/project_ukwrttbk>
+- Community group: scan the QR code below.
 
-### More Information
+<p align="center">
+  <img src="assets/community-qr.png" alt="Hachimiao community QR code" width="220" />
+</p>
 
-- Project homepage, community group, model downloads, and resource links should be replaced with real links before release.
+### 6.5 Acknowledgements
+
 - Thanks to the JLC / LCSC ecosystem, OpenClaw, MiMo, Petdex / Codex Pet, related open-source projects, and community contributors.
 
 <!-- Images -->
