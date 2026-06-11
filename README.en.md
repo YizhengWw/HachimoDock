@@ -166,134 +166,17 @@ assets/               Icons and other assets
 
 ## 4. Hardware Reproduction
 
-### 4.1 Hardware BOM
+Hardware reproduction materials have been split into a dedicated document so the BOM, enclosure, assembly images, and PCB process notes can be maintained cleanly.
 
-![Hardware overview][img-bom]
-
-#### Option 1: One-click LCSC Order
-
-Use this when ordering the custom board and electronic materials together. Replace the placeholder with the real LCSC order link before release.
-
-#### Option 2: Buy Parts Manually
-
-Use the table below to check and purchase the complete-device materials item by item.
-
-| Category | Module / Part | Position / Interface | Qty / Unit | Qty / 50 Units | Notes |
-| --- | --- | --- | ---: | ---: | --- |
-| Dev board | [Raspberry Pi Zero 2 WH][buy-pi] | Insert into U1 | 1 | 50 | Pre-soldered 40-pin header version recommended |
-| SD card | [microSD card][buy-sd] | TF card slot | 1 | 50 | 32 GB or above, A1/A2 preferred |
-| Display | [2.8-inch 240x320 SPI TFT touch screen][buy-screen] | Insert into U2 | 1 | 50 | 11-pin XPT2046 touch version used as reference; 8-pin non-touch version can be an alternative; choose soldered header and ILI9341 version |
-| Knob | [Pushable knob module / EC11 encoder module][buy-knob] | Connect to H2 | 1 | 50 | Confirm shaft length, knob height, installation direction, and mounting method with the enclosure design |
-| Microphone module | [INMP441 microphone module][buy-mic] | Connect to H1 | 1 | 50 | External module can be used if SMT microphone cost is too high |
-| Speaker | [1224 small cavity speaker, 1.25 connector, adhesive backing][buy-speaker] | Connect to CN7 | 1 | 50 | 1224, 8 ohm, 1-2 W, 1.25P |
-| Wires | [Dupont wires][buy-wire] | Buttons / knob / microphone | 15 | 750 | Around 20 cm, female-to-female |
-| Screws | [Self-tapping screw M2 * 8 mm][buy-screw] | Screen mounting | 4 | 200 | Used to mount the screen |
-| Screws | [Self-tapping screw M2 * 5 mm][buy-screw] | Structure mounting | 8 | 400 | Used to mount other structure parts |
-| Enclosure | [3D printed / CNC enclosure][buy-shell] | Whole device structure | 1 | 50 | Enclosure, back cover, and internal brackets |
-| Adapter cable | [Micro-USB male to Type-C female cable][buy-micro-usb] | Internal board extension | 1 | 50 | 10 cm; MicroUSB male up-angle to Type-C female straight `[mic2-tpc1]` |
-| Adapter cable | [Type-C to Type-A cable][buy-typec-a] | Device to computer | 1 | 50 | USB 2.0 is enough; must be 4-wire or above, not charge-only |
-| Custom PCB baseboard | See the project PCB BOM | Interconnects modules and reduces Dupont wiring | - | - | Verify baseboard materials with the PCB project |
-
-> Purchase note: links are provided as reproduction references only. Prices, stock, and after-sales service follow the corresponding platform. Verify models and supply before batch production.
-
-### 4.2 Enclosure and Assembly
-
-The MakerWorld model link should be replaced with the real release page before publishing.
-
-![Assembly overview][img-assembly]
-
-![Assembly detail][img-assembly-detail]
-
-### 4.3 PCB Process Information
-
-![PCB front/back][img-pcb-front]
-
-![PCB render][img-pcb-back]
-
-| Item | Value |
-| --- | --- |
-| Thickness | 1.6 mm |
-| Layers | 2-layer board |
-| Size | 71 mm * 30.5 mm |
-| Soldering | Audio-related parts such as amplifier and microphone may need a hot plate. Other parts can be soldered with an iron. If voice interaction is not required, a bare board with manually soldered headers can be used without affecting the core product flow. |
+- [Open hardware reproduction guide](docs/hardware-reproduction.en.md)
+- Covers: complete-device BOM, purchase notes, enclosure and assembly, and PCB process information.
 
 ## 5. User Guide
 
-For installation, build, configuration, secondary development, and troubleshooting, refer to the project documentation. This section is for users who already have Hachimiao hardware or have assembled the device following the reproduction guide.
+The user guide has been split into a dedicated document and now includes the full software screenshots from the Word document.
 
-![Pet Manager overview][img-manager]
-
-### 5.1 Preparation
-
-- Device-side runtime is installed and can boot normally.
-- Pet Manager is built or installed on the PC.
-- A usable Wi-Fi network, or access to the device AP provisioning flow.
-- At least one local CLI agent: Codex, Claude Code, OpenClaw, etc.
-
-### 5.2 Device Binding
-
-Power on the device and wait for first-start mode. An unbound device enters waiting/provisioning state and displays a connection prompt or the default pet screen. Open Pet Manager and start the binding wizard.
-
-The binding wizard has 4 steps:
-
-1. Choose the connection method: Ethernet or Wi-Fi.
-2. Bind the network.
-3. Verify communication and confirm that the bridge is online.
-4. Confirm the avatar.
-
-Connection methods:
-
-- **Wired binding**: plug in the cable and click detect/bind. No password is required.
-- **Wi-Fi provisioning**: temporarily connect the computer to the device hotspot (default SSID: `claw-pet`). Pet Manager sends Wi-Fi, MQTT, desktop device ID, and namespace configuration through the device AP (`192.168.44.1`). The device then returns to the user LAN, and the computer network is restored after provisioning.
-
-### 5.3 Pet Manager Dashboard
-
-The dashboard brings together device connection status, agent channels, avatars, button configuration, and the voice assistant entry.
-
-- **Connection status**: shows desktop device ID, USB and Wi-Fi online status, and serial rescan controls.
-- **Channels and avatars**: Claude Code, Codex, and OpenClaw are separate channels. Each channel can bind a different avatar; the device shows the avatar of the active channel.
-- **More actions**: send test message, copy desktop device ID, return device to home screen, force avatar sync, and unbind device.
-
-### 5.4 Avatar Gallery and Custom Avatars
-
-The avatar gallery lets you browse built-in and custom avatars. Detail pages can preview every state animation and state sound, and custom WAV files can be uploaded.
-
-The add-avatar flow supports:
-
-- Creating a custom avatar.
-- Importing from Codex.
-- Importing from the community.
-
-The built-in Westie avatar (`builtin://terrier-clips`) includes 16 animated states:
-
-- **Connection / welcome**: `welcome`
-- **Working**: `working.thinking`, `working.typing`, `working.browsing`
-- **Results**: `waiting_user`, `done`, `error`
-- **Touch feedback**: `touch.lick`, `touch.what`
-- **Idle**: `idle.playing`, `idle.wandering`, `idle.begging`, `idle.daydreaming`, `idle.eating`, `idle.reading`, `idle.traveling`
-
-Custom avatar wizard:
-
-1. Upload a reference image (PNG / JPEG / WebP / GIF; GIF uses the first frame).
-2. Enter avatar name and personality description.
-3. Generate the configuration and sync it to the device.
-
-### 5.5 Widget Center
-
-The widget center manages the device negative screen. Four widgets are built in, and new widgets can be generated with AI.
-
-| Widget | ID | Description |
-| --- | --- | --- |
-| Token usage | `token-usage` | Pushes real-time coding-agent token usage to the device and converts it into an easy-to-understand lunch-cost equivalent. |
-| Slack-off countdown | `slack-off-countdown` | Shows how much time is left before the end of the workday. |
-| Pomodoro timer | `tomato-clock` | 25-minute focus + 5-minute break loop. Tap to start/pause; long press to reset. |
-| Water reminder | `drink-reminder` | Reminds you to drink water every 45 minutes. Tap to confirm; long press to pause or resume. |
-
-Creating a widget has 3 steps:
-
-1. **Install skill**: install `petAgent-ui-generator` into the detected coding agent. The app scans `~/.claude/`, `~/.codex/`, `~/.openclaw/`, `~/.gemini/`, and `~/.cursor/`.
-2. **Describe and generate**: describe the widget purpose, displayed numbers/states, and click/long-press behavior in natural language. The skill invokes the agent to generate the widget.
-3. **Auto refresh / manual import**: after generation, the widget center refreshes automatically. You can also drag in a `.clawpkg` directory or zip file manually.
+- [Open user guide](docs/user-guide.en.md)
+- Covers: device binding, Pet Manager dashboard, avatar gallery, custom avatars, widget center, and AI widget generation flow.
 
 ## 6. Maintenance
 
@@ -347,23 +230,6 @@ If you discover a security issue, please do not disclose sensitive details publi
 [img-custom-avatar-2]: assets/petclaw-custom-crowd-product-poster-white-dense.png
 [img-components-1]: assets/image_10.jpeg
 [img-components-2]: assets/image_11.png
-[img-bom]: assets/image_12.png
-[img-assembly]: assets/1aa4e315-fe70-44ae-853e-b72996ee1aae.png
-[img-assembly-detail]: assets/image_15.jpeg
-[img-pcb-front]: assets/image_16.png
-[img-pcb-back]: assets/image_17.png
-[img-manager]: assets/image_18.png
 
 <!-- Purchase links -->
 
-[buy-pi]: https://item.taobao.com/item.htm?id=693613248231
-[buy-sd]: https://detail.tmall.com/item.htm?id=848065818893
-[buy-screen]: https://item.taobao.com/item.htm?id=526024381409
-[buy-knob]: https://e.tb.cn/h.iForjxnIRX1llEz
-[buy-mic]: https://e.tb.cn/h.izOC4n5sjGeIoAm
-[buy-speaker]: https://e.tb.cn/h.ixBS9SgI6gFXrIx
-[buy-wire]: https://so.szlcsc.com/global.html
-[buy-screw]: https://item.taobao.com/item.htm?id=39761471376
-[buy-shell]: https://www.jlc-3dp.cn/
-[buy-micro-usb]: https://detail.tmall.com/item.htm?id=867489662609
-[buy-typec-a]: https://item.taobao.com/item.htm?id=726410843702

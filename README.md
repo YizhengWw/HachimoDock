@@ -166,134 +166,17 @@ assets/               图标等资源
 
 ## 4. 硬件复刻
 
-### 4.1 硬件 BOM
+硬件复刻资料已拆分为独立文档，便于维护 BOM、结构件、装配图和 PCB 工艺信息。
 
-![Hardware overview][img-bom]
-
-#### 方式一：立创商城一键下单
-
-适合直接按底板工程与电子料 BOM 统一下单。正式发布前请替换为立创商城真实一键下单链接。
-
-#### 方式二：按表格自行购买
-
-按下方整机物料表逐项核对采购。
-
-| 类别 | 模块 / 器件 | 位号 / 接口 | 单套数量 | 备货总量 | 备注 |
-| --- | --- | --- | ---: | ---: | --- |
-| 开发板 | [Raspberry Pi Zero 2 WH][buy-pi] | 插入 U1 | 1 | 50 | 需预焊 40pin 排针版本 |
-| SD 卡 | [microSD 卡][buy-sd] | TF 卡槽 | 1 | 50 | 32GB 以上，A1/A2 级别优先 |
-| 屏幕 | [中景园电子 2.8寸 240x320 SPI TFT 触摸屏][buy-screen] | 插入 U2 | 1 | 50 | 以 11PIN 带 XPT2046 触摸版本为例；8PIN 无触摸版本作为同尺寸备选；选焊接排针、ILI9341 版本 |
-| 旋钮 | [可按下旋钮模块 / EC11 编码器模块][buy-knob] | 接 H2 | 1 | 50 | 需和外观 ID 确认轴长、旋钮高度、安装方向和固定方式 |
-| 麦克风模块 | [INMP441 麦克风模块][buy-mic] | 接 H1 | 1 | 50 | 若麦克风元件贴片成本过高，可采用外接模块方案 |
-| 喇叭 | [1224 小腔体喇叭，1.25 端子，带双面胶][buy-speaker] | 接 CN7 | 1 | 50 | 1224，8 欧，1-2 W，1.25P |
-| 线材辅料 | [杜邦线][buy-wire] | 按钮 / 旋钮 / 麦克风 | 15 | 750 | 20 cm 左右，母对母 |
-| 结构辅料 | [自攻螺丝 M2 * 8 mm][buy-screw] | 屏幕固定 | 4 | 200 | 用于固定屏幕 |
-| 结构辅料 | [自攻螺丝 M2 * 5 mm][buy-screw] | 结构固定 | 8 | 400 | 用于固定其他构件 |
-| 外壳结构 | [3D 打印 / CNC 外壳][buy-shell] | 整机结构 | 1 | 50 | 外壳、后盖、内部固定支架 |
-| 转接线 | [Micro-USB 公转 Type-C 母转接线][buy-micro-usb] | 内部开发板引出 | 1 | 50 | 10 cm；MicroUSB 公上弯转 Type-C 母直 `[mic2-tpc1]` |
-| 转接线 | [Type-C 转 Type-A 转接线][buy-typec-a] | 设备连接到电脑 | 1 | 50 | USB 2.0 即可，4 芯及以上，不能只是充电线 |
-| 定制 PCB 底板 | 见工程内底板 BOM | 各模块连接中转，减少杜邦线 | - | - | 底板物料随 PCB 工程核对 |
-
-> 采购说明：链接仅供复刻参考，价格、库存和售后以对应平台为准；批量制作前请先核对型号与供货。
-
-### 4.2 结构件与装配
-
-MakerWorld 模型下载链接将在发布前替换为真实页面。
-
-![Assembly overview][img-assembly]
-
-![Assembly detail][img-assembly-detail]
-
-### 4.3 板子工艺信息
-
-![PCB front/back][img-pcb-front]
-
-![PCB render][img-pcb-back]
-
-| 项目 | 参数 |
-| --- | --- |
-| 关键厚度 | 1.6 mm |
-| 板子层数 | 双层板 |
-| 尺寸 | 71 mm * 30.5 mm |
-| 焊接 | 音频处理部分（功放、麦克风）可能需要加热台；其余器件使用烙铁即可。若不需要音频交互，可考虑打裸板自行焊接排针排母，不影响产品核心功能。 |
+- [查看硬件复刻文档](docs/hardware-reproduction.md)
+- 覆盖内容：整机 BOM、采购说明、结构件与装配、PCB 工艺信息。
 
 ## 5. 使用指南
 
-完整的软件安装、构建、配置、二次开发和故障排查，请以项目文档为准。本节面向已经拥有 Hachimiao 硬件设备，或已经按复刻教程完成装配的用户。
+使用指南已拆分为独立文档，并补充了 Word 文档中的完整软件截图。
 
-![Pet Manager overview][img-manager]
-
-### 5.1 准备
-
-- 设备端已安装并能正常启动。
-- PC 端已构建或安装 Pet Manager。
-- 有可用 Wi-Fi 网络，或可进入设备 AP 直连环境。
-- 至少有一个本机 CLI Agent：Codex、Claude Code、OpenClaw 等。
-
-### 5.2 绑定设备
-
-接通设备电源，等待设备进入首次启动状态。未绑定设备会进入等待连接或配网状态，屏幕显示待连接提示或默认宠物画面。打开 Pet Manager 客户端后进入设备绑定向导。
-
-绑定向导分 4 步：
-
-1. 选择方式（网线或 Wi-Fi）。
-2. 网络绑定。
-3. 验证通信，确认 Bridge 在线。
-4. 确认形象。
-
-两种连接方式：
-
-- **插网线绑定（直连）**：插线后点击“检测绑定”，无需输入密码。
-- **Wi-Fi 配网**：电脑临时连接设备热点（默认 SSID `claw-pet`），管理端经设备 AP（`192.168.44.1`）下发 Wi-Fi、MQTT、桌面设备 ID 与 namespace，设备再回到用户局域网；电脑网络在配网完成后自动恢复。
-
-### 5.3 Pet Manager 管理端主页
-
-控制台聚合设备连接状态、渠道与形象、按钮配置和语音助手入口。
-
-- **连接状态**：显示桌面设备 ID、USB 与 Wi-Fi 在线状态，可重新扫描串口。
-- **渠道与形象**：Claude Code / Codex / OpenClaw 各为一个渠道，分别绑定形象；设备端展示当前正在使用的渠道形象。
-- **更多操作**：发送测试消息、复制桌面设备 ID、设备返回主屏、强制同步形象、解绑设备。
-
-### 5.4 形象画廊与自定义形象
-
-形象画廊用于浏览默认形象与自定义形象。进入详情可逐个预览每个状态的动画与状态提示音，也可以上传自定义 WAV。
-
-“添加形象”支持三种方式：
-
-- 新建自定义形象。
-- 从 Codex 导入。
-- 从社区导入。
-
-内置“西高地小狗”形象（`builtin://terrier-clips`）共 16 个状态动画：
-
-- **连接 / 欢迎**：`welcome`
-- **工作**：`working.thinking`、`working.typing`、`working.browsing`
-- **结果**：`waiting_user`、`done`、`error`
-- **触摸反馈**：`touch.lick`、`touch.what`
-- **空闲**：`idle.playing`、`idle.wandering`、`idle.begging`、`idle.daydreaming`、`idle.eating`、`idle.reading`、`idle.traveling`
-
-自定义形象向导：
-
-1. 上传参考图（PNG / JPEG / WebP / GIF，GIF 取首帧）。
-2. 填写形象名称与性格描述。
-3. 生成配置并同步到设备。
-
-### 5.5 组件中心（设备负一屏）
-
-组件中心是设备负一屏组件库。内置 4 个组件，并支持用 AI 生成新组件。
-
-| 组件 | ID | 说明 |
-| --- | --- | --- |
-| Token 消耗 | `token-usage` | 把当前 coding agent 的实时 Token 消耗推到设备屏，等价换算成几顿午餐。 |
-| 摸鱼倒计时 | `slack-off-countdown` | 提醒今天还有多久下班。 |
-| 番茄钟 | `tomato-clock` | 25 分钟专注 + 5 分钟休息循环，点击屏幕开始 / 暂停，长按重置。 |
-| 喝水提醒 | `drink-reminder` | 每 45 分钟提醒一次喝水，点击屏幕确认已喝，长按暂停或恢复。 |
-
-创建组件分 3 步：
-
-1. **装 Skill**：把 `petAgent-ui-generator` 装到检测到的 Coding Agent。管理端会自动扫描 `~/.claude/`、`~/.codex/`、`~/.openclaw/`、`~/.gemini/`、`~/.cursor/`。
-2. **描述生成**：用自然语言描述组件用途、显示什么数字 / 状态、点击与长按做什么，skill 调起 Agent 自动生成组件。
-3. **自动更新 / 手动加入**：生成完成后组件中心自动刷新；也可把 `.clawpkg` 目录或 zip 拖入手动加入。
+- [查看使用指南](docs/user-guide.md)
+- 覆盖内容：设备绑定、Pet Manager 管理端、形象画廊、自定义形象、组件中心和 AI 生成组件流程。
 
 ## 6. 附录与维护
 
@@ -347,23 +230,6 @@ MakerWorld 模型下载链接将在发布前替换为真实页面。
 [img-custom-avatar-2]: assets/petclaw-custom-crowd-product-poster-white-dense.png
 [img-components-1]: assets/image_10.jpeg
 [img-components-2]: assets/image_11.png
-[img-bom]: assets/image_12.png
-[img-assembly]: assets/1aa4e315-fe70-44ae-853e-b72996ee1aae.png
-[img-assembly-detail]: assets/image_15.jpeg
-[img-pcb-front]: assets/image_16.png
-[img-pcb-back]: assets/image_17.png
-[img-manager]: assets/image_18.png
 
 <!-- Purchase links -->
 
-[buy-pi]: https://item.taobao.com/item.htm?id=693613248231
-[buy-sd]: https://detail.tmall.com/item.htm?id=848065818893
-[buy-screen]: https://item.taobao.com/item.htm?id=526024381409
-[buy-knob]: https://e.tb.cn/h.iForjxnIRX1llEz
-[buy-mic]: https://e.tb.cn/h.izOC4n5sjGeIoAm
-[buy-speaker]: https://e.tb.cn/h.ixBS9SgI6gFXrIx
-[buy-wire]: https://so.szlcsc.com/global.html
-[buy-screw]: https://item.taobao.com/item.htm?id=39761471376
-[buy-shell]: https://www.jlc-3dp.cn/
-[buy-micro-usb]: https://detail.tmall.com/item.htm?id=867489662609
-[buy-typec-a]: https://item.taobao.com/item.htm?id=726410843702
