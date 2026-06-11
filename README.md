@@ -169,6 +169,7 @@ assets/               图标等资源
 硬件复刻资料已拆分为独立文档，便于维护 BOM、结构件、装配图和 PCB 工艺信息。
 
 - [查看硬件复刻文档](docs/hardware-reproduction.md)
+- [嘉立创开源硬件项目](https://oshwhub.com/eda_lfilxkob/project_ukwrttbk)
 - 覆盖内容：整机 BOM、采购说明、结构件与装配、PCB 工艺信息。
 
 ## 5. 使用指南

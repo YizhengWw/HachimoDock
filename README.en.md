@@ -169,6 +169,7 @@ assets/               Icons and other assets
 Hardware reproduction materials have been split into a dedicated document so the BOM, enclosure, assembly images, and PCB process notes can be maintained cleanly.
 
 - [Open hardware reproduction guide](docs/hardware-reproduction.en.md)
+- [OSHWHub hardware project](https://oshwhub.com/eda_lfilxkob/project_ukwrttbk)
 - Covers: complete-device BOM, purchase notes, enclosure and assembly, and PCB process information.
 
 ## 5. User Guide
