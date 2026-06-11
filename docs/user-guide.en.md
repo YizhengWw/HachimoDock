@@ -4,6 +4,8 @@
 
 For installation, build, configuration, secondary development, and troubleshooting, refer to the project documentation. This page is for users who already have Hachimiao hardware or have assembled the device following the reproduction guide.
 
+![First-use preparation](../assets/image_18.png)
+
 ## Preparation
 
 - The device-side runtime is installed and can boot normally.

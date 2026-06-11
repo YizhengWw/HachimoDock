@@ -32,11 +32,13 @@ Hachimiao is a dedicated small display for agents. It turns CLI agents running o
 
 When the agent thinks, the pet thinks with it. When the agent calls tools, the pet starts working. When a task finishes, it celebrates; when something fails, it reacts. Hachimiao is not just another virtual assistant window. It gives agent activity a persistent, glanceable, physical presence.
 
+| Product Photo | System Overview |
+| --- | --- |
+| ![Desktop companion][img-intro-1] | ![System overview][img-intro-2] |
+
 | Glanceable | Voice-first |
 | --- | --- |
 | Agent state, progress, pending decisions, and results are translated into pet expressions, animations, colors, and short labels. A quick look tells you what the agent is doing. | No need to switch back to a terminal or chat window first. Speak to the device to talk to the agent, issue commands, capture thoughts, or continue work. |
-
-![Desktop companion][img-intro-1]
 
 ## 2. Highlights
 
@@ -223,6 +225,7 @@ If you discover a security issue, please do not disclose sensitive details publi
 <!-- Images -->
 
 [img-intro-1]: assets/image_02.jpeg
+[img-intro-2]: assets/image_03.png
 [img-status-gif]: assets/image_04.gif
 [img-status-1]: assets/image_05.png
 [img-status-2]: assets/image_06.png

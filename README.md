@@ -32,11 +32,13 @@ Hachimiao 是 Agent 的专属小屏。它将 PC 上运行的各类 Agent（Codex
 
 Agent 在思考，它跟着思考；Agent 在调工具，它开始工作；任务完成它庆祝，任务报错它发愁。它不是一个停留在屏幕里的“虚拟”助理，而是有状态、有回应、有存在感的 AI 搭子。
 
+| 项目实拍 | 系统组成 |
+| --- | --- |
+| ![Desktop companion][img-intro-1] | ![System overview][img-intro-2] |
+
 | 抬头可见 | 开口即用 |
 | --- | --- |
 | 把 Agent 的状态、进度、待决策事项和任务结果翻译成前台可见的宠物行为。看一眼设备上的表情、动作和短标签，就能知道 Agent 正在做什么。 | 不必先打开电脑窗口、寻找 IM 聊天框或切回终端，开口即可和 Agent 对话、下命令，覆盖办公、写作、开发、查资料和记录想法等场景。 |
-
-![Desktop companion][img-intro-1]
 
 ## 2. 核心亮点
 
@@ -223,6 +225,7 @@ assets/               图标等资源
 <!-- Images -->
 
 [img-intro-1]: assets/image_02.jpeg
+[img-intro-2]: assets/image_03.png
 [img-status-gif]: assets/image_04.gif
 [img-status-1]: assets/image_05.png
 [img-status-2]: assets/image_06.png
