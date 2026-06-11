@@ -6,7 +6,7 @@ For installation, build, configuration, secondary development, and troubleshooti
 
 ## Preparation
 
-- Device-side runtime is installed and can boot normally.
+- The device-side runtime is installed and can boot normally.
 - Pet Manager is built or installed on the PC.
 - A usable Wi-Fi network, or access to the device AP provisioning flow.
 - At least one local CLI agent: Codex, Claude Code, OpenClaw, etc.
@@ -17,15 +17,15 @@ Power on the device and wait for first-start mode. An unbound device enters wait
 
 The binding wizard has 4 steps:
 
-1. Choose the connection method: Ethernet or Wi-Fi.
+1. Choose the connection method: wired direct connection or Wi-Fi.
 2. Bind the network.
 3. Verify communication and confirm that the bridge is online.
 4. Confirm the avatar.
 
 Connection methods:
 
-- **Wired binding**: plug in the cable and click detect/bind. No password is required.
-- **Wi-Fi provisioning**: temporarily connect the computer to the device hotspot (default SSID: `claw-pet`). Pet Manager sends Wi-Fi, MQTT, desktop device ID, and namespace configuration through the device AP (`192.168.44.1`). The device then returns to the user LAN, and the computer network is restored after provisioning.
+- **Wired direct binding**: connect the device to the computer with a data cable and click detect/bind. Pet Manager scans the USB serial device, reads the board ID, and saves the local binding. No Wi-Fi password is required.
+- **Wi-Fi provisioning**: temporarily connect the computer to the device hotspot (default SSID: `claw-pet`, default password: `88888888`). Pet Manager sends Wi-Fi, MQTT, desktop device ID, and namespace configuration through the device AP (`192.168.44.1`). The device then returns to the user LAN, and the computer network is restored after provisioning.
 
 ![Device binding](../assets/image_19.png)
 
@@ -34,8 +34,8 @@ Connection methods:
 The dashboard brings together device connection status, agent channels, avatars, button configuration, and the voice assistant entry.
 
 - **Connection status**: shows desktop device ID, USB and Wi-Fi online status, and serial rescan controls.
-- **Channels and avatars**: Claude Code, Codex, and OpenClaw are separate channels. Each channel can bind a different avatar; the device shows the avatar of the active channel.
-- **More actions**: send test message, copy desktop device ID, return device to home screen, force avatar sync, and unbind device.
+- **Channels and avatars**: Claude Code, Codex, and OpenClaw are fixed channels, and the page only shows agents detected on the current computer. Each channel can save its own avatar; the device follows one agent's live state at a time.
+- **More actions**: send test message, copy desktop device ID, return device to home screen, force avatar sync, configure Wi-Fi over USB, and unbind device.
 
 ![Pet Manager dashboard](../assets/image_20.png)
 
@@ -73,19 +73,19 @@ The widget center manages the device negative screen. Four widgets are built in,
 
 | Widget | ID | Description |
 | --- | --- | --- |
-| Token usage | `token-usage` | Pushes real-time coding-agent token usage to the device and converts it into an easy-to-understand lunch-cost equivalent. |
-| Slack-off countdown | `slack-off-countdown` | Shows how much time is left before the end of the workday. |
-| Pomodoro timer | `tomato-clock` | 25-minute focus + 5-minute break loop. Tap to start/pause; long press to reset. |
-| Water reminder | `drink-reminder` | Reminds you to drink water every 45 minutes. Tap to confirm; long press to pause or resume. |
+| Token usage | `token-usage` | Pushes real-time coding-agent token usage to the device and refreshes automatically when the negative screen is open. |
+| Slack-off countdown | `slack-off-countdown` | Shows how much time is left before the end of the workday. Tap to switch display; long press to reset the countdown. |
+| Pomodoro timer | `tomato-clock` | 25-minute focus + 5-minute break loop. Tap to pause/continue; long press to reset. |
+| Water reminder | `drink-reminder` | Uses a default 60-minute interval to remind you to drink water. Tap to confirm; long press to pause or resume. |
 
-Click a widget to preview its description and button mappings. If the device is offline, install over USB or wait until the device is online.
+Click a widget to preview its description and button mappings. Installation prefers the online device path; if the device is offline or unreachable, Pet Manager prompts you to connect it with a USB data cable before pushing.
 
 ![Widget center](../assets/image_23.png)
 
 Creating a widget has 3 steps:
 
 1. **Install skill**: install `petAgent-ui-generator` into the detected coding agent. The app scans `~/.claude/`, `~/.codex/`, `~/.openclaw/`, `~/.gemini/`, and `~/.cursor/`.
-2. **Describe and generate**: describe the widget purpose, displayed numbers/states, and click/long-press behavior in natural language. The skill invokes the agent to generate the widget.
-3. **Auto refresh / manual import**: after generation, the widget center refreshes automatically. You can also drag in a `.clawpkg` directory or zip file manually.
+2. **Describe and generate**: describe the widget purpose, the default scene after switching to the negative screen, displayed numbers/states, and what tap/long-press should do. The skill invokes the currently followed agent to generate the widget.
+3. **Auto refresh / manual import**: after generation, the widget center refreshes automatically and shows the new draft. If it does not appear, drag in the `.clawpkg` directory or zip file, or choose the file manually.
 
 ![Widget generation](../assets/image_24.png)
