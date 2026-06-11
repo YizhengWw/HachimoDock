@@ -58,7 +58,7 @@ The desktop app keeps the pet display in sync with the agent in real time. Expre
 When the agent is idle, the pet plays on its own with multiple idle states. You can also touch the screen to interact with it.
 
 <p align="center">
-  <img src="assets/readme/idle-touch-feedback.gif" alt="Idle and touch feedback" />
+  <img src="assets/image_07.gif" alt="Idle and touch feedback" />
 </p>
 
 ### Voice Interaction With Agents
