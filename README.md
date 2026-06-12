@@ -8,6 +8,7 @@
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#硬件方案">硬件方案</a>
+    · <a href="#图集">图集</a>
     · <a href="#软件架构">软件架构</a>
     · <a href="#复刻与部署">复刻与部署</a>
     · <a href="#常见问题">常见问题</a>
@@ -32,6 +33,23 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 | `ref/` | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB/MQTT 下发和本地 bridge sidecar。 |
 | `board-runtime/` | Raspberry Pi / Radxa Cubie A7Z 设备端运行时。负责显示宠物动画、接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。 |
 
+## 图集
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/b40469d726074c91aac4db4526b3bc00.jpeg" alt="HachimoDock（哈基米机）实拍图" />
+      <br />
+      <sub>桌面小屏实拍：把 Agent 状态放到工位视野里。</sub>
+    </td>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/875e49ef6bd54d28b4a01e32f5549e96.png" alt="HachimoDock（哈基米机）桌面端界面" />
+      <br />
+      <sub>桌面端管理：设备绑定、Agent 跟随、形象和组件配置。</sub>
+    </td>
+  </tr>
+</table>
+
 ## 核心亮点
 
 | 能力 | 说明 |
@@ -43,6 +61,45 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 | 多链路通信 | Raspberry Pi 方案支持 USB gadget 直连；Radxa A7Z 方案当前默认走 Wi-Fi + MQTT/SSH。 |
 | 语音与实体交互 | Raspberry Pi 方案已验证触摸、旋钮/按钮和语音链路；Radxa A7Z 方案保留硬件与软件扩展位。 |
 
+### 状态跟随与互动
+
+<table>
+  <tr>
+    <td width="34%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/369ca3da496442379a84795c2db3d7a8.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
+      <br />
+      <sub>Agent 状态变化时，小屏同步切换表情和动作。</sub>
+    </td>
+    <td width="33%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/be759dc4ce584dcc8f036ee129c6ce4c.png" alt="HachimoDock（哈基米机）状态示例一" />
+      <br />
+      <sub>一眼识别当前状态，不必盯着终端窗口。</sub>
+    </td>
+    <td width="33%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/e3a5b26f6d1e4c238972d06631d4f9b3.png" alt="HachimoDock（哈基米机）状态示例二" />
+      <br />
+      <sub>字幕和短标签提示 Agent 正在做什么。</sub>
+    </td>
+  </tr>
+</table>
+
+### 自定义形象与组件
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/7a5c0f04d764447b8c6aeab20835ea03.png" alt="HachimoDock（哈基米机）自定义形象" />
+      <br />
+      <sub>上传宠物照片、头像或原创角色，生成自己的桌面搭子。</sub>
+    </td>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/171866a2265246bd998bc25cca0bf3e8.png" alt="HachimoDock（哈基米机）组件示例" />
+      <br />
+      <sub>负一屏组件承载番茄钟、喝水提醒、Token 消耗等轻量工具。</sub>
+    </td>
+  </tr>
+</table>
+
 ## 硬件方案
 
 | 方案 | 推荐用途 | 当前已验证 | 当前未默认启用 |
@@ -51,6 +108,21 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 | 方案二：Raspberry Pi Zero 2 W | 兼容方案，适合完整体验触摸、旋钮、语音和 USB 直连 | Raspberry Pi OS、SPI ILI9341 LCD、XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、HTTP/MQTT、负一屏 widget、桌面端状态同步 | 无线和音频效果仍取决于实际镜像、声卡和网络配置 |
 
 `ESP32` 不是当前 `board-runtime/` 已支持目标；如需使用，需要另起移植工程。
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/d878179685fb4b7b8ab69a78dcd0ca4b.png" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
+      <br />
+      <sub>方案一 Radxa A7Z 的核心物料示意。</sub>
+    </td>
+    <td width="50%">
+      <img src="https://image.lceda.cn/oshwhub/pullImage/17aeced03fb54724b4cc552eaea332c9.png" alt="HachimoDock（哈基米机）使用界面" />
+      <br />
+      <sub>桌面端负责绑定、跟随、形象、组件和诊断。</sub>
+    </td>
+  </tr>
+</table>
 
 ## 软件架构
 
