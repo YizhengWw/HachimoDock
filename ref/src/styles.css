@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
+ * [Output] Provide a Linear-inspired clean visual language for the HachimoDock desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -447,6 +447,10 @@ input:focus-visible {
   color: var(--text-on-accent);
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.sidebar-brand__mark {
+  background: transparent;
 }
 
 .sidebar-brand-mark img,

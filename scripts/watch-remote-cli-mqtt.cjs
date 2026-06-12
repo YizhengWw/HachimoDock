@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
  * [Input] Consume MQTT broker config from env or sibling pet-claw/.env plus CLI watch options.
- * [Output] Stream remote-cli control messages and followed bridge state topics for Pet Manager debugging.
+ * [Output] Stream remote-cli control messages and followed bridge state topics for HachimoDock debugging.
  * [Pos] script node in scripts
  * [Sync] If this file changes, update `scripts/.folder.md`.
  */

@@ -1,8 +1,8 @@
 [package]
 name = "pet-manager-tauri"
 version = "0.1.0"
-description = "pet-manager Tauri client"
-authors = ["pet-manager contributors"]
+description = "HachimoDock Tauri client"
+authors = ["HachimoDock contributors"]
 license = "GPL-3.0-only"
 edition = "2021"
 

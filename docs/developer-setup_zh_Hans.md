@@ -1,13 +1,13 @@
 # 本地开发指南
 
-本文档用于从零构建 Pet Manager PC 端，并将板端 runtime 部署到
+本文档用于从零构建 [HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock) PC 端，并将板端 runtime 部署到
 Raspberry Pi 或 Radxa Cubie A7Z 设备。
 
 ## 项目结构
 
 ```text
-claw-pet-manager/
-├── ref/                 # 桌面端：Pet Manager Tauri 应用
+HachimoDock/
+├── ref/                 # 桌面端：HachimoDock Tauri 应用
 ├── board-runtime/       # 设备端：Raspberry Pi / Radxa Cubie A7Z runtime
 ├── scripts/             # 项目辅助脚本
 └── docs/                # 项目文档
@@ -85,14 +85,14 @@ Radxa Cubie A7Z shell 部署命令。macOS 如需运行 PowerShell 版本的 Rad
 ## 获取代码
 
 ```bash
-git clone <repo-url> claw-pet-manager
-cd claw-pet-manager
+git clone <repo-url> HachimoDock
+cd HachimoDock
 ```
 
 如果已经 clone 过：
 
 ```bash
-cd claw-pet-manager
+cd HachimoDock
 git pull origin main
 ```
 
@@ -187,7 +187,15 @@ npm run pack-builtins
 
 设备端位于 `board-runtime/`，当前主线支持 Raspberry Pi + Raspberry Pi OS +
 systemd，以及 Radxa Cubie A7Z + Debian + systemd。设备端负责显示宠物动画、
-接收桌面端状态、处理触屏/旋钮/按钮输入、运行负一屏 widget 和配网页面。
+接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。两种硬件方案的
+默认能力边界如下：
+
+| 方案 | 推荐场景 | 当前已验证 | 当前未默认启用 |
+|---|---|---|---|
+| 方案一：Radxa Cubie A7Z | 默认复刻硬件，性能更高，推荐走 Wi-Fi + MQTT/SSH | Debian 11/12、ILI9341 SPI LCD、`/dev/fb0` framebuffer 显示、HTTP/MQTT、桌面端状态同步、负一屏 widget | XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT、USB gadget `/dev/ttyGS0` |
+| 方案二：Raspberry Pi Zero 2 W | 兼容方案，适合完整体验 USB 直连、触摸、旋钮和语音 | Raspberry Pi OS、ILI9341 SPI LCD、XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、HTTP/MQTT、桌面端状态同步、负一屏 widget | 音频设备名和网络质量取决于实际镜像、声卡与现场配置 |
+
+`ESP32` 不是当前 `board-runtime/` 的已支持目标；如果要使用，需要单独做运行时移植。
 
 ### 1. 本机编译检查
 
@@ -558,10 +566,12 @@ export BOARD_HOST="radxa@<board-ip>"
 export BOARD_IP="<board-ip>"
 ```
 
-桌面端和设备端支持两条通信路径：
+桌面端和设备端支持两条通信路径，具体取决于硬件方案：
 
-- USB serial：用于直连设备、按钮配置、组件安装和状态同步。
-- MQTT：用于无线可达性、远程绑定和状态/语音同步。
+- USB serial：用于直连设备、按钮配置、组件安装和状态同步；当前主要对应
+  Raspberry Pi USB gadget `/dev/ttyGS0`。
+- MQTT：用于无线可达性、远程绑定和状态/语音同步；当前 Radxa Cubie A7Z
+  默认走 Wi-Fi + MQTT/SSH，不依赖 `/dev/ttyGS0`。
 
 ### 4. 检查基础链路
 
@@ -582,8 +592,8 @@ ssh "$BOARD_HOST" 'sudo journalctl -u board-runtime -n 80 --no-pager'
 ### 1. 启动桌面端
 
 ```bash
-git clone <repo-url> claw-pet-manager
-cd claw-pet-manager/ref
+git clone <repo-url> HachimoDock
+cd HachimoDock/ref
 npm install
 npm run dev
 ```
@@ -593,7 +603,7 @@ npm run dev
 Raspberry Pi：另开一个 macOS / Linux / WSL / Git Bash 终端：
 
 ```bash
-cd claw-pet-manager/board-runtime
+cd HachimoDock/board-runtime
 
 export BOARD_HOST="<pi-user>@<pi-ip>"
 HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
@@ -602,7 +612,7 @@ HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
 Radxa Cubie A7Z：Windows PowerShell 终端：
 
 ```powershell
-cd claw-pet-manager\board-runtime
+cd HachimoDock\board-runtime
 
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
@@ -613,7 +623,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 Radxa Cubie A7Z：macOS / Linux / WSL / Git Bash 终端：
 
 ```bash
-cd claw-pet-manager/board-runtime
+cd HachimoDock/board-runtime
 
 HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
 ```
@@ -650,9 +660,10 @@ ssh "$BOARD_HOST" 'cat /proc/fb; ls -l /dev/fb*'
 
 ### 4. 在桌面端连接设备
 
-在 Pet Manager 中进入设备页面，确认：
+在 HachimoDock（哈基米机）中进入设备页面，确认：
 
-- USB 显示已连接，或 Wi-Fi 显示在线
+- Raspberry Pi 方案中 USB 显示已连接，或 Wi-Fi 显示在线
+- Radxa A7Z 方案中 Wi-Fi/MQTT 显示在线
 - 可以扫描到设备
 - 可以切换 Agent
 - 可以更换形象并同步到设备端
@@ -857,8 +868,9 @@ A7Z 仍白屏时，优先确认：
 ### 设备端配置
 
 - 设备端源码：`board-runtime/src/`
-- systemd 环境变量：`board-runtime/board-runtime-rpi.env`
-- Radxa systemd 环境变量：`board-runtime/board-runtime-radxa.env`
+- Raspberry Pi systemd 环境变量模板：`board-runtime/board-runtime-rpi.env`
+- Radxa systemd 环境变量：部署脚本在设备上生成
+  `/opt/board-runtime/board-runtime-radxa.env`
 - 主服务 unit 模板：`board-runtime/board-runtime-rpi.service`
 - widget runtime unit 模板：`board-runtime/board-widget-runtime.service`
 - 设备运行目录：`/opt/board-runtime`

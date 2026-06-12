@@ -1,12 +1,21 @@
 # board runtime
 
-`board-runtime` 是 Pet Manager 的设备端运行时。当前支持
+`board-runtime` 是 [HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock) 的设备端运行时。当前主线覆盖
 Raspberry Pi（已在 Raspberry Pi Zero 2 W + Raspberry Pi OS 上使用）和
-Radxa Cubie A7Z（Debian 11/12 系列镜像），负责把
-桌面端的 agent/session 状态、语音字幕、按钮/触屏输入和负一屏组件展示到一块
-SPI 小屏上。
+Radxa Cubie A7Z（Debian 11/12 系列镜像）。它负责把桌面端的
+agent/session 状态、语音字幕、按钮/触屏输入和负一屏组件展示到 SPI 小屏上；
+不同硬件方案默认启用的能力不同。
 
-运行时主体用 C 编写，配套少量 shell / Python：
+## 硬件方案支持矩阵
+
+| 方案 | 定位 | 当前已验证 | 当前未默认启用 |
+|---|---|---|---|
+| 方案一：Radxa Cubie A7Z | 默认复刻硬件，性能更高，推荐走 Wi-Fi + MQTT/SSH | Debian 11/12、ILI9341 SPI LCD、`/dev/fb0` framebuffer 显示、HTTP/MQTT、桌面端状态同步、负一屏 widget | XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT、USB gadget `/dev/ttyGS0` |
+| 方案二：Raspberry Pi Zero 2 W | 兼容方案，适合完整体验 USB 直连、触摸、旋钮和语音 | Raspberry Pi OS、ILI9341 SPI LCD、XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、HTTP/MQTT、桌面端状态同步、负一屏 widget | 具体音频设备名和网络质量取决于镜像、声卡与现场配置 |
+
+`ESP32` 不是当前 `board-runtime/` 的已支持部署目标；如需使用，需要单独做运行时移植。
+
+运行时主体用 C 编写，配套少量 shell / Python。下面列的是仓库内模块，不代表每个硬件方案都会默认启动：
 
 - C：`board-server`、触屏输入、旋钮/按键输入、framebuffer overlay。
 - shell：启动编排、framebuffer 视频播放、Wi-Fi/AP/USB gadget 辅助脚本。
@@ -32,7 +41,8 @@ HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
 ```
 
 在 Radxa Cubie A7Z 上部署使用 `deploy-radxa-a733.sh` 或 PowerShell 脚本；可选的
-LCD 配置会写入已验证的 ILI9341 SPI 屏 overlay。
+LCD 配置会写入已验证的 ILI9341 SPI 屏 overlay。当前 A7Z 启动编排默认只启用
+`board-server`、显示链路和 widget runtime，不启动触摸、旋钮和语音进程。
 
 刷写系统前先参考官方资料：
 
@@ -141,11 +151,12 @@ http://<board-ip>/debug/state
 
 ## 配网和通信
 
-设备支持两条通信路径：
+设备支持两条通信路径，但硬件方案默认路径不同：
 
-- USB direct-connect：`board-server` 集成 `/dev/ttyGS0` USB serial 行协议。
+- USB direct-connect：`board-server` 集成 `/dev/ttyGS0` USB serial 行协议；当前主要用于 Raspberry Pi USB gadget 方案。
 - MQTT：设备订阅 `desk/<targetDeviceId>/state/+` 和 `speech/text`，并发布
   `claw-pet/board/<boardDeviceId>/hello`、`availability`、`input/action`。
+  当前 Radxa Cubie A7Z 默认走 Wi-Fi + MQTT/SSH。
 
 配网状态和本地验证接口：
 

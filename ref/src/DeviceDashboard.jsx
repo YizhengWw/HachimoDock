@@ -571,7 +571,7 @@ export default function DeviceDashboard({ binding, onUnbind }) {
   // ---------- Action-menu callbacks ----------
   const onSendTest = useCallback(() => {
     const sendPromise = usb.connected
-      ? invoke("usb_send_speech", { text: "hello from pet-manager" }).then(() => ({ ok: true })).catch((err) => ({ ok: false, error: String(err) }))
+      ? invoke("usb_send_speech", { text: "hello from HachimoDock" }).then(() => ({ ok: true })).catch((err) => ({ ok: false, error: String(err) }))
       : invoke("send_test_message", { desktopDeviceId: binding.desktopDeviceId, namespace: null, text: null });
     sendPromise.then((res) => {
       push(res.ok

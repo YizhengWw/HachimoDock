@@ -1,6 +1,6 @@
 # Claude Code — board-runtime
 
-本文是设备端目录的工作说明。当前设备端主线支持 Raspberry Pi 和 Radxa Cubie A7Z。
+本文是 HachimoDock（哈基米机）设备端目录的工作说明。当前设备端主线支持 Raspberry Pi 和 Radxa Cubie A7Z。
 
 ## 硬件平台
 

@@ -1,6 +1,6 @@
 /**
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
- * [Output] Pet Manager desktop app shell with first-level device/gallery/component-center sidebar tabs, browser-only dev direct-dashboard fallback, Tauri setup-first routing, setup header, setup-completion DeviceContext refresh, and device-scoped appearance management routing.
+ * [Output] HachimoDock desktop app shell with first-level device/gallery/component-center sidebar tabs, browser-only dev direct-dashboard fallback, Tauri setup-first routing, setup header, setup-completion DeviceContext refresh, and device-scoped appearance management routing.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -26,7 +26,7 @@ import {
   acknowledgeGenerationTask,
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
-import petManagerMark from "./assets/logo/pet-manager-mark.svg";
+import hachimoDockMark from "./assets/logo/hachimodock-mark.png";
 
 const DEV_DIRECT_DASHBOARD_BINDING = {
   boardDeviceId: "board-dev-direct-001",
@@ -223,7 +223,7 @@ function AppInner({
           <header className="wizard-header wizard-header--shell">
             <div className="wizard-header-leading">
               <div className="wizard-brand">
-                <img src={petManagerMark} alt="" />
+                <img src={hachimoDockMark} alt="" />
               </div>
               <div className="wizard-header-copy">
                 <span className="wizard-title">绑定桌宠</span>
@@ -246,11 +246,11 @@ function AppInner({
           <div className="sidebar-head">
             <div className="sidebar-brand">
               <span className="sidebar-brand__mark">
-                <img src={petManagerMark} alt="" />
+                <img src={hachimoDockMark} alt="" />
               </span>
               <span className="sidebar-brand__copy">
-                <strong className="sidebar-brand-name">桌宠管理端</strong>
-                <span>Pet Manager</span>
+                <strong className="sidebar-brand-name">HachimoDock</strong>
+                <span>桌宠管理端</span>
               </span>
             </div>
           </div>

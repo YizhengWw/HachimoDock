@@ -2,10 +2,10 @@
 
 > Status: **Design (rev 4)** · Last reviewed 2026-05-26
 >
-> Owners: voice-service-node · claw-pet-manager · openclaw-runtime
+> Owners: voice-service-node · [HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock) · openclaw-runtime
 >
 > This document is the contract between the three components above. If you
-> change anything in voice-service / pet-manager / openclaw that affects this
+> change anything in voice-service / HachimoDock（哈基米机） / openclaw that affects this
 > contract, update this file in the **same** PR.
 >
 > ### Revision history
@@ -18,16 +18,16 @@
 >   OpenClawAdapter mirrors pet-claw's helper-process pattern instead of
 >   asking OpenClaw to ship a v4 protocol. Also: session "freshness window"
 >   removed — `resolveActive()` always picks the latest existing session.
-> - **rev 3 (2026-05-26)**: Pet Manager board-audio enable now performs
+> - **rev 3 (2026-05-26)**: HachimoDock（哈基米机） board-audio enable now performs
 >   one-click runtime preflight (`ensure_bridge_runtime` then
 >   `ensure_voice_runtime`) before sending `audio_bridge`, targets the current
 >   online board id before falling back to the saved binding id, and exposes
 >   board voice enablement plus trigger-button configuration with an explicit
->   USB OTA affordance. Pet Manager passes `voiceButton` through
+>   USB OTA affordance. HachimoDock（哈基米机） passes `voiceButton` through
 >   `audio_bridge_signal`; the Rust command writes `voice_button` into the
 >   board control payload and attempts USB first when the device is connected.
-> - **rev 4 (2026-05-26)**: clarified that push-to-talk is board-side. Pet
->   Manager only stores/enables the board voice setting, lets the user choose
+> - **rev 4 (2026-05-26)**: clarified that push-to-talk is board-side.
+>   HachimoDock（哈基米机） only stores/enables the board voice setting, lets the user choose
 >   which physical board button is the voice button, and sends that config to
 >   the board over USB first, MQTT second. The board runtime owns microphone
 >   capture, playback listener startup, and hardware button press/release
@@ -74,7 +74,7 @@ What this rules out:
           │                              ▼
           │             ┌────────────────────────────────────┐  ★ NEW
           │             │  Agent Session Bus                 │
-          │             │  (in pet-manager bridge,           │
+          │             │  (in HachimoDock bridge,           │
           │             │   port 8181 by default)            │
           │             │                                    │
           │             │  · resolveSession(agentId)         │
@@ -122,7 +122,7 @@ Key invariants:
 
 ## 3. The Agent Session Bus
 
-Lives inside `claw-pet-manager` (Tauri Rust + bridge Node sidecar). Listens
+Lives inside HachimoDock（哈基米机） (Tauri Rust + bridge Node sidecar). Listens
 on `127.0.0.1:8181` (configurable via `AGENT_BUS_PORT`).
 
 ### 3.1 HTTP / SSE contract
@@ -258,7 +258,7 @@ type AgentEvent =
 > **Important context**: OpenClaw exposes two completely separate channels:
 >
 > 1. **Read channel — WebSocket gateway** at `ws://127.0.0.1:18789`.
->    `OpenClawGatewayBridge` (in pet-manager bridge `headless-mqtt.js`)
+>    `OpenClawGatewayBridge` (in HachimoDock（哈基米机） bridge `headless-mqtt.js`)
 >    already negotiates `connect` + `sessions.subscribe` here and forwards
 >    events as MQTT topics so the board can mirror state.
 >    **This channel is read-only by design.** It tells you *what the agent
@@ -310,13 +310,13 @@ Adapter mapping:
 - `defaults.llm` config block (and the entire `openai_internal` provider).
 - The LLM/agent/persona env vars `LOCAL_AGENT_BACKEND`, `LOCAL_AGENT_MODEL`,
   `LOCAL_AGENT_BASE_URL`, `LOCAL_AGENT_API_KEY`, `PET_CLAW_PERSONA_MODEL`.
-  pet-manager stops setting them.
+  HachimoDock（哈基米机） stops setting them.
 
 ### 5.2 Added
 - `VOICE_BUS_URL` (default `http://127.0.0.1:8181`) — where to POST inject.
-- `VOICE_AGENT_ID` — set by pet-manager, equals `selected_agent_id`. Voice
+- `VOICE_AGENT_ID` — set by HachimoDock（哈基米机）, equals `selected_agent_id`. Voice
   refuses to start if empty (matches "no agent → manager-level failure").
-- `VOICE_SESSION_ID` (default `auto`) — set by pet-manager when the user
+- `VOICE_SESSION_ID` (default `auto`) — set by HachimoDock（哈基米机） when the user
   picks a specific session in the UI.
 
 ### 5.3 `worker_entry.mjs` rewrite
@@ -378,7 +378,7 @@ voice_agents:
     # not with us. We're an audio terminal.
 ```
 
-## 6. claw-pet-manager: what changes
+## 6. HachimoDock（哈基米机）: what changes
 
 ### 6.1 Rust (`src-tauri/src/lib.rs`)
 
@@ -398,7 +398,7 @@ voice_agents:
 | Session dropdown | List sessions from `GET /agent/sessions`, default = "最近 active session"; "新开 session" as the last option |
 | Live status | A small chip showing `voice → claude-code → /Users/x/proj <session 30 min ago>` so the user knows where their voice is going |
 | Board-audio target | When sending `audio_bridge`, the UI uses the current online board id resolved from availability first, then falls back to the persisted binding id for older bindings |
-| Board voice config | Pet Manager stores `{enabled, trigger}` where `trigger` is `top_button.hold` or `encoder_button.hold`; it never captures board voice itself. Applying the config sends `audio_bridge` through USB serial when connected and through MQTT as a fallback. |
+| Board voice config | HachimoDock（哈基米机） stores `{enabled, trigger}` where `trigger` is `top_button.hold` or `encoder_button.hold`; it never captures board voice itself. Applying the config sends `audio_bridge` through USB serial when connected and through MQTT as a fallback. |
 
 ### 6.3 Board runtime (`board-runtime`)
 
@@ -430,12 +430,12 @@ Pre-conditions:
 2. In a terminal in `/Users/x/proj`, user runs `claude` and says: "请帮我把
    `src/main.rs` 重构成 hooks 风格，先列出现有结构。" Claude responds with a
    plan.
-3. pet-manager shows: agent=`claude-code`, status=`ready`, voice button
+3. HachimoDock（哈基米机） shows: agent=`claude-code`, status=`ready`, voice button
    enabled, session dropdown highlights the just-touched session.
 
 Steps:
 
-1. User enables board voice in Pet Manager, chooses the physical voice button,
+1. User enables board voice in HachimoDock（哈基米机）, chooses the physical voice button,
    and applies the config to the board over USB.
 2. User holds the selected physical board button and speaks: "那直接帮我改吧。"
 3. Expected:
@@ -459,7 +459,7 @@ appended-to, the architecture has not landed yet.
 - Voice command for switching agents ("切到 codex") — explicitly disallowed
   per architecture review (avoids accidental leaks across agents/projects).
 - Multi-user / multi-tenant. The bus is local-only; one user per machine.
-- Remote OpenClaw (running on a different host than pet-manager). Voice
+- Remote OpenClaw (running on a different host than HachimoDock（哈基米机）). Voice
   expects `agent-runtime` to be importable on the same machine the bus
   runs on. Cross-host OpenClaw will need a thin RPC shim later, but it's
   not on the critical path.
@@ -467,16 +467,16 @@ appended-to, the architecture has not landed yet.
 ## 10. Roll-out checklist
 
 - [ ] (this file) Architecture written and reviewed
-- [ ] Bus skeleton + adapter interface in `claw-pet-manager` bridge
+- [ ] Bus skeleton + adapter interface in HachimoDock（哈基米机） bridge
 - [ ] ClaudeCodeAdapter: `~/.claude/projects` schema verified against current `claude` CLI
 - [ ] CodexAdapter: `--output-format stream-json` verified against current Codex CLI
 - [ ] OpenClawAdapter: helper-process pattern lifted from pet-claw,
       `agentCommand()` exercised end-to-end on a machine with `openclaw`
       npm installed
 - [ ] voice-service-node refactored, `roles.yaml` slimmed
-- [ ] pet-manager Rust env vars switched
-- [ ] pet-manager UI: enable-state + session dropdown + status chip
+- [ ] HachimoDock（哈基米机） Rust env vars switched
+- [ ] HachimoDock（哈基米机） UI: enable-state + session dropdown + status chip
 - [ ] §8 E2E test passes for `claude-code` and `codex`
 - [ ] §8 E2E test passes for `openclaw` (no external dependency — if
       `openclaw` npm pkg is on the machine, this works today)
-- [ ] PRs split as: voice-bus (pet-manager) · vsn refactor (voice-service-node) · docs+board followups
+- [ ] PRs split as: voice-bus (HachimoDock（哈基米机）) · vsn refactor (voice-service-node) · docs+board followups

@@ -3286,8 +3286,8 @@ body:not([data-view="home"]) .dialogue-badge,
                     <button class="runtime-placeholder-close" id="closeOnboardingOverlayBtn" type="button" aria-label="关闭提示">x</button>
                     <div class="runtime-placeholder-kicker">Runtime Placeholder</div>
                     <h1 id="onboardingTitle">正在等待配对中</h1>
-                    <p class="runtime-placeholder-copy" id="onboardingDescription">桌宠当前还没有完成首次配对，请启动 Pet Manager 继续配置。</p>
-                    <button class="runtime-placeholder-button" id="launchPetManagerBtn" type="button">启动 Pet Manager</button>
+                    <p class="runtime-placeholder-copy" id="onboardingDescription">桌宠当前还没有完成首次配对，请启动 HachimoDock（哈基米机）继续配置。</p>
+                    <button class="runtime-placeholder-button" id="launchPetManagerBtn" type="button">启动 HachimoDock（哈基米机）</button>
                 </section>
                 <div class="pet-wrapper" id="petWrapper">
                     <video id="petVideoA" class="pet-video is-active" muted autoplay loop playsinline preload="auto"></video>
@@ -3804,7 +3804,7 @@ let sessions = [
 const TASK_STATUS_ORDER = { running: 0, pending: 1, completed: 2, failed: 3 };
 const ONBOARDING_DEFAULTS = {
   productName: "",
-  petManagerName: "Pet Manager",
+  petManagerName: "HachimoDock（哈基米机）",
   productTagline: "",
   commandName: "",
   recommendedCommand: "",
@@ -5271,7 +5271,7 @@ function createFallbackOnboardingState() {
       topicBase: "desk/<default-device-id>",
       pairedAtLabel: "未记录",
       lastHeartbeatAtLabel: "未记录",
-      detail: "桌面端会默认沿用 MQTT device_id，也可以在 Pet Manager 里直接绑定远端 CLI。"
+      detail: "桌面端会默认沿用 MQTT device_id，也可以在 HachimoDock（哈基米机）里直接绑定远端 CLI。"
     },
     agents: [],
     checks: [],
@@ -5309,7 +5309,7 @@ function closeOnboardingPanel() {
 
 function getOnboardingNarrative(state) {
   const defaults = getOnboardingDefaultsForUi(state);
-  const petManagerLabel = normalizeString(state?.petManagerName, defaults.petManagerName || "Pet Manager");
+  const petManagerLabel = normalizeString(state?.petManagerName, defaults.petManagerName || "HachimoDock（哈基米机）");
   const petManagerReady = state?.petManagerAvailable !== false;
   const remoteAgentReady = Boolean(state?.remoteAgentReady);
   const localAgentDetected = Boolean(
@@ -5334,7 +5334,7 @@ function getOnboardingNarrative(state) {
     if (remoteAgentReady) {
       return {
         title: "远端 CLI 已连接",
-        description: `Pet Manager 已把桌宠切到远端 coding agent / CLI；如果要切换到另一台机器，直接在 ${petManagerLabel} 里重新保存远端目标即可覆盖。`
+        description: `HachimoDock（哈基米机）已把桌宠切到远端 coding agent / CLI；如果要切换到另一台机器，直接在 ${petManagerLabel} 里重新保存远端目标即可覆盖。`
       };
     }
     return {
@@ -5371,7 +5371,7 @@ function getOnboardingNarrative(state) {
 
   return {
     title: "本机 agent 已连接",
-    description: "已经发现可接入的 coding agent / CLI。这个入口现在只会在未匹配本机 agent 时阻塞桌宠，其他配置可以按需在 Pet Manager 里继续补齐。"
+    description: "已经发现可接入的 coding agent / CLI。这个入口现在只会在未匹配本机 agent 时阻塞桌宠，其他配置可以按需在 HachimoDock（哈基米机）里继续补齐。"
   };
 }
 
@@ -5394,7 +5394,7 @@ function renderOnboardingPairing(pairing) {
         <div class="onboarding-pairing-header">
             <div>
                 <div class="onboarding-pairing-title">${escapeHTML(remoteEnabled ? "Remote CLI Binding" : "MQTT Subscription")}</div>
-                <div class="onboarding-pairing-meta">${escapeHTML(data.detail || "桌面端会默认沿用 MQTT device_id；如需切远端，请去 Pet Manager 绑定。")}</div>
+                <div class="onboarding-pairing-meta">${escapeHTML(data.detail || "桌面端会默认沿用 MQTT device_id；如需切远端，请去 HachimoDock（哈基米机）绑定。")}</div>
             </div>
             <div class="onboarding-pairing-status ${stateClass}">${escapeHTML(remoteEnabled ? "远端已绑定" : "本机默认")}</div>
         </div>

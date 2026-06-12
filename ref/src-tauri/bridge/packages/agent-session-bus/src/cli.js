@@ -30,7 +30,7 @@ async function main() {
 
   // Real adapters are always registered; isAvailable() reports not-installed
   // cleanly so this is safe on machines that don't have any agent installed.
-  // The pet-manager UI uses /agent/status to decide which voice button to
+  // The HachimoDock UI uses /agent/status to decide which voice button to
   // enable.
   adapters.push(new ClaudeCodeAdapter({ log: withScope(defaultLog, "claude") }));
   adapters.push(new CodexAdapter({ log: withScope(defaultLog, "codex") }));

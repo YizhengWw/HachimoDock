@@ -1210,7 +1210,7 @@ static void br_server_build_pairing_hint(br_server_state *server, br_pairing_sta
   output[0] = '\0';
   if (state == BR_PAIRING_WAITING_CONFIG || state == BR_PAIRING_LAN_DISCOVERY ||
       state == BR_PAIRING_AP_FALLBACK) {
-    br_normalize_text("请打开电脑端 Pet Manager 进行配网。", "", output, output_size);
+    br_normalize_text("请打开电脑端 HachimoDock 进行配网。", "", output, output_size);
     return;
   }
   br_normalize_text("", "", output, output_size);
@@ -4026,7 +4026,7 @@ static bool br_handle_http_connection(br_server_state *server, int fd) {
     br_snprintf_append(json, sizeof(json), &used, ",\"hint\":\"");
     br_json_escape_append(json, sizeof(json), &used, server->pairing_message);
     // Echo the currently-bound desktop identity + MQTT namespace so the
-    // portal (and the eventual Pet Manager) can tell at a glance who this
+    // portal (and the eventual HachimoDock) can tell at a glance who this
     // board is paired with without waiting for the next MQTT handshake.
     br_snprintf_append(json, sizeof(json), &used, "\",\"desktopDeviceId\":\"");
     br_json_escape_append(json, sizeof(json), &used, server->config.target_device_id);

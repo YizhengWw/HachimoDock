@@ -1,9 +1,0 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
-  <title id="title">Pet Manager logo</title>
-  <desc id="desc">Orange rounded-square app mark with a white line cat face.</desc>
-  <rect width="128" height="128" rx="24" fill="#FF6A00"/>
-  <path d="M36.5 39.5L50.2 48.1C54.1 46.2 58.8 45.1 64 45.1C69.2 45.1 73.9 46.2 77.8 48.1L91.5 39.5L87.9 61.2C90.3 65.1 91.6 69.5 91.6 74.1C91.6 89.5 79.2 98.8 64 98.8C48.8 98.8 36.4 89.5 36.4 74.1C36.4 69.5 37.7 65.1 40.1 61.2L36.5 39.5Z" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M55.1 75.2C55.1 78.1 52.8 80.4 49.9 80.4C47 80.4 44.7 78.1 44.7 75.2C44.7 72.3 47 70 49.9 70C52.8 70 55.1 72.3 55.1 75.2Z" fill="white"/>
-  <path d="M83.3 75.2C83.3 78.1 81 80.4 78.1 80.4C75.2 80.4 72.9 78.1 72.9 75.2C72.9 72.3 75.2 70 78.1 70C81 70 83.3 72.3 83.3 75.2Z" fill="white"/>
-  <path d="M61.1 85.2C62.5 86.6 65.5 86.6 66.9 85.2" stroke="white" stroke-width="5" stroke-linecap="round"/>
-</svg>

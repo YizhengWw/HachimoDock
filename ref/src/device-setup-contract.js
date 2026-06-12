@@ -1,6 +1,6 @@
 /**
  * [Input] Consume device setup fixtures defined by `ref/src/fixtures.js`[Pos].
- * [Output] Provide the stage-one setup state contract, mock state machine helpers, and normalized snapshot adapter for the Pet Manager bind flow.
+ * [Output] Provide the stage-one setup state contract, mock state machine helpers, and normalized snapshot adapter for the HachimoDock bind flow.
  * [Pos] contract node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -148,7 +148,7 @@ const SETUP_STATE_META = {
     tone: "info",
     eyebrow: "步骤 1 / 连接设备",
     title: "已检测到主机链路",
-    description: "Pet Manager 正在确认主机链路的稳定性，并准备读取 board 信息。",
+    description: "HachimoDock 正在确认主机链路的稳定性，并准备读取 board 信息。",
   },
   [SETUP_STATES.setupDeviceIdentifying]: {
     tone: "info",
@@ -180,7 +180,7 @@ const SETUP_STATE_META = {
     tone: "info",
     eyebrow: "步骤 3 / 网络配置",
     title: "正在验证网络连接",
-    description: "Pet Manager 正在等待设备确认联网成功和网络回执。",
+    description: "HachimoDock 正在等待设备确认联网成功和网络回执。",
   },
   [SETUP_STATES.setupDeviceRegistering]: {
     tone: "info",

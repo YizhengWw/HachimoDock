@@ -478,7 +478,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
       return;
     }
     if (!ffmpegOk) {
-      setDirectError("未检测到 ffmpeg，无法完成导入到 Pet Manager。");
+      setDirectError("未检测到 ffmpeg，无法完成导入到 HachimoDock。");
       return;
     }
 
@@ -489,7 +489,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
       await installCodexCommunityPet(parsed.petId);
       const result = await onImport(parsed.petId);
       if (result?.ok === false) {
-        setDirectError(result.error || "安装已完成，但导入到 Pet Manager 失败。");
+        setDirectError(result.error || "安装已完成，但导入到 HachimoDock 失败。");
       }
     } catch (err) {
       console.error(err);
@@ -535,7 +535,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
                   className="message-banner message-banner--error"
                   style={{ whiteSpace: "pre-wrap", marginTop: 0 }}
                 >
-                  <AlertCircle size={14} /> 未检测到 ffmpeg，导入到 Pet Manager 时会失败。
+                  <AlertCircle size={14} /> 未检测到 ffmpeg，导入到 HachimoDock 时会失败。
                   {"\n  macOS: brew install ffmpeg\n  Windows: winget install Gyan.FFmpeg\n  Linux: apt install ffmpeg"}
                 </div>
               )}
@@ -554,7 +554,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
                         <span>先打开社区网站</span>
                       </div>
                       <div className="community-step-desc">
-                        在社区里挑选形象，然后使用下方任意一种方式导入到 Pet Manager。
+                        在社区里挑选形象，然后使用下方任意一种方式导入到 HachimoDock。
                       </div>
                     </div>
                     <div className="community-source-list">
@@ -705,7 +705,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
                             检测到 {newPets.length} 个新增或更新的形象
                           </div>
                           <div className="muted small">
-                            选择一个导入到 Pet Manager，导入过程会在本地用 ffmpeg
+                            选择一个导入到 HachimoDock，导入过程会在本地用 ffmpeg
                             将精灵图转换为视频。
                           </div>
                         </div>

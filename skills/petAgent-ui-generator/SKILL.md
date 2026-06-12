@@ -33,7 +33,7 @@ description: Generate petAgent 桌搭子 widget folders (.clawpkg format) from n
    - `<id>/runtime/widget.json` ⭐ (新:状态机 + tick + 可选 fetcher/reader,见下方专门小节)
    - `<id>/assets/.keep`
    - `<id>/share.json`
-6. **告诉用户:** "已生成 `<id>/` 目录,拖到 claw-pet-manager 的 ComponentCenter 即可安装到设备。"
+6. **告诉用户:** "已生成 `<id>/` 目录,拖到 HachimoDock（哈基米机）的 ComponentCenter 即可安装到设备。"
 
 ## 强制约束
 
@@ -45,9 +45,9 @@ description: Generate petAgent 桌搭子 widget folders (.clawpkg format) from n
 
 ## 按钮配置追问规则
 
-Pet Manager 负一屏的产品模型是:切到负一屏就是进入这个组件场景。组件必须有一个无操作也成立的默认状态(自动计时、自动刷新展示、显示当前状态、或明确的待开始状态),不能依赖顶部红钮或旋钮触发后才有价值。
+HachimoDock（哈基米机）负一屏的产品模型是:切到负一屏就是进入这个组件场景。组件必须有一个无操作也成立的默认状态(自动计时、自动刷新展示、显示当前状态、或明确的待开始状态),不能依赖顶部红钮或旋钮触发后才有价值。
 
-Pet Manager 组件中心只允许用户在安装前把每个组件动作绑定到屏幕点击或屏幕长按。顶部红钮不可用；前方旋钮旋转固定用于系统音量，不要写成 widget action。生成新组件时优先给出清晰默认绑定。
+HachimoDock（哈基米机）组件中心只允许用户在安装前把每个组件动作绑定到屏幕点击或屏幕长按。顶部红钮不可用；前方旋钮旋转固定用于系统音量，不要写成 widget action。生成新组件时优先给出清晰默认绑定。
 
 `buttons.json` 可写这些事件:
 - `screen.region.tap` → 屏幕主动作,如开始/暂停、刷新、查看详情

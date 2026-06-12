@@ -1,6 +1,6 @@
-# Pet Manager Desktop (`ref/`)
+# [HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock) Desktop (`ref/`)
 
-`ref/` 是 Pet Manager 桌面端应用。它使用 Tauri 2 + React + Vite：
+`ref/` 是 HachimoDock（哈基米机）桌面端应用。它使用 Tauri 2 + React + Vite：
 
 - `src/`：React UI，包括设备向导、设备仪表盘、宠物相册、组件中心、语音控制和
   当前展示配置。
@@ -58,10 +58,12 @@ npm test
 
 ## 设备通信
 
-桌面端可以通过两条路径和设备端通信：
+桌面端可以通过两条路径和设备端通信，具体取决于硬件方案：
 
-- USB serial：优先用于直连设备、按钮配置、`.clawpkg` 安装和状态同步。
-- MQTT：用于无线可达性、远程绑定和状态/语音同步。
+- USB serial：主要用于 Raspberry Pi USB gadget 直连、按钮配置、`.clawpkg`
+  安装和状态同步。
+- MQTT：用于无线可达性、远程绑定和状态/语音同步；当前 Radxa Cubie A7Z
+  默认走 Wi-Fi + MQTT/SSH。
 
 设备目标不要写死 IP。调试具体板子时使用：
 
@@ -89,8 +91,7 @@ npm run pack-builtins
 
 ## 开发注意
 
-- 桌面端 UI 变更同步更新 `ref/.folder.md`。
+- 桌面端 UI 变更同步更新相关 README、设计文档或当前仍纳入版本管理的目录说明。
 - Tauri 命令或 bridge 契约变更需要检查 `board-runtime/` 是否也要同步。
 - 不要在业务代码里写死某一块设备的 IP、用户或 board id。
 - selected agent、语音、USB active-state 下发要保持“只跟随当前选择 agent”的语义。
-

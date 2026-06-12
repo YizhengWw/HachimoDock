@@ -55,7 +55,7 @@ const PREVIEW_PADDING: u32 = 4;
 /// is already transparent.
 const HALO_RADIUS: i32 = 2;
 
-/// Codex row → (pet-manager family, used columns count, per-frame durations in ms).
+/// Codex row → (HachimoDock family, used columns count, per-frame durations in ms).
 /// Source: ~/.codex/skills/hatch-pet/references/animation-rows.md + mapping image.
 struct RowMap {
     row: u32,

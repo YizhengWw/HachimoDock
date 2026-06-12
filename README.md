@@ -1,6 +1,6 @@
-# claw-pet-manager
+# [HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock)
 
-`claw-pet-manager` 是 Pet Manager 的单仓库工作区，包含桌面端管理器
+[HachimoDock（哈基米机）](https://github.com/YizhengWw/HachimoDock) 是单仓库工作区，包含桌面端管理器
 和小屏设备端运行时。
 
 这个仓库当前分成两条主线：
@@ -9,12 +9,22 @@
   agent 跟随、语音/按钮配置、USB/MQTT 下发和本地 bridge sidecar 管理。
 - `board-runtime/`：Raspberry Pi / Radxa Cubie A7Z 设备端 runtime，用于显示
   宠物动画、接收桌面端 session 状态、处理输入、运行负一屏 widget 和配网页面。
+  两种硬件方案的能力边界不同，见下方支持矩阵。
+
+## 硬件方案和当前支持范围
+
+| 方案 | 推荐用途 | 当前已验证 | 当前未默认启用 |
+|---|---|---|---|
+| 方案一：Radxa Cubie A7Z | 默认复刻硬件，性能更高，适合走 Wi-Fi + MQTT/SSH 部署 | Debian 11/12、SPI ILI9341 LCD、framebuffer 显示、HTTP/MQTT、负一屏 widget、桌面端状态同步 | XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT、USB gadget `/dev/ttyGS0` |
+| 方案二：Raspberry Pi Zero 2 W | 兼容方案，适合完整体验触摸、旋钮、语音和 USB 直连 | Raspberry Pi OS、SPI ILI9341 LCD、XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、HTTP/MQTT、负一屏 widget、桌面端状态同步 | 无线和音频效果仍取决于实际镜像、声卡和网络配置 |
+
+`ESP32` 不属于当前 `board-runtime/` 已支持目标；如要使用，需要另起移植工程。
 
 ## 目录结构
 
 | 路径 | 说明 |
 |---|---|
-| `ref/` | 桌面端 Pet Manager。React UI 在 `src/`，Tauri/Rust 后端在 `src-tauri/`。 |
+| `ref/` | 桌面端 HachimoDock（哈基米机）。React UI 在 `src/`，Tauri/Rust 后端在 `src-tauri/`。 |
 | `board-runtime/` | 设备端 runtime。C 主服务 + shell/Python 辅助进程，部署到 Raspberry Pi 或 Radxa Cubie A7Z。 |
 | `scripts/` | 仓库级脚本，例如内置 `.clawpkg` 打包。 |
 | `skills/` | 组件中心使用的 agent skill，包含 `.clawpkg` 生成流程。 |
@@ -102,7 +112,7 @@ tracked in [docs/open-source-compliance-prep.md](docs/open-source-compliance-pre
 
 ## 大体链路
 
-1. 桌面端 `ref/` 发现并管理本机 agent 通道（Codex、Claude Code 等）。
+1. 桌面端 `ref/` 发现并管理本机 agent 通道（Codex、Claude Code、OpenClaw 等）。
 2. Tauri 后端和 bridge sidecar 读取 agent session JSONL，归一化状态、字幕和 token 数据。
 3. 桌面端把当前选中 agent 的状态通过 USB serial 或 MQTT 下发给设备。
 4. `board-runtime/` 的 `board-server` 接收状态，写入 `.current-state`、
@@ -138,7 +148,7 @@ curl -fsS http://$BOARD_IP/board-runtime-config.json
 
 ## 文档同步约定
 
-- 改桌面端功能时，同步更新 `ref/.folder.md`、相关 README 或设计文档。
+- 改桌面端功能时，同步更新相关 README、设计文档或当前仍纳入版本管理的目录说明。
 - 改设备端功能时，同步更新 `board-runtime/README.md`、`board-runtime/DEPLOY.md`
   或 `board-runtime/docs/*`。
 - 跨端改动需要同时更新两边说明，避免桌面端和设备端契约漂移。

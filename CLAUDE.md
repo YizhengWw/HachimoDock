@@ -4,7 +4,7 @@
 ## 0) Update Contract
 - Any functional, architectural, or coding-style change must update related folder docs before session end.
 ## 0.5) Repository Overview
-- This is a single repository for both the desktop Pet Manager and the Raspberry Pi board runtime.
+- This is a single repository for both the HachimoDock（哈基米机） desktop app and the Raspberry Pi board runtime.
 - `ref/` is the Tauri 2 + React desktop app and local bridge sidecar.
 - `board-runtime/` is the Raspberry Pi device runtime.
 - Use `README.md`, `ref/README.md`, and `board-runtime/README.md` as the human-facing entry docs.

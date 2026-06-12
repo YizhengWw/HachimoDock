@@ -44,11 +44,11 @@ progress=30:本次间隔
 - **`note` / `footer` / `progress` 在 compact 模式（fb->height ≤ 540,真机 480 屏恒为 compact）也渲染**。`note` 和 `progress` 固定在指标面板内,避免挤压底部操作提示。
 - `title` 不再画绿色胶囊外框,只保留左上角标题文字;`headline` 优先作为右上角状态句渲染,缓解小屏顶部拥挤。
 - 右上角徽章只画一个绿色 `badge` 圆,不画 STATS 的 amber alert 圆。
-- 槽位 key 为 camelCase（`metricLabel`/`metricValue`/`metricUnit`）以对齐 claw-pet-manager 端 JS payload；STATS 用的是 `metricTitle`。
+- 槽位 key 为 camelCase（`metricLabel`/`metricValue`/`metricUnit`）以对齐 HachimoDock（哈基米机）端 JS payload；STATS 用的是 `metricTitle`。
 
 ## 上游契约
 
-由 `claw-pet-manager/ref/src/lib/clawpkg-contract.js` 中的 `COMPONENT_DASHBOARD_V1_SLOTS` 定义同步。两端 9 槽位 id 与 maxBytes 必须严格一致;修改契约时必须同步两端。
+由 `HachimoDock/ref/src/lib/clawpkg-contract.js` 中的 `COMPONENT_DASHBOARD_V1_SLOTS` 定义同步。两端 9 槽位 id 与 maxBytes 必须严格一致;修改契约时必须同步两端。
 
 ## 实现入口
 
@@ -61,7 +61,7 @@ progress=30:本次间隔
 
 ## USB OTA 投放
 
-由 `claw-pet-manager` 的 `install_clawpkg_over_usb` Tauri 命令承担投放:
+由 HachimoDock（哈基米机）的 `install_clawpkg_over_usb` Tauri 命令承担投放:
 
 1. 客户端调用 `clawpkg::validate_clawpkg_at_path()` 解 `.clawpkg.zip` 并校验。
 2. 用 `clawpkg::render_component_dashboard_payload()` 把 `negative-screen.json` 的 dashboard 转成本文件描述的 `COMPONENT_DASHBOARD_V1` 文本 payload。

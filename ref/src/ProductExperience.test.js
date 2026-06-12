@@ -1,5 +1,5 @@
 /**
- * [Input] Product experience bug report and core Pet Manager source files.
+ * [Input] Product experience bug report and core HachimoDock source files.
  * [Output] Static Node regression coverage for top-level shell routing, Tauri-first setup routing, component center routing, flattened
  *          desktop HTTP bridge calls, fixed-height desktop sidebar, unified pet album naming, modal-based single desktop-pet assignment,
  *          dashboard guide entry, faster previews, wizard help affordances, and packaged Tauri runtime resources.

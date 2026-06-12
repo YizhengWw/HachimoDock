@@ -104,7 +104,7 @@ flowchart LR
 | `.current-debug-speech` | `fb-display.sh` | `fb-speech-overlay` | 顶部 debug overlay 文本 |
 | `.debug-overlay-enabled` | HTTP debug | `fb-display.sh` / `fb-speech-overlay` | debug overlay 开关 |
 | `.screen-page` | `board-touch-input` / `board-server` | `fb-display.sh` / `fb-speech-overlay` | 屏幕轮播页号文本（`main` / `stats`），默认 `main` |
-| `.button-config` | `board-server` | `board-touch-input` / `board-rotary-input` | Pet Manager 设备页通过 USB `control/command` 下发的完整按钮配置；输入驱动按 event 查 action 后执行系统切页、系统重置、语音 PTT 或转发负一屏 widget 事件 |
+| `.button-config` | `board-server` | `board-touch-input` / `board-rotary-input` | HachimoDock（哈基米机）设备页通过 USB `control/command` 下发的完整按钮配置；输入驱动按 event 查 action 后执行系统切页、系统重置、语音 PTT 或转发负一屏 widget 事件 |
 | `.widget-events` | `board-touch-input` / `board-rotary-input` | `board-widget-runtime.py` | 负一屏 widget 输入事件队列；完整按钮配置可把旋钮短按/长按/旋转等硬件事件重映射成 `screen.region.tap`、`screen.region.long_press` 或 `knob.rotate_cw / knob.rotate_ccw` |
 | `.stats-display` | `board-server`（`runtime_stats_flush`） | `fb-speech-overlay` | `STATS_DASHBOARD_V1` 结构化统计 payload，`.screen-page=stats` 时由 overlay 绘制全屏仪表盘 |
 | `stats/today.json` | `board-server` | 调试 / 远程拉取 | 当日 token 聚合（机器可读）|

@@ -142,13 +142,13 @@
         <label for="desktop-id">
           电脑端设备 ID (desktopDeviceId)
           <span class="scan-meta" style="display:block;margin-top:2px;">
-            Pet Manager 正式版会自动下发；本页面手动填入以模拟两端绑定。
+            HachimoDock（哈基米机）正式版会自动下发；本页面手动填入以模拟两端绑定。
             boardDeviceId ↔ desktopDeviceId 会用于后续 MQTT topic 前缀。
           </span>
         </label>
         <input id="desktop-id" name="desktopDeviceId" type="text"
                autocomplete="off" spellcheck="false"
-               placeholder="例如 manual-pet-manager-xxxxxx" />
+               placeholder="例如 manual-hachimodock-xxxxxx" />
 
         <button id="submit" type="submit">提交配置</button>
         <div class="status" id="status"></div>
@@ -159,7 +159,7 @@
       const $ = (id) => document.getElementById(id);
       let manualMode = false;
 
-      // desktopDeviceId is what the PC-side Pet Manager will eventually
+      // desktopDeviceId is what the PC-side HachimoDock（哈基米机） will eventually
       // generate once and reuse across re-bindings.  Until that client
       // exists, we persist a stable pseudo-id in localStorage so the user
       // gets the same ID on every page reload instead of a fresh random
@@ -171,7 +171,7 @@
         try { v = localStorage.getItem(DESKTOP_ID_KEY) || ""; } catch (_) {}
         if (!v) {
           const rand = Math.random().toString(36).slice(2, 8);
-          v = "manual-pet-manager-" + rand;
+          v = "manual-hachimodock-" + rand;
           try { localStorage.setItem(DESKTOP_ID_KEY, v); } catch (_) {}
         }
         return v;

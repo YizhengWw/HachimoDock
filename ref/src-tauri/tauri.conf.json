@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Pet Manager",
+  "productName": "HachimoDock",
   "version": "0.1.0",
   "identifier": "com.petmanager.desktop",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Pet Manager",
+        "title": "HachimoDock",
         "width": 1200,
         "height": 760,
         "minWidth": 1200,

@@ -13,8 +13,8 @@
 - Cursor rules: `.cursor/rules/*.mdc`
 
 ## Repository Layout
-- This is now a single repository containing both the desktop manager and the device runtime.
-- `ref/` owns the Tauri/React desktop manager and bridge sidecar.
+- This is now a single repository containing both the HachimoDock（哈基米机） desktop manager and the device runtime.
+- `ref/` owns the Tauri/React HachimoDock（哈基米机） desktop manager and bridge sidecar.
 - `board-runtime/` owns the Raspberry Pi board runtime.
 - When a change crosses desktop/device boundaries, update both affected folder docs in the same commit.
 

@@ -20,7 +20,7 @@ const { parseLine, frameToEvents } = require("../util/stream-json");
  *
  * Like ClaudeCodeAdapter this is intentionally machine-agnostic. Discovery
  * fallback paths are kept in lock-step with `lib.rs::detect_codex` so the
- * pet-manager UI's "Codex 已安装" badge agrees with the bus's notion of
+ * HachimoDock UI's "Codex 已安装" badge agrees with the bus's notion of
  * availability.
  */
 class CodexAdapter extends BaseAdapter {
@@ -245,7 +245,7 @@ class CodexAdapter extends BaseAdapter {
         yield {
           ...evt,
           code: "AGENT_UNSUPPORTED_MODEL",
-          message: "Codex CLI resume 该会话时切到了当前账号不支持的模型；Pet Manager 没有传模型参数。请确认 Codex CLI 与 Codex Desktop 使用同一账号/模型能力，或改用 Codex Desktop 的续接通道。",
+          message: "Codex CLI resume 该会话时切到了当前账号不支持的模型；HachimoDock 没有传模型参数。请确认 Codex CLI 与 Codex Desktop 使用同一账号/模型能力，或改用 Codex Desktop 的续接通道。",
           details: evt.message,
         };
       } else {
@@ -356,7 +356,7 @@ class CodexAdapter extends BaseAdapter {
             yield {
               kind: "error",
               code: "AGENT_UNSUPPORTED_MODEL",
-              message: "Codex Desktop 续接该会话时仍返回模型不可用；Pet Manager 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
+              message: "Codex Desktop 续接该会话时仍返回模型不可用；HachimoDock 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
             };
           } else {
             yield { kind: "error", code: pickAppServerErrorCode(params), message };
@@ -373,7 +373,7 @@ class CodexAdapter extends BaseAdapter {
               yield {
                 kind: "error",
                 code: "AGENT_UNSUPPORTED_MODEL",
-                message: "Codex Desktop 续接该会话时仍返回模型不可用；Pet Manager 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
+                message: "Codex Desktop 续接该会话时仍返回模型不可用；HachimoDock 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
               };
             } else {
               yield { kind: "error", code: "AGENT_ERROR", message: errorMessage };
@@ -421,7 +421,7 @@ class CodexAdapter extends BaseAdapter {
         yield {
           kind: "error",
           code: "AGENT_UNSUPPORTED_MODEL",
-          message: "Codex Desktop 续接该会话时仍返回模型不可用；Pet Manager 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
+          message: "Codex Desktop 续接该会话时仍返回模型不可用；HachimoDock 没有传模型参数，请确认 Desktop 当前会话本身能继续发送。",
         };
       } else {
         yield {
@@ -751,7 +751,7 @@ function createStdioJsonRpcClient({ child, log, stderrLimit = 8192 }) {
         id: frame.id,
         error: {
           code: "UNSUPPORTED_CLIENT_REQUEST",
-          message: `Pet Manager cannot handle codex app-server request ${frame.method}`,
+          message: `HachimoDock cannot handle codex app-server request ${frame.method}`,
         },
       });
     } catch {
@@ -852,7 +852,7 @@ function defaultServerRequestResult(method) {
     case "item/tool/call":
       return {
         success: false,
-        contentItems: [{ type: "inputText", text: "Pet Manager cannot run this client-side tool." }],
+        contentItems: [{ type: "inputText", text: "HachimoDock cannot run this client-side tool." }],
       };
     default:
       return undefined;

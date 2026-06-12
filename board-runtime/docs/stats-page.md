@@ -46,7 +46,7 @@ fb-display.sh
 
 ## 3. token 累加模型
 
-`tokenUsage.totalTokens` 在 pet-claw 端是 session 内的单调累加值（详见 [headless-mqtt.js#normalizeTokenUsage](../../claw-pet-manager/ref/src-tauri/bridge/packages/clawd-backend-service/src/headless-mqtt.js)）。板端用 delta：
+`tokenUsage.totalTokens` 在 pet-claw 端是 session 内的单调累加值（详见 [headless-mqtt.js#normalizeTokenUsage](../../ref/src-tauri/bridge/packages/clawd-backend-service/src/headless-mqtt.js)）。板端用 delta：
 
 - key = `(source, sessionKey 或 sessionId 或 runId)`
 - 每次新值 `cur > prev` → `delta = cur - prev`，加进 today；`prev := cur`

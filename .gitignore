@@ -8,6 +8,19 @@ target/
 test-results/
 tmp-captures/
 .DS_Store
+
+# Local agent folder-map docs
+.folder.md
+
+*.log
+*.tmp
+*.bak
+*.orig
+Thumbs.db
+.env
+.env.*
+!.env.example
+!*.env.example
 .claude/
 pet-claw/.env
 pet-claw/claw-on-desk/
@@ -21,7 +34,18 @@ board-runtime/scripts/legacy-t113/build-armhf/
 ref/src-tauri/Testing/
 
 # Avatar pipeline generated playstyle assets (large, regenerable, not source)
+output/playstyle-assets/
 output/playstyle-assets-v2/
+
+# Coverage and language/tool caches
+coverage/
+.nyc_output/
+.pytest_cache/
+__pycache__/
+.ruff_cache/
+.mypy_cache/
+.vite/
+.turbo/
 
 # Generated anchor-image metadata may contain signed remote URLs; keep out of VCS.
 pet-claw/src/assets/pets/**/generated-anchor-images/
