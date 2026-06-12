@@ -33,7 +33,7 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件
 这个 GitHub 仓库主要托管软件端和固件端代码；硬件端资料在 OSHWHub 维护。
 
 | 端 | 入口 | 说明 |
-|---|---|
+|---|---|---|
 | 软件端 | [`ref/`](ref/) | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB/MQTT 下发和本地 bridge sidecar。 |
 | 固件端 / 设备运行时 | [`board-runtime/`](board-runtime/) | Raspberry Pi / Radxa Cubie A7Z 设备端运行时。负责显示宠物动画、接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。 |
 | 硬件端 | [OSHWHub 硬件复刻页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) | PCB、BOM、结构/装配和硬件复刻资料。 |
