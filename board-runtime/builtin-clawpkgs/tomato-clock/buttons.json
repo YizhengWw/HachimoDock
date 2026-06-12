@@ -1,0 +1,4 @@
+[
+  { "control": "屏幕区域", "event": "screen.region.tap", "action": "tomato.start_pause", "label": "暂停 / 继续" },
+  { "control": "屏幕区域", "event": "screen.region.long_press", "action": "tomato.reset", "label": "重置" }
+]

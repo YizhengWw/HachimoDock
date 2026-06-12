@@ -1,0 +1,126 @@
+{
+  "name": "clawd-on-desk",
+  "version": "0.5.9",
+  "description": "A desktop pet that reacts to your Claude Code sessions in real-time.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node launch.js",
+    "bridge:mqtt": "npm --prefix packages/clawd-backend-service run bridge:mqtt",
+    "bridge:web": "npm --prefix packages/clawd-backend-service run bridge:web",
+    "build": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
+    "test": "node --test test/*.test.js",
+    "test:backend": "npm --prefix packages/clawd-backend-service test",
+    "install:claude-hooks": "npm --prefix packages/clawd-backend-service run install:claude-hooks",
+    "install:gemini-hooks": "npm --prefix packages/clawd-backend-service run install:gemini-hooks",
+    "install:cursor-hooks": "npm --prefix packages/clawd-backend-service run install:cursor-hooks"
+  },
+  "keywords": [
+    "clawd",
+    "desktop-pet",
+    "electron",
+    "claude-code"
+  ],
+  "author": "wangwu50",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.clawd.on-desk",
+    "productName": "Clawd on Desk",
+    "mac": {
+      "icon": "assets/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.entertainment",
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false,
+      "artifactName": "Clawd-on-Desk-Setup-${version}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "maintainer": "wangwu50 <wangwu50@users.noreply.github.com>",
+      "icon": "assets/icons",
+      "category": "Utility",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "assets/icon.ico",
+      "uninstallerIcon": "assets/icon.ico",
+      "installerHeaderIcon": "assets/icon.ico"
+    },
+    "files": [
+      "src/**/*",
+      "packages/clawd-backend-service/**/*",
+      "assets/svg/**/*",
+      "assets/sounds/**/*",
+      "assets/tray-icon*.png",
+      "hooks/**/*",
+      "extensions/**/*",
+      "agents/**/*"
+    ],
+    "asarUnpack": [
+      "hooks/**/*",
+      "extensions/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "wangwu50",
+        "repo": "clawd-on-desk"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^41.0.2",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3",
+    "electron-updater": "^6.8.3",
+    "koffi": "^2.15.2",
+    "mqtt": "^5.15.1",
+    "ws": "^8.18.3"
+  }
+}

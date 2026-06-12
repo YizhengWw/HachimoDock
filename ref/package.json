@@ -1,0 +1,33 @@
+{
+  "name": "pet-manager-client",
+  "private": true,
+  "version": "0.1.0",
+  "author": "wangwu50",
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite --host 0.0.0.0 --port 4173",
+    "build": "tauri build",
+    "build:web": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "tauri": "tauri",
+    "pack-builtins": "node ../scripts/pack-builtin-clawpkgs.js",
+    "test": "find src -name '*.test.js' -type f -print0 | xargs -0 node --test"
+  },
+  "dependencies": {
+    "@imgly/background-removal": "^1.5.0",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-http": "^2",
+    "lucide-react": "^0.511.0",
+    "playwright": "^1.59.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.10"
+  }
+}

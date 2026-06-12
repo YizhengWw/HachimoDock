@@ -1,0 +1,10 @@
+.DS_Store
+build/
+node_modules/
+*.log
+.current-state
+.current-event
+.current-speech
+build-host/
+__pycache__/
+Testing/

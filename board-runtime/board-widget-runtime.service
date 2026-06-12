@@ -1,0 +1,16 @@
+[Unit]
+Description=Board widget runtime (.clawpkg interpreter)
+After=board-runtime.service
+Wants=board-runtime.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/board-runtime/board-widget-runtime.py /opt/board-runtime
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+Environment=BOARD_WIDGET_LOG=INFO
+
+[Install]
+WantedBy=multi-user.target

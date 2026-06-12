@@ -1,0 +1,7 @@
+{
+  "id": "drink-reminder",
+  "name": "喝水提醒",
+  "version": "1.0.0",
+  "author": "openclaw",
+  "description": "切到负一屏即进入喝水提醒场景，自动累计距离上次喝水时间，点击确认，长按暂停。"
+}

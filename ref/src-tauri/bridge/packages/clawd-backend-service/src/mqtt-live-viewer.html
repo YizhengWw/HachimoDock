@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clawd MQTT 实时监控</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --ok: #10b981;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --accent: #38bdf8;
+      --line: #334155;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #1e293b 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .title {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 4px 0 16px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--panel-2), var(--panel));
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    .k {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .v {
+      font-size: 14px;
+      font-family: var(--mono);
+      word-break: break-all;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    input, button {
+      height: 38px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      background: #0b1220;
+      padding: 0 10px;
+      font-size: 14px;
+    }
+    button {
+      background: #0369a1;
+      border-color: #0284c7;
+      cursor: pointer;
+      min-width: 90px;
+    }
+    button:hover { filter: brightness(1.05); }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warn);
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+    }
+    .dot.ok {
+      background: var(--ok);
+      box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+    }
+    .dot.err {
+      background: var(--err);
+      box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+    }
+    .table {
+      width: 100%;
+      border-collapse: collapse;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .table th, .table td {
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+      font-size: 12px;
+    }
+    .table th { color: var(--muted); font-weight: 600; }
+    .table td code {
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #cbd5e1;
+    }
+    .state-badge {
+      display: inline-block;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: #e2e8f0;
+      background: rgba(2, 132, 199, 0.15);
+    }
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin: 10px 0 0;
+    }
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+      .toolbar { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">Clawd MQTT 实时监控</div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="k">MQTT 连接</div>
+        <div class="v status"><span id="mqtt-dot" class="dot"></span><span id="mqtt-status">等待连接</span></div>
+      </div>
+      <div class="card">
+        <div class="k">MQTT URL</div>
+        <div class="v" id="mqtt-url">-</div>
+      </div>
+      <div class="card">
+        <div class="k">订阅 Topic</div>
+        <div class="v" id="mqtt-topic">-</div>
+      </div>
+      <div class="card">
+        <div class="k">消息总数</div>
+        <div class="v" id="msg-count">0</div>
+      </div>
+      <div class="card" style="grid-column: 1 / -1">
+        <div class="k">连接诊断</div>
+        <div class="v" id="mqtt-detail">-</div>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <input id="topic-filter" placeholder="按 topic 过滤，例如 claude-code 或 state/active">
+      <input id="state-filter" placeholder="按 state 过滤，例如 working / waiting_user">
+      <button id="clear-btn">清空表格</button>
+    </div>
+
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width: 130px;">时间</th>
+          <th style="width: 30%;">Topic</th>
+          <th style="width: 130px;">State / Event</th>
+          <th>Payload</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+
+    <div class="hint">
+      页面数据来自本地 `bridge:web` 服务（SSE）。建议同时运行 `bridge:mqtt` 作为数据生产端。
+    </div>
+  </div>
+
+  <script>
+    const rowsEl = document.getElementById("rows");
+    const topicFilterEl = document.getElementById("topic-filter");
+    const stateFilterEl = document.getElementById("state-filter");
+    const clearBtn = document.getElementById("clear-btn");
+
+    const mqttDotEl = document.getElementById("mqtt-dot");
+    const mqttStatusEl = document.getElementById("mqtt-status");
+    const mqttUrlEl = document.getElementById("mqtt-url");
+    const mqttTopicEl = document.getElementById("mqtt-topic");
+    const mqttDetailEl = document.getElementById("mqtt-detail");
+    const msgCountEl = document.getElementById("msg-count");
+
+    const MAX_ROWS = 200;
+    const messages = [];
+
+    function escapeHtml(text) {
+      return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function renderStatus(state) {
+      mqttUrlEl.textContent = state.mqttUrl || "-";
+      mqttTopicEl.textContent = state.mqttTopic || "-";
+      msgCountEl.textContent = String(state.messages || 0);
+      mqttDetailEl.textContent = buildMqttDetail(state);
+
+      if (state.mqttConnected) {
+        mqttDotEl.className = "dot ok";
+        mqttStatusEl.textContent = "已连接";
+      } else if (state.lastError) {
+        mqttDotEl.className = "dot err";
+        mqttStatusEl.textContent = "连接异常";
+      } else {
+        mqttDotEl.className = "dot";
+        mqttStatusEl.textContent = "连接中/重连中";
+      }
+    }
+
+    function formatTs(ts) {
+      if (!ts) return "-";
+      return new Date(ts).toLocaleString();
+    }
+
+    function buildMqttDetail(state) {
+      const reconnects = String(state.reconnectCount || 0);
+      const lastConnect = formatTs(state.lastConnectAt);
+      const lastClose = formatTs(state.lastDisconnectAt);
+      if (state.lastError) {
+        return "最近错误: " + state.lastError + " @ " + formatTs(state.lastErrorAt) +
+          " | 最近成功: " + lastConnect +
+          " | 最近断开: " + lastClose +
+          " | 重连次数: " + reconnects;
+      }
+      if (state.mqttConnected) {
+        return "最近成功: " + lastConnect + " | 重连次数: " + reconnects;
+      }
+      return "等待 broker 返回 CONNACK | 最近成功: " + lastConnect +
+        " | 最近断开: " + lastClose +
+        " | 重连次数: " + reconnects;
+    }
+
+    function passFilter(item) {
+      const tf = topicFilterEl.value.trim().toLowerCase();
+      const sf = stateFilterEl.value.trim().toLowerCase();
+      const topicHit = !tf || item.topic.toLowerCase().includes(tf);
+      const stateRaw = ((item.payloadJson && item.payloadJson.state) || "").toLowerCase();
+      const eventRaw = ((item.payloadJson && item.payloadJson.event) || "").toLowerCase();
+      const stateHit = !sf || stateRaw.includes(sf) || eventRaw.includes(sf);
+      return topicHit && stateHit;
+    }
+
+    function formatStateEvent(item) {
+      const st = item.payloadJson && item.payloadJson.state ? item.payloadJson.state : "-";
+      const ev = item.payloadJson && item.payloadJson.event ? item.payloadJson.event : "-";
+      return '<span class="state-badge">' + escapeHtml(st) + "</span><br><span style='color:#94a3b8'>" + escapeHtml(ev) + "</span>";
+    }
+
+    function renderRows() {
+      const filtered = messages.filter(passFilter);
+      rowsEl.innerHTML = filtered
+        .slice()
+        .reverse()
+        .map((item) => {
+          const text = item.payloadJson ? JSON.stringify(item.payloadJson, null, 2) : item.payloadText;
+          return (
+            "<tr>" +
+            "<td>" + escapeHtml(new Date(item.ts).toLocaleTimeString()) + "</td>" +
+            "<td><code>" + escapeHtml(item.topic) + "</code></td>" +
+            "<td>" + formatStateEvent(item) + "</td>" +
+            "<td><code>" + escapeHtml(text) + "</code></td>" +
+            "</tr>"
+          );
+        })
+        .join("");
+    }
+
+    function addMessage(item) {
+      messages.push(item);
+      if (messages.length > MAX_ROWS) {
+        messages.shift();
+      }
+      renderRows();
+    }
+
+    topicFilterEl.addEventListener("input", renderRows);
+    stateFilterEl.addEventListener("input", renderRows);
+    clearBtn.addEventListener("click", () => {
+      messages.length = 0;
+      renderRows();
+    });
+
+    const es = new EventSource("/events");
+
+    es.addEventListener("snapshot", (evt) => {
+      const snap = JSON.parse(evt.data);
+      renderStatus(snap.state || {});
+      messages.length = 0;
+      for (const item of (snap.history || [])) {
+        messages.push(item);
+      }
+      renderRows();
+    });
+
+    es.addEventListener("status", (evt) => {
+      renderStatus(JSON.parse(evt.data));
+    });
+
+    es.addEventListener("message", (evt) => {
+      addMessage(JSON.parse(evt.data));
+    });
+
+    es.onerror = () => {
+      mqttDotEl.className = "dot err";
+      mqttStatusEl.textContent = "页面连接断开，等待自动重连";
+    };
+  </script>
+</body>
+</html>

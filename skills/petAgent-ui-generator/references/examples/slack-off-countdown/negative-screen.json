@@ -1,0 +1,13 @@
+{
+  "dashboard": {
+    "title": "摸鱼倒计时",
+    "eyebrow": "距离今天下班",
+    "headline": "还有 2 小时 13 分",
+    "metricLabel": "下班时间",
+    "metricValue": "18:00",
+    "metricUnit": "",
+    "badge": "5",
+    "note": "本周已坚持 5 天",
+    "footer": "点击 切显示 · 长按 重设"
+  }
+}

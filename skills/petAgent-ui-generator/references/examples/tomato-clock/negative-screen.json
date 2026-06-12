@@ -1,0 +1,13 @@
+{
+  "dashboard": {
+    "title": "番茄钟",
+    "eyebrow": "当前阶段",
+    "headline": "专注中 · 第 2 轮",
+    "metricLabel": "剩余时间",
+    "metricValue": "24:59",
+    "metricUnit": "",
+    "badge": "2",
+    "note": "本轮目标：写完登录页",
+    "footer": "点击 开始/暂停 · 长按 重置"
+  }
+}

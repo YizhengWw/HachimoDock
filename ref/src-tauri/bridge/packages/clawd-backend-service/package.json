@@ -1,0 +1,21 @@
+{
+  "name": "clawd-backend-service",
+  "version": "0.5.9",
+  "private": true,
+  "description": "Headless bridge service for Clawd on Desk.",
+  "author": "wangwu50",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "scripts": {
+    "bridge:mqtt": "node src/headless-mqtt.js",
+    "bridge:web": "node src/mqtt-live-viewer.js",
+    "test": "node --test ../../test/*.test.js",
+    "install:claude-hooks": "node ../../hooks/install.js",
+    "install:gemini-hooks": "node ../../hooks/gemini-install.js",
+    "install:cursor-hooks": "node ../../hooks/cursor-install.js"
+  },
+  "dependencies": {
+    "mqtt": "^5.15.1",
+    "ws": "^8.18.3"
+  }
+}

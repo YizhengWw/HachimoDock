@@ -1,0 +1,42 @@
+[package]
+name = "pet-manager-tauri"
+version = "0.1.0"
+description = "pet-manager Tauri client"
+authors = ["pet-manager contributors"]
+license = "GPL-3.0-only"
+edition = "2021"
+
+[lib]
+name = "pet_manager_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `devtools` lets us press ⌘⌥I in the running app to inspect the webview.
+# Tauri 2 only exposes the inspector when this feature is enabled at compile
+# time even on debug builds. Keeping it on for now while voice integration
+# is being shaken out; turn off once the UX is stable.
+# `protocol-asset` is required by main for serving local widget assets.
+tauri = { version = "2", features = ["devtools", "protocol-asset"] }
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+uuid = { version = "1", features = ["v4"] }
+# image/webp decode for M13.1 codex-pet import (sprite sheet -> per-state MP4)
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
+# USB serial communication with claw-pet board
+serialport = "4"
+base64 = "0.22"
+zip = "0.6"
+# Used by install_clawpkg_over_ssh to stage widget dirs before scp.
+tempfile = "3.27.0"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[dev-dependencies]
+tempfile = "3.27.0"

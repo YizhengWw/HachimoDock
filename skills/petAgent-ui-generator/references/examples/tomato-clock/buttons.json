@@ -1,0 +1,4 @@
+[
+  { "control": "屏幕区域", "event": "screen.region.tap", "action": "timer.start_pause", "label": "开始 / 暂停" },
+  { "control": "屏幕区域", "event": "screen.region.long_press", "action": "timer.reset", "label": "重置" }
+]

@@ -1,0 +1,7 @@
+{
+  "id": "tomato-clock",
+  "name": "番茄钟",
+  "version": "1.0.0",
+  "author": "openclaw",
+  "description": "经典 25 分钟专注 + 5 分钟休息循环，验证本地计时和按钮功能绑定。"
+}

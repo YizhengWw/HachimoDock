@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "since_last_min": { "type": "int", "init": 18 },
+    "interval_min": { "type": "int", "init": 60 },
+    "drink_count_today": { "type": "int", "init": 7 }
+  },
+  "states": ["reminding", "paused"],
+  "initial_state": "reminding",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "reminder.acknowledge",
+      "to": "reminding",
+      "set": { "since_last_min": 0 },
+      "inc": { "drink_count_today": 1 }
+    },
+    { "from": "reminding", "on": "reminder.pause_resume", "to": "paused" },
+    { "from": "paused", "on": "reminder.pause_resume", "to": "reminding" }
+  ],
+  "tick": [
+    { "every_ms": 60000, "while_state": "reminding", "inc": { "since_last_min": 1 } }
+  ],
+  "dashboard": {
+    "title": "喝水提醒",
+    "eyebrow": "距离上次喝水",
+    "headline": { "switch_state": { "reminding": "别忘了补水", "paused": "提醒已暂停" } },
+    "metricLabel": "已隔",
+    "metricValue": { "var": "since_last_min" },
+    "metricUnit": "分钟",
+    "badge": { "var": "drink_count_today" },
+    "note": "预定时间间隔",
+    "footer": {
+      "switch_state": {
+        "reminding": "自动计时 · 点击我喝了 · 长按暂停",
+        "paused": "长按恢复提醒"
+      }
+    },
+    "progress": { "pct_of": "since_last_min", "of_max": "interval_min", "label": "本次间隔" }
+  }
+}

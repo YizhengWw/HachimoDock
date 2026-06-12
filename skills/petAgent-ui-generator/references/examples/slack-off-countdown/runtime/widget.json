@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "off_hour":  { "type": "int", "init": 18 },
+    "off_min":   { "type": "int", "init": 0 },
+    "view_mode": { "type": "string", "init": "remaining" }
+  },
+  "states": ["showing"],
+  "initial_state": "showing",
+  "transitions": [
+    { "from": "*", "on": "clock.switch_view",     "set": { "view_mode": "remaining" } },
+    { "from": "*", "on": "clock.reset_offhour",   "set": { "off_hour": 18, "off_min": 0 } }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title":       "摸鱼倒计时",
+    "eyebrow":     "距离今天下班",
+    "headline":    "看右下下班时间",
+    "metricLabel": "下班时间",
+    "metricValue": { "var": "off_hour" },
+    "metricUnit":  ":00",
+    "footer":      "点击 切显示 · 长按 重设"
+  }
+}

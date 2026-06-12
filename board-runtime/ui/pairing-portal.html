@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>claw-pet 配网</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px 16px 48px;
+        background: #0b0f17;
+        color: #f5f7fb;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        font-size: 15px;
+        line-height: 1.55;
+      }
+      main {
+        max-width: 420px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 4px 0 12px;
+      }
+      .card {
+        background: #151b26;
+        border: 1px solid #232c3c;
+        border-radius: 14px;
+        padding: 18px 18px 20px;
+        margin-bottom: 16px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: #9aa4b7;
+        margin: 10px 0 4px;
+      }
+      input, select {
+        width: 100%;
+        padding: 10px 12px;
+        background: #0d121b;
+        color: #f5f7fb;
+        border: 1px solid #2b3447;
+        border-radius: 10px;
+        font-size: 15px;
+      }
+      button {
+        width: 100%;
+        padding: 12px;
+        margin-top: 18px;
+        background: linear-gradient(90deg, #4f7dff, #6b9bff);
+        color: #fff;
+        font-size: 16px;
+        font-weight: 600;
+        border: 0;
+        border-radius: 10px;
+      }
+      button:disabled { opacity: 0.6; }
+      .kv {
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        color: #9aa4b7;
+        padding: 2px 0;
+      }
+      .kv b { color: #f5f7fb; font-weight: 600; }
+      .hint { color: #9aa4b7; font-size: 13px; margin-top: 8px; }
+      .status { margin-top: 10px; font-size: 14px; }
+      .status.ok { color: #6ee7a0; }
+      .status.err { color: #ff7b7b; }
+      .ssid-row {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .ssid-row select {
+        flex: 1 1 auto;
+      }
+      .ssid-row button.refresh {
+        width: auto;
+        margin: 0;
+        padding: 0 14px;
+        background: #1f2a3c;
+        color: #cfd6e4;
+        font-size: 13px;
+        border: 1px solid #2b3447;
+        border-radius: 10px;
+        flex: 0 0 auto;
+        white-space: nowrap;
+      }
+      .ssid-row button.refresh:disabled { opacity: 0.6; }
+      .toggle-manual {
+        background: transparent;
+        color: #6b9bff;
+        font-size: 13px;
+        font-weight: 500;
+        margin-top: 6px;
+        padding: 4px 0;
+        border: 0;
+        text-align: left;
+        width: auto;
+      }
+      .scan-meta {
+        font-size: 12px;
+        color: #6c7688;
+        margin-top: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>claw-pet 配网</h1>
+      <div class="card" id="info-card">
+        <div class="kv"><span>设备 ID (boardDeviceId)</span><b id="device-id">-</b></div>
+        <div class="kv"><span>当前状态</span><b id="state">-</b></div>
+        <div class="kv"><span>热点 SSID</span><b id="ssid">-</b></div>
+        <div class="kv"><span>热点密码</span><b id="psk">-</b></div>
+        <div class="kv"><span>AP 地址</span><b id="ap-ip">-</b></div>
+        <div class="kv"><span>已绑定电脑 (desktopDeviceId)</span><b id="bound-desktop">-</b></div>
+        <p class="hint" id="hint">正在读取设备信息…</p>
+      </div>
+
+      <form class="card" id="cfg-form">
+        <h2 style="margin:0 0 4px;font-size:16px;">填写目标 Wi-Fi</h2>
+        <p class="hint">设备会连接下面的 Wi-Fi 并回到正常模式。</p>
+
+        <label for="wifi-ssid-select">Wi-Fi 名称 (SSID)</label>
+        <div class="ssid-row" id="ssid-picker">
+          <select id="wifi-ssid-select" required>
+            <option value="" disabled selected>正在扫描…</option>
+          </select>
+          <button type="button" id="refresh" class="refresh">刷新</button>
+        </div>
+        <input id="wifi-ssid-manual" name="ssid" placeholder="请输入 Wi-Fi 名称" autocomplete="off" style="display:none;margin-top:8px;" />
+        <button type="button" id="toggle-manual" class="toggle-manual">找不到？手动输入</button>
+        <div class="scan-meta" id="scan-meta"></div>
+
+        <label for="wifi-psk">Wi-Fi 密码</label>
+        <input id="wifi-psk" name="password" type="password" autocomplete="off" />
+
+        <label for="desktop-id">
+          电脑端设备 ID (desktopDeviceId)
+          <span class="scan-meta" style="display:block;margin-top:2px;">
+            Pet Manager 正式版会自动下发；本页面手动填入以模拟两端绑定。
+            boardDeviceId ↔ desktopDeviceId 会用于后续 MQTT topic 前缀。
+          </span>
+        </label>
+        <input id="desktop-id" name="desktopDeviceId" type="text"
+               autocomplete="off" spellcheck="false"
+               placeholder="例如 manual-pet-manager-xxxxxx" />
+
+        <button id="submit" type="submit">提交配置</button>
+        <div class="status" id="status"></div>
+      </form>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let manualMode = false;
+
+      // desktopDeviceId is what the PC-side Pet Manager will eventually
+      // generate once and reuse across re-bindings.  Until that client
+      // exists, we persist a stable pseudo-id in localStorage so the user
+      // gets the same ID on every page reload instead of a fresh random
+      // value each time — important because the board will key MQTT
+      // topics off whatever we submit.
+      const DESKTOP_ID_KEY = "clawPetManualDesktopId";
+      function ensureDesktopId() {
+        let v = "";
+        try { v = localStorage.getItem(DESKTOP_ID_KEY) || ""; } catch (_) {}
+        if (!v) {
+          const rand = Math.random().toString(36).slice(2, 8);
+          v = "manual-pet-manager-" + rand;
+          try { localStorage.setItem(DESKTOP_ID_KEY, v); } catch (_) {}
+        }
+        return v;
+      }
+
+      async function refreshState() {
+        try {
+          const r = await fetch("/pairing/state", { cache: "no-store" });
+          const j = await r.json();
+          $("device-id").textContent = j.boardDeviceId || "-";
+          $("state").textContent = j.pairingState + " / " + j.pairingMode;
+          $("ssid").textContent = j.apSsid || "-";
+          $("psk").textContent = j.apPsk || "-";
+          $("ap-ip").textContent = j.apIp || "-";
+          $("bound-desktop").textContent = j.desktopDeviceId || "（尚未绑定）";
+          $("hint").textContent = j.hint || "";
+        } catch (err) {
+          $("hint").textContent = "无法连接设备：" + err.message;
+        }
+      }
+
+      function formatUpdatedAt(ts) {
+        if (!ts) return "";
+        const when = new Date(ts * 1000);
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())}`;
+      }
+
+      async function refreshWifiList() {
+        const sel = $("wifi-ssid-select");
+        const btn = $("refresh");
+        btn.disabled = true;
+        btn.textContent = "扫描中…";
+        sel.innerHTML = '<option value="" disabled selected>加载中…</option>';
+        try {
+          const r = await fetch("/wifi/scan", { cache: "no-store" });
+          const j = await r.json();
+          const nets = Array.isArray(j.networks) ? j.networks.slice() : [];
+          nets.sort((a, b) => (b.signal || -200) - (a.signal || -200));
+          if (nets.length === 0) {
+            sel.innerHTML = '<option value="" disabled selected>未扫描到 Wi-Fi</option>';
+            $("scan-meta").textContent = j.updatedAt
+              ? `扫描时间 ${formatUpdatedAt(j.updatedAt)} · 无结果`
+              : "暂无扫描结果";
+          } else {
+            sel.innerHTML = '<option value="" disabled selected>请选择 Wi-Fi…</option>';
+            for (const n of nets) {
+              const opt = document.createElement("option");
+              opt.value = n.ssid;
+              const bars = signalBars(n.signal);
+              const lock = n.secure ? " 🔒" : "";
+              opt.textContent = `${n.ssid}${lock}  ${bars} ${n.signal || "?"}dBm`;
+              sel.appendChild(opt);
+            }
+            $("scan-meta").textContent = j.updatedAt
+              ? `共 ${nets.length} 个 Wi-Fi · 扫描于 ${formatUpdatedAt(j.updatedAt)}`
+              : `共 ${nets.length} 个 Wi-Fi`;
+          }
+        } catch (err) {
+          sel.innerHTML = '<option value="" disabled selected>扫描失败</option>';
+          $("scan-meta").textContent = "扫描失败: " + err.message;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = "刷新";
+        }
+      }
+
+      function signalBars(dbm) {
+        if (dbm == null) return "▁";
+        if (dbm >= -55) return "▁▂▄▆█";
+        if (dbm >= -65) return "▁▂▄▆";
+        if (dbm >= -75) return "▁▂▄";
+        if (dbm >= -85) return "▁▂";
+        return "▁";
+      }
+
+      $("toggle-manual").addEventListener("click", () => {
+        manualMode = !manualMode;
+        $("wifi-ssid-manual").style.display = manualMode ? "block" : "none";
+        $("ssid-picker").style.display = manualMode ? "none" : "flex";
+        $("toggle-manual").textContent = manualMode ? "从列表中选择" : "找不到？手动输入";
+        if (manualMode) {
+          $("wifi-ssid-manual").focus();
+        }
+      });
+
+      $("refresh").addEventListener("click", refreshWifiList);
+
+      const errorToZh = (code) => {
+        switch (code) {
+          case "ssid_not_found":
+            return "找不到该 Wi-Fi（请确认 SSID 正确、路由器开启、在信号范围内）";
+          case "wrong_password_or_assoc":
+            return "关联失败（密码可能不正确）";
+          case "no_dhcp_lease":
+            return "已连上路由但未拿到 IP（路由 DHCP 可能有问题）";
+          case "missing_ssid":
+            return "Wi-Fi 名称为空";
+          case "missing_creds":
+            return "缺少凭据文件（请重试）";
+          default:
+            if (typeof code === "string" && code.startsWith("sta_timeout_")) {
+              return "连接超时（wpa_state=" + code.slice(12) + "）";
+            }
+            return code || "未知错误";
+        }
+      };
+
+      // Poll /pairing/state after apply-config until we can decide:
+      //   - success:  lastAttempt.ok==true
+      //   - failure:  lastAttempt.ok==false && error != "pending"
+      //   - degraded: repeated fetch failures AFTER we saw "pending" → assume
+      //               the AP shut down because STA succeeded (portal will
+      //               become unreachable in that branch).
+      let pollTimer = null;
+      function stopPolling() {
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+      }
+
+      async function pollApplyResult(expectedSsid) {
+        const status = $("status");
+        const btn = $("submit");
+        const startedAt = Date.now();
+        let sawPending = false;
+        let consecutiveErrors = 0;
+        const tick = async () => {
+          // Compute elapsed once per tick so both try/catch branches can use
+          // it.  Earlier versions only updated the countdown on the success
+          // path, so once sta-apply tore down wlan0 the UI froze on "(0s)".
+          const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+          try {
+            const r = await fetch("/pairing/state", {
+              cache: "no-store",
+              // Cap each probe so a single hung request can't starve the
+              // interval ticks after the AP goes down.
+              signal: AbortSignal.timeout ? AbortSignal.timeout(1500) : undefined,
+            });
+            const j = await r.json();
+            consecutiveErrors = 0;
+            const la = j.lastAttempt;
+            if (la && la.ssid === expectedSsid) {
+              if (la.ok === true) {
+                stopPolling();
+                status.className = "status ok";
+                status.textContent = `连接成功！设备已加入 ${la.ssid}${la.ip ? "（IP " + la.ip + "）" : ""}。AP 热点即将关闭，此页面可关闭。`;
+                btn.disabled = false;
+                btn.textContent = "提交配置";
+                return;
+              }
+              if (la.error && la.error !== "pending") {
+                stopPolling();
+                status.className = "status err";
+                status.textContent = `连接失败：${errorToZh(la.error)}。设备已恢复到配网模式，你可以重试。`;
+                btn.disabled = false;
+                btn.textContent = "重试";
+                // Let the user see fresh AP info when they retry.
+                setTimeout(refreshState, 500);
+                return;
+              }
+              if (la.error === "pending") {
+                sawPending = true;
+                status.className = "status";
+                status.textContent = `正在让设备连接 ${expectedSsid}… (${elapsed}s)`;
+              }
+            } else {
+              status.className = "status";
+              status.textContent = `等待设备开始切换… (${elapsed}s)`;
+            }
+            if (Date.now() - startedAt > 60000) {
+              stopPolling();
+              status.className = "status err";
+              status.textContent = "等待超时，未收到设备反馈。请检查串口日志。";
+              btn.disabled = false;
+              btn.textContent = "重试";
+            }
+          } catch (err) {
+            consecutiveErrors += 1;
+            // sta-apply tears down wlan0 almost immediately after the HTTP
+            // response flushes, so most subsequent polls land here.  Keep
+            // the countdown moving instead of freezing on the last pending
+            // message — otherwise the user thinks the page is stuck.
+            if (sawPending) {
+              status.className = "status";
+              status.textContent = `热点已离线，等待设备连上 ${expectedSsid}… (${elapsed}s)`;
+            } else {
+              status.className = "status";
+              status.textContent = `与设备暂时失联… (${elapsed}s)`;
+            }
+            // After ~24s of nothing (12 × 2s) AND we already saw pending, we
+            // assume STA succeeded: on failure sta-apply brings the AP back
+            // up within ~25s so we would have reconnected by then.
+            if (sawPending && consecutiveErrors >= 12) {
+              stopPolling();
+              status.className = "status ok";
+              status.textContent = `热点已关闭，设备大概率成功连接到 ${expectedSsid}。请在你自己的 Wi-Fi 下刷新设备发现。`;
+              btn.disabled = false;
+              btn.textContent = "提交配置";
+            } else if (Date.now() - startedAt > 60000) {
+              stopPolling();
+              status.className = "status err";
+              status.textContent = "无法读取设备状态：" + err.message;
+              btn.disabled = false;
+              btn.textContent = "重试";
+            }
+          }
+        };
+        tick();
+        pollTimer = setInterval(tick, 2000);
+      }
+
+      document.getElementById("cfg-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = $("submit");
+        const status = $("status");
+        const ssid = (manualMode
+          ? $("wifi-ssid-manual").value
+          : $("wifi-ssid-select").value
+        ).trim();
+        if (!ssid) {
+          status.className = "status err";
+          status.textContent = "请先选择或输入 Wi-Fi 名称";
+          return;
+        }
+        const desktopDeviceId = $("desktop-id").value.trim();
+        if (!desktopDeviceId) {
+          status.className = "status err";
+          status.textContent = "请填写电脑端设备 ID (desktopDeviceId)";
+          return;
+        }
+        // Persist whatever the user last typed so reloads and future
+        // re-bindings default to the same ID.
+        try { localStorage.setItem(DESKTOP_ID_KEY, desktopDeviceId); } catch (_) {}
+        stopPolling();
+        btn.disabled = true;
+        btn.textContent = "验证中…";
+        status.className = "status";
+        status.textContent = "提交中…";
+        const body = {
+          ssid,
+          password: $("wifi-psk").value,
+          desktopDeviceId,
+        };
+        try {
+          const r = await fetch("/pairing/apply-config", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          const j = await r.json().catch(() => ({}));
+          if (r.ok && j.ok !== false) {
+            status.className = "status";
+            status.textContent = `已提交，设备正在尝试连接 ${ssid}…`;
+            pollApplyResult(ssid);
+          } else {
+            status.className = "status err";
+            status.textContent = "失败: " + (j.error || r.status);
+            btn.disabled = false;
+            btn.textContent = "提交配置";
+          }
+        } catch (err) {
+          status.className = "status err";
+          status.textContent = "网络错误: " + err.message;
+          btn.disabled = false;
+          btn.textContent = "提交配置";
+        }
+      });
+
+      // Seed the desktopDeviceId input before the first state fetch so the
+      // user sees a populated value even if the device has never been
+      // bound before (server returns empty string in that case).
+      $("desktop-id").value = ensureDesktopId();
+
+      refreshState();
+      refreshWifiList();
+      setInterval(() => {
+        // Skip the periodic info refresh while we're actively polling the
+        // apply result -- otherwise the two loops step on each other and the
+        // info card can briefly show stale state as AP tears down.
+        if (!pollTimer) refreshState();
+      }, 3000);
+    </script>
+  </body>
+</html>

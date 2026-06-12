@@ -1,0 +1,13 @@
+{
+  "dashboard": {
+    "title": "喝水提醒",
+    "eyebrow": "距离下次喝水",
+    "headline": "还有 18 分钟",
+    "metricLabel": "间隔",
+    "metricValue": "45",
+    "metricUnit": "分钟",
+    "badge": "4",
+    "note": "今天已喝 4 次（约 1 升）",
+    "footer": "点击 我喝了 · 长按 暂停"
+  }
+}

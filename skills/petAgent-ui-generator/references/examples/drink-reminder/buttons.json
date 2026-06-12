@@ -1,0 +1,4 @@
+[
+  { "control": "屏幕区域", "event": "screen.region.tap", "action": "reminder.acknowledge", "label": "我喝了" },
+  { "control": "屏幕区域", "event": "screen.region.long_press", "action": "reminder.pause_resume", "label": "暂停 / 恢复" }
+]

@@ -1,0 +1,7 @@
+{
+  "id": "tomato-clock",
+  "name": "番茄钟",
+  "version": "1.0.0",
+  "author": "openclaw",
+  "description": "切到负一屏即进入专注计时场景，自动开始倒计时，点击暂停/继续，长按重置。"
+}

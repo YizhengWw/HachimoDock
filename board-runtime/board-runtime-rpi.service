@@ -1,0 +1,16 @@
+[Unit]
+Description=Board Runtime (claw-pet device)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/opt/board-runtime/board-runtime-rpi.env
+ExecStart=/bin/sh /opt/board-runtime/start-rpi.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

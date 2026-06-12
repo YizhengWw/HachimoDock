@@ -1,0 +1,24 @@
+{
+  "createdAt": "2026-04-17T11:11:13.094Z",
+  "profile": "board-runtime",
+  "assetsProfile": "linux-zqboard-800x480",
+  "runtimeLanguage": "c",
+  "buildSystem": "cmake",
+  "executables": [
+    "board-server",
+    "board-touch-input",
+    "fb-speech-overlay"
+  ],
+  "publicIdentityField": "boardDeviceId",
+  "runtimeContracts": [
+    ".current-state",
+    ".current-event",
+    ".current-speech"
+  ],
+  "sizes": {
+    "assetsBytes": 5661084,
+    "uiBytes": 399934,
+    "sourceBytes": 0,
+    "totalBytes": 6061018
+  }
+}

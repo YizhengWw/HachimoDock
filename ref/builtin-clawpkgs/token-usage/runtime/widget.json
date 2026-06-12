@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "agent_label":     { "type": "string", "init": "" },
+    "tokens_display":  { "type": "string", "init": "—" },
+    "headline_text":   { "type": "string", "init": "等待 bridge 数据" },
+    "breakdown_text":  { "type": "string", "init": "" }
+  },
+  "states": ["live"],
+  "initial_state": "live",
+  "transitions": [],
+  "tick": [],
+  "readers": {
+    "agent_field":     { "path": ".stats-display", "every_s": 2, "field_pattern": "(?m)^agent=(.+)$",       "into": "agent_label" },
+    "headline_field":  { "path": ".stats-display", "every_s": 2, "field_pattern": "(?m)^headline=(.+)$",    "into": "headline_text" },
+    "value_field":     { "path": ".stats-display", "every_s": 2, "field_pattern": "(?m)^metricValue=(.+)$", "into": "tokens_display" },
+    "breakdown_field": { "path": ".stats-display", "every_s": 2, "field_pattern": "(?m)^breakdown=(.+)$",   "into": "breakdown_text" }
+  },
+  "dashboard": {
+    "title":       "🤖 Token 消耗",
+    "eyebrow":     { "var": "agent_label" },
+    "headline":    { "var": "headline_text" },
+    "metricLabel": "今日累计",
+    "metricValue": { "var": "tokens_display" },
+    "metricUnit":  "TOKEN",
+    "note":        { "var": "breakdown_text" },
+    "footer":      "切到负一屏自动刷新"
+  }
+}

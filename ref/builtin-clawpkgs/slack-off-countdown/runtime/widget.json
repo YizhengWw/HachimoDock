@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "minutes_left": { "type": "int", "init": 133 },
+    "off_hour": { "type": "int", "init": 18 }
+  },
+  "states": ["showing"],
+  "initial_state": "showing",
+  "pages": [
+    { "id": "countdown" },
+    { "id": "offhour" }
+  ],
+  "initial_page": "countdown",
+  "transitions": [
+    { "from": "*", "on": "clock.switch_view", "page": "next" },
+    { "from": "*", "on": "clock.reset_countdown", "set": { "minutes_left": 133 } }
+  ],
+  "tick": [
+    { "every_ms": 60000, "inc": { "minutes_left": -1 } }
+  ],
+  "dashboard": {
+    "title": "摸鱼倒计时",
+    "eyebrow": "距离今天下班",
+    "headline": { "switch_page": { "countdown": "自动倒计时中", "offhour": "下班时间" } },
+    "metricLabel": { "switch_page": { "countdown": "剩余", "offhour": "下班时间" } },
+    "metricValue": { "switch_page": { "countdown": { "var": "minutes_left" }, "offhour": { "var": "off_hour" } } },
+    "metricUnit": { "switch_page": { "countdown": "分钟", "offhour": ":00" } },
+    "badge": "5",
+    "note": "本周已坚持 5 天打卡",
+    "footer": "自动倒计时 · 点击切显示 · 长按重置"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "remaining_s": { "type": "int", "init": 1500 },
+    "completed_today": { "type": "int", "init": 0 }
+  },
+  "states": ["focus", "rest", "paused"],
+  "initial_state": "focus",
+  "transitions": [
+    { "from": "focus", "on": "tomato.start_pause", "to": "paused" },
+    { "from": "paused", "on": "tomato.start_pause", "to": "focus" },
+    { "from": "rest", "on": "tomato.start_pause", "to": "focus", "set": { "remaining_s": 1500 } },
+    { "from": "*", "on": "tomato.reset", "to": "focus", "set": { "remaining_s": 1500 } }
+  ],
+  "tick": [
+    { "every_ms": 1000, "while_state": "focus", "inc": { "remaining_s": -1 } },
+    { "every_ms": 1000, "while_state": "rest", "inc": { "remaining_s": -1 } }
+  ],
+  "dashboard": {
+    "title": "番茄钟",
+    "eyebrow": { "switch_state": { "focus": "专注阶段", "rest": "休息阶段", "paused": "暂停中" } },
+    "headline": { "switch_state": { "focus": "专注中", "rest": "喘口气", "paused": "已暂停" } },
+    "metricLabel": "剩余",
+    "metricValue": { "fmt_mmss": "remaining_s" },
+    "metricUnit": "",
+    "badge": { "var": "completed_today" },
+    "note": "今日完成数显示在右上",
+    "footer": {
+      "switch_state": {
+        "focus": "自动计时 · 点击暂停 · 长按重置",
+        "rest": "自动休息 · 点击切专注 · 长按重置",
+        "paused": "点击继续 · 长按重置"
+      }
+    }
+  }
+}

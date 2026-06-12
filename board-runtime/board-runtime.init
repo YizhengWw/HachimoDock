@@ -1,0 +1,182 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+BOARD_DIR="${BOARD_DIR:-/mnt/UDISK/board-runtime}"
+MQTT_BROKER_URL="${MQTT_BROKER_URL:-mqtt://broker.openclaw.example:1883}"
+if [ -z "$PET_DEVICE_ID" ]; then
+    WLAN_MAC=$(cat /sys/class/net/${BOARD_RUNTIME_WLAN_IFACE:-wlan0}/address 2>/dev/null | tr -d ':' | tr 'A-F' 'a-f')
+    if [ -n "$WLAN_MAC" ]; then
+        PET_DEVICE_ID="board-${WLAN_MAC}"
+    else
+        PET_DEVICE_ID="board-unknown"
+    fi
+fi
+BOARD_RUNTIME_WLAN_IFACE="${BOARD_RUNTIME_WLAN_IFACE:-wlan0}"
+BOARD_RUNTIME_AP_IP="${BOARD_RUNTIME_AP_IP:-192.168.44.1}"
+BOARD_RUNTIME_AP_SSID="${BOARD_RUNTIME_AP_SSID:-claw-pet}"
+BOARD_RUNTIME_AP_PSK="${BOARD_RUNTIME_AP_PSK:-88888888}"
+BOARD_RUNTIME_AP_CHANNEL="${BOARD_RUNTIME_AP_CHANNEL:-6}"
+BOARD_RUNTIME_ADMIN_TOKEN="${BOARD_RUNTIME_ADMIN_TOKEN:-${PET_CLAW_ADMIN_TOKEN:-}}"
+BOARD_RUNTIME_AP_UP_CMD_DEFAULT="sh $BOARD_DIR/board-ap-up.sh"
+BOARD_RUNTIME_AP_DOWN_CMD_DEFAULT="sh $BOARD_DIR/board-ap-down.sh"
+BOARD_RUNTIME_STA_APPLY_CMD_DEFAULT="sh $BOARD_DIR/board-sta-apply.sh"
+
+start_network_watchdog() {
+    if [ -f "$BOARD_DIR/board-network-watchdog.sh" ]; then
+        sh "$BOARD_DIR/board-network-watchdog.sh" once >/dev/null 2>&1 &
+    fi
+
+    procd_open_instance network_watchdog
+    procd_set_param command /bin/sh -c "while [ ! -f '$BOARD_DIR/board-network-watchdog.sh' ]; do sleep 2; done; exec sh '$BOARD_DIR/board-network-watchdog.sh' watch"
+    procd_set_param env \
+        BOARD_RUNTIME_WLAN_IFACE="$BOARD_RUNTIME_WLAN_IFACE" \
+        BOARD_RUNTIME_DHCP_INTERVAL="${BOARD_RUNTIME_DHCP_INTERVAL:-20}"
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+}
+
+start_service() {
+    # Self-check: flag critical hardware/filesystem issues before the main
+    # services come up so the screen reflects the real failure instead of
+    # silently hanging.  We do not abort startup on self-check failure; the
+    # hint written to .current-speech already surfaces the problem.
+    if [ -x "$BOARD_DIR/board-selfcheck.sh" ]; then
+        BOARD_DIR="$BOARD_DIR" BOARD_RUNTIME_WLAN_IFACE="$BOARD_RUNTIME_WLAN_IFACE" \
+            sh "$BOARD_DIR/board-selfcheck.sh" "$BOARD_DIR" 2>&1 || true
+    fi
+
+    # USB gadget setup: configure CDC-ACM if UDC is present
+    if [ -f "$BOARD_DIR/usb-gadget-setup.sh" ]; then
+        sh "$BOARD_DIR/usb-gadget-setup.sh" 2>&1 || true
+    fi
+
+    # Detect transport mode: USB serial or WiFi/MQTT
+    BOARD_TRANSPORT="mqtt"
+    if [ -z "$BOARD_TRANSPORT_FORCE" ]; then
+        UDC_STATE=""
+        for udc_dir in /sys/class/udc/*; do
+            [ -f "$udc_dir/state" ] && UDC_STATE=$(cat "$udc_dir/state" 2>/dev/null) && break
+        done
+        if [ "$UDC_STATE" = "configured" ] && [ -c /dev/ttyGS0 ]; then
+            BOARD_TRANSPORT="usb"
+        fi
+    else
+        BOARD_TRANSPORT="$BOARD_TRANSPORT_FORCE"
+    fi
+
+    # board-server listens on BOARD_RUNTIME_PORT (default 80) so the pairing
+    # portal is reachable at plain http://192.168.44.1/ when the device is in
+    # AP fallback mode.  TinaLinux/OpenWrt ships uhttpd bound to :80 for LuCI;
+    # that would squat the port and prevent board-server from binding, so we
+    # disable it here (safe: this build never uses LuCI).
+    if [ -x /etc/init.d/uhttpd ]; then
+        /etc/init.d/uhttpd stop 2>/dev/null || true
+        /etc/init.d/uhttpd disable 2>/dev/null || true
+    fi
+    killall uhttpd 2>/dev/null || true
+
+    # The system wpa_supplicant service (procd-managed) auto-associates with
+    # cached SSIDs on boot, stealing wlan0 from hostapd.  board-runtime owns
+    # wlan0 lifecycle: board-ap-up.sh for AP, board-sta-apply.sh for STA.
+    # Permanently remove the system service so it can never interfere.
+    if [ -f /etc/init.d/wpa_supplicant ]; then
+        /etc/init.d/wpa_supplicant stop 2>/dev/null || true
+        /etc/init.d/wpa_supplicant disable 2>/dev/null || true
+        mv /etc/init.d/wpa_supplicant /etc/init.d/wpa_supplicant.disabled-by-board-runtime
+    fi
+    killall wpa_supplicant 2>/dev/null || true
+
+    # Kill default LVGL demo if running.
+    killall lv_examples 2>/dev/null
+
+    # Start board-server (HTTP + WebSocket + MQTT + state file bridge).
+    # This is always needed — in AP mode for the pairing portal, in STA mode
+    # for MQTT bridge and state management.
+    procd_open_instance board-server
+    procd_set_param command "$BOARD_DIR/board-server" "$BOARD_DIR"
+    procd_set_param env \
+        BOARD_TRANSPORT="$BOARD_TRANSPORT" \
+        MQTT_URL="$MQTT_BROKER_URL" \
+        PET_CLAW_MQTT_URL="$MQTT_BROKER_URL" \
+        PET_SCREEN_NAME="OpenClaw Board Runtime" \
+        PET_CLAW_DEVICE_ID="$PET_DEVICE_ID" \
+        PET_CLAW_MQTT_NAMESPACE=desk \
+        BOARD_RUNTIME_HOST=0.0.0.0 \
+        BOARD_RUNTIME_PORT="${BOARD_RUNTIME_PORT:-80}" \
+        BOARD_RUNTIME_AP_IP="$BOARD_RUNTIME_AP_IP" \
+        BOARD_RUNTIME_AP_SSID="$BOARD_RUNTIME_AP_SSID" \
+        BOARD_RUNTIME_AP_PSK="$BOARD_RUNTIME_AP_PSK" \
+        BOARD_RUNTIME_AP_CHANNEL="$BOARD_RUNTIME_AP_CHANNEL" \
+        BOARD_RUNTIME_WLAN_IFACE="$BOARD_RUNTIME_WLAN_IFACE" \
+        BOARD_RUNTIME_AP_UP_CMD="${BOARD_RUNTIME_AP_UP_CMD:-$BOARD_RUNTIME_AP_UP_CMD_DEFAULT}" \
+        BOARD_RUNTIME_AP_DOWN_CMD="${BOARD_RUNTIME_AP_DOWN_CMD:-$BOARD_RUNTIME_AP_DOWN_CMD_DEFAULT}" \
+        BOARD_RUNTIME_STA_APPLY_CMD="${BOARD_RUNTIME_STA_APPLY_CMD:-$BOARD_RUNTIME_STA_APPLY_CMD_DEFAULT}" \
+        BOARD_RUNTIME_ADMIN_TOKEN="$BOARD_RUNTIME_ADMIN_TOKEN" \
+        BOARD_RUNTIME_DISCOVERY_UDP_PORT="${BOARD_RUNTIME_DISCOVERY_UDP_PORT:-19890}" \
+        BOARD_RUNTIME_DISCOVERY_MDNS_PORT="${BOARD_RUNTIME_DISCOVERY_MDNS_PORT:-5353}" \
+        BOARD_RUNTIME_DISCOVERY_TIMEOUT_MS="${BOARD_RUNTIME_DISCOVERY_TIMEOUT_MS:-30000}" \
+        BOARD_RUNTIME_DISCOVERY_ANNOUNCE_MS="${BOARD_RUNTIME_DISCOVERY_ANNOUNCE_MS:-3000}"
+    procd_set_param stderr 1
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    # Start framebuffer speech overlay (needed in both AP and STA modes
+    # to render pairing hints and status text on screen).
+    procd_open_instance fb_speech_overlay
+    procd_set_param command "$BOARD_DIR/fb-speech-overlay" "$BOARD_DIR"
+    procd_set_param env \
+        PET_CLAW_FB_SPEECH_OVERLAY="${PET_CLAW_FB_SPEECH_OVERLAY:-1}" \
+        PET_CLAW_FB_SPEECH_HOLD_SECONDS="${PET_CLAW_FB_SPEECH_HOLD_SECONDS:-10}" \
+        PET_CLAW_FB_SPEECH_SCALE="${PET_CLAW_FB_SPEECH_SCALE:-2.0}"
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    # Network watchdog only needed in WiFi/MQTT mode
+    if [ "$BOARD_TRANSPORT" != "usb" ]; then
+        start_network_watchdog
+    fi
+
+    # Start raw touch input bridge.
+    procd_open_instance board_touch_input
+    procd_set_param command "$BOARD_DIR/board-touch-input" "$BOARD_DIR"
+    procd_set_param env \
+        BOARD_TRANSPORT="$BOARD_TRANSPORT" \
+        MQTT_URL="$MQTT_BROKER_URL" \
+        PET_CLAW_MQTT_URL="$MQTT_BROKER_URL" \
+        PET_CLAW_DEVICE_ID="$PET_DEVICE_ID" \
+        PET_CLAW_MQTT_NAMESPACE=desk
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+
+    # Start GPIO rotary/button input bridge when present. Top button and
+    # encoder rotation are system-level page controls.
+    if [ "${PET_ROTARY_INPUT_ENABLED:-1}" != "0" ] && [ -x "$BOARD_DIR/board-rotary-input" ]; then
+        procd_open_instance board_rotary_input
+        procd_set_param command "$BOARD_DIR/board-rotary-input" "$BOARD_DIR"
+        procd_set_param stdout 1
+        procd_set_param stderr 1
+        procd_set_param respawn 3600 5 5
+        procd_close_instance
+    fi
+
+    # Start fb-display.sh (video player driver).
+    procd_open_instance fb-display
+    procd_set_param command sh "$BOARD_DIR/fb-display.sh"
+    procd_set_param env \
+        PET_CLAW_FB_CLIP_MAX_SECONDS="${PET_CLAW_FB_CLIP_MAX_SECONDS:-30}" \
+        PET_CLAW_FB_IDLE_MAX_LOOPS="${PET_CLAW_FB_IDLE_MAX_LOOPS:-5}" \
+        PET_CLAW_FB_WORKING_MAX_LOOPS="${PET_CLAW_FB_WORKING_MAX_LOOPS:-5}" \
+        PET_CLAW_FB_DEBUG_OVERLAY="${PET_CLAW_FB_DEBUG_OVERLAY:-0}"
+    procd_set_param stderr 1
+    procd_set_param respawn 3600 5 5
+    procd_close_instance
+}

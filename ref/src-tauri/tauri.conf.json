@@ -1,0 +1,104 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pet Manager",
+  "version": "0.1.0",
+  "identifier": "com.petmanager.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev:web",
+    "beforeBuildCommand": "npm run build:web",
+    "devUrl": "http://localhost:4173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pet Manager",
+        "width": 1200,
+        "height": 760,
+        "minWidth": 1200,
+        "minHeight": 760,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: ipc: http://ipc.localhost asset: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* blob: data:; connect-src 'self' tauri: ipc: http://ipc.localhost asset: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* blob: data:; img-src 'self' asset: http://127.0.0.1:* http://localhost:* data: blob:; media-src 'self' asset: http://127.0.0.1:* http://localhost:* blob: data: mediastream:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:;",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPLOCALDATA/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../dist/terrier-clips": "terrier-clips",
+      "../builtin-clawpkgs": "builtin-clawpkgs",
+      "bridge/package.json": "bridge/package.json",
+      "bridge/packages/clawd-backend-service/package.json": "bridge/packages/clawd-backend-service/package.json",
+      "bridge/packages/clawd-backend-service/src": "bridge/packages/clawd-backend-service/src",
+      "bridge/packages/agent-session-bus/package.json": "bridge/packages/agent-session-bus/package.json",
+      "bridge/packages/agent-session-bus/src": "bridge/packages/agent-session-bus/src",
+      "bridge/agents": "bridge/agents",
+      "bridge/hooks": "bridge/hooks",
+      "bridge/node_modules/@babel/runtime": "bridge/node_modules/@babel/runtime",
+      "bridge/node_modules/@types/node": "bridge/node_modules/@types/node",
+      "bridge/node_modules/@types/readable-stream": "bridge/node_modules/@types/readable-stream",
+      "bridge/node_modules/@types/ws": "bridge/node_modules/@types/ws",
+      "bridge/node_modules/abort-controller": "bridge/node_modules/abort-controller",
+      "bridge/node_modules/base64-js": "bridge/node_modules/base64-js",
+      "bridge/node_modules/bl": "bridge/node_modules/bl",
+      "bridge/node_modules/broker-factory": "bridge/node_modules/broker-factory",
+      "bridge/node_modules/buffer": "bridge/node_modules/buffer",
+      "bridge/node_modules/buffer-from": "bridge/node_modules/buffer-from",
+      "bridge/node_modules/commist": "bridge/node_modules/commist",
+      "bridge/node_modules/concat-stream": "bridge/node_modules/concat-stream",
+      "bridge/node_modules/debug": "bridge/node_modules/debug",
+      "bridge/node_modules/event-target-shim": "bridge/node_modules/event-target-shim",
+      "bridge/node_modules/events": "bridge/node_modules/events",
+      "bridge/node_modules/fast-unique-numbers": "bridge/node_modules/fast-unique-numbers",
+      "bridge/node_modules/help-me": "bridge/node_modules/help-me",
+      "bridge/node_modules/ieee754": "bridge/node_modules/ieee754",
+      "bridge/node_modules/inherits": "bridge/node_modules/inherits",
+      "bridge/node_modules/ip-address": "bridge/node_modules/ip-address",
+      "bridge/node_modules/js-sdsl": "bridge/node_modules/js-sdsl",
+      "bridge/node_modules/lru-cache": "bridge/node_modules/lru-cache",
+      "bridge/node_modules/minimist": "bridge/node_modules/minimist",
+      "bridge/node_modules/mqtt": "bridge/node_modules/mqtt",
+      "bridge/node_modules/mqtt-packet": "bridge/node_modules/mqtt-packet",
+      "bridge/node_modules/ms": "bridge/node_modules/ms",
+      "bridge/node_modules/number-allocator": "bridge/node_modules/number-allocator",
+      "bridge/node_modules/process": "bridge/node_modules/process",
+      "bridge/node_modules/process-nextick-args": "bridge/node_modules/process-nextick-args",
+      "bridge/node_modules/readable-stream": "bridge/node_modules/readable-stream",
+      "bridge/node_modules/rfdc": "bridge/node_modules/rfdc",
+      "bridge/node_modules/safe-buffer": "bridge/node_modules/safe-buffer",
+      "bridge/node_modules/smart-buffer": "bridge/node_modules/smart-buffer",
+      "bridge/node_modules/socks": "bridge/node_modules/socks",
+      "bridge/node_modules/split2": "bridge/node_modules/split2",
+      "bridge/node_modules/string_decoder": "bridge/node_modules/string_decoder",
+      "bridge/node_modules/tslib": "bridge/node_modules/tslib",
+      "bridge/node_modules/typedarray": "bridge/node_modules/typedarray",
+      "bridge/node_modules/undici-types": "bridge/node_modules/undici-types",
+      "bridge/node_modules/worker-factory": "bridge/node_modules/worker-factory",
+      "bridge/node_modules/worker-timers": "bridge/node_modules/worker-timers",
+      "bridge/node_modules/worker-timers-broker": "bridge/node_modules/worker-timers-broker",
+      "bridge/node_modules/worker-timers-worker": "bridge/node_modules/worker-timers-worker",
+      "bridge/node_modules/ws": "bridge/node_modules/ws",
+      "bridge/runtime/node": "bridge/runtime/node",
+      "../../skills/petAgent-ui-generator": "skills/petAgent-ui-generator"
+    }
+  }
+}

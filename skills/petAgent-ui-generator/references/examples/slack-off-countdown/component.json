@@ -1,0 +1,7 @@
+{
+  "id": "slack-off-countdown",
+  "name": "摸鱼倒计时",
+  "version": "1.0.0",
+  "author": "openclaw",
+  "description": "用最朴素的方式提醒今天还有多久下班，让用户一眼看见自己的节奏。"
+}

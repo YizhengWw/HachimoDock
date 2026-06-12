@@ -1,0 +1,14 @@
+{
+  "dashboard": {
+    "title": "喝水提醒",
+    "eyebrow": "距离上次喝水",
+    "headline": "别忘了补水",
+    "metricLabel": "已隔",
+    "metricValue": "18",
+    "metricUnit": "分钟",
+    "badge": "7",
+    "note": "预定时间间隔",
+    "footer": "自动计时 · 点击我喝了 · 长按暂停",
+    "progress": { "value": 30, "label": "本次间隔" }
+  }
+}

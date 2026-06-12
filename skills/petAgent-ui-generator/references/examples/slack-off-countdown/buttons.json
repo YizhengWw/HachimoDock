@@ -1,0 +1,4 @@
+[
+  { "control": "屏幕区域", "event": "screen.region.tap", "action": "clock.switch_view", "label": "切换显示" },
+  { "control": "屏幕区域", "event": "screen.region.long_press", "action": "clock.reset_offhour", "label": "重新设置下班时间" }
+]

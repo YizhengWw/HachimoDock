@@ -1,0 +1,22 @@
+{
+  "name": "agent-session-bus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Voice <-> coding-agent routing bus. Receives STT text from voice-service-node and dispatches it into the user's currently selected agent session (Claude Code, Codex, OpenClaw), streaming the agent's response back as SSE for TTS.",
+  "author": "wangwu50",
+  "license": "GPL-3.0-only",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./adapters/claude-code": "./src/adapters/claude-code.js",
+    "./adapters/codex": "./src/adapters/codex.js",
+    "./adapters/openclaw": "./src/adapters/openclaw.js",
+    "./adapters/mock": "./src/adapters/mock.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node src/cli.js"
+  },
+  "dependencies": {}
+}

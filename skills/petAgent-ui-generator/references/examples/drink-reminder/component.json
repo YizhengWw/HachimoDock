@@ -1,0 +1,7 @@
+{
+  "id": "drink-reminder",
+  "name": "喝水提醒",
+  "version": "1.0.0",
+  "author": "openclaw",
+  "description": "每 45 分钟提醒一次喝水，点击确认，长按暂停或恢复提醒。"
+}
