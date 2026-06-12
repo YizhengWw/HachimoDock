@@ -8,6 +8,7 @@
   <p>
     <a href="#快速开始">快速开始</a>
     · <a href="#硬件方案">硬件方案</a>
+    · <a href="#硬件端资料">硬件端资料</a>
     · <a href="#图集">图集</a>
     · <a href="#软件架构">软件架构</a>
     · <a href="#复刻与部署">复刻与部署</a>
@@ -18,20 +19,24 @@
     <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows-db3b2b" />
     <img alt="Runtime" src="https://img.shields.io/badge/runtime-Radxa%20A7Z%20%7C%20Raspberry%20Pi-e8a23a" />
   </p>
+  <p>
+    <a href="https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB"><strong>硬件端资料 / PCB / BOM / 复刻教程</strong></a>
+  </p>
 </div>
 
 ![HachimoDock（哈基米机）产品图](docs/assets/readme/product-hero.webp)
 
 ## 项目简介
 
-HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行时。它把电脑里正在运行的 Agent 状态同步到桌面小屏上，让 AI 工作状态从终端窗口里走出来，变成一只可以抬头看见、可以触摸互动、可以语音唤起的小搭子。
+HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件/运行时 + 开源硬件方案。它把电脑里正在运行的 Agent 状态同步到桌面小屏上，让 AI 工作状态从终端窗口里走出来，变成一只可以抬头看见、可以触摸互动、可以语音唤起的小搭子。
 
-这个仓库包含两条主线：
+这个 GitHub 仓库主要托管软件端和固件端代码；硬件端资料在 OSHWHub 维护。
 
-| 模块 | 说明 |
+| 端 | 入口 | 说明 |
 |---|---|
-| `ref/` | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB/MQTT 下发和本地 bridge sidecar。 |
-| `board-runtime/` | Raspberry Pi / Radxa Cubie A7Z 设备端运行时。负责显示宠物动画、接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。 |
+| 软件端 | [`ref/`](ref/) | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB/MQTT 下发和本地 bridge sidecar。 |
+| 固件端 / 设备运行时 | [`board-runtime/`](board-runtime/) | Raspberry Pi / Radxa Cubie A7Z 设备端运行时。负责显示宠物动画、接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。 |
+| 硬件端 | [OSHWHub 硬件复刻页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) | PCB、BOM、结构/装配和硬件复刻资料。 |
 
 ## 图集
 
@@ -102,6 +107,9 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 
 ## 硬件方案
 
+本仓库给出软件和固件配套；PCB、BOM、硬件装配和复刻资料请看：
+[OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
+
 | 方案 | 推荐用途 | 当前已验证 | 当前未默认启用 |
 |---|---|---|---|
 | 方案一：Radxa Cubie A7Z | 默认复刻硬件，性能更高，适合走 Wi-Fi + MQTT/SSH 部署 | Debian 11/12、SPI ILI9341 LCD、framebuffer 显示、HTTP/MQTT、负一屏 widget、桌面端状态同步 | XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT、USB gadget `/dev/ttyGS0` |
@@ -123,6 +131,17 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
     </td>
   </tr>
 </table>
+
+## 硬件端资料
+
+硬件端不只是一张接线图，包含从主控、屏幕、PCB、外壳到装配的复刻路径：
+
+| 内容 | 入口 |
+|---|---|
+| 硬件复刻总入口 | [OSHWHub 项目页](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) |
+| 软件端和固件端 | 本 GitHub 仓库 |
+| 桌面端开发说明 | [ref/README.md](ref/README.md) |
+| 设备端部署说明 | [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md) |
 
 ## 软件架构
 
@@ -214,9 +233,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 
 ## 常见问题
 
+### 这个 GitHub 仓库包含什么？
+
+包含软件端和固件端：
+
+- 软件端：`ref/`，也就是 HachimoDock（哈基米机）桌面管理器。
+- 固件端 / 设备运行时：`board-runtime/`，部署到 Raspberry Pi 或 Radxa Cubie A7Z。
+- 硬件端：PCB、BOM、装配和复刻资料在 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
+
 ### 一定要用 Radxa Cubie A7Z 吗？
 
 不是。当前文档同时照顾 Radxa Cubie A7Z 和 Raspberry Pi Zero 2 W。A7Z 是默认复刻硬件，性能更高；Pi 方案更适合完整体验 USB gadget、触摸、旋钮/按钮和语音链路。
+
+### 屏幕、麦克风、喇叭和旋钮能换型号吗？
+
+可以，但需要确认接口和驱动。屏幕建议保持 2.8 英寸 240×320 SPI、ILI9341；Raspberry Pi 方案已验证 XPT2046/ADS7846 触摸和 EC11/按钮。Radxa A7Z 方案当前默认验证 LCD 显示，触摸、旋钮和语音需要后续 overlay、GPIO 和声卡适配。
+
+### 屏幕一定要带触摸吗？
+
+不是必须。无触摸版本也能用于状态显示；带 XPT2046 触摸屏可以体验触摸反馈和更多交互。
+
+### 必须做定制 PCB 底板吗？
+
+不是必须。定制 PCB 主要是为了减少杜邦线、让结构更整洁。调试阶段可以先用杜邦线直连；想做成完整产品形态时再按 OSHWHub 的硬件资料打样。
+
+### 大概成本多少？
+
+方案一 Radxa A7Z 的电子料大约在几百元级别，具体取决于主控、屏幕、音频模块、外壳和打样方式。方案二 Raspberry Pi Zero 2 W 的成本受主板供货、声卡和转接件影响更大。
 
 ### 支持哪些 Agent？
 
@@ -226,9 +269,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 
 取决于方案。Raspberry Pi 可走 USB gadget 直连；Radxa A7Z 当前默认走 Wi-Fi + MQTT/SSH，需要网络。
 
+### 语音交互怎么用？
+
+当前完整验证的是 Raspberry Pi 方案：按住按钮说话，板端把语音转成文本后通过输入事件送到桌面端，再注入目标 Agent。语音识别链路需要可用网络和 STT 服务。Radxa A7Z 方案当前默认不启动板端语音 PTT。
+
 ### 能自己加组件吗？
 
 可以。组件中心使用 `.clawpkg` 结构，内置 skill 可以根据自然语言生成负一屏组件，并在 USB 或 SSH/MQTT 链路可用时下发到设备。
+
+### 用什么开源协议？
+
+软件代码按 GPL-3.0-only 发布；硬件设计、3D 结构件、官方宠物素材和第三方资源请以仓库内 `LICENSE`、`COPYRIGHT`、`docs/open-source-compliance-prep.md` 以及对应资源随附声明为准。
+
+### 怎么反馈问题或参与贡献？
+
+可以在 GitHub 提 Issue、Discussion 或 PR。硬件复刻相关问题建议同时参考 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
 
 ## 文档
 
