@@ -20,7 +20,7 @@
   </p>
 </div>
 
-![HachimoDock（哈基米机）产品图](https://image.lceda.cn/oshwhub/pullImage/cecb8d736582436b939c4fa78db3eebc.png)
+![HachimoDock（哈基米机）产品图](docs/assets/readme/product-hero.webp)
 
 ## 项目简介
 
@@ -38,12 +38,12 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 <table>
   <tr>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/b40469d726074c91aac4db4526b3bc00.jpeg" alt="HachimoDock（哈基米机）实拍图" />
+      <img src="docs/assets/readme/live-photo.webp" alt="HachimoDock（哈基米机）实拍图" />
       <br />
       <sub>桌面小屏实拍：把 Agent 状态放到工位视野里。</sub>
     </td>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/875e49ef6bd54d28b4a01e32f5549e96.png" alt="HachimoDock（哈基米机）桌面端界面" />
+      <img src="docs/assets/readme/desktop-ui.webp" alt="HachimoDock（哈基米机）桌面端界面" />
       <br />
       <sub>桌面端管理：设备绑定、Agent 跟随、形象和组件配置。</sub>
     </td>
@@ -66,17 +66,17 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 <table>
   <tr>
     <td width="34%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/369ca3da496442379a84795c2db3d7a8.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
+      <img src="docs/assets/readme/status-follow.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
       <br />
       <sub>Agent 状态变化时，小屏同步切换表情和动作。</sub>
     </td>
     <td width="33%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/be759dc4ce584dcc8f036ee129c6ce4c.png" alt="HachimoDock（哈基米机）状态示例一" />
+      <img src="docs/assets/readme/status-example-1.webp" alt="HachimoDock（哈基米机）状态示例一" />
       <br />
       <sub>一眼识别当前状态，不必盯着终端窗口。</sub>
     </td>
     <td width="33%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/e3a5b26f6d1e4c238972d06631d4f9b3.png" alt="HachimoDock（哈基米机）状态示例二" />
+      <img src="docs/assets/readme/status-example-2.webp" alt="HachimoDock（哈基米机）状态示例二" />
       <br />
       <sub>字幕和短标签提示 Agent 正在做什么。</sub>
     </td>
@@ -88,12 +88,12 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 <table>
   <tr>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/7a5c0f04d764447b8c6aeab20835ea03.png" alt="HachimoDock（哈基米机）自定义形象" />
+      <img src="docs/assets/readme/custom-avatar.webp" alt="HachimoDock（哈基米机）自定义形象" />
       <br />
       <sub>上传宠物照片、头像或原创角色，生成自己的桌面搭子。</sub>
     </td>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/171866a2265246bd998bc25cca0bf3e8.png" alt="HachimoDock（哈基米机）组件示例" />
+      <img src="docs/assets/readme/component-example.webp" alt="HachimoDock（哈基米机）组件示例" />
       <br />
       <sub>负一屏组件承载番茄钟、喝水提醒、Token 消耗等轻量工具。</sub>
     </td>
@@ -112,12 +112,12 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端运行
 <table>
   <tr>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/d878179685fb4b7b8ab69a78dcd0ca4b.png" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
+      <img src="docs/assets/readme/hardware-bom.webp" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
       <br />
       <sub>方案一 Radxa A7Z 的核心物料示意。</sub>
     </td>
     <td width="50%">
-      <img src="https://image.lceda.cn/oshwhub/pullImage/17aeced03fb54724b4cc552eaea332c9.png" alt="HachimoDock（哈基米机）使用界面" />
+      <img src="docs/assets/readme/usage-ui.webp" alt="HachimoDock（哈基米机）使用界面" />
       <br />
       <sub>桌面端负责绑定、跟随、形象、组件和诊断。</sub>
     </td>
