@@ -4325,7 +4325,7 @@ static void br_server_load_config(br_server_state *server, const char *root_dir)
     }
   }
   br_normalize_text(server->config.local_device_id, "linux-pet-01", server->config.board_device_id, sizeof(server->config.board_device_id));
-  br_normalize_text(getenv("PET_SCREEN_NAME"), "OpenClaw Board Runtime", server->config.screen_name, sizeof(server->config.screen_name));
+  br_normalize_text(getenv("PET_SCREEN_NAME"), "HachimoDock Board Runtime", server->config.screen_name, sizeof(server->config.screen_name));
   br_normalize_text(getenv("PET_SCREEN_MODEL"), "zqboard-t113-board-runtime", server->config.screen_model, sizeof(server->config.screen_model));
   br_normalize_text(getenv("PET_SCREEN_FW"), "0.1.0", server->config.screen_fw, sizeof(server->config.screen_fw));
   br_normalize_topic_part(getenv("PET_CLAW_TARGET_DEVICE_ID"), server->config.local_device_id, server->config.target_device_id, sizeof(server->config.target_device_id));

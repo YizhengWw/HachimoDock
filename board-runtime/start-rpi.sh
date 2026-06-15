@@ -139,7 +139,7 @@ fi
 # Common env vars for board-server
 export MQTT_URL="$MQTT_BROKER_URL"
 export PET_CLAW_MQTT_URL="$MQTT_BROKER_URL"
-export PET_SCREEN_NAME="OpenClaw Board Runtime"
+export PET_SCREEN_NAME="HachimoDock Board Runtime"
 export PET_CLAW_DEVICE_ID="$PET_DEVICE_ID"
 export PET_CLAW_MQTT_NAMESPACE=desk
 export BOARD_RUNTIME_HOST=0.0.0.0

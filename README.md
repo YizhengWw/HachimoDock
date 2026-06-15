@@ -323,6 +323,15 @@ ssh "$BOARD_HOST" 'systemctl is-active board-runtime'
 curl -fsS http://$BOARD_IP/board-runtime-config.json
 ```
 
+## 致谢 / Acknowledgements
+
+HachimoDock 的实现参考、借鉴并集成了以下开源项目，特此致谢：
+
+- [Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)（AGPL-3.0）— 桌面端 Agent 桌宠形态与桌面端 bridge 的实现参考来源。
+- [OpenClaw](https://github.com/openclaw/openclaw)（MIT）— CLI Agent 运行时与插件 SDK。
+- [Claude Code](https://github.com/anthropics/claude-code) — 主力 coding agent 与 hook 状态协议。
+- [Codex](https://github.com/openai/codex) — 被适配的 CLI Agent 之一；同时支持 Cursor、Gemini CLI、GitHub Copilot CLI 等。
+
 ## 作者 / Author
 
 HachimoDock 由 **Yizheng Wang**（[@YizhengWw](https://github.com/YizhengWw)）与 **Wenchao Wang** 共同设计与开发。

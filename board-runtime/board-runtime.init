@@ -103,7 +103,7 @@ start_service() {
         BOARD_TRANSPORT="$BOARD_TRANSPORT" \
         MQTT_URL="$MQTT_BROKER_URL" \
         PET_CLAW_MQTT_URL="$MQTT_BROKER_URL" \
-        PET_SCREEN_NAME="OpenClaw Board Runtime" \
+        PET_SCREEN_NAME="HachimoDock Board Runtime" \
         PET_CLAW_DEVICE_ID="$PET_DEVICE_ID" \
         PET_CLAW_MQTT_NAMESPACE=desk \
         BOARD_RUNTIME_HOST=0.0.0.0 \
