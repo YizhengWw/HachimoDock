@@ -15,7 +15,7 @@
     · <a href="#常见问题">常见问题</a>
   </p>
   <p>
-    <img alt="GPL-3.0-only" src="https://img.shields.io/badge/license-GPL--3.0--only-2a2620" />
+    <img alt="AGPL-3.0-only" src="https://img.shields.io/badge/license-AGPL--3.0--only-2a2620" />
     <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows-db3b2b" />
     <img alt="Runtime" src="https://img.shields.io/badge/runtime-Radxa%20A7Z%20%7C%20Raspberry%20Pi-e8a23a" />
   </p>
@@ -283,7 +283,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 
 ### 用什么开源协议？
 
-软件代码按 GPL-3.0-only 发布；硬件设计、3D 结构件、官方宠物素材和第三方资源请以仓库内 `LICENSE`、`COPYRIGHT`、`docs/open-source-compliance-prep.md` 以及对应资源随附声明为准。
+软件代码按 AGPL-3.0-only 发布（桌面端 bridge 衍生自 AGPL-3.0 的 Clawd on Desk，AGPL 强 copyleft 不能降级为 GPL）；硬件设计、3D 结构件、官方宠物素材和第三方资源请以仓库内 `LICENSE`、`COPYRIGHT`、`docs/open-source-compliance-prep.md` 以及对应资源随附声明为准。
 
 ### 怎么反馈问题或参与贡献？
 
@@ -347,4 +347,4 @@ HachimoDock 由 **Yizheng Wang**（[@YizhengWw](https://github.com/YizhengWw)）
 
 Copyright (C) 2026 Yizheng Wang.
 
-This project is licensed under the GNU General Public License version 3 only (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full license text and [COPYRIGHT](COPYRIGHT) for the copyright notice.
+This project is licensed under the GNU Affero General Public License version 3 only (`AGPL-3.0-only`). See [LICENSE](LICENSE) for the full license text and [COPYRIGHT](COPYRIGHT) for the copyright notice.

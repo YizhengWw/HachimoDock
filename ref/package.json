@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "author": "Yizheng Wang <skyler.wang98@gmail.com>",
-  "license": "GPL-3.0-only",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",

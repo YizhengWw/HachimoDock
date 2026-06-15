@@ -24,7 +24,7 @@
     "claude-code"
   ],
   "author": "Yizheng Wang <skyler.wang98@gmail.com>",
-  "license": "GPL-3.0-only",
+  "license": "AGPL-3.0-only",
   "type": "commonjs",
   "build": {
     "appId": "com.clawd.on-desk",
