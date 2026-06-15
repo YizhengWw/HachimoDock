@@ -1,7 +1,7 @@
 <div align="center">
   <img src="ref/src/assets/logo/hachimodock-mark.png" width="112" alt="HachimoDock（哈基米机）logo" />
   <h1>HachimoDock（哈基米机）</h1>
-  <p><strong>让你的宠物 / 朋友 / 你推变成 AI Agent，和你一起工作</strong></p>
+  <p><strong>哈基米机 HachimoDock：让你的宠物 / 朋友 / 你推变成 AI Agent，和你一起工作</strong></p>
   <p>
     把 Codex、Claude Code、OpenClaw 等 CLI Agent 的状态变成桌上小宠物的表情、动作、字幕和提醒。
   </p>
