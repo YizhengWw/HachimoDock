@@ -23,7 +23,7 @@
     "electron",
     "claude-code"
   ],
-  "author": "wangwu50",
+  "author": "Yizheng Wang <skyler.wang98@gmail.com>",
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "build": {
@@ -59,7 +59,7 @@
       ]
     },
     "linux": {
-      "maintainer": "wangwu50 <wangwu50@users.noreply.github.com>",
+      "maintainer": "Yizheng Wang <skyler.wang98@gmail.com>",
       "icon": "assets/icons",
       "category": "Utility",
       "target": [
@@ -107,7 +107,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "wangwu50",
+        "owner": "YizhengWw",
         "repo": "clawd-on-desk"
       }
     ]

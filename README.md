@@ -20,6 +20,10 @@
     <img alt="Runtime" src="https://img.shields.io/badge/runtime-Radxa%20A7Z%20%7C%20Raspberry%20Pi-e8a23a" />
   </p>
   <p>
+    <a href="https://github.com/YizhengWw/HachimoDock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/YizhengWw/HachimoDock?style=social" /></a>
+    <a href="https://github.com/YizhengWw"><img alt="Follow @YizhengWw" src="https://img.shields.io/github/followers/YizhengWw?label=Follow%20%40YizhengWw&style=social" /></a>
+  </p>
+  <p>
     <a href="https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB"><strong>硬件端资料 / PCB / BOM / 复刻教程</strong></a>
   </p>
 </div>
@@ -319,8 +323,19 @@ ssh "$BOARD_HOST" 'systemctl is-active board-runtime'
 curl -fsS http://$BOARD_IP/board-runtime-config.json
 ```
 
+## 作者 / Author
+
+HachimoDock 由 **Yizheng Wang**（[@YizhengWw](https://github.com/YizhengWw)）与 **Wenchao Wang** 共同设计与开发。
+
+- 📧 邮箱：skyler.wang98@gmail.com
+- 💬 微信交流群：扫描下方二维码加入
+
+<img src="docs/assets/readme/group-qrcode.png" width="180" alt="HachimoDock 微信交流群二维码" />
+
+如果 HachimoDock 对你有帮助，欢迎给仓库点一个 ⭐ **Star**、点击 **Follow** 关注后续更新，也欢迎提 Issue / PR 一起把它做得更好。
+
 ## License
 
-Copyright (C) 2026 wangwu50.
+Copyright (C) 2026 Yizheng Wang.
 
 This project is licensed under the GNU General Public License version 3 only (`GPL-3.0-only`). See [LICENSE](LICENSE) for the full license text and [COPYRIGHT](COPYRIGHT) for the copyright notice.

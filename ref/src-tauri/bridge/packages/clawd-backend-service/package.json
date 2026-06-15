@@ -3,7 +3,7 @@
   "version": "0.5.9",
   "private": true,
   "description": "Headless bridge service for Clawd on Desk.",
-  "author": "wangwu50",
+  "author": "Yizheng Wang <skyler.wang98@gmail.com>",
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "scripts": {

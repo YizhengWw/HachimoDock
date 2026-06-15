@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Voice <-> coding-agent routing bus. Receives STT text from voice-service-node and dispatches it into the user's currently selected agent session (Claude Code, Codex, OpenClaw), streaming the agent's response back as SSE for TTS.",
-  "author": "wangwu50",
+  "author": "Yizheng Wang <skyler.wang98@gmail.com>",
   "license": "GPL-3.0-only",
   "type": "commonjs",
   "main": "src/index.js",

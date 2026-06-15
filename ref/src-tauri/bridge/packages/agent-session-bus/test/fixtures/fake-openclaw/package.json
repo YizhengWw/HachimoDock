@@ -1,7 +1,7 @@
 {
   "name": "openclaw",
   "version": "0.0.1-fake",
-  "author": "wangwu50",
+  "author": "Yizheng Wang <skyler.wang98@gmail.com>",
   "license": "GPL-3.0-only",
   "main": "dist/index.js",
   "type": "module"
