@@ -388,7 +388,7 @@ function normalizeMqttFollowTestResponse(rawConfig = {}) {
     stateTopic: normalizeText(rawConfig.stateTopic, `${topicBase}/state/pet-manager-test`),
     speechTopic: normalizeText(rawConfig.speechTopic, `${topicBase}/speech/text`),
     state: normalizeFollowTestState(rawConfig.state),
-    speechText: normalizeText(rawConfig.speechText, "HachimoDock 已连接 MQTT"),
+    speechText: normalizeText(rawConfig.speechText, "Pet Manager 已连接 MQTT"),
     publishedAt: normalizeTimestamp(rawConfig.publishedAt),
     detail: normalizeText(rawConfig.detail),
   };
@@ -515,7 +515,7 @@ export async function publishMqttFollowTest(payload = {}) {
   const normalizedPayload = {
     deviceId: normalizeTopicPart(payload.deviceId, bridgeConfig.deviceId || DEFAULT_TEST_DEVICE_ID),
     state: normalizeFollowTestState(payload.state),
-    speechText: normalizeText(payload.speechText, "HachimoDock 已连接 MQTT"),
+    speechText: normalizeText(payload.speechText, "Pet Manager 已连接 MQTT"),
   };
 
   if (hasTauriRuntime()) {

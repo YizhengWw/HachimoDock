@@ -2,7 +2,8 @@
  * [Input] open/onClose props + Tauri invoke for usb_apply_wifi + listen for usb-message.
  * [Output] Shared modal-card dialog with SSID/password inputs and a live
  *          three-stage indicator (applying / connected with IP / failed with
- *          code) driven by the device-side apply-wifi-ack frames.
+ *          code) driven by the device-side apply-wifi-ack frames, with a
+ *          client-side timeout when the board never returns a terminal ack.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -16,6 +17,7 @@ const STAGE_INITIAL = "initial";
 const STAGE_APPLYING = "applying";
 const STAGE_CONNECTED = "connected";
 const STAGE_FAILED = "failed";
+const APPLY_TIMEOUT_MS = 30_000;
 
 const ERROR_HINT = {
   invalid_json: "请求格式错误",
@@ -39,9 +41,31 @@ export default function WifiApplyModal({ open, onClose }) {
   const [ip, setIp] = useState("");
   const [error, setError] = useState("");
   const submittingRef = useRef(false);
+  const timeoutRef = useRef(null);
+
+  const clearApplyTimeout = () => {
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  const startApplyTimeout = () => {
+    clearApplyTimeout();
+    timeoutRef.current = window.setTimeout(() => {
+      submittingRef.current = false;
+      setStage((currentStage) => (
+        currentStage === STAGE_APPLYING ? STAGE_FAILED : currentStage
+      ));
+      setError((currentError) => currentError || "timeout");
+      setIp("");
+      timeoutRef.current = null;
+    }, APPLY_TIMEOUT_MS);
+  };
 
   useEffect(() => {
     if (open) {
+      clearApplyTimeout();
       setSsid("");
       setPsk("");
       setStage(STAGE_INITIAL);
@@ -62,15 +86,18 @@ export default function WifiApplyModal({ open, onClose }) {
         const ackPayload = data.payload || {};
         const nextStage = ackPayload.stage || "";
         if (nextStage === STAGE_APPLYING) {
+          startApplyTimeout();
           setStage(STAGE_APPLYING);
           setError("");
           setIp("");
         } else if (nextStage === STAGE_CONNECTED) {
+          clearApplyTimeout();
           setStage(STAGE_CONNECTED);
           setIp(ackPayload.ip || "");
           setError("");
           submittingRef.current = false;
         } else if (nextStage === STAGE_FAILED) {
+          clearApplyTimeout();
           setStage(STAGE_FAILED);
           setError(ackPayload.error || "unknown");
           setIp("");
@@ -85,6 +112,7 @@ export default function WifiApplyModal({ open, onClose }) {
     })();
     return () => {
       cancelled = true;
+      clearApplyTimeout();
       if (unlisten) unlisten();
     };
   }, [open]);
@@ -98,12 +126,14 @@ export default function WifiApplyModal({ open, onClose }) {
       return;
     }
     submittingRef.current = true;
+    startApplyTimeout();
     setStage(STAGE_APPLYING);
     setError("");
     setIp("");
     try {
       await invoke("usb_apply_wifi", { ssid: ssid.trim(), psk });
     } catch (err) {
+      clearApplyTimeout();
       submittingRef.current = false;
       setStage(STAGE_FAILED);
       setError(typeof err === "string" ? err : "invoke_failed");

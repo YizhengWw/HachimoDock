@@ -3,15 +3,6 @@
 当前设备端主线支持 Raspberry Pi + Raspberry Pi OS + systemd，以及
 Radxa Cubie A7Z + Debian + systemd。
 
-- 方案一：Radxa Cubie A7Z 是默认复刻硬件，当前已验证 Debian、ILI9341 SPI
-  LCD、`/dev/fb0` 显示、HTTP/MQTT、状态同步和负一屏 widget。默认不启用
-  XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT 和 USB gadget
-  `/dev/ttyGS0`。
-- 方案二：Raspberry Pi Zero 2 W 是兼容方案，当前已验证 ILI9341 SPI LCD、
-  XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、
-  HTTP/MQTT、状态同步和负一屏 widget。
-- `ESP32` 不是当前 `board-runtime/` 的已支持部署目标；如需使用，需要另起移植。
-
 ## 前置条件
 
 - 本机能 SSH 到目标板，例如 `<pi-user>@<pi-ip>` 或 `radxa@<board-ip>`。

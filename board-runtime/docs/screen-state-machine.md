@@ -113,7 +113,7 @@ touch.lick.mp4
 
 `board-server` 仍会在两类非状态字幕场景写 `.current-speech`：
 
-- 配网等待提示，例如“请打开电脑端 HachimoDock（哈基米机）进行配网。”
+- 配网等待提示，例如“请打开电脑端 Pet Manager 进行配网。”
 - 上游 `speech/text` topic 推送的实际文本内容；如果 payload 带 `source` + `sessionId` / `runId` / `sessionKey`，设备端会按 session 保留最近回复 30 秒，并按更新时间合并显示。
 
 配网等待期间，`fb-display.sh` 不会用通用 `waiting_user` 文案覆盖配网提示。

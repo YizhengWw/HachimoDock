@@ -1,6 +1,6 @@
 /**
  * [Input] children tree consuming useDeviceContext; Tauri invoke for USB status/manual serial rescan/WiFi online/bindings/agents; lib helpers for appearance/agent storage.
- * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent); hydrates the active channel from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
+ * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent); hydrates and reconciles active channel from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
  * [Pos] component node in ref/src/shell
  * [Sync] If this file changes, update `ref/src/shell/.folder.md`.
  */
@@ -11,6 +11,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -75,6 +76,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   const [appearances, setAppearances] = useState([]);
   const [agentAppearanceMap, setAgentAppearanceMap] = useState({});
   const [enabledAgents, setEnabledAgents] = useState(new Set());
+  const [bridgeSelectedAgentId, setBridgeSelectedAgentId] = useState("");
+  const bindingReconcileRef = useRef("");
   const [agentOptions, setAgentOptions] = useState(() =>
     FIXED_AGENT_OPTIONS.map((agent) => ({ ...agent, detected: false })),
   );
@@ -116,6 +119,27 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
           const id = resolveOnlineBoardDeviceId(devices, binding);
           setWifiOnline(Boolean(id));
           setWifiBoardDeviceId(id);
+          const entry = id ? devices?.[id] : null;
+          const targetSource = entry?.targetSource || "";
+          const targetDeviceId = entry?.targetDeviceId || entry?.desktopDeviceId || binding?.desktopDeviceId || "";
+          const mqttNamespace = entry?.mqttNamespace || binding?.mqttNamespace || "desk";
+          if (id && targetDeviceId && bridgeSelectedAgentId && targetSource !== bridgeSelectedAgentId) {
+            const reconcileKey = `${id}:${targetDeviceId}:${targetSource}->${bridgeSelectedAgentId}`;
+            if (bindingReconcileRef.current !== reconcileKey) {
+              bindingReconcileRef.current = reconcileKey;
+              invoke("dispatch_remote_cli_binding", {
+                input: {
+                  boardDeviceId: id,
+                  targetDeviceId,
+                  targetSource: bridgeSelectedAgentId,
+                  previousSource: targetSource,
+                  mqttNamespace,
+                },
+              }).catch((err) => {
+                console.warn("[DeviceContext] dispatch_remote_cli_binding reconcile failed", err);
+              });
+            }
+          }
         })
         .catch(() => {
           if (!cancelled) {
@@ -130,7 +154,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       cancelled = true;
       clearInterval(id);
     };
-  }, [binding]);
+  }, [binding, bridgeSelectedAgentId]);
 
   // --- Initial: load bridge profile, detect agents, list appearances ---
   const loadAppearancesData = useCallback(async () => {
@@ -151,6 +175,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   const loadBridgeSelection = useCallback(async () => {
     try {
       const profile = await invoke("load_bridge_profile");
+      setBridgeSelectedAgentId(profile?.selectedAgentId || profile?.enabledAgents?.[0] || "");
       const bridgeEnabled = bridgeEnabledAgents(profile);
       if (bridgeEnabled) {
         setEnabledAgents(bridgeEnabled);
@@ -245,6 +270,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       setAgentAppearanceMap(nextMap);
       const enabled = new Set(assignedAgentIds(nextMap, agentId));
       setEnabledAgents(enabled);
+      setBridgeSelectedAgentId(agentId);
+      bindingReconcileRef.current = "";
       saveAgentAppearanceMap(nextMap);
       saveEnabledAgents(enabled);
       return { nextMap, notice };

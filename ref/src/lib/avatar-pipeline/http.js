@@ -42,7 +42,7 @@ function buildTransportError(err, { url, method, label }) {
   const raw = err?.message || String(err);
   if (/Failed to fetch|NetworkError|TypeError/i.test(raw)) {
     return new Error(
-      `无法连接到 ${url}（${method} via ${label}）。请检查 Base URL、网络、证书，或确认当前运行的是桌面版 HachimoDock。原始错误: ${raw}`,
+      `无法连接到 ${url}（${method} via ${label}）。请检查 Base URL、网络、证书，或确认当前运行的是桌面版 Pet Manager。原始错误: ${raw}`,
     );
   }
   return new Error(`${method} ${url} via ${label} failed: ${raw}`);

@@ -1,6 +1,6 @@
 /**
  * [Input] Current desktop-pet channel map, active appearance, selected appearance, Tauri invoke/listen adapters, device reachability, and agent labels.
- * [Output] Shared "set as desktop pet" workflow that keeps USB-connected devices authoritative by re-syncing appearance assets before switching channels, clears the previous followed source, requires USB for appearance changes, updates device follow-source binding, and keeps one active channel.
+ * [Output] Shared "set as desktop pet" workflow that syncs appearance assets only when the selected appearance changes, explains USB sync failures before cancelling real appearance changes, skips asset re-pushes for pure follow-channel switches, clears the previous followed source, requires USB for appearance changes, updates device follow-source binding, and keeps one active channel.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md` and UI callers that set desktop pets.
  */
@@ -49,11 +49,9 @@ export async function applyDesktopPetAssignment({
   /* `appearanceChanged` 只反映**客户端本地缓存** vs 目标的差异。它不能保证
    * 设备端真的就是 activeAppearanceId——前一次切换可能 OTA 失败、设备被
    * 别的客户端动过、设备被重启过 (`.desktop-pet-current` 丢失)，都会让
-   * localStorage 和设备实际状态脱节。bug 历史：客户端 UI 显示「西高地」、
-   * localStorage 也是「西高地」，但设备实际是 RX-93，于是这里 `false` 跳过
-   * USB sync，永远修不回来。修复策略：USB 已连接时**总是**触发 sync，
-   * 缓存只用于 USB 离线时降级提示——成本一次素材推送 vs 数据正确性，
-   * 选数据正确性。 */
+   * localStorage 和设备实际状态脱节。真实换形象时必须 USB sync 成功后才
+   * 保存跟随渠道；纯跟随渠道切换且形象 ID 一致时不重推素材，避免把
+   * 跟随切换卡在不必要的 OTA ACK 上。 */
   const appearanceChanged = activeAppearanceId !== appearance.id;
 
   let usbStatus = null;
@@ -86,9 +84,8 @@ export async function applyDesktopPetAssignment({
   let notice = appearanceChanged
     ? `已将「${appearance.name}」设为 ${channelLabel} 渠道桌宠。`
     : `已切换设备跟随主体为 ${channelLabel}，沿用「${appearance.name}」，无需重新传输素材。`;
-  /* USB 在线就 sync——即使 localStorage 说没变（参见上面 appearanceChanged 注释）。
-   * MQTT 在线但 USB 不在线时仍按旧逻辑跳过推送（推不动）。 */
-  if (shouldSyncOverUsb) {
+  /* 只有真正换形象才下发素材；纯跟随渠道切换且形象一致时不重推动画。 */
+  if (appearanceChanged && shouldSyncOverUsb) {
     const unlisten = listen
       ? await listen("usb-sync-progress", (event) => {
         const progress = event.payload || {};
@@ -116,6 +113,9 @@ export async function applyDesktopPetAssignment({
         throw new Error(result?.error || "同步失败");
       }
       notice = `已将「${appearance.name}」设为 ${channelLabel} 渠道桌宠，并通过 USB 同步 ${result?.fileCount || 0} 个素材 (${formatBytes(result?.byteCount || 0)})`;
+    } catch (err) {
+      const detail = err?.message || String(err);
+      throw new Error(`形象素材下发失败，已取消切换跟随；设备仍保持原跟随主体。原始错误：${detail}`);
     } finally {
       unlisten();
     }

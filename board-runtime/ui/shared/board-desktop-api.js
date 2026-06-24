@@ -74,7 +74,7 @@
         },
         checks: [
           { ok: true, label: "设备待配网", detail: "已开启 AP 热点回退模式" },
-          { ok: false, label: "电脑端发现", detail: "请在 HachimoDock 中连接设备热点并下发配置" }
+          { ok: false, label: "电脑端发现", detail: "请在 Pet Manager 中连接设备热点并下发配置" }
         ],
         recommendedCommands: [`连接热点并访问 ${apIp}`]
       };
@@ -90,13 +90,13 @@
         state: pairingState || "waiting_config",
         stateLabel: "等待配对",
         boardLabel: boardDeviceId || "Board Runtime",
-        detail: hint || "请在电脑端打开 HachimoDock 扫描设备。"
+        detail: hint || "请在电脑端打开 Pet Manager 扫描设备。"
       },
       checks: [
         { ok: true, label: "设备待配网", detail: "设备已进入局域网发现阶段" },
-        { ok: false, label: "发现状态", detail: "等待 HachimoDock 扫描并配置" }
+        { ok: false, label: "发现状态", detail: "等待 Pet Manager 扫描并配置" }
       ],
-      recommendedCommands: ["打开 HachimoDock 并开始设备发现"]
+      recommendedCommands: ["打开 Pet Manager 并开始设备发现"]
     };
   }
 
@@ -140,14 +140,14 @@
         const title = pairingMode === "ap" ? "设备已进入热点模式" : "正在等待配对中";
         const description = pairingMode === "ap"
           ? `请连接设备热点并访问 ${String(config?.apIp || "192.168.44.1")}`
-          : "桌宠当前还没有完成首次配对，请启动 HachimoDock 继续配置。";
+          : "桌宠当前还没有完成首次配对，请启动 Pet Manager 继续配置。";
         return {
           runtimeReady: true,
           mqttReady: pairingMode === "sta",
           title: 'Board runtime',
-          recommendedCommand: "打开 HachimoDock 并完成设备发现",
+          recommendedCommand: "打开 Pet Manager 并完成设备发现",
           productName: "Board Runtime",
-          petManagerName: "HachimoDock",
+          petManagerName: "Pet Manager",
           readyMessage: title,
           description
         };
@@ -157,7 +157,7 @@
         return buildOnboardingState(config);
       }
       if (channel === 'run-onboarding-action') {
-        return { ok: false, message: 'Board runtime does not launch HachimoDock.' };
+        return { ok: false, message: 'Board runtime does not launch Pet Manager.' };
       }
       if (channel === 'pet-screen-input-action') {
         return postInputAction(args[0] || {});

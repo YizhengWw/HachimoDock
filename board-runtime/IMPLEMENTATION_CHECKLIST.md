@@ -12,7 +12,7 @@
 ### 1. 状态机管理与 UI 提示
 - [x] D1.1 开机硬件自检流程（关键服务、屏幕、网络基础检查）
 - [x] D1.2 无有效网络配置时进入“待连接状态（待配网）”
-- [x] D1.3 待连接引导 UI 渲染（提示“请在电脑端打开 HachimoDock（哈基米机）”）
+- [x] D1.3 待连接引导 UI 渲染（提示“请在电脑端打开 Pet Manager”）
 - [x] D1.4 状态机事件定义与状态切换日志（便于排障）
 
 ### 2. 局域网发现与 AP 热点双轨支持
@@ -57,7 +57,7 @@
 - [ ] D6.7 语音交互文字回传（转写/回复文本）
 - [ ] D6.8 语音功能分期规划（明确“第几期”上线范围）
 
-## 二、电脑端（HachimoDock（哈基米机））功能清单
+## 二、电脑端（Pet Manager）功能清单
 
 ### 1. 基础信息采集
 - [ ] C1.1 获取或生成本机唯一标识 `desktopDeviceId`
@@ -142,14 +142,14 @@
 ### 已知限制 / 下一步建议
 
 1. **D4.4 ~ D4.6（MQTT 端到端联动）未收口**：`runtime_mqtt.c` 代码早已存在，但：
-   - STA 连上后没有显式把 MQTT broker URL / `desktopDeviceId` / `namespace` 传递到 `last-attempt.json`，HachimoDock（哈基米机）目前要额外 poll。
+   - STA 连上后没有显式把 MQTT broker URL / `desktopDeviceId` / `namespace` 传递到 `last-attempt.json`，Pet Manager 目前要额外 poll。
    - 未明确 LWT（遗嘱）topic 约定，也没在 pairing 回执里带 MQTT online/offline。
    - 建议后续在 `sta-apply` 成功后额外发一个 `/pairing/mqtt-ready` 事件，或者由 board-server 监听 `last-attempt.json` 变 ok 后主动重建 MQTT 连接并广播上线。
 2. **Wi-Fi 扫描只抓了 AP 切换前那一刻的快照**：XR829 芯片在设备端扫描灵敏度比 Mac 弱，用户反馈"明明能看到十几个，板子只看到 1 个"。暂时用户可以「手动输入」绕过。若要做得更好：改成 AP 下也可以周期性降级扫描（把 wlan0 短暂切回 managed 扫描 2-3s 再切回 AP），或者直接在 portal 一律允许手动输入。
 3. **BusyBox 差异**：这个设备镜像**缺 `head` / `tail` / `pgrep` / `logread` / `wpa_passphrase` / `setsid`**，后续写脚本要规避；`date` 不支持 `%N`，所以 `last-attempt.json` 的 `atMs` 精度只到秒（但 portal 只按 ssid + ok/error 判定，不依赖具体毫秒）。
 4. **Portal reload 策略**：失败回 AP 后 Mac 偶尔需要手动断开再重连 `claw-pet` 才能刷出 portal；可以考虑在设备端 AP 重启前先多等 1~2 秒 + 提醒 DHCP 重发。
 5. **自动化 E2E**：目前靠 `/tmp/simulate_pet_manager.py` 做"电脑端"一侧，后续可以把 `/pairing/state.lastAttempt` 轮询和失败分支都写入该脚本作为回归。
-6. **配置版本号**：`network-config.json` 还没有 schema version（D3.4 里提到"防止脏配置"）。建议下一轮加 `configVersion` 字段，HachimoDock（哈基米机）和设备端同时校验。
+6. **配置版本号**：`network-config.json` 还没有 schema version（D3.4 里提到"防止脏配置"）。建议下一轮加 `configVersion` 字段，Pet Manager 和设备端同时校验。
 
 ### 本轮闭环的测试路径（供回归参考）
 

@@ -1,3 +1,8 @@
+/*
+ * [Input] Board runtime root, MQTT/USB transport env, pairing/network config, and local device input/control events.
+ * [Output] HTTP/WebSocket/MQTT/USB board service that updates session state files, publishes availability, and binds to the selected desktop agent source.
+ */
+
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
@@ -1210,7 +1215,7 @@ static void br_server_build_pairing_hint(br_server_state *server, br_pairing_sta
   output[0] = '\0';
   if (state == BR_PAIRING_WAITING_CONFIG || state == BR_PAIRING_LAN_DISCOVERY ||
       state == BR_PAIRING_AP_FALLBACK) {
-    br_normalize_text("请打开电脑端 HachimoDock 进行配网。", "", output, output_size);
+    br_normalize_text("请打开电脑端 Pet Manager 进行配网。", "", output, output_size);
     return;
   }
   br_normalize_text("", "", output, output_size);
@@ -1672,6 +1677,7 @@ static void br_server_rebind(br_server_state *server, const br_remote_binding *b
     if (old_wildcard[0]) br_mqtt_client_unsubscribe(&server->mqtt, old_wildcard);
     if (old_speech[0]) br_mqtt_client_unsubscribe(&server->mqtt, old_speech);
     br_server_subscribe_topics(server);
+    br_server_publish_presence(server, true);
   }
 }
 
@@ -4026,7 +4032,7 @@ static bool br_handle_http_connection(br_server_state *server, int fd) {
     br_snprintf_append(json, sizeof(json), &used, ",\"hint\":\"");
     br_json_escape_append(json, sizeof(json), &used, server->pairing_message);
     // Echo the currently-bound desktop identity + MQTT namespace so the
-    // portal (and the eventual HachimoDock) can tell at a glance who this
+    // portal (and the eventual Pet Manager) can tell at a glance who this
     // board is paired with without waiting for the next MQTT handshake.
     br_snprintf_append(json, sizeof(json), &used, "\",\"desktopDeviceId\":\"");
     br_json_escape_append(json, sizeof(json), &used, server->config.target_device_id);
@@ -4325,7 +4331,7 @@ static void br_server_load_config(br_server_state *server, const char *root_dir)
     }
   }
   br_normalize_text(server->config.local_device_id, "linux-pet-01", server->config.board_device_id, sizeof(server->config.board_device_id));
-  br_normalize_text(getenv("PET_SCREEN_NAME"), "HachimoDock Board Runtime", server->config.screen_name, sizeof(server->config.screen_name));
+  br_normalize_text(getenv("PET_SCREEN_NAME"), "OpenClaw Board Runtime", server->config.screen_name, sizeof(server->config.screen_name));
   br_normalize_text(getenv("PET_SCREEN_MODEL"), "zqboard-t113-board-runtime", server->config.screen_model, sizeof(server->config.screen_model));
   br_normalize_text(getenv("PET_SCREEN_FW"), "0.1.0", server->config.screen_fw, sizeof(server->config.screen_fw));
   br_normalize_topic_part(getenv("PET_CLAW_TARGET_DEVICE_ID"), server->config.local_device_id, server->config.target_device_id, sizeof(server->config.target_device_id));

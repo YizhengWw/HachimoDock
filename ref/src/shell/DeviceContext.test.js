@@ -102,6 +102,17 @@ test("provider keeps WiFi availability separate while USB is connected", () => {
   assert.match(source, /const\s+deviceOnline\s*=\s*Boolean\(usb\.connected\s*\|\|\s*wifiOnline\)/);
 });
 
+test("provider reconciles online board targetSource with the selected client channel", () => {
+  const availabilityEffect = source.match(/\/\/ --- WiFi availability poll[\s\S]*?\n  \}, \[[^\]]*\]\);/);
+  assert.ok(availabilityEffect, "expected WiFi availability poll effect");
+  assert.match(source, /const\s+\[bridgeSelectedAgentId,\s*setBridgeSelectedAgentId\]/);
+  assert.match(source, /setBridgeSelectedAgentId\(profile\?\.selectedAgentId/);
+  assert.match(availabilityEffect[0], /const\s+entry\s*=\s*id\s*\?\s*devices\?\.\[id\]/);
+  assert.match(availabilityEffect[0], /entry\?\.targetSource/);
+  assert.match(availabilityEffect[0], /invoke\(["']dispatch_remote_cli_binding["']/);
+  assert.match(availabilityEffect[0], /targetSource:\s*bridgeSelectedAgentId/);
+});
+
 test("provider exposes manual USB serial rescan and connect action", () => {
   assert.match(source, /const\s+rescanUsbDevices\s*=\s*useCallback\(\s*async\s*\(\)\s*=>/);
   assert.match(source, /invoke\(["']usb_scan_devices["']\)/);

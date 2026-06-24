@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide a Linear-inspired clean visual language for the HachimoDock desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
+ * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment with inline non-blocking USB sync progress, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -447,10 +447,6 @@ input:focus-visible {
   color: var(--text-on-accent);
   flex-shrink: 0;
   overflow: hidden;
-}
-
-.sidebar-brand__mark {
-  background: transparent;
 }
 
 .sidebar-brand-mark img,
@@ -9284,6 +9280,86 @@ input:focus-visible {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.channel-matrix-sync {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-ring);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface));
+}
+
+.channel-matrix-sync__copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--accent-strong);
+}
+
+.channel-matrix-sync__copy > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.channel-matrix-sync__copy strong {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.channel-matrix-sync__copy span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-matrix-sync__meter {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.channel-matrix-sync__meter > span {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  text-align: right;
+}
+
+.channel-matrix-sync__bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--accent-ring) 36%, var(--surface));
+}
+
+.channel-matrix-sync__bar > span {
+  display: block;
+  width: var(--sync-progress);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+@media (max-width: 760px) {
+  .channel-matrix-sync {
+    grid-template-columns: 1fr;
+  }
+
+  .channel-matrix-sync__meter {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
 }
 
 .channel-matrix__rows {

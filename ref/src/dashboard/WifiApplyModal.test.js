@@ -3,8 +3,9 @@
  * [Output] Static Node coverage that the modal uses shared modal-card chrome
  *          and form controls, renders SSID/PSK inputs, invokes usb_apply_wifi
  *          with {ssid, psk} on submit, listens to the "usb-message" event
- *          filtered by topic === "apply-wifi-ack", and renders the three stages
- *          (applying / connected / failed).
+ *          filtered by topic === "apply-wifi-ack", renders the three stages
+ *          (applying / connected / failed), and has a client-side timeout for
+ *          missing terminal ACKs.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -58,6 +59,13 @@ test("Renders three stages: applying, connected, failed", () => {
   assert.match(source, /applying/);
   assert.match(source, /connected/);
   assert.match(source, /failed/);
+});
+
+test("Times out locally when the board never returns a terminal ACK", () => {
+  assert.match(source, /const\s+APPLY_TIMEOUT_MS\s*=\s*30_000/);
+  assert.match(source, /window\.setTimeout/);
+  assert.match(source, /window\.clearTimeout/);
+  assert.match(source, /setError[\s\S]{0,120}["']timeout["']/);
 });
 
 test("Does not persist credentials outside component state", () => {

@@ -3,8 +3,8 @@
   "version": "0.5.9",
   "private": true,
   "description": "Headless bridge service for Clawd on Desk.",
-  "author": "Yizheng Wang <skyler.wang98@gmail.com>",
-  "license": "AGPL-3.0-only",
+  "author": "wangwu50",
+  "license": "GPL-3.0-only",
   "type": "commonjs",
   "scripts": {
     "bridge:mqtt": "node src/headless-mqtt.js",

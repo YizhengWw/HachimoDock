@@ -1,8 +1,9 @@
 #!/bin/sh
 # Start board-runtime on Raspberry Pi.
-# Manages all processes: board-server, board-serial-bridge (USB mode),
-# fb-speech-overlay, fb-display, board-touch-input, network-watchdog.
-# Transport auto-detection waits for late USB gadget enumeration before WiFi/MQTT fallback.
+# [Input] Runtime env, USB gadget state, WiFi/MQTT config, and board process binaries.
+# [Output] Starts board-server/display/input workers with a verified USB or MQTT transport.
+# Transport auto-detection waits for late USB gadget enumeration, but only treats
+# USB as usable after the UDC reaches configured; stale ttyGS0 nodes fall back to MQTT.
 set -u
 
 BOARD_DIR="${BOARD_DIR:-/opt/board-runtime}"
@@ -42,8 +43,8 @@ if [ -z "${BOARD_TRANSPORT_FORCE:-}" ]; then
         ''|*[!0-9]*) BOARD_USB_ENUM_WAIT_SECONDS=30 ;;
     esac
     # USB enumeration can lag well behind gadget setup on Pi Zero after a
-    # reboot. Wait long enough that board-server does not race ahead in MQTT
-    # mode while the Mac is still creating /dev/cu.usbmodem*.
+    # reboot. Wait long enough for the UDC to become configured, but do not
+    # treat a stale /dev/ttyGS0 character device as a working data path.
     USB_WAIT_REMAINING="$BOARD_USB_ENUM_WAIT_SECONDS"
     while [ "$USB_WAIT_REMAINING" -gt 0 ]; do
         for udc_dir in /sys/class/udc/*; do
@@ -53,13 +54,14 @@ if [ -z "${BOARD_TRANSPORT_FORCE:-}" ]; then
         sleep 1
         USB_WAIT_REMAINING=$((USB_WAIT_REMAINING - 1))
     done
-    if [ -c /dev/ttyGS0 ]; then
+    if [ "$UDC_STATE" = "configured" ] && [ -c /dev/ttyGS0 ]; then
         BOARD_TRANSPORT="usb"
-        if [ "$UDC_STATE" != "configured" ]; then
-            log "USB serial device exists but host is not configured yet (state=${UDC_STATE:-unknown}); starting USB transport and waiting for host"
-        fi
     else
-        log "USB gadget not configured after ${BOARD_USB_ENUM_WAIT_SECONDS}s (state=${UDC_STATE:-unknown}); using MQTT"
+        if [ -c /dev/ttyGS0 ]; then
+            log "USB serial device exists but host is not configured after ${BOARD_USB_ENUM_WAIT_SECONDS}s (state=${UDC_STATE:-unknown}); using MQTT"
+        else
+            log "USB gadget not configured after ${BOARD_USB_ENUM_WAIT_SECONDS}s (state=${UDC_STATE:-unknown}); using MQTT"
+        fi
     fi
 else
     BOARD_TRANSPORT="$BOARD_TRANSPORT_FORCE"
@@ -139,7 +141,7 @@ fi
 # Common env vars for board-server
 export MQTT_URL="$MQTT_BROKER_URL"
 export PET_CLAW_MQTT_URL="$MQTT_BROKER_URL"
-export PET_SCREEN_NAME="HachimoDock Board Runtime"
+export PET_SCREEN_NAME="OpenClaw Board Runtime"
 export PET_CLAW_DEVICE_ID="$PET_DEVICE_ID"
 export PET_CLAW_MQTT_NAMESPACE=desk
 export BOARD_RUNTIME_HOST=0.0.0.0

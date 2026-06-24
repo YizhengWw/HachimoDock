@@ -251,7 +251,7 @@ ${description.trim()}
 - 请把按钮功能写进 buttons.json,并让 action 与 runtime/widget.json transitions 对齐。
 - 如果按钮配置不清楚,例如只说"加个按钮"或"支持点击"但没说点击 / 长按分别触发什么,请先追问,不要直接猜。
 
-要求把组件目录生成在当前工作目录下,目录名用 kebab-case id。生成后告诉我目录路径,我会拖回到 HachimoDock 的组件中心安装到设备。`;
+要求把组件目录生成在当前工作目录下,目录名用 kebab-case id。生成后告诉我目录路径,我会拖回到 Pet Manager 的组件中心安装到设备。`;
 }
 
 /**

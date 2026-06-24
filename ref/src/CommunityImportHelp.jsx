@@ -40,7 +40,7 @@ export default function CommunityImportHelp({ onBack }) {
         <span className="help-eyebrow">说明</span>
         <h1 className="page-hero-title">petAgent 兼容 codex pet 说明</h1>
         <p className="page-hero-sub">
-          这份说明已经内置在 HachimoDock 里，用来帮助你理解社区形象、Codex 宠物资源和管理端导入流程之间的关系。
+          这份说明已经内置在 Pet Manager 里，用来帮助你理解社区形象、Codex 宠物资源和管理端导入流程之间的关系。
         </p>
         <a
           className="help-link"
@@ -57,7 +57,7 @@ export default function CommunityImportHelp({ onBack }) {
         <h2>1. 背景概览</h2>
         <p>
           Codex Pet 通常会把桌宠资源写入本机 <code>.codex/pets</code> 目录。petAgent 和 Codex
-          不是同一个产品，但在授权访问本地目录后，HachimoDock 可以扫描这些已有资源，并生成管理端里的形象卡片。
+          不是同一个产品，但在授权访问本地目录后，Pet Manager 可以扫描这些已有资源，并生成管理端里的形象卡片。
         </p>
         <div className="help-note">
           petAgent 只负责读取和展示你本机已经存在的 codex pet 资源，不负责替第三方社区生成、维护或打包完整形象。
@@ -79,7 +79,7 @@ export default function CommunityImportHelp({ onBack }) {
       <section className="help-section">
         <h2>3. 如何获取更多形象</h2>
         <p>
-          你可以从社区安装，也可以在支持 hatch-pet 的环境中生成自己的宠物，再让 HachimoDock 去识别和导入。
+          你可以从社区安装，也可以在支持 hatch-pet 的环境中生成自己的宠物，再让 Pet Manager 去识别和导入。
         </p>
         <Figure
           src={HELP_IMAGES.codexPlay02}
@@ -99,7 +99,7 @@ export default function CommunityImportHelp({ onBack }) {
       </section>
 
       <section className="help-section">
-        <h2>4. HachimoDock 里怎么导入</h2>
+        <h2>4. Pet Manager 里怎么导入</h2>
         <ol className="help-list">
           <li>点击“从社区导入”旁边的问号，先了解来源和目录规则。</li>
           <li>需要现成安装命令时，可把社区链接、curl 命令或 `npx codex-pets add ...` 粘贴进导入框。</li>
@@ -107,8 +107,8 @@ export default function CommunityImportHelp({ onBack }) {
         </ol>
         <Figure
           src={HELP_IMAGES.importEntry}
-          alt="HachimoDock 中的导入入口"
-          caption="HachimoDock 中的导入入口"
+          alt="Pet Manager 中的导入入口"
+          caption="Pet Manager 中的导入入口"
         />
       </section>
 
@@ -117,7 +117,7 @@ export default function CommunityImportHelp({ onBack }) {
         <p>Windows 上常见的默认目录是：</p>
         <div className="help-code">C:\Users\&lt;你的用户名&gt;\.codex\pets</div>
         <p>
-          如果导入不到，先确认宠物资源是否真的在这个目录下，再回到 HachimoDock 重新扫描。
+          如果导入不到，先确认宠物资源是否真的在这个目录下，再回到 Pet Manager 重新扫描。
         </p>
         <Figure
           src={HELP_IMAGES.petsFolder}

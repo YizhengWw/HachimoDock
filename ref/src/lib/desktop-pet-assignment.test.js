@@ -1,6 +1,6 @@
 /**
  * [Input] Shared desktop-pet assignment workflow with mocked Tauri commands and localStorage.
- * [Output] Node regression coverage that setting a desktop pet preserves per-channel shapes, re-syncs assets whenever USB is connected before switching channels, requires USB for appearance changes, dispatches device follow binding, and saves exactly one active channel.
+ * [Output] Node regression coverage that setting a desktop pet preserves per-channel shapes, syncs assets only for real appearance changes, skips unchanged-appearance follow-switch re-pushes, requires USB for real appearance changes, dispatches device follow binding, and saves exactly one active channel.
  * [Pos] test node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -129,7 +129,7 @@ test("applyDesktopPetAssignment skips USB asset sync only when active appearance
   assert.deepEqual(JSON.parse(storage.get(ENABLED_AGENTS_STORAGE_KEY)), ["claude-code"]);
 });
 
-test("applyDesktopPetAssignment re-syncs unchanged active appearance when USB is connected", async () => {
+test("applyDesktopPetAssignment does not re-sync unchanged active appearance when USB is connected", async () => {
   installStorage();
   const calls = [];
   const invoke = async (command, args) => {
@@ -150,7 +150,7 @@ test("applyDesktopPetAssignment re-syncs unchanged active appearance when USB is
     }
     if (command === "ensure_bridge_runtime") return { running: true };
     if (command === "usb_get_status") return { connected: true };
-    if (command === "usb_sync_appearance") return { ok: true, fileCount: 9, byteCount: 1954800 };
+    if (command === "usb_sync_appearance") throw new Error("unchanged appearance should not sync");
     if (command === "dispatch_remote_cli_binding") return { ok: true };
     return {};
   };
@@ -167,9 +167,56 @@ test("applyDesktopPetAssignment re-syncs unchanged active appearance when USB is
     deviceOnline: true,
   });
 
-  const syncCall = calls.find((call) => call.command === "usb_sync_appearance");
-  assert.deepEqual(syncCall?.args, { appearanceId: "same-avatar" });
-  assert.match(result.notice, /通过 USB 同步 9 个素材/);
+  assert.equal(calls.some((call) => call.command === "usb_sync_appearance"), false);
+  assert.match(result.notice, /无需重新传输素材/);
+});
+
+test("applyDesktopPetAssignment switches follow channel without syncing unchanged appearance", async () => {
+  const storage = installStorage();
+  const calls = [];
+  const invoke = async (command, args) => {
+    calls.push({ command, args });
+    if (command === "load_bridge_profile") {
+      return {
+        desktopDeviceId: "desk-1",
+        mqttUrl: "mqtt://example",
+        mqttNamespace: "pet",
+        mqttUsername: "u",
+        mqttPassword: "p",
+        transport: "mqtt",
+        serialPort: "",
+        serialBaud: 115200,
+        petChannelId: "pet",
+        enabledAgents: ["codex"],
+        selectedAgentId: "codex",
+      };
+    }
+    if (command === "ensure_bridge_runtime") return { running: true };
+    if (command === "usb_get_status") return { connected: true };
+    if (command === "usb_sync_appearance") throw new Error("unchanged appearance should not sync");
+    if (command === "dispatch_remote_cli_binding") return { ok: true };
+    return {};
+  };
+
+  const result = await applyDesktopPetAssignment({
+    invoke,
+    listen: null,
+    agentAppearanceMap: { codex: "same-avatar", "claude-code": "same-avatar" },
+    agentId: "claude-code",
+    appearance: { id: "same-avatar", name: "同一形象" },
+    agentOptions: [{ id: "claude-code", label: "Claude Code" }],
+    boardDeviceId: "board-1",
+    currentAppearanceId: "same-avatar",
+    deviceOnline: true,
+  });
+
+  assert.match(result.notice, /已切换设备跟随主体为 Claude Code/);
+  assert.doesNotMatch(result.notice, /形象素材重推未完成/);
+  assert.equal(calls.some((call) => call.command === "usb_sync_appearance"), false);
+  assert.ok(calls.some((call) => call.command === "save_bridge_profile"));
+  assert.ok(calls.some((call) => call.command === "dispatch_remote_cli_binding"));
+  assert.deepEqual(JSON.parse(storage.get(ENABLED_AGENTS_STORAGE_KEY)), ["claude-code"]);
+  assert.equal(storage.get(ACTIVE_APPEARANCE_KEY), "same-avatar");
 });
 
 test("applyDesktopPetAssignment forwards numeric USB sync progress", async () => {
@@ -212,12 +259,12 @@ test("applyDesktopPetAssignment forwards numeric USB sync progress", async () =>
   await applyDesktopPetAssignment({
     invoke,
     listen,
-    agentAppearanceMap: { codex: "same-avatar" },
+    agentAppearanceMap: { codex: "old-avatar" },
     agentId: "codex",
-    appearance: { id: "same-avatar", name: "同一形象" },
+    appearance: { id: "new-avatar", name: "新形象" },
     agentOptions: [{ id: "codex", label: "Codex" }],
     boardDeviceId: "board-1",
-    currentAppearanceId: "same-avatar",
+    currentAppearanceId: "old-avatar",
     deviceOnline: true,
     onProgress: (progress) => progressEvents.push(progress),
   });
@@ -269,7 +316,7 @@ test("applyDesktopPetAssignment does not switch followed channel when USB appear
       currentAppearanceId: "old-avatar",
       deviceOnline: true,
     }),
-    /Connection lost/,
+    /形象素材下发失败，已取消切换跟随[\s\S]*Connection lost/,
   );
 
   assert.equal(calls.some((call) => call.command === "save_bridge_profile"), false);

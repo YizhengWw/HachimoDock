@@ -4,7 +4,7 @@
 /*
  * [Input] Local agent state monitors, bridge profile env, MQTT broker events, device availability, and mock button inject requests.
  * [Output] Per-source retained MQTT status, USB-forwarder state files, remote board binding commands, and optional agent-session injection requests.
- * [Pos] Headless status bridge for the Tauri HachimoDock runtime.
+ * [Pos] Headless status bridge for the Tauri Pet Manager runtime.
  * [Sync] If state-file or follow-source semantics change, update `ref/.folder.md`.
  */
 
@@ -1478,7 +1478,7 @@ class HookHttpServer {
         }
         const namespace = payload.namespace || "desk";
         const deviceId = payload.deviceId || "";
-        const text = payload.text || "HachimoDock 配网测试 - 如果你看到这条消息，说明 MQTT 通信正常！";
+        const text = payload.text || "Pet Manager 配网测试 - 如果你看到这条消息，说明 MQTT 通信正常！";
         if (!deviceId) {
           this.sendJson(res, 400, { ok: false, error: "deviceId is required" });
           return;

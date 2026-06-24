@@ -1,5 +1,5 @@
 /*
- * [Input] Tauri commands invoked by the React HachimoDock client.
+ * [Input] Tauri commands invoked by the React Pet Manager client.
  * [Output] Desktop runtime services for device pairing, bridge management,
  *          local agent discovery, Codex pet import, external/community help links,
  *          controlled Codex Pets CLI installs, device follow-source binding,
@@ -512,11 +512,11 @@ const BRIDGE_LOG_FILE_NAME: &str = "status-bridge.log";
 const BRIDGE_PID_FILE_NAME: &str = "status-bridge.pid";
 const BRIDGE_LAUNCH_SCRIPT_FILE_NAME: &str = "run-status-bridge.sh";
 const BRIDGE_WINDOWS_LAUNCH_SCRIPT_FILE_NAME: &str = "run-status-bridge.ps1";
-const BRIDGE_LAUNCH_AGENT_LABEL: &str = "com.hachimodock.status-bridge";
-const BRIDGE_WINDOWS_STARTUP_SCRIPT_NAME: &str = "HachimoDock Status Bridge.cmd";
+const BRIDGE_LAUNCH_AGENT_LABEL: &str = "com.petmanager.status-bridge";
+const BRIDGE_WINDOWS_STARTUP_SCRIPT_NAME: &str = "Pet Manager Status Bridge.cmd";
 const USB_STATE_MAX_AGE_MS: u64 = 10 * 60 * 1000;
 const KNOWN_USB_STATE_SOURCES: [&str; 3] = ["claude-code", "codex", "openclaw"];
-const HACHIMODOCK_APP_BUNDLE_NAME: &str = "HachimoDock.app";
+const PET_MANAGER_APP_BUNDLE_NAME: &str = "Pet Manager.app";
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
@@ -2104,7 +2104,7 @@ fn ensure_bridge_runtime(
                 None,
                 false,
                 "inactive",
-                "填写 Desktop ID 并保存后，HachimoDock 会自动拉起本地 bridge。".to_string(),
+                "填写 Desktop ID 并保存后，Pet Manager 会自动拉起本地 bridge。".to_string(),
             ));
         }
     }
@@ -2227,7 +2227,7 @@ fn stop_bridge_runtime(
         if pid_before.is_none() {
             (
                 "ready",
-                "检测到 bridge 仍在运行，但当前没有 HachimoDock 的 pid 记录，无法直接断开。"
+                "检测到 bridge 仍在运行，但当前没有 Pet Manager 的 pid 记录，无法直接断开。"
                     .to_string(),
             )
         } else {
@@ -3412,7 +3412,7 @@ fn resolve_skill_source_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf
         let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         if let Some(dev_src) = manifest_dir
             .parent() // ref/
-            .and_then(|p| p.parent()) // HachimoDock/
+            .and_then(|p| p.parent()) // claw-pet-manager/
             .map(|p| p.join("skills").join(SKILL_NAME))
         {
             if dev_src.exists() {
@@ -3423,7 +3423,7 @@ fn resolve_skill_source_dir(app: &tauri::AppHandle) -> Result<std::path::PathBuf
     }
 
     Err(format!(
-        "skill 源目录不存在；尝试过:\n  {}\n(production: tauri.conf.json bundle.resources 必须包含 skills/petAgent-ui-generator; debug: 确认从 HachimoDock 根目录运行)",
+        "skill 源目录不存在；尝试过:\n  {}\n(production: tauri.conf.json bundle.resources 必须包含 skills/petAgent-ui-generator; debug: 确认从 claw-pet-manager 根目录运行)",
         tried.join("\n  ")
     ))
 }
@@ -4200,7 +4200,7 @@ fn canonicalize_component_draft_path(
             return Ok(target);
         }
     }
-    Err("只能删除 HachimoDock component-drafts 目录下的组件草稿。".to_string())
+    Err("只能删除 Pet Manager component-drafts 目录下的组件草稿。".to_string())
 }
 
 fn read_draft_entry(
@@ -5256,7 +5256,7 @@ pub fn run() {
             launch_agent_with_prompt
         ])
         .build(tauri::generate_context!())
-        .expect("error while building HachimoDock Tauri application");
+        .expect("error while building pet-manager tauri application");
 
     app.run(|_app_handle, event| {
         if let RunEvent::Exit | RunEvent::ExitRequested { .. } = event {
@@ -5586,7 +5586,7 @@ fn resolve_bridge_assets(app_handle: &tauri::AppHandle) -> Result<ResolvedBridge
         }
     }
 
-    Err("未找到 bridge 运行资源，HachimoDock 当前无法自动拉起本地 bridge。".to_string())
+    Err("未找到 bridge 运行资源，Pet Manager 当前无法自动拉起本地 bridge。".to_string())
 }
 
 fn resolve_voice_runtime_paths(config_path: &Path) -> Result<VoiceRuntimePaths, String> {
@@ -5633,7 +5633,7 @@ fn resolve_voice_service_assets(
         }
     }
 
-    Err("未找到 voice-service-node 运行资源，HachimoDock 当前无法自动拉起语音服务。".to_string())
+    Err("未找到 voice-service-node 运行资源，Pet Manager 当前无法自动拉起语音服务。".to_string())
 }
 
 fn resolve_node_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -6569,7 +6569,7 @@ fn build_bridge_root_candidates(current_root: &Path) -> Vec<PathBuf> {
                 &mut candidates,
                 home_dir
                     .join("Applications")
-                    .join(HACHIMODOCK_APP_BUNDLE_NAME)
+                    .join(PET_MANAGER_APP_BUNDLE_NAME)
                     .join("Contents")
                     .join("Resources")
                     .join(BRIDGE_RESOURCE_ROOT),
@@ -6579,7 +6579,7 @@ fn build_bridge_root_candidates(current_root: &Path) -> Vec<PathBuf> {
         push_unique_path(
             &mut candidates,
             PathBuf::from("/Applications")
-                .join(HACHIMODOCK_APP_BUNDLE_NAME)
+                .join(PET_MANAGER_APP_BUNDLE_NAME)
                 .join("Contents")
                 .join("Resources")
                 .join(BRIDGE_RESOURCE_ROOT),
@@ -6593,7 +6593,7 @@ fn build_bridge_root_candidates(current_root: &Path) -> Vec<PathBuf> {
             push_unique_path(
                 &mut candidates,
                 PathBuf::from(&local_app_data)
-                    .join("HachimoDock")
+                    .join("Pet Manager")
                     .join(BRIDGE_RESOURCE_ROOT),
             );
         }
@@ -6601,7 +6601,7 @@ fn build_bridge_root_candidates(current_root: &Path) -> Vec<PathBuf> {
             push_unique_path(
                 &mut candidates,
                 PathBuf::from(&program_files)
-                    .join("HachimoDock")
+                    .join("Pet Manager")
                     .join(BRIDGE_RESOURCE_ROOT),
             );
         }
@@ -7164,24 +7164,24 @@ mod tests {
             ..BridgeProfileFile::default()
         };
         let bridge_assets = ResolvedBridgeAssets {
-            resource_root: PathBuf::from(r"\\?\C:\Users\TestUser\AppData\Local\HachimoDock\bridge"),
+            resource_root: PathBuf::from(r"\\?\C:\Users\TestUser\AppData\Local\Pet Manager\bridge"),
             workspace_root: PathBuf::from(
-                r"\\?\C:\Users\TestUser\AppData\Local\HachimoDock\bridge\packages\clawd-backend-service",
+                r"\\?\C:\Users\TestUser\AppData\Local\Pet Manager\bridge\packages\clawd-backend-service",
             ),
             entry_path: PathBuf::from(
-                r"\\?\C:\Users\TestUser\AppData\Local\HachimoDock\bridge\packages\clawd-backend-service\src\headless-mqtt.js",
+                r"\\?\C:\Users\TestUser\AppData\Local\Pet Manager\bridge\packages\clawd-backend-service\src\headless-mqtt.js",
             ),
         };
         let script = build_windows_bridge_launcher_script(
             &runtime_paths,
             &profile,
             &bridge_assets,
-            Path::new(r"\\?\C:\Users\TestUser\AppData\Local\HachimoDock\bridge\runtime\node.exe"),
+            Path::new(r"\\?\C:\Users\TestUser\AppData\Local\Pet Manager\bridge\runtime\node.exe"),
         );
 
         assert!(script.contains(r#"$entryArg = '"' + $entryPath + '"'"#));
         assert!(script.contains("Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList $entryArg"));
-        assert!(script.contains(r"C:\Users\TestUser\AppData\Local\HachimoDock\bridge"));
+        assert!(script.contains(r"C:\Users\TestUser\AppData\Local\Pet Manager\bridge"));
         assert!(!script.contains(r"\\?\C:\Users"));
         assert!(!script.contains("CLAWD_CODEX_MODEL"));
         assert!(!script.contains("--model"));
@@ -7214,7 +7214,7 @@ mod tests {
         let err =
             canonicalize_component_draft_path(outside.to_str().unwrap(), &draft_roots).unwrap_err();
 
-        assert!(err.contains("只能删除 HachimoDock component-drafts"));
+        assert!(err.contains("只能删除 Pet Manager component-drafts"));
     }
 
     #[test]
@@ -7227,6 +7227,6 @@ mod tests {
         let err = canonicalize_component_draft_path(drafts_root.to_str().unwrap(), &draft_roots)
             .unwrap_err();
 
-        assert!(err.contains("只能删除 HachimoDock component-drafts"));
+        assert!(err.contains("只能删除 Pet Manager component-drafts"));
     }
 }

@@ -1,6 +1,6 @@
 /**
  * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/applyDesktopPet/saveAgentAppearance; useToast for notices.
- * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection and one currently followed Agent synced to the device.
+ * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -42,6 +42,25 @@ function appearanceKindLabel(appearance) {
   return "自定义";
 }
 
+function normalizeSyncProgress(progress = {}) {
+  const bytesSent = Number(progress.bytesSent || 0);
+  const bytesTotal = Number(progress.bytesTotal || 0);
+  const rawPercent = Number(progress.percent);
+  const percent = Number.isFinite(rawPercent)
+    ? rawPercent
+    : bytesTotal > 0
+      ? Math.round((bytesSent / bytesTotal) * 100)
+      : 0;
+  return {
+    text: progress.text || "正在通过 USB 下发形象素材...",
+    currentFile: Number(progress.currentFile || 0),
+    totalFiles: Number(progress.totalFiles || 0),
+    bytesSent,
+    bytesTotal,
+    percent: Math.max(0, Math.min(100, Math.round(percent))),
+  };
+}
+
 export default function ChannelMatrixCard() {
   const {
     appearances,
@@ -57,6 +76,7 @@ export default function ChannelMatrixCard() {
   const [pickerState, setPickerState] = useState(null); // { agentId }
   const [pendingFollow, setPendingFollow] = useState(null); // { agentId, appearance }
   const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState(null);
 
   const installedAgents = useMemo(
     () => agentOptions.filter((agent) => agent.detected),
@@ -89,9 +109,13 @@ export default function ChannelMatrixCard() {
     }
 
     setSyncing(true);
+    setSyncProgress(normalizeSyncProgress({
+      text: `准备下发「${appearance.name}」到设备端...`,
+      percent: 0,
+    }));
     try {
       const { notice } = await applyDesktopPet(agentId, appearance, {
-        onProgress: (p) => push({ tone: "info", title: p.text || "同步中...", ttl: 2000 }),
+        onProgress: (p) => setSyncProgress(normalizeSyncProgress(p)),
       });
       push({ tone: "success", title: notice || `已同步「${appearance.name}」到设备端` });
     } catch (err) {
@@ -100,6 +124,7 @@ export default function ChannelMatrixCard() {
       push({ tone, title: "更换形象失败", message: msg });
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
     }
   }, [activeAgentId, agentOptions, applyDesktopPet, closePicker, push, saveAgentAppearance]);
 
@@ -114,9 +139,13 @@ export default function ChannelMatrixCard() {
     const { agentId, appearance } = pendingFollow;
     setPendingFollow(null);
     setSyncing(true);
+    setSyncProgress(normalizeSyncProgress({
+      text: `准备下发「${appearance.name}」并切换跟随...`,
+      percent: 0,
+    }));
     try {
       const { notice } = await applyDesktopPet(agentId, appearance, {
-        onProgress: (p) => push({ tone: "info", title: p.text || "同步中...", ttl: 2000 }),
+        onProgress: (p) => setSyncProgress(normalizeSyncProgress(p)),
       });
       push({ tone: "success", title: notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}` });
     } catch (err) {
@@ -129,6 +158,7 @@ export default function ChannelMatrixCard() {
       push({ tone, title: "切换跟随失败", message: msg });
     } finally {
       setSyncing(false);
+      setSyncProgress(null);
     }
   }, [agentOptions, applyDesktopPet, pendingFollow, push]);
 
@@ -137,6 +167,31 @@ export default function ChannelMatrixCard() {
       <p className="channel-matrix__intro">
         选择设备端需要展示实时状态的Agent，每个Agent可分别设置自己的形象；
       </p>
+
+      {syncProgress && (
+        <div className="channel-matrix-sync" aria-live="polite">
+          <div className="channel-matrix-sync__copy">
+            <UploadCloud size={15} />
+            <div>
+              <strong>形象素材下发中</strong>
+              <span>{syncProgress.text}</span>
+            </div>
+          </div>
+          <div className="channel-matrix-sync__meter">
+            <span>{syncProgress.percent}%</span>
+            <div
+              className="channel-matrix-sync__bar"
+              role="progressbar"
+              aria-label="形象素材下发进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={syncProgress.percent}
+            >
+              <span style={{ "--sync-progress": `${syncProgress.percent}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {installedAgents.length === 0 ? (
         <div className="channel-matrix__empty">未扫描到本机已安装的 Agent。</div>

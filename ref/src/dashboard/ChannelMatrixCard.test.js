@@ -1,6 +1,6 @@
 /**
  * [Input] Read ChannelMatrixCard.jsx source.
- * [Output] Static Node coverage: default export, detected-agent filtering, useDeviceContext field destructuring, followed row state, per-agent appearance saving, followed-agent device sync, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
+ * [Output] Static Node coverage: default export, detected-agent filtering, useDeviceContext field destructuring, followed row state, per-agent appearance saving, followed-agent device sync, inline USB sync progress, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -69,6 +69,21 @@ test("Follow confirmation syncs the selected agent appearance to the device", ()
   assert.match(source, /function FollowAgentConfirmModal\s*\(/);
   assert.match(source, /确认跟随/);
   assert.match(source, /同步「\{appearanceName\}」到设备端展示/);
+});
+
+test("USB appearance sync progress stays inline instead of spawning repeated toasts", () => {
+  assert.match(source, /const \[syncProgress,\s*setSyncProgress\]\s*=\s*useState\(null\)/);
+  assert.match(source, /setSyncProgress\(normalizeSyncProgress\(p\)\)/);
+  assert.doesNotMatch(source, /onProgress:\s*\(p\)\s*=>\s*push\(\{\s*tone:\s*"info"/);
+  assert.match(source, /className="channel-matrix-sync"/);
+  assert.match(source, /role="progressbar"/);
+  assert.match(source, /aria-valuenow=\{syncProgress\.percent\}/);
+
+  const stripRule = extractCssRule(styles, ".channel-matrix-sync");
+  const barRule = extractCssRule(styles, ".channel-matrix-sync__bar > span");
+  assert.match(stripRule, /display:\s*grid/);
+  assert.doesNotMatch(stripRule, /position:\s*(fixed|absolute)/);
+  assert.match(barRule, /width:\s*var\(--sync-progress\)/);
 });
 
 test("AgentAppearancePickerModal subcomponent is declared in the same file", () => {

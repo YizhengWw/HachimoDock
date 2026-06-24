@@ -1,5 +1,5 @@
 /**
- * [Input] Product experience bug report and core HachimoDock source files.
+ * [Input] Product experience bug report and core Pet Manager source files.
  * [Output] Static Node regression coverage for top-level shell routing, Tauri-first setup routing, component center routing, flattened
  *          desktop HTTP bridge calls, fixed-height desktop sidebar, unified pet album naming, modal-based single desktop-pet assignment,
  *          dashboard guide entry, faster previews, wizard help affordances, and packaged Tauri runtime resources.
@@ -144,6 +144,7 @@ test("app shell routes device, pet album, component center, detail, wizard, and 
   assert.match(app, /const handleOpenDetail = useCallback/);
   assert.match(app, /const handleDetailBack = useCallback/);
   assert.match(app, /subscribeGenerationTask/);
+  assert.match(app, /s\.status === "completed"[\s\S]*refresh\(\)\.catch/);
   assert.match(app, /acknowledgeGenerationTask/);
   assert.match(app, /<AppearanceGallery/);
   assert.match(app, /<CustomAvatarWizard/);

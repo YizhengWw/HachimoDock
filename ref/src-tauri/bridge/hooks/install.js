@@ -22,7 +22,9 @@ const CORE_HOOKS = [
   "Notification",
   // PermissionRequest: handled by HTTP_HOOKS (blocking), not command hook
   "Elicitation",
-  "WorktreeCreate",
+  // WorktreeCreate is not an observer hook. Claude Code expects this hook to
+  // create a worktree and print its absolute path, so registering the Clawd
+  // status-notifier hook here makes native worktree creation fail with no output.
 ];
 
 // Assistant streaming hooks are not available on every Claude Code build.
