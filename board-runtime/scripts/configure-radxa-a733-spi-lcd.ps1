@@ -11,7 +11,7 @@ param(
     [ValidateSet(0, 1)]
     [int]$ChipSelect = 0,
     [int]$SpeedHz = 16000000,
-    [int]$Rotate = 90,
+    [int]$Rotate = 270,
     [switch]$ResetActiveLow,
     [switch]$ResetActiveHigh,
     [string]$SudoPassword = "",

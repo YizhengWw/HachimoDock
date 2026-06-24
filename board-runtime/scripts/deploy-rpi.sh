@@ -116,7 +116,7 @@ remote "sudo mkdir -p /etc/systemd/system.conf.d; printf '[Manager]\nRuntimeWatc
 # does not briefly launch in the wrong transport mode during first deployment.
 remote "sudo systemctl enable board-runtime board-widget-runtime.service >/dev/null"
 
-LCD_OVERLAY='dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=270,fps=60'
+LCD_OVERLAY='dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=90,fps=60'
 TOUCH_OVERLAY='dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1'
 
 # Configure USB gadget (dwc2 peripheral mode) if not already set
@@ -139,7 +139,7 @@ remote "printf '%s\n' 'pcm.!default {' '    type asym' '    playback.pcm \"pet_s
 # Configure ILI9341 SPI display + ADS7846/XPT2046 touch overlays.
 # Pin map (BCM): CLK=11 MOSI=10 MISO=9 RES=27 DC=22 BLK=12 LCD_CS=8 (CE0)
 #                T_CS=7 (CE1) PEN/IRQ=5
-# - fbtft 'rpi-display' preset drives ILI9341 320x240, rotate=270 → fb1
+# - fbtft 'rpi-display' preset drives ILI9341 320x240, rotate=90 -> fb1
 # - ads7846 separate overlay so PEN matches GPIO5 (mhs35's bundled ads7846
 #   hardcodes PEN=GPIO17 and breaks touch on this panel)
 BOOT_OVERLAY_CHANGED=$(remote "

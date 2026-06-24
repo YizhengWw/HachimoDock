@@ -11,7 +11,7 @@ param(
     [int]$LcdResetPin = 13,
     [int]$LcdBacklightPin = 0,
     [int]$LcdSpeedHz = 16000000,
-    [int]$LcdRotate = 90,
+    [int]$LcdRotate = 270,
     [switch]$LcdResetActiveHigh,
     [string]$SudoPassword = "",
     [switch]$SkipApt,

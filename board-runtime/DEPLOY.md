@@ -164,7 +164,7 @@ Radxa PowerShell 脚本：
 | `-LcdResetPin` | `13` | A7Z physical pin 13 / PL6 |
 | `-LcdBacklightPin` | `0` | `0` 表示 BLK 直连 3.3V，不由 GPIO 控制 |
 | `-LcdSpeedHz` | `16000000` | SPI LCD 频率 |
-| `-LcdRotate` | `90` | 屏幕旋转角度 |
+| `-LcdRotate` | `270` | 屏幕旋转角度 |
 
 Radxa shell 脚本：
 
@@ -180,7 +180,7 @@ Radxa shell 脚本：
 | `LCD_RESET_PIN` | `13` | A7Z physical pin 13 / PL6 |
 | `LCD_BACKLIGHT_PIN` | `0` | `0` 表示 BLK 直连 3.3V，不由 GPIO 控制 |
 | `LCD_SPEED_HZ` | `16000000` | SPI LCD 频率 |
-| `LCD_ROTATE` | `90` | 屏幕旋转角度 |
+| `LCD_ROTATE` | `270` | 屏幕旋转角度 |
 
 示例：
 
@@ -306,7 +306,7 @@ ssh "$BOARD_HOST" 'systemctl is-active board-widget-runtime.service'
 会自动写入 `/boot/firmware/config.txt`：
 
 ```text
-dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=270,fps=60
+dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=90,fps=60
 dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1
 dtoverlay=googlevoicehat-soundcard
 ```
@@ -367,7 +367,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\configure-radxa-a7
   -ResetPin 13 `
   -BacklightPin 0 `
   -SpeedHz 16000000 `
-  -Rotate 90 `
+  -Rotate 270 `
   -Reboot
 ```
 
@@ -384,13 +384,13 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/configure-radxa-a733-spi
   -ResetPin 13 \
   -BacklightPin 0 \
   -SpeedHz 16000000 \
-  -Rotate 90 \
+  -Rotate 270 \
   -Reboot
 ```
 
 `configure-radxa-a733-spi-lcd.ps1` defaults to the verified A7Z settings:
 ILI9341, SPI1 CS0, `RES=PL6` active-low, `DC=PL7`, no backlight GPIO,
-16 MHz, rotate 90. Use `-ResetActiveHigh` only for a different display
+16 MHz, rotate 270. Use `-ResetActiveHigh` only for a different display
 module that is known to need high-active reset.
 
 The Radxa deployment script can also configure this overlay in one run:

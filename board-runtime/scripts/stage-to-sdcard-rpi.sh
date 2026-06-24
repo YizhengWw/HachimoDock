@@ -249,7 +249,7 @@ grep -q '^dtoverlay=googlevoicehat-soundcard' /boot/firmware/config.txt || print
 # Keep all active board overlays under [all]; Raspberry Pi Imager often leaves
 # model-specific sections above it, and lines appended in the wrong section do
 # not apply on Pi Zero.
-LCD_OVERLAY='dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=270,fps=60'
+LCD_OVERLAY='dtoverlay=fbtft,spi0-0,rpi-display,reset_pin=27,dc_pin=22,led_pin=12,speed=32000000,rotate=90,fps=60'
 TOUCH_OVERLAY='dtoverlay=ads7846,cs=1,penirq=5,penirq_pull=2,speed=2000000,xohms=150,swapxy=1'
 sudo sed -i 's/^dtoverlay=mhs35/# legacy display disabled: dtoverlay=mhs35/' /boot/firmware/config.txt
 sudo sed -i '/^dtparam=spi=on$/d; /^dtoverlay=fbtft,/d; /^dtoverlay=ads7846,/d; /^dtparam=i2s=on$/d; /^dtoverlay=googlevoicehat-soundcard$/d' /boot/firmware/config.txt
