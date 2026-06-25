@@ -6,12 +6,12 @@
     把 Codex、Claude Code、OpenClaw 等 CLI Agent 的状态变成桌上小宠物的表情、动作、字幕和提醒。
   </p>
   <p>
-    <a href="#快速开始">快速开始</a>
-    · <a href="#硬件方案">硬件方案</a>
+    <a href="#硬件方案">硬件方案</a>
     · <a href="#硬件端资料">硬件端资料</a>
     · <a href="#图集">图集</a>
     · <a href="#软件架构">软件架构</a>
     · <a href="#复刻与部署">复刻与部署</a>
+    · <a href="#快速开始">快速开始</a>
     · <a href="#常见问题">常见问题</a>
   </p>
   <p>
@@ -121,20 +121,11 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件
 
 `ESP32` 不是当前 `board-runtime/` 已支持目标；如需使用，需要另起移植工程。
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/assets/readme/hardware-bom.webp" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
-      <br />
-      <sub>方案一 Radxa A7Z 的核心物料示意。</sub>
-    </td>
-    <td width="50%">
-      <img src="docs/assets/readme/usage-ui.webp" alt="HachimoDock（哈基米机）使用界面" />
-      <br />
-      <sub>桌面端负责绑定、跟随、形象、组件和诊断。</sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/assets/readme/hardware-bom.webp" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
+  <br />
+  <sub>方案一 Radxa A7Z 的核心物料示意。</sub>
+</p>
 
 ## 硬件端资料
 
@@ -164,43 +155,6 @@ flowchart LR
 ```
 
 桌面端读取 Agent session、归一化状态和字幕，再通过 USB serial 或 MQTT 下发到设备端。设备端 `board-server` 写入 `.current-state`、`.current-speech`、`.stats-display` 等本地状态文件，显示进程、输入进程和 widget runtime 通过这些文件协作。
-
-## 快速开始
-
-### 启动桌面端
-
-```sh
-git clone https://github.com/YizhengWw/HachimoDock.git
-cd HachimoDock/ref
-npm install
-npm run dev
-```
-
-只调试前端页面时：
-
-```sh
-cd ref
-npm run dev:web
-```
-
-构建桌面应用：
-
-```sh
-cd ref
-npm run build
-```
-
-更多说明见 [ref/README.md](ref/README.md)。
-
-### 编译设备端
-
-```sh
-cd board-runtime
-cmake -S . -B /tmp/board-runtime-build-check
-cmake --build /tmp/board-runtime-build-check --target board-server
-```
-
-更多说明见 [board-runtime/README.md](board-runtime/README.md)。
 
 ## 复刻与部署
 
@@ -244,6 +198,49 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 设备 IP、用户名、密码、board id 和 desktop id 不要写死在文档或业务代码里。调试具体板子时使用 `BOARD_HOST="<pi-user>@<pi-ip>"` 和 `BOARD_IP="<pi-ip>"`。
 
 部署细节见 [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md)，安全部署与鉴权见 [board-runtime/docs/security-hardening.md](board-runtime/docs/security-hardening.md)。
+
+## 快速开始
+
+<p align="center">
+  <img src="docs/assets/readme/usage-ui.webp" alt="HachimoDock（哈基米机）使用界面" />
+  <br />
+  <sub>桌面端负责绑定、跟随、形象、组件和诊断。</sub>
+</p>
+
+### 启动桌面端
+
+```sh
+git clone https://github.com/YizhengWw/HachimoDock.git
+cd HachimoDock/ref
+npm install
+npm run dev
+```
+
+只调试前端页面时：
+
+```sh
+cd ref
+npm run dev:web
+```
+
+构建桌面应用：
+
+```sh
+cd ref
+npm run build
+```
+
+更多说明见 [ref/README.md](ref/README.md)。
+
+### 编译设备端
+
+```sh
+cd board-runtime
+cmake -S . -B /tmp/board-runtime-build-check
+cmake --build /tmp/board-runtime-build-check --target board-server
+```
+
+更多说明见 [board-runtime/README.md](board-runtime/README.md)。
 
 ## 常见问题
 
