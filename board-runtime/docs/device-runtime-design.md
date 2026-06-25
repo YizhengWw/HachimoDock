@@ -74,6 +74,7 @@ flowchart LR
   Server -->|speech text / pairing hint| Overlay["fb-speech-overlay"]
   Display -->|state caption at clip entry| Overlay
   Server -->|.screen-interrupt| Display
+  Server -->|.welcome-trigger| Display
   Touch["board-touch-input"] -->|.touch-request| Display
   Touch -->|MQTT input/action| Upstream
   Display -->|.debug-screen-state.json<br/>.current-debug-speech| Overlay
@@ -97,6 +98,7 @@ flowchart LR
 | `.current-state` | `board-server` | `fb-display.sh` / `fb-speech-overlay` | 设备端 session 状态机解析出的 canonical state |
 | `.current-event` | `board-server` | `fb-speech-overlay` / debug | 当前 active record 的 event |
 | `.current-speech` | `fb-display.sh` / `board-server` | `fb-speech-overlay` | 普通字幕内容；状态字幕由 `fb-display.sh` 在 clip 入口写入，speech topic 会按 session 聚合最近 30 秒回复后由 `board-server` 写入，配网提示也由 `board-server` 写入 |
+| `.welcome-trigger` | `board-server`（USB serial asset commit） | `fb-display.sh` | 新形象资产激活后的一次性 `welcome` marker；显示层只消费新 marker 一次，然后回到当前 session 状态 |
 | `.screen-interrupt` | `board-server` | `fb-display.sh` | 屏幕硬打断 marker |
 | `.touch-request` | `board-touch-input` | `fb-display.sh` | 本地 touch 动画请求 |
 | `.debug-session-state.json` | `board-server` | HTTP debug / overlay | session 状态 debug 快照 |

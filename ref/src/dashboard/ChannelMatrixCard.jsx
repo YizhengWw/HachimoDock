@@ -1,6 +1,6 @@
 /**
- * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/applyDesktopPet/saveAgentAppearance; useToast for notices.
- * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress.
+ * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/appearanceSync/applyDesktopPet/saveAgentAppearance; useToast for notices.
+ * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress that survives dashboard tab unmounts.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -68,6 +68,7 @@ export default function ChannelMatrixCard() {
     agentOptions,
     currentDisplay,
     deviceConnected,
+    appearanceSync,
     applyDesktopPet,
     saveAgentAppearance,
   } = useDeviceContext();
@@ -75,8 +76,10 @@ export default function ChannelMatrixCard() {
 
   const [pickerState, setPickerState] = useState(null); // { agentId }
   const [pendingFollow, setPendingFollow] = useState(null); // { agentId, appearance }
-  const [syncing, setSyncing] = useState(false);
-  const [syncProgress, setSyncProgress] = useState(null);
+  const syncing = appearanceSync?.pending === true;
+  const syncProgress = appearanceSync?.progress
+    ? normalizeSyncProgress(appearanceSync.progress)
+    : null;
 
   const installedAgents = useMemo(
     () => agentOptions.filter((agent) => agent.detected),
@@ -108,23 +111,18 @@ export default function ChannelMatrixCard() {
       return;
     }
 
-    setSyncing(true);
-    setSyncProgress(normalizeSyncProgress({
-      text: `准备下发「${appearance.name}」到设备端...`,
-      percent: 0,
-    }));
     try {
       const { notice } = await applyDesktopPet(agentId, appearance, {
-        onProgress: (p) => setSyncProgress(normalizeSyncProgress(p)),
+        initialProgress: {
+          text: `准备下发「${appearance.name}」到设备端...`,
+          percent: 0,
+        },
       });
       push({ tone: "success", title: notice || `已同步「${appearance.name}」到设备端` });
     } catch (err) {
       const msg = err?.message || String(err);
       const tone = msg === APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE ? "warning" : "error";
       push({ tone, title: "更换形象失败", message: msg });
-    } finally {
-      setSyncing(false);
-      setSyncProgress(null);
     }
   }, [activeAgentId, agentOptions, applyDesktopPet, closePicker, push, saveAgentAppearance]);
 
@@ -138,14 +136,12 @@ export default function ChannelMatrixCard() {
     if (!pendingFollow) return;
     const { agentId, appearance } = pendingFollow;
     setPendingFollow(null);
-    setSyncing(true);
-    setSyncProgress(normalizeSyncProgress({
-      text: `准备下发「${appearance.name}」并切换跟随...`,
-      percent: 0,
-    }));
     try {
       const { notice } = await applyDesktopPet(agentId, appearance, {
-        onProgress: (p) => setSyncProgress(normalizeSyncProgress(p)),
+        initialProgress: {
+          text: `准备下发「${appearance.name}」并切换跟随...`,
+          percent: 0,
+        },
       });
       push({ tone: "success", title: notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}` });
     } catch (err) {
@@ -156,9 +152,6 @@ export default function ChannelMatrixCard() {
           ? "warning"
           : "error";
       push({ tone, title: "切换跟随失败", message: msg });
-    } finally {
-      setSyncing(false);
-      setSyncProgress(null);
     }
   }, [agentOptions, applyDesktopPet, pendingFollow, push]);
 

@@ -1,6 +1,6 @@
 /**
  * [Input] family definitions for the avatar generation pipeline.
- * [Output] FAMILIES array with distinct first/last-frame motion grammar, subject-adaptive action cues, and marker props consumed by the prompt builder.
+ * [Output] FAMILIES array for all known/imported states plus CUSTOM_GENERATION_FAMILIES for user-created avatar generation.
  * [Pos] lib node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
@@ -237,3 +237,9 @@ export const FAMILIES = [
     variation_hint: "Do not reuse right-facing frames; redraw mirrored.",
   },
 ];
+
+const CUSTOM_GENERATION_EXCLUDED_FAMILY_IDS = new Set(["touch.right", "touch.left"]);
+
+export const CUSTOM_GENERATION_FAMILIES = FAMILIES.filter(
+  (item) => !CUSTOM_GENERATION_EXCLUDED_FAMILY_IDS.has(item.family),
+);

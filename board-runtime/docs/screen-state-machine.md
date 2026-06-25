@@ -11,6 +11,7 @@
 - 接收 MQTT 状态消息。
 - 归一化业务状态，写入 `.current-state` 和 `.current-event`。
 - 在需要屏幕硬打断时写入 `.screen-interrupt`。
+- 在 USB serial 激活新形象资产时写入 `.welcome-trigger`，并配合 `.screen-interrupt` 立即重放欢迎视频。
 - 维护 debug 快照文件，供 `/debug/state` 查询。
 - 提供 `/debug/overlay` 开关顶部 debug 显示。
 
@@ -23,6 +24,7 @@
 - 扫描 `terrier-clips` 下的视频文件。
 - 根据文件名动态建立 state -> clip 列表。
 - 读取 `.current-state` 判断当前 session 最高优先级状态。
+- 读取 `.welcome-trigger`，对每次新的形象下发插入一次 `welcome` 播放。
 - 在 clip 边界进行软切换。
 - 在 `.screen-interrupt` 或本地 touch 请求出现时进行硬打断。
 - 在 Raspberry Pi 上控制 ffmpeg 解码视频，并通过 `fb-rawvideo-blit.py` 写入 framebuffer。
@@ -205,15 +207,24 @@ touch.what.mp4
 
 ## 配网完成和 welcome
 
-`welcome` 是特殊状态，只用于配网流程完成后的欢迎动作。
+`welcome` 是特殊状态，用于两类“一次性欢迎动作”：
 
-`board-server` 在配网状态从等待态进入 `PairingReady` 时，屏幕状态机记录一次 `welcome` checkpoint：
+- 配网状态从等待态进入 `PairingReady`。
+- USB serial 激活一套新的形象资产。
+
+配网完成时，屏幕状态机记录一次 `welcome` checkpoint：
 
 ```text
 welcome -> idle.<random>
 ```
 
-`welcome` 播放完成后，屏幕状态机继续按 clip 边界读取 session 当前状态。
+形象切换时，`board-server` 的 serial asset commit 会先写 `.welcome-trigger`，再写 `.screen-interrupt`。`fb-display.sh` 只要观察到新的 `.welcome-trigger` marker，就会优先进入一次：
+
+```text
+welcome -> current resolved state
+```
+
+`welcome` 播放完成后，屏幕状态机继续按 clip 边界读取 session 当前状态；同一个 marker 不会重复触发。
 
 ## Debug 模式
 

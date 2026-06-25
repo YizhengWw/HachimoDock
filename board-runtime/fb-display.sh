@@ -2,8 +2,9 @@
 # Framebuffer video driver for the board runtime.
 # New model: each animation is one complete clip under terrier-clips, with
 # optional same-family WAV cues for terminal states.
-# The screen pulls .current-state at clip boundaries; .screen-interrupt only
-# means "stop now and pull the current state again".
+# The screen pulls .current-state at clip boundaries; .screen-interrupt means
+# "stop now and pull the current state again", while .welcome-trigger injects
+# a one-shot welcome clip before returning to the current session state.
 set -u
 export LANG="${LANG:-C.UTF-8}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
@@ -72,6 +73,7 @@ SPEECH_HOLD_UNTIL_PATH="$RUNTIME_ROOT/.current-speech-hold-until"
 # persistent renderer (--serve "hud") draws the same Pillow HUD over a dark frame.
 VOLUME_DISPLAY_PATH="$RUNTIME_ROOT/.volume-display"
 SCREEN_PAGE_PATH="$RUNTIME_ROOT/.screen-page"
+WELCOME_TRIGGER_PATH="$RUNTIME_ROOT/.welcome-trigger"
 CLIPS_RELOAD_PATH="$RUNTIME_ROOT/.clips-reload"
 STATS_RENDERER="${PET_CLAW_FB_STATS_RENDERER:-$DIR/fb-stats-renderer.py}"
 STATS_RENDER_INTERVAL_SECONDS="${PET_CLAW_FB_STATS_RENDER_INTERVAL_SECONDS:-2}"
@@ -108,6 +110,7 @@ CURRENT_LOOP_COUNT=0
 CURRENT_SPEECH_MARKER=""
 LAST_INTERRUPT_MARKER=""
 LAST_TOUCH_MARKER=""
+LAST_WELCOME_TRIGGER_MARKER=""
 LAST_STATS_RENDER_AT=0
 WAS_PAIRING=0
 CHECKPOINT_STATE=""
@@ -1238,6 +1241,12 @@ get_current_top_state() {
 resolve_checkpoint_state() {
   STATE=$(get_current_top_state)
   EVENT=$(read_runtime_file "$RUNTIME_ROOT/.current-event")
+  WELCOME_MARKER=$(read_runtime_file "$WELCOME_TRIGGER_PATH")
+  if [ -n "$WELCOME_MARKER" ] && [ "$WELCOME_MARKER" != "$LAST_WELCOME_TRIGGER_MARKER" ]; then
+    LAST_WELCOME_TRIGGER_MARKER="$WELCOME_MARKER"
+    CHECKPOINT_STATE="welcome"
+    return
+  fi
   case "$EVENT" in
     PairingWaiting|PairingApMode|Pairing*)
       if [ "$EVENT" != "PairingReady" ]; then
@@ -1740,6 +1749,7 @@ dd if=/dev/zero of="$FB_DEV" bs=4096 count=512 2>/dev/null || true
 
 LAST_INTERRUPT_MARKER=$(read_runtime_file "$RUNTIME_ROOT/.screen-interrupt")
 LAST_TOUCH_MARKER=$(read_runtime_file "$RUNTIME_ROOT/.touch-request")
+LAST_WELCOME_TRIGGER_MARKER=$(read_runtime_file "$WELCOME_TRIGGER_PATH")
 LAST_CLIPS_RELOAD_MARKER=$(read_runtime_file "$CLIPS_RELOAD_PATH")
 log "starting display driver (pid=$$ clips=$VIDEO_ROOT)"
 log "$FB_DEV info: bpp=$(cat /sys/class/graphics/fb${FB_NUM}/bits_per_pixel 2>/dev/null) size=$(cat /sys/class/graphics/fb${FB_NUM}/virtual_size 2>/dev/null) stride=$(cat /sys/class/graphics/fb${FB_NUM}/stride 2>/dev/null)"

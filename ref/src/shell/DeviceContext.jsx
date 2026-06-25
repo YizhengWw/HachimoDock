@@ -1,6 +1,6 @@
 /**
- * [Input] children tree consuming useDeviceContext; Tauri invoke for USB status/manual serial rescan/WiFi online/bindings/agents; lib helpers for appearance/agent storage.
- * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent); hydrates and reconciles active channel from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
+ * [Input] children tree consuming useDeviceContext; Tauri invoke/listen for USB status, appearance sync progress, manual serial rescan, WiFi online, bindings, and agents; lib helpers for appearance/agent storage.
+ * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent, appearanceSync); hydrates and reconciles active channel from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
  * [Pos] component node in ref/src/shell
  * [Sync] If this file changes, update `ref/src/shell/.folder.md`.
  */
@@ -34,6 +34,13 @@ import { deriveCurrentDisplay } from "./DeviceContext.pure.js";
 export { deriveCurrentDisplay };
 
 const ACTIVE_COMPONENT_STORAGE_KEY = "pet-manager:active-component";
+const EMPTY_APPEARANCE_SYNC = {
+  pending: false,
+  progress: null,
+  agentId: "",
+  appearanceId: "",
+  appearanceName: "",
+};
 
 const DeviceContext = createContext(null);
 
@@ -82,6 +89,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
     FIXED_AGENT_OPTIONS.map((agent) => ({ ...agent, detected: false })),
   );
   const [currentComponent, setCurrentComponent] = useState(() => readActiveComponent());
+  const [appearanceSync, setAppearanceSync] = useState(EMPTY_APPEARANCE_SYNC);
+  const appearanceSyncTokenRef = useRef(0);
 
   // --- USB status poll (3s); serial auto-connect is owned by the Rust backend. ---
   useEffect(() => {
@@ -253,28 +262,55 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
 
   const applyDesktopPet = useCallback(
     async (agentId, appearance, options = {}) => {
-      const { onProgress } = options;
-      const currentAppearanceId = currentDisplay.appearance?.id || "";
-      const { nextMap, notice } = await applyDesktopPetAssignment({
-        invoke,
-        listen,
-        agentAppearanceMap,
+      const { initialProgress, onProgress } = options;
+      const syncToken = appearanceSyncTokenRef.current + 1;
+      appearanceSyncTokenRef.current = syncToken;
+      const appearanceSyncMeta = {
         agentId,
-        appearance,
-        agentOptions,
-        boardDeviceId: onlineBoardDeviceId || usb.boardDeviceId || binding?.boardDeviceId || "",
-        currentAppearanceId,
-        deviceOnline,
-        onProgress,
+        appearanceId: appearance?.id || "",
+        appearanceName: appearance?.name || "",
+      };
+      const emitAppearanceSyncProgress = (progress) => {
+        setAppearanceSync({
+          pending: true,
+          progress,
+          ...appearanceSyncMeta,
+        });
+        onProgress?.(progress);
+      };
+      emitAppearanceSyncProgress(initialProgress || {
+        text: appearance?.name
+          ? `准备下发「${appearance.name}」到设备端...`
+          : "准备下发形象到设备端...",
+        percent: 0,
       });
-      setAgentAppearanceMap(nextMap);
-      const enabled = new Set(assignedAgentIds(nextMap, agentId));
-      setEnabledAgents(enabled);
-      setBridgeSelectedAgentId(agentId);
-      bindingReconcileRef.current = "";
-      saveAgentAppearanceMap(nextMap);
-      saveEnabledAgents(enabled);
-      return { nextMap, notice };
+      const currentAppearanceId = currentDisplay.appearance?.id || "";
+      try {
+        const { nextMap, notice } = await applyDesktopPetAssignment({
+          invoke,
+          listen,
+          agentAppearanceMap,
+          agentId,
+          appearance,
+          agentOptions,
+          boardDeviceId: onlineBoardDeviceId || usb.boardDeviceId || binding?.boardDeviceId || "",
+          currentAppearanceId,
+          deviceOnline,
+          onProgress: emitAppearanceSyncProgress,
+        });
+        setAgentAppearanceMap(nextMap);
+        const enabled = new Set(assignedAgentIds(nextMap, agentId));
+        setEnabledAgents(enabled);
+        setBridgeSelectedAgentId(agentId);
+        bindingReconcileRef.current = "";
+        saveAgentAppearanceMap(nextMap);
+        saveEnabledAgents(enabled);
+        return { nextMap, notice };
+      } finally {
+        if (appearanceSyncTokenRef.current === syncToken) {
+          setAppearanceSync({ pending: false, progress: null, ...appearanceSyncMeta });
+        }
+      }
     },
     [agentAppearanceMap, agentOptions, binding, currentDisplay, deviceOnline, onlineBoardDeviceId, usb.boardDeviceId],
   );
@@ -310,6 +346,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       agentOptions,
       currentDisplay,
       currentComponent,
+      appearanceSync,
       applyDesktopPet,
       saveAgentAppearance,
       rescanUsbDevices,
@@ -330,6 +367,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       agentOptions,
       currentDisplay,
       currentComponent,
+      appearanceSync,
       applyDesktopPet,
       saveAgentAppearance,
       rescanUsbDevices,

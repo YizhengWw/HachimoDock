@@ -2,7 +2,7 @@
  * [Input] Product experience bug report and core Pet Manager source files.
  * [Output] Static Node regression coverage for top-level shell routing, Tauri-first setup routing, component center routing, flattened
  *          desktop HTTP bridge calls, fixed-height desktop sidebar, unified pet album naming, modal-based single desktop-pet assignment,
- *          dashboard guide entry, faster previews, wizard help affordances, and packaged Tauri runtime resources.
+ *          dashboard guide entry, faster previews, shared-provider wizard help affordances, and packaged POSIX Tauri runtime resources.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -79,7 +79,7 @@ test("Tauri release runtime resources are packaged and development path fallback
   assertResource(resources, "bridge/agents", "bridge/agents");
   assertResource(resources, "bridge/hooks", "bridge/hooks");
   assertResource(resources, "bridge/runtime/node", "bridge/runtime/node");
-  assertResource(resources, "bridge/runtime/node.exe", "bridge/runtime/node.exe");
+  assert.equal(resources["bridge/runtime/node.exe"], undefined, "node.exe is not bundled unless its runtime artifact is added deliberately");
   assertResource(resources, "../../skills/petAgent-ui-generator", "skills/petAgent-ui-generator");
 
   assert.ok(existsSync(join(refRoot, "public/terrier-clips")), "public terrier clips should feed the Vite dist resource");
@@ -89,7 +89,6 @@ test("Tauri release runtime resources are packaged and development path fallback
   assertTauriResourceSourceExists("bridge/agents");
   assertTauriResourceSourceExists("bridge/hooks");
   assertTauriResourceSourceExists("bridge/runtime/node");
-  assertTauriResourceSourceExists("bridge/runtime/node.exe");
   assertTauriResourceSourceExists("../../skills/petAgent-ui-generator");
 
   assert.match(tauri, /resource_dir\.join\("terrier-clips"\)/);
@@ -200,6 +199,7 @@ test("appearance listing and previews keep source fallbacks and dashboard-specif
 
 test("generation setup clearly supports GIF first-frame input and field help affordances", () => {
   const wizard = readSource("src/CustomAvatarWizard.jsx");
+  const providerConfig = readSource("src/lib/avatar-pipeline/provider-config.js");
 
   assert.match(wizard, /image\/gif/);
   assert.match(wizard, /GIF 会取首帧作为参考图/);
@@ -207,7 +207,9 @@ test("generation setup clearly supports GIF first-frame input and field help aff
   assert.match(wizard, /label="API Key"/);
   assert.match(wizard, /label="Base URL"/);
   assert.match(wizard, /label="视频生成模型"/);
-  assert.match(wizard, /const VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL/);
+  assert.match(providerConfig, /VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL/);
+  assert.match(wizard, /loadProviderConfig/);
+  assert.match(wizard, /saveProviderConfig/);
   assert.match(wizard, /thinkingModel: isVolcengine \? VOLCENGINE_THINKING_MODEL : thinkingModel\.trim\(\) \|\| trimmedModel/);
   assert.match(wizard, /请先填写 API Key 和视频生成模型/);
   assert.match(wizard, /火山 Ark 地址已固定/);

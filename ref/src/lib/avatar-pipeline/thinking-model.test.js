@@ -1,6 +1,6 @@
 /**
  * [Input] Volcano Ark Responses API thinking-model request builder.
- * [Output] Node regression coverage for `/api/v3/responses` Doubao multimodal and text-only payloads.
+ * [Output] Node regression coverage for requested-family prompts, `/api/v3/responses` Doubao multimodal, and text-only payloads.
  * [Pos] test node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -50,4 +50,25 @@ test("text-only DeepSeek thinking models omit input_image", () => {
     false,
   );
   assert.match(request.body.input[0].content[0].text, /纯文本模型，不支持图片输入/);
+});
+
+test("thinking request prompt uses the caller-provided family list", () => {
+  const request = buildThinkingModelRequest({
+    thinking: { apiKey: "test-key" },
+    image: { dataUrl: "data:image/png;base64,abc123" },
+    families: [
+      {
+        family: "working",
+        label: "working",
+        playback: "loop_state",
+        motion_brief: "desk work",
+        prop_policy: "Required small marker prop: one tiny keyboard.",
+      },
+    ],
+  });
+
+  const text = request.body.input[0].content.find((part) => part.type === "input_text").text;
+  assert.match(text, /"family": "working"/);
+  assert.doesNotMatch(text, /touch\.right/);
+  assert.doesNotMatch(text, /touch\.left/);
 });

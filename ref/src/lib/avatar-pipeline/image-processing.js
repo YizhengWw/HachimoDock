@@ -1,6 +1,6 @@
 /**
  * [Input] user-uploaded image Blob.
- * [Output] background-removed, black-composited, fixed 4:3 downscaled PNG as Uint8Array.
+ * [Output] background-removed, alpha-matte decontaminated, black-composited, fixed 4:3 downscaled PNG as Uint8Array.
  * [Pos] lib node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header, run.js, and pipeline-defaults.js.
  */
@@ -45,6 +45,15 @@ function canvasToUint8Array(canvas) {
 function even(value) {
   const rounded = Math.max(2, Math.round(value));
   return rounded % 2 === 0 ? rounded : rounded - 1;
+}
+
+export function decontaminateAlphaMattePixels(imageData, { foregroundAlphaThreshold = 16 } = {}) {
+  const { data } = imageData;
+  for (let index = 0; index < data.length; index += 4) {
+    const alpha = data[index + 3];
+    data[index + 3] = alpha >= foregroundAlphaThreshold ? 255 : 0;
+  }
+  return imageData;
 }
 
 export function computeFourThreeCanvasLayout({
@@ -107,13 +116,23 @@ export async function processImageForPipeline(imageBlob, options = {}) {
     maxDimension,
   });
 
+  const matteCanvas = document.createElement("canvas");
+  matteCanvas.width = layout.canvasWidth;
+  matteCanvas.height = layout.canvasHeight;
+  const matteCtx = matteCanvas.getContext("2d");
+  matteCtx.clearRect(0, 0, layout.canvasWidth, layout.canvasHeight);
+  matteCtx.drawImage(img, layout.drawX, layout.drawY, layout.drawWidth, layout.drawHeight);
+  const matteData = matteCtx.getImageData(0, 0, layout.canvasWidth, layout.canvasHeight);
+  decontaminateAlphaMattePixels(matteData);
+  matteCtx.putImageData(matteData, 0, 0);
+
   const canvas = document.createElement("canvas");
   canvas.width = layout.canvasWidth;
   canvas.height = layout.canvasHeight;
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#000000";
   ctx.fillRect(0, 0, layout.canvasWidth, layout.canvasHeight);
-  ctx.drawImage(img, layout.drawX, layout.drawY, layout.drawWidth, layout.drawHeight);
+  ctx.drawImage(matteCanvas, 0, 0);
 
   const processedBytes = await canvasToUint8Array(canvas);
 

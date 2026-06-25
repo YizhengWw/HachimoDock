@@ -145,10 +145,17 @@ http://<board-ip>/debug/state
 
 - `.current-state`：当前宠物状态，如 `idle`、`working`、`done`。
 - `.current-speech`：主屏字幕。
+- `.welcome-trigger`：新形象资产激活后的一次性 `welcome` marker；`fb-display.sh` 消费后回到当前 session 状态。
+- `.screen-interrupt`：屏幕硬打断 marker，促使主屏立即重算状态并切换 clip。
 - `.screen-page`：`main` 或 `stats`。
 - `.stats-display`：负一屏统计或组件 dashboard payload。
 - `.button-config`：桌面端下发的按钮功能配置。
 - `.widget-events`：负一屏 widget 输入事件队列。
+
+任务页补充约束：
+
+- 板端任务 dashboard 为了保持小屏可读性，只展示单个最高优先级任务卡；其余任务仍保留在本地会话快照里用于统计与状态回收，不再同时铺满任务区。
+- 每次通过 USB serial 激活新的形象资产时，板端都会先播放一次 `welcome` 视频，再回到当前 session 对应状态。
 
 更完整的架构说明见 [docs/device-runtime-design.md](docs/device-runtime-design.md)。
 安全加固和鉴权/凭证部署说明见 [docs/security-hardening.md](docs/security-hardening.md)。

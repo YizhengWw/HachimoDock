@@ -1,5 +1,5 @@
 /**
- * [Input] image payload + Volcengine Ark API-key/model-name config.
+ * [Input] image payload + requested family list + Volcengine Ark API-key/model-name config.
  * [Output] structured persona + per-family prompts via Ark Responses with Doubao 2.0 multimodal by default.
  * [Pos] lib node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
@@ -67,13 +67,14 @@ function supportsImageInput(thinking) {
 export function buildThinkingModelRequest({
   thinking,
   image,
+  families = FAMILIES,
   appearanceName = "",
   personality = "",
 }) {
   const apiUrl =
     thinking?.apiUrlOverride ||
     (thinking?.baseUrl ? joinUrl(thinking.baseUrl, "/api/v3/responses") : DEFAULT_THINKING_API_URL);
-  const userPrompt = buildUserPrompt({ families: FAMILIES, appearanceName, personality });
+  const userPrompt = buildUserPrompt({ families, appearanceName, personality });
   const sendImage = Boolean(image?.dataUrl && supportsImageInput(thinking));
   const textOnlyNotice = sendImage
     ? ""
@@ -113,6 +114,7 @@ export function buildThinkingModelRequest({
 export async function callThinkingModel({
   thinking,
   image,
+  families = FAMILIES,
   appearanceName = "",
   personality = "",
   signal,
@@ -121,6 +123,7 @@ export async function callThinkingModel({
   const { apiUrl, body } = buildThinkingModelRequest({
     thinking,
     image,
+    families,
     appearanceName,
     personality,
   });

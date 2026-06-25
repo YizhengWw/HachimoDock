@@ -135,6 +135,7 @@ test("provider exposes the documented context shape fields", () => {
     "agentOptions",
     "currentDisplay",
     "currentComponent",
+    "appearanceSync",
     "applyDesktopPet",
     "rescanUsbDevices",
     "refresh",
@@ -146,6 +147,14 @@ test("provider exposes the documented context shape fields", () => {
 test("provider reuses applyDesktopPetAssignment from lib (does not re-implement)", () => {
   assert.match(source, /from\s+["'][^"']*desktop-pet-assignment[^"']*["']/);
   assert.match(source, /applyDesktopPetAssignment\(/);
+});
+
+test("provider owns appearance USB sync progress so dashboard tab switches keep the task visible", () => {
+  assert.match(source, /const\s+\[appearanceSync,\s*setAppearanceSync\]\s*=\s*useState/);
+  assert.match(source, /appearanceSyncTokenRef/);
+  assert.match(source, /setAppearanceSync\(\{\s*pending:\s*true/);
+  assert.match(source, /setAppearanceSync\(\{\s*pending:\s*false,\s*progress:\s*null/);
+  assert.match(source, /onProgress\?\.\(progress\)/);
 });
 
 test("provider reads currentComponent from a stable localStorage key with null fallback", () => {

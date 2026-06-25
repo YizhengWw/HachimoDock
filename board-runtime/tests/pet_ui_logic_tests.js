@@ -1,4 +1,11 @@
+/*
+ * [Input] board-runtime browser-side UI helpers and source files.
+ * [Output] Regression coverage for task-card rendering limits plus shared board UI logic.
+ */
+
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const { resolve } = require("node:path");
 
 const vitals = require("../ui/windows/main/pet-vitals.js");
 const detailStats = require("../ui/windows/main/detail-runtime-stats.js");
@@ -293,11 +300,23 @@ function testDetailViewRenderer() {
   assert(root.innerHTML.includes('aria-label="\u72b6\u6001\u9875"'));
 }
 
+function testTaskDashboardRendersOnlyOneTaskCard() {
+  const source = readFileSync(resolve(__dirname, "../ui/windows/main/index.html"), "utf8");
+  const match = source.match(/function renderTaskCards\(tasks\) \{[\s\S]*?\n\}/);
+  assert(match, "expected renderTaskCards function");
+  assert.match(
+    match[0],
+    /slice\(0,\s*1\)/,
+    "expected task dashboard to render at most one task card",
+  );
+}
+
 (async () => {
   testPetVitalsDeltaTracking();
   testPetVitalsPersistenceAndDerivedMetrics();
   testDetailRuntimeStatsGroupingAndMerging();
   await testWebSocketBridgeConfigConnectionAndMessages();
   testDetailViewRenderer();
+  testTaskDashboardRendersOnlyOneTaskCard();
   console.log("pet ui logic tests passed");
 })();

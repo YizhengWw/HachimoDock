@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment with inline non-blocking USB sync progress, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
+ * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment with inline non-blocking USB sync progress, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, airy detail-page summary sections, compact single-state regeneration CTA button, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -6340,10 +6340,40 @@ input:focus-visible {
 .test-feedback--danger { color: var(--danger); }
 
 /* ---------- Detail ---------- */
-.detail-grid {
+.detail-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(480px, 1fr) minmax(340px, 420px);
+  gap: 22px;
+  align-items: start;
+}
+
+.detail-preview-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.detail-control-panel {
+  position: sticky;
+  top: 16px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-control-panel__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 2px 0;
+}
+
+.detail-control-panel__header strong {
+  font-size: 18px;
+  color: var(--text);
 }
 
 .detail-media {
@@ -6368,28 +6398,93 @@ input:focus-visible {
 }
 
 .detail-media__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 14px;
   font-size: 12px;
   color: var(--text-muted);
   border-top: 1px solid var(--line);
 }
 
-.detail-meta {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xl);
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.detail-meta h2 {
+.detail-summary-card h2 {
   margin: 0;
   font-size: 18px;
 }
 
-.detail-meta .path {
+.detail-state-rail-section,
+.detail-context-drawer,
+.detail-side-section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+}
+
+.detail-state-rail-section {
+  padding: 14px;
+}
+
+.detail-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.detail-section-heading h4 {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.detail-context-drawer {
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.detail-context-drawer summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 650;
+  list-style: none;
+}
+
+.detail-context-drawer summary::-webkit-details-marker {
+  display: none;
+}
+
+.detail-summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 18px 18px;
+}
+
+.detail-summary-card__description {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.68;
+}
+
+.detail-summary-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-side-section {
+  padding: 16px;
+}
+
+.detail-context-drawer .path {
   font-family: var(--font-mono);
   font-size: 11.5px;
   color: var(--text-muted);
@@ -6407,10 +6502,7 @@ input:focus-visible {
 .detail-audio-config {
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  margin-top: 4px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line-soft);
+  gap: 12px;
 }
 
 .detail-audio-config__header,
@@ -6454,16 +6546,107 @@ input:focus-visible {
   pointer-events: none;
 }
 
+.detail-state-regenerate-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.detail-state-regenerate-entry__header,
+.detail-state-regenerate-entry__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-state-regenerate-entry__header {
+  justify-content: space-between;
+}
+
+.detail-state-regenerate-entry__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.detail-state-regenerate-entry__cta {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 103, 0, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 6px 14px rgba(255, 95, 21, 0.1);
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.detail-state-regenerate-entry__cta:hover:not(:disabled) {
+  border-color: rgba(255, 103, 0, 0.38);
+  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
+  box-shadow: 0 8px 18px rgba(255, 95, 21, 0.14);
+}
+
+.detail-state-regenerate-entry__cta:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  box-shadow: none;
+}
+
+.detail-state-regenerate-entry__message,
+.single-state-regenerate-modal__message {
+  margin-top: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.single-state-regenerate-modal {
+  width: min(720px, 100%);
+}
+
+.single-state-regenerate-modal__wizard {
+  max-width: none;
+}
+
+.single-state-regenerate-modal__prompt textarea {
+  min-height: 116px;
+  resize: vertical;
+}
+
+.single-state-regenerate-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .btn-ghost.is-disabled {
   opacity: 0.48;
   pointer-events: none;
 }
 
-.detail-states {
+.detail-state-rail {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(118px, 142px);
   gap: 10px;
-  margin-top: 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 0 2px 4px;
+  scroll-snap-type: x proximity;
 }
 
 .state-card {
@@ -6476,6 +6659,7 @@ input:focus-visible {
   background: var(--surface);
   text-align: left;
   cursor: pointer;
+  scroll-snap-align: start;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
@@ -6559,8 +6743,12 @@ input:focus-visible {
 }
 
 @media (max-width: 780px) {
-  .detail-grid {
+  .detail-workspace {
     grid-template-columns: 1fr;
+  }
+
+  .detail-control-panel {
+    position: static;
   }
 }
 

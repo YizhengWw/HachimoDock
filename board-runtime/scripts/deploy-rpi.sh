@@ -2,7 +2,10 @@
 # Deploy board-runtime to Raspberry Pi.
 # Usage: sh scripts/deploy-rpi.sh
 #   HOST=user@<pi-ip> sh scripts/deploy-rpi.sh
+#   HOST=user@<pi-ip> SUDO_PASSWORD=<password> sh scripts/deploy-rpi.sh
 #   REMOTE_DIR=/opt/board-runtime (default)
+# When SUDO_PASSWORD is set, sudo auth uses askpass so stdin remains available
+# to deployment writes like `printf ... | sudo tee /etc/asound.conf`.
 set -eu
 
 HOST="${HOST:?ERROR: set HOST=user@<pi-ip> before deploying}"
@@ -23,7 +26,14 @@ remote() {
     if [ -n "${SUDO_PASSWORD:-}" ]; then
         SUDO_PASSWORD_QUOTED=$(shell_quote "$SUDO_PASSWORD")
         {
-            printf '%s\n' 'sudo() { printf "%s\n" "$SUDO_PASSWORD" | command sudo -S -p "" "$@"; }'
+            printf '%s\n' 'ASKPASS_FILE=$(mktemp "${TMPDIR:-/tmp}/board-runtime-sudo-askpass.XXXXXX")'
+            printf '%s\n' 'trap '\''rm -f "$ASKPASS_FILE"'\'' EXIT HUP INT TERM'
+            printf '%s\n' '{'
+            printf '%s\n' '    printf '\''%s\n'\'' '\''#!/bin/sh'\'''
+            printf '%s\n' '    printf '\''%s\n'\'' '\''printf "%s\n" "$SUDO_PASSWORD"'\'''
+            printf '%s\n' '} > "$ASKPASS_FILE"'
+            printf '%s\n' 'chmod 700 "$ASKPASS_FILE"'
+            printf '%s\n' 'sudo() { SUDO_ASKPASS="$ASKPASS_FILE" command sudo -A "$@"; }'
             printf '%s\n' "$1"
         } | ssh "$HOST" "SUDO_PASSWORD='$SUDO_PASSWORD_QUOTED' sh -s"
     else

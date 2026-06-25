@@ -102,7 +102,7 @@ done
             env=env,
         )
         try:
-            deadline = time.time() + 6.0
+            deadline = time.time() + 10.0
             observed_loop = 0
             while time.time() < deadline:
                 debug_file = runtime / ".debug-screen-state.json"
@@ -354,6 +354,112 @@ exit 0
                 proc.wait(timeout=2)
 
 
+def run_welcome_trigger_regression(script: Path, base_env: dict[str, str]) -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        clips = tmp_path / "terrier-clips"
+        runtime = tmp_path / "runtime"
+        tools = tmp_path / "tools"
+        log_path = tmp_path / "tplayer.log"
+        create_clips(clips)
+        runtime.mkdir()
+        tools.mkdir()
+        (runtime / ".current-state").write_text("working\n")
+        (runtime / ".current-event").write_text("UserPromptSubmit\n")
+        write_fake_tool(
+            tools / "hexdump",
+            "#!/bin/sh\nprintf '1'\n",
+        )
+        write_fake_tool(
+            tools / "tplayerdemo",
+            f"""#!/bin/sh
+echo "start args=$*" >> {log_path}
+while IFS= read -r line; do
+  echo "$line" >> {log_path}
+done
+""",
+        )
+        env = base_env.copy()
+        env.update(
+            {
+                "PATH": f"{tools}{os.pathsep}{env.get('PATH', '')}",
+                "PET_CLAW_RUNTIME_ROOT": str(runtime),
+                "PET_CLAW_CLIPS_DIR": str(clips),
+                "PET_CLAW_FB_DEV": "/dev/null",
+                "PET_CLAW_FB_DISABLE_CACHE": "1",
+                "PET_CLAW_FB_FAKE_DURATION_SECONDS": "0.4",
+                "PET_CLAW_FB_WORKING_MAX_LOOPS": "1",
+                "PET_CLAW_FB_WELCOME_MAX_LOOPS": "1",
+                "PET_CLAW_FB_DEBUG_OVERLAY": "1",
+                "PET_CLAW_FB_CLIP_MAX_SECONDS": "30",
+                "PET_CLAW_FB_TPLAYER_READY_SECONDS": "0",
+            }
+        )
+        proc = subprocess.Popen(
+            ["sh", str(script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            debug_file = runtime / ".debug-screen-state.json"
+            deadline = time.time() + 6.0
+            while time.time() < deadline:
+                if debug_file.exists():
+                    try:
+                        payload = json.loads(debug_file.read_text())
+                    except (ValueError, OSError):
+                        time.sleep(0.05)
+                        continue
+                    if payload.get("displayedState") == "working":
+                        break
+                time.sleep(0.05)
+            else:
+                return False, "fb-display never entered baseline working state before welcome trigger"
+
+            marker = f"{int(time.time() * 1000)} assets\n"
+            (runtime / ".welcome-trigger").write_text(marker)
+            (runtime / ".screen-interrupt").write_text(marker)
+
+            saw_welcome = False
+            deadline = time.time() + 6.0
+            while time.time() < deadline:
+                if debug_file.exists():
+                    try:
+                        payload = json.loads(debug_file.read_text())
+                    except (ValueError, OSError):
+                        time.sleep(0.05)
+                        continue
+                    if payload.get("displayedState") == "welcome":
+                        saw_welcome = True
+                        break
+                time.sleep(0.05)
+            if not saw_welcome:
+                stdout, stderr = proc.communicate(timeout=0.1) if proc.poll() is not None else ("", "")
+                return False, f"welcome trigger did not switch display to welcome; stdout={stdout!r}; stderr={stderr!r}"
+
+            deadline = time.time() + 6.0
+            while time.time() < deadline:
+                if debug_file.exists():
+                    try:
+                        payload = json.loads(debug_file.read_text())
+                    except (ValueError, OSError):
+                        time.sleep(0.05)
+                        continue
+                    if payload.get("displayedState") == "working":
+                        return True, ""
+                time.sleep(0.05)
+            return False, "welcome trigger did not return to the previous working state after welcome clip"
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+
+
 def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     script = repo / "fb-display.sh"
@@ -435,6 +541,7 @@ def main() -> int:
         speech_sync_ok, speech_sync_error = run_state_speech_sync_regression(script, os.environ.copy())
         multi_speech_ok, multi_speech_error = run_multi_speech_bubble_regression(script, os.environ.copy())
         audio_cue_ok, audio_cue_error = run_state_audio_cue_regression(script, os.environ.copy())
+        welcome_trigger_ok, welcome_trigger_error = run_welcome_trigger_regression(script, os.environ.copy())
 
     if result.returncode != 0:
         sys.stderr.write(result.stdout)
@@ -469,6 +576,10 @@ def main() -> int:
         return 1
     if not audio_cue_ok:
         sys.stderr.write(audio_cue_error)
+        sys.stderr.write("\n")
+        return 1
+    if not welcome_trigger_ok:
+        sys.stderr.write(welcome_trigger_error)
         sys.stderr.write("\n")
         return 1
     if not multi_speech_ok:

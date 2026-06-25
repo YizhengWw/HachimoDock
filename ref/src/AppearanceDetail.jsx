@@ -1,12 +1,12 @@
 /**
  * [Input] An appearanceId persisted by `lib/appearance-store.js`.
- * [Output] Side-by-side video preview, compressed configurable per-family WAV cue overrides, persistent pending audio OTA
- *          reminder with top-right downlink action, generated family grid, and normalized source/provider labels for built-in, custom, and codex pet appearances.
+ * [Output] Preview-first appearance workspace, sticky current-state controls, contextual details drawer,
+ *          configurable per-family WAV cue overrides, background single-state image+prompt regeneration, and state rail.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
@@ -16,6 +16,7 @@ import {
   Upload,
   UploadCloud,
   Volume2,
+  ImageUp,
 } from "lucide-react";
 import {
   deleteAppearance,
@@ -23,11 +24,23 @@ import {
   readAudioAsBlobUrl,
   removeFamilyAudioCue,
   replaceFamilyAudioCue,
+  replaceFamilyVideo,
 } from "./lib/appearance-store.js";
 import AppearancePreview from "./AppearancePreview.jsx";
 import { compressWavFileForBoard } from "./lib/audio-cue.js";
 import { mediaFromFamily, mediaFromSourceImage, mediaFromSourcePreview } from "./lib/appearance-preview.js";
 import { FAMILIES } from "./lib/avatar-pipeline/families.js";
+import { runSingleFamilyVideo } from "./lib/avatar-pipeline/run.js";
+import {
+  DEFAULT_ADVANCED,
+  DEFAULT_PROVIDER_ID,
+  VIDEO_PROVIDERS,
+  VOLCENGINE_BASE_URL,
+  VOLCENGINE_THINKING_MODEL,
+  loadProviderConfig,
+  saveProviderConfig,
+} from "./lib/avatar-pipeline/provider-config.js";
+import { AvatarWizardStep1, AvatarWizardStep2 } from "./CustomAvatarWizard.jsx";
 
 const AUDIO_SYNC_DIRTY_PREFIX = "pet-manager.appearance-audio-dirty.";
 
@@ -57,6 +70,12 @@ function writeAudioSyncDirty(appearanceId, dirty) {
   else window.localStorage.removeItem(key);
 }
 
+function isImageFile(file) {
+  if (!file) return false;
+  if (/^image\//i.test(file.type || "")) return true;
+  return /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
+}
+
 export default function AppearanceDetail({ appearanceId, onBack }) {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState("");
@@ -69,6 +88,108 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [audioSyncMessage, setAudioSyncMessage] = useState("");
   const [deleteState, setDeleteState] = useState("idle"); // idle | confirm | deleting
   const [deleteError, setDeleteError] = useState("");
+  const [singleStateImageFile, setSingleStateImageFile] = useState(null);
+  const [singleStateImagePreview, setSingleStateImagePreview] = useState("");
+  const [singleStatePrompt, setSingleStatePrompt] = useState("");
+  const [singleStateStatus, setSingleStateStatus] = useState("idle"); // idle | generating | success | error | syncing | synced
+  const [singleStateMessage, setSingleStateMessage] = useState("");
+  const [singleStateDialogOpen, setSingleStateDialogOpen] = useState(false);
+  const [singleStateStep, setSingleStateStep] = useState(0);
+  const singleStateInputRef = useRef(null);
+  const [providerId, setProviderId] = useState(DEFAULT_PROVIDER_ID);
+  const provider = useMemo(
+    () => VIDEO_PROVIDERS.find((item) => item.id === providerId) || VIDEO_PROVIDERS[0],
+    [providerId],
+  );
+  const isVolcengine = providerId === "volcengine";
+  const [apiKey, setApiKey] = useState("");
+  const [accessKey, setAccessKey] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
+  const [model, setModel] = useState(provider.models[0] || "");
+  const [thinkingModel, setThinkingModel] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [openaiCompat, setOpenaiCompat] = useState(true);
+  const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
+  const [testFeedback, setTestFeedback] = useState(null);
+  const [removeBg, setRemoveBg] = useState(true);
+  const [fastGeneration, setFastGeneration] = useState(true);
+
+  const familyByName = useMemo(() => {
+    const map = new Map();
+    if (record) {
+      for (const family of record.families) map.set(family.family, family);
+    }
+    return map;
+  }, [record]);
+
+  const activeRecord = familyByName.get(activeFamily);
+
+  const generatedFamilies = useMemo(
+    () => record?.families?.filter((family) => family.ok) || [],
+    [record],
+  );
+
+  const audioFamilyNames = useMemo(
+    () => generatedFamilies
+      .filter((family) => family.audioPath || family.audioSrc)
+      .map((family) => family.family),
+    [generatedFamilies],
+  );
+
+  useEffect(() => {
+    setSingleStatePrompt(activeRecord?.prompt || "");
+    setSingleStateImageFile(null);
+    setSingleStateMessage("");
+    setSingleStateStatus("idle");
+    setSingleStateDialogOpen(false);
+    setSingleStateStep(0);
+  }, [activeRecord?.family, record?.id]);
+
+  useEffect(() => {
+    if (record?.provider && VIDEO_PROVIDERS.some((item) => item.id === record.provider)) {
+      setProviderId(record.provider);
+    }
+  }, [record?.provider]);
+
+  useEffect(() => {
+    const saved = loadProviderConfig(providerId);
+    setApiKey(saved.apiKey);
+    setAccessKey(saved.accessKey);
+    setSecretKey(saved.secretKey);
+    setBaseUrl(saved.baseUrl);
+    setModel(saved.model);
+    setThinkingModel(saved.thinkingModel);
+    setFastGeneration(saved.fastGeneration);
+    setAdvanced(saved.advanced);
+    setTestFeedback(null);
+  }, [providerId]);
+
+  useEffect(() => {
+    if (!singleStateImageFile) {
+      setSingleStateImagePreview("");
+      return undefined;
+    }
+    const reader = new FileReader();
+    let cancelled = false;
+    reader.onload = () => {
+      if (!cancelled) setSingleStateImagePreview(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.onerror = () => {
+      if (!cancelled) setSingleStateImagePreview("");
+    };
+    reader.readAsDataURL(singleStateImageFile);
+    return () => {
+      cancelled = true;
+      if (reader.readyState === FileReader.LOADING) {
+        try {
+          reader.abort();
+        } catch {
+          /* noop */
+        }
+      }
+    };
+  }, [singleStateImageFile]);
 
   const markAudioSyncDirty = useCallback((message) => {
     writeAudioSyncDirty(appearanceId, true);
@@ -231,26 +352,222 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     }
   }, [audioSyncState, record]);
 
-  const familyByName = useMemo(() => {
-    const map = new Map();
-    if (record) {
-      for (const family of record.families) map.set(family.family, family);
+  const singleStateGenerationReadyIssue = useMemo(() => {
+    if (providerId === "kling") {
+      if (!accessKey.trim() || !secretKey.trim()) {
+        return "请先填写 Kling Access Key 和 Secret Key。";
+      }
+      if (!baseUrl.trim() || !model.trim()) {
+        return "请先填写接口地址和视频生成模型。";
+      }
+      return "";
     }
-    return map;
-  }, [record]);
 
-  const generatedFamilies = useMemo(
-    () => record?.families?.filter((family) => family.ok) || [],
-    [record],
+    if (isVolcengine && (!apiKey.trim() || !model.trim())) {
+      return "请先填写 API Key 和视频生成模型。";
+    }
+    if (!apiKey.trim()) return "请先填写 API Key。";
+    if (!baseUrl.trim() || !model.trim()) return "请先填写接口地址和视频生成模型。";
+    return "";
+  }, [providerId, accessKey, secretKey, apiKey, baseUrl, model, isVolcengine]);
+
+  const persistSingleStateProviderConfig = useCallback(() => {
+    saveProviderConfig(providerId, {
+      apiKey,
+      accessKey,
+      secretKey,
+      baseUrl,
+      model,
+      thinkingModel,
+      fastGeneration,
+      advanced,
+    });
+  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, advanced]);
+
+  const handleSingleStateTestConnection = useCallback(() => {
+    const key = providerId === "kling" ? accessKey.trim() : apiKey.trim();
+    const normalizedBaseUrl = baseUrl.trim();
+    if (isVolcengine) {
+      if (!key) {
+        setTestFeedback({ tone: "warning", text: "请先填写 API Key。" });
+        return;
+      }
+      setTestFeedback({
+        tone: "success",
+        text: `火山 Ark 地址已固定，请求会发送到 ${VOLCENGINE_BASE_URL}`,
+      });
+      return;
+    }
+    if (!key || !normalizedBaseUrl) {
+      setTestFeedback({ tone: "warning", text: "请先填写 API Key 和 Base URL。" });
+      return;
+    }
+    try {
+      const url = new URL(
+        /^https?:\/\//i.test(normalizedBaseUrl) ? normalizedBaseUrl : `https://${normalizedBaseUrl}`,
+      );
+      setTestFeedback({
+        tone: "success",
+        text: `基础地址校验通过，请求会发送到 ${url.origin}`,
+      });
+    } catch {
+      setTestFeedback({ tone: "danger", text: "Base URL 格式不正确。" });
+    }
+  }, [providerId, apiKey, accessKey, baseUrl, isVolcengine]);
+
+  const handleSingleStateFile = useCallback((file) => {
+    if (!file) return;
+    if (!isImageFile(file)) {
+      setSingleStateStatus("error");
+      setSingleStateMessage("请上传 PNG / JPEG / WebP / GIF 图片。");
+      return;
+    }
+    setSingleStateImageFile(file);
+    setSingleStateStatus("idle");
+    setSingleStateMessage("");
+  }, []);
+
+  const handleSingleStatePickClick = useCallback(() => {
+    singleStateInputRef.current?.click();
+  }, []);
+
+  const handleSingleStateDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      const picked = event.dataTransfer.files?.[0];
+      if (picked) handleSingleStateFile(picked);
+    },
+    [handleSingleStateFile],
   );
 
-  const audioFamilyNames = useMemo(
-    () => generatedFamilies
-      .filter((family) => family.audioPath || family.audioSrc)
-      .map((family) => family.family),
-    [generatedFamilies],
-  );
+  const handleOpenSingleStateDialog = useCallback(() => {
+    setSingleStateDialogOpen(true);
+    setSingleStateStep(0);
+  }, []);
 
+  const handleCloseSingleStateDialog = useCallback(() => {
+    setSingleStateDialogOpen(false);
+  }, []);
+
+  const handleSingleStateGenerate = useCallback(async () => {
+    if (!record || !activeRecord?.ok || singleStateStatus === "generating") return;
+    if (record.type === "builtin") {
+      setSingleStateStatus("error");
+      setSingleStateMessage("内置形象不能直接替换单个状态，请先创建自定义形象后再编辑。");
+      return;
+    }
+    if (!singleStateImageFile) {
+      setSingleStateStatus("error");
+      setSingleStateMessage("请先上传当前状态的参考图片。");
+      return;
+    }
+    const prompt = singleStatePrompt.trim();
+    if (!prompt) {
+      setSingleStateStatus("error");
+      setSingleStateMessage("请填写用于生成当前状态视频的 prompt。");
+      return;
+    }
+    if (singleStateGenerationReadyIssue) {
+      setSingleStateStatus("error");
+      setSingleStateMessage(singleStateGenerationReadyIssue);
+      return;
+    }
+
+    persistSingleStateProviderConfig();
+    const trimmedModel = model.trim();
+    const providerConfig = {
+      provider: providerId,
+      apiKey,
+      accessKey,
+      secretKey,
+      baseUrl: isVolcengine ? VOLCENGINE_BASE_URL : baseUrl,
+      model: trimmedModel,
+      thinkingModel: isVolcengine ? VOLCENGINE_THINKING_MODEL : thinkingModel.trim() || trimmedModel,
+      fastGeneration,
+      advanced:
+        providerId === "custom"
+          ? {
+              ...advanced,
+              authHeader: openaiCompat ? "Authorization" : advanced.authHeader,
+              authPrefix: openaiCompat ? "Bearer" : advanced.authPrefix,
+            }
+          : undefined,
+    };
+
+    setSingleStateStatus("generating");
+    setSingleStateMessage(`正在生成 ${activeRecord.family} 状态素材…`);
+    try {
+      const result = await runSingleFamilyVideo({
+        imageFile: singleStateImageFile,
+        family: activeRecord.family,
+        prompt,
+        providerConfig,
+        skipProcessing: !removeBg,
+        onProgress: (progress) => {
+          if (progress?.message) setSingleStateMessage(progress.message);
+        },
+      });
+      const nextRecord = await replaceFamilyVideo({
+        appearanceId: record.id,
+        family: activeRecord.family,
+        videoBytes: result.family.videoBytes,
+        taskId: result.family.taskId,
+        videoUrl: result.family.videoUrl,
+        prompt: result.family.prompt,
+      });
+      setRecord(nextRecord);
+      setSingleStateStatus("success");
+      setSingleStateMessage(`已替换 ${activeRecord.family} 状态素材。需要在设备生效时，点击“替换到板端”。`);
+    } catch (generationFailure) {
+      console.error(generationFailure);
+      setSingleStateStatus("error");
+      setSingleStateMessage(generationFailure?.message || String(generationFailure));
+    }
+  }, [
+    activeRecord,
+    record,
+    singleStateImageFile,
+    singleStatePrompt,
+    singleStateStatus,
+    singleStateGenerationReadyIssue,
+    persistSingleStateProviderConfig,
+    providerId,
+    isVolcengine,
+    apiKey,
+    accessKey,
+    secretKey,
+    baseUrl,
+    model,
+    thinkingModel,
+    fastGeneration,
+    advanced,
+    openaiCompat,
+    removeBg,
+  ]);
+
+  const handleSyncSingleStateToDevice = useCallback(async () => {
+    if (!record || singleStateStatus === "syncing") return;
+    if (!hasTauriRuntime()) {
+      setSingleStateStatus("error");
+      setSingleStateMessage("当前不是桌面客户端运行环境，无法替换到板端。");
+      return;
+    }
+
+    setSingleStateStatus("syncing");
+    setSingleStateMessage("正在通过素材 OTA 通道替换到板端…");
+    try {
+      const result = await invoke("usb_sync_appearance", { appearanceId: record.id });
+      if (!result?.ok) {
+        throw new Error(result?.error || "设备未确认素材替换");
+      }
+      setSingleStateStatus("synced");
+      setSingleStateMessage(`已替换到板端（${result.fileCount || 0} 个素材，${result.byteCount || 0} bytes）。`);
+    } catch (syncFailure) {
+      console.error(syncFailure);
+      setSingleStateStatus("error");
+      setSingleStateMessage(syncFailure?.message || String(syncFailure));
+    }
+  }, [record, singleStateStatus]);
 
   if (error) {
     return (
@@ -281,7 +598,6 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     );
   }
 
-  const activeRecord = familyByName.get(activeFamily);
   const activePreviewMedia = activeRecord?.ok
     ? mediaFromFamily(activeRecord, record) ||
       mediaFromSourcePreview(record) ||
@@ -290,6 +606,14 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const isBuiltin = record.type === "builtin";
   const canEditAudio = activeRecord?.ok;
   const audioInputId = `audio-cue-${record.id}-${activeFamily || "none"}`;
+  const singleStateBusy = singleStateStatus === "generating" || singleStateStatus === "syncing";
+  const canRegenerateState = activeRecord?.ok && !isBuiltin && !singleStateBusy;
+  const canSyncSingleState = !isBuiltin && (singleStateStatus === "success" || singleStateStatus === "synced");
+  const singleStateStartIssue = !singleStateImageFile
+    ? "请先上传当前状态的参考图片。"
+    : !singleStatePrompt.trim()
+      ? "请填写用于生成当前状态视频的 prompt。"
+      : singleStateGenerationReadyIssue;
 
   return (
     <div className="page page-appearance-detail">
@@ -347,177 +671,399 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
         </div>
       )}
 
-      <div className="detail-grid">
-        <div className="detail-media">
-          {activeRecord?.ok && activePreviewMedia ? (
-            <AppearancePreview
-              media={activePreviewMedia}
-              className="detail-media__video"
-              emptyClassName="detail-media__video detail-media__video--empty"
-              playing
-            />
-          ) : (
-            <div
-              className="detail-media__video"
-              style={{ display: "grid", placeItems: "center", color: "#888", background: "#f4f5f7" }}
-            >
-              {generatedFamilies.length === 0 ? (
-                <div style={{ textAlign: "center", padding: 16 }}>
-                  <AlertCircle size={28} />
-                  <div style={{ marginTop: 8 }}>暂无可用动画素材</div>
-                  <div className="muted small" style={{ marginTop: 4, maxWidth: 360 }}>
-                    这个形象没有成功生成的 family，请返回宠物图册重新创建。
+      <div className="detail-workspace">
+        <div className="detail-preview-panel">
+          <div className="detail-media">
+            {activeRecord?.ok && activePreviewMedia ? (
+              <AppearancePreview
+                media={activePreviewMedia}
+                className="detail-media__video"
+                emptyClassName="detail-media__video detail-media__video--empty"
+                playing
+              />
+            ) : (
+              <div
+                className="detail-media__video"
+                style={{ display: "grid", placeItems: "center", color: "#888", background: "#f4f5f7" }}
+              >
+                {generatedFamilies.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: 16 }}>
+                    <AlertCircle size={28} />
+                    <div style={{ marginTop: 8 }}>暂无可用动画素材</div>
+                    <div className="muted small" style={{ marginTop: 4, maxWidth: 360 }}>
+                      这个形象没有成功生成的 family，请返回宠物图册重新创建。
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div>暂无可预览素材</div>
-              )}
+                ) : (
+                  <div>暂无可预览素材</div>
+                )}
+              </div>
+            )}
+            <div className="detail-media__label">
+              <span>{activeRecord?.family || "—"} · {activeRecord?.ok ? "已生成" : "暂无素材"}</span>
+              <span>{record.name}</span>
             </div>
-          )}
-          <div className="detail-media__label">
-            {activeRecord?.family || "—"} · {activeRecord?.ok ? "已生成" : "暂无素材"}
           </div>
+
+          <section className="detail-state-rail-section">
+            <div className="detail-section-heading">
+              <h4>全部状态</h4>
+              <span className="muted small">{generatedFamilies.length} 个已生成素材</span>
+            </div>
+            {generatedFamilies.length === 0 ? (
+              <div className="empty-state">
+                <div>
+                  <strong>暂无可用素材</strong>
+                </div>
+                <div className="muted small">未成功生成的 family 已隐藏。</div>
+              </div>
+            ) : (
+              <div className="detail-state-rail">
+                {generatedFamilies.map((familyRecord) => {
+                  const definition =
+                    FAMILIES.find((item) => item.family === familyRecord.family) || {
+                      family: familyRecord.family,
+                      label: familyRecord.family,
+                    };
+                  const isActive = activeFamily === familyRecord.family;
+                  return (
+                    <button
+                      key={familyRecord.family}
+                      type="button"
+                      className={`state-card${isActive ? " active" : ""}`}
+                      onClick={() => setActiveFamily(familyRecord.family)}
+                    >
+                      <span className="state-card__thumb">
+                        <AppearancePreview
+                          media={mediaFromFamily(familyRecord)}
+                          className="state-card__media"
+                          emptyClassName="state-card__media state-card__media--empty"
+                        />
+                      </span>
+                      <span className="state-card__family">{familyRecord.family}</span>
+                      <span className="state-card__hint">{definition.label}</span>
+                      {(familyRecord.audioPath || familyRecord.audioSrc) && (
+                        <span className="state-card__sound">提示音</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
         </div>
 
-        <div className="detail-meta">
+        <aside className="detail-control-panel" aria-label="当前状态控制">
+          <div className="detail-control-panel__header">
+            <span className="muted small">当前状态</span>
+            <strong>{activeRecord?.family || "—"}</strong>
+          </div>
+          {activeRecord?.ok && (
+            <section className="detail-side-section detail-side-section--audio">
+              <div className="detail-audio-config">
+                <div className="detail-audio-config__header">
+                  <span>
+                    <Volume2 size={15} />
+                    状态提示音
+                  </span>
+                  <span className="muted small">{activeRecord.family}</span>
+                </div>
+                {audioUrl ? (
+                  <audio className="detail-audio-config__player" src={audioUrl} controls />
+                ) : (
+                  <div className="muted small">
+                    当前状态 {activeRecord.family} 还没有提示音。
+                    {audioFamilyNames.length > 0
+                      ? ` 已有提示音: ${audioFamilyNames.join(" / ")}。请选择对应状态试听，或为当前状态上传 WAV。`
+                      : ""}
+                  </div>
+                )}
+                {audioErr && (
+                  <div className="message-banner message-banner--error">
+                    <AlertCircle size={14} /> {audioErr}
+                  </div>
+                )}
+                {(audioSyncDirty || audioSyncMessage) && (
+                  <div
+                    className={`message-banner detail-audio-sync-message ${
+                      audioSyncState === "error"
+                        ? "message-banner--error"
+                        : audioSyncState === "success"
+                          ? "message-banner--success"
+                          : "message-banner--warning"
+                    }`}
+                  >
+                    {audioSyncState === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
+                    {audioSyncMessage || "音效已保存到客户端，需要通过板端音效 OTA 通道下发到设备后才会生效。"}
+                  </div>
+                )}
+                <div className="detail-audio-config__actions">
+                  <input
+                    id={audioInputId}
+                    className="detail-audio-config__input"
+                    type="file"
+                    accept="audio/wav,audio/x-wav,.wav"
+                    onChange={handleAudioFileChange}
+                    disabled={!canEditAudio || audioState === "saving"}
+                  />
+                  <label
+                    className={`btn-ghost${canEditAudio ? "" : " is-disabled"}`}
+                    htmlFor={canEditAudio ? audioInputId : undefined}
+                  >
+                    {audioState === "saving" ? <Loader size={14} className="spin" /> : <Upload size={14} />}
+                    上传 WAV
+                  </label>
+                  {audioUrl && canEditAudio && !activeRecord.audioDefault && (
+                    <button
+                      className="btn-ghost danger"
+                      type="button"
+                      onClick={handleRemoveAudioCue}
+                      disabled={audioState === "saving"}
+                    >
+                      <Trash2 size={14} />
+                      移除提示音
+                    </button>
+                  )}
+                </div>
+                {isBuiltin && (
+                  <div className="muted small">
+                    未上传时使用默认提示音；上传后会优先使用你的配置。
+                  </div>
+                )}
+                {!isBuiltin && activeRecord.audioDefault && (
+                  <div className="muted small">
+                    未上传时使用默认提示音；上传后会优先使用你的配置。
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+          {activeRecord?.ok && (
+            <section className="detail-side-section detail-side-section--regenerate">
+              <div className="detail-state-regenerate-entry">
+                <div className="detail-state-regenerate-entry__header">
+                  <span className="detail-state-regenerate-entry__title">
+                    <ImageUp size={15} />
+                    单状态重生成
+                  </span>
+                  <span className="muted small">{activeRecord.family}</span>
+                </div>
+                <div className="muted small">
+                  上传一张参考图并调整 prompt，只重新生成当前状态；生成配置沿用创建形象的向导样式。
+                </div>
+                <div className="detail-state-regenerate-entry__actions">
+                  <button
+                    className="detail-state-regenerate-entry__cta"
+                    type="button"
+                    onClick={handleOpenSingleStateDialog}
+                    disabled={!canRegenerateState}
+                  >
+                    {singleStateBusy ? <Loader size={14} className="spin" /> : <ImageUp size={14} />}
+                    <span>重新生成当前状态</span>
+                  </button>
+                  {canSyncSingleState && (
+                    <button
+                      className="btn-primary"
+                      type="button"
+                      onClick={handleSyncSingleStateToDevice}
+                      disabled={singleStateBusy}
+                    >
+                      {singleStateStatus === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
+                      替换到板端
+                    </button>
+                  )}
+                </div>
+                {(singleStateMessage || isBuiltin) && (
+                  <div
+                    className={`message-banner detail-state-regenerate-entry__message ${
+                      singleStateStatus === "error"
+                        ? "message-banner--error"
+                        : singleStateStatus === "success" || singleStateStatus === "synced"
+                          ? "message-banner--success"
+                          : "message-banner--muted"
+                    }`}
+                  >
+                    {singleStateStatus === "generating" || singleStateStatus === "syncing" ? (
+                      <Loader size={14} className="spin" />
+                    ) : (
+                      <AlertCircle size={14} />
+                    )}
+                    {singleStateMessage || "内置形象不能直接替换单个状态，请先创建自定义形象后再编辑。"}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </aside>
+      </div>
+
+      <details className="detail-context-drawer" open>
+        <summary>
+          <span>形象信息</span>
+          <span className="muted small">来源、模型与生成路径</span>
+        </summary>
+        <section className="detail-summary-card">
           <h2>{record.name}</h2>
-          {record.description && <div className="muted small">{record.description}</div>}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
+          {record.description && <div className="detail-summary-card__description">{record.description}</div>}
+          <div className="detail-summary-card__meta">
             <span className="pill" style={{ background: "var(--accent-soft)", color: "var(--accent-strong)" }}>
               {appearanceSourceLabel(record)}
             </span>
             <span className="muted small">
               {record.provider || "—"} · {record.model || "—"}
             </span>
+            <span className="muted small">
+              生成时间：{new Date(record.created_at).toLocaleString()}
+            </span>
           </div>
           <div className="path">{record.absolute_dir}</div>
-          <div className="muted small">
-            生成时间：{new Date(record.created_at).toLocaleString()}
-          </div>
-          {activeRecord?.ok && (
-            <div className="detail-audio-config">
-              <div className="detail-audio-config__header">
-                <span>
-                  <Volume2 size={15} />
-                  状态提示音
-                </span>
-                <span className="muted small">{activeRecord.family}</span>
+        </section>
+      </details>
+
+      {singleStateDialogOpen && activeRecord?.ok && (
+        <div className="modal-backdrop" onClick={handleCloseSingleStateDialog}>
+          <div
+            className="modal-card modal-card--wide single-state-regenerate-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="single-state-regenerate-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h3 id="single-state-regenerate-title" className="modal-title">
+                  单状态重生成
+                </h3>
+                <div className="modal-subtitle">
+                  当前状态：{activeRecord.family}。关闭弹窗不会取消生成，完成后会先替换客户端素材，再由“替换到板端”下发。
+                </div>
               </div>
-              {audioUrl ? (
-                <audio className="detail-audio-config__player" src={audioUrl} controls />
-              ) : (
-                <div className="muted small">
-                  当前状态 {activeRecord.family} 还没有提示音。
-                  {audioFamilyNames.length > 0
-                    ? ` 已有提示音: ${audioFamilyNames.join(" / ")}。请选择对应状态试听，或为当前状态上传 WAV。`
-                    : ""}
+              <button
+                className="icon-btn"
+                type="button"
+                onClick={handleCloseSingleStateDialog}
+                aria-label="关闭单状态重生成"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="ca-wizard single-state-regenerate-modal__wizard">
+                <div className="ca-tabs">
+                  {["上传参考图", "生成配置"].map((label, index) => (
+                    <div
+                      key={label}
+                      className={`ca-tab ${singleStateStep === index ? "active" : singleStateStep > index ? "done" : ""}`}
+                    >
+                      {singleStateStep > index ? "OK" : index + 1} · {label}
+                    </div>
+                  ))}
                 </div>
-              )}
-              {audioErr && (
-                <div className="message-banner message-banner--error">
-                  <AlertCircle size={14} /> {audioErr}
-                </div>
-              )}
-              {(audioSyncDirty || audioSyncMessage) && (
-                <div
-                  className={`message-banner detail-audio-sync-message ${
-                    audioSyncState === "error"
-                      ? "message-banner--error"
-                      : audioSyncState === "success"
-                        ? "message-banner--success"
-                        : "message-banner--warning"
-                  }`}
-                >
-                  {audioSyncState === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
-                  {audioSyncMessage || "音效已保存到客户端，需要通过板端音效 OTA 通道下发到设备后才会生效。"}
-                </div>
-              )}
-              <div className="detail-audio-config__actions">
-                <input
-                  id={audioInputId}
-                  className="detail-audio-config__input"
-                  type="file"
-                  accept="audio/wav,audio/x-wav,.wav"
-                  onChange={handleAudioFileChange}
-                  disabled={!canEditAudio || audioState === "saving"}
-                />
-                <label
-                  className={`btn-ghost${canEditAudio ? "" : " is-disabled"}`}
-                  htmlFor={canEditAudio ? audioInputId : undefined}
-                >
-                  {audioState === "saving" ? <Loader size={14} className="spin" /> : <Upload size={14} />}
-                  上传 WAV
-                </label>
-                {audioUrl && canEditAudio && !activeRecord.audioDefault && (
-                  <button
-                    className="btn-ghost danger"
-                    type="button"
-                    onClick={handleRemoveAudioCue}
-                    disabled={audioState === "saving"}
+
+                {singleStateStep === 0 && (
+                  <AvatarWizardStep1
+                    file={singleStateImageFile}
+                    previewUrl={singleStateImagePreview}
+                    appearanceName={record.name}
+                    personality=""
+                    onAppearanceName={() => {}}
+                    onPersonality={() => {}}
+                    onPickClick={handleSingleStatePickClick}
+                    onDrop={handleSingleStateDrop}
+                    inputRef={singleStateInputRef}
+                    onFileChange={handleSingleStateFile}
+                    onCancel={handleCloseSingleStateDialog}
+                    canAdvance={Boolean(singleStateImageFile) && !isBuiltin}
+                    onNext={() => setSingleStateStep(1)}
+                    title={`第 1 步 · 上传 ${activeRecord.family} 参考图`}
+                    identityFields={false}
+                    cancelLabel="关闭"
+                    nextLabel="下一步：生成配置"
                   >
-                    <Trash2 size={14} />
-                    移除提示音
-                  </button>
+                    <div className="field single-state-regenerate-modal__prompt">
+                      <label className="field-label">当前状态 prompt</label>
+                      <textarea
+                        className="field-input"
+                        value={singleStatePrompt}
+                        onChange={(event) => setSingleStatePrompt(event.target.value)}
+                        disabled={singleStateBusy}
+                        placeholder="描述这个状态要生成的动作，例如：小八猫趴在纸箱里认真写字，保持黑色背景，循环动画。"
+                      />
+                    </div>
+                  </AvatarWizardStep1>
+                )}
+
+                {singleStateStep === 1 && (
+                  <AvatarWizardStep2
+                    providerId={providerId}
+                    apiKey={apiKey}
+                    onApiKey={setApiKey}
+                    accessKey={accessKey}
+                    onAccessKey={setAccessKey}
+                    secretKey={secretKey}
+                    onSecretKey={setSecretKey}
+                    baseUrl={baseUrl}
+                    onBaseUrl={setBaseUrl}
+                    model={model}
+                    onModel={setModel}
+                    advancedOpen={advancedOpen}
+                    onAdvancedOpen={setAdvancedOpen}
+                    openaiCompat={openaiCompat}
+                    onOpenaiCompat={setOpenaiCompat}
+                    advanced={advanced}
+                    onAdvanced={setAdvanced}
+                    testFeedback={testFeedback}
+                    onPickProvider={setProviderId}
+                    onTestConnection={handleSingleStateTestConnection}
+                    canStart={!singleStateStartIssue && canRegenerateState}
+                    generationReadyIssue={singleStateStartIssue}
+                    submitError={singleStateStatus === "error" ? singleStateMessage : ""}
+                    removeBg={removeBg}
+                    onRemoveBg={setRemoveBg}
+                    fastGeneration={fastGeneration}
+                    onFastGeneration={setFastGeneration}
+                    onBack={() => setSingleStateStep(0)}
+                    onStart={handleSingleStateGenerate}
+                    title={`第 2 步 · 生成 ${activeRecord.family}`}
+                    startLabel="生成并替换当前状态"
+                  />
+                )}
+
+                {singleStateStatus !== "error" && singleStateMessage && (
+                  <div
+                    className={`message-banner single-state-regenerate-modal__message ${
+                      singleStateStatus === "success" || singleStateStatus === "synced"
+                        ? "message-banner--success"
+                        : "message-banner--muted"
+                    }`}
+                  >
+                    {singleStateBusy ? <Loader size={14} className="spin" /> : <AlertCircle size={14} />}
+                    {singleStateMessage}
+                  </div>
                 )}
               </div>
-              {isBuiltin && (
-                <div className="muted small">
-                  未上传时使用默认提示音；上传后会优先使用你的配置。
-                </div>
-              )}
-              {!isBuiltin && activeRecord.audioDefault && (
-                <div className="muted small">
-                  未上传时使用默认提示音；上传后会优先使用你的配置。
-                </div>
-              )}
             </div>
-          )}
+            <div className="single-state-regenerate-modal__footer">
+              <button
+                className="btn-ghost"
+                type="button"
+                onClick={handleCloseSingleStateDialog}
+              >
+                关闭
+              </button>
+              <button
+                className="btn-primary"
+                type="button"
+                onClick={handleSyncSingleStateToDevice}
+                disabled={!canSyncSingleState || singleStateBusy}
+              >
+                {singleStateStatus === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
+                替换到板端
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div>
-        <h4 style={{ margin: "18px 0 6px", fontSize: 13.5 }}>全部素材（{generatedFamilies.length}）</h4>
-        {generatedFamilies.length === 0 ? (
-          <div className="empty-state">
-            <div>
-              <strong>暂无可用素材</strong>
-            </div>
-            <div className="muted small">未成功生成的 family 已隐藏。</div>
-          </div>
-        ) : (
-          <div className="detail-states">
-            {generatedFamilies.map((familyRecord) => {
-              const definition =
-                FAMILIES.find((item) => item.family === familyRecord.family) || {
-                  family: familyRecord.family,
-                  label: familyRecord.family,
-                };
-              const isActive = activeFamily === familyRecord.family;
-              return (
-                <button
-                  key={familyRecord.family}
-                  type="button"
-                  className={`state-card${isActive ? " active" : ""}`}
-                  onClick={() => setActiveFamily(familyRecord.family)}
-                >
-                  <span className="state-card__thumb">
-                    <AppearancePreview
-                      media={mediaFromFamily(familyRecord)}
-                      className="state-card__media"
-                      emptyClassName="state-card__media state-card__media--empty"
-                    />
-                  </span>
-                  <span className="state-card__family">{familyRecord.family}</span>
-                  <span className="state-card__hint">{definition.label}</span>
-                  {(familyRecord.audioPath || familyRecord.audioSrc) && (
-                    <span className="state-card__sound">提示音</span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

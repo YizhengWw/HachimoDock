@@ -13,7 +13,9 @@
   "runtimeContracts": [
     ".current-state",
     ".current-event",
-    ".current-speech"
+    ".current-speech",
+    ".screen-interrupt",
+    ".welcome-trigger"
   ],
   "sizes": {
     "assetsBytes": 5661084,

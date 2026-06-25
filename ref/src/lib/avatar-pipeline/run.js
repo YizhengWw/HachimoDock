@@ -1,16 +1,16 @@
 /**
  * [Input] image + provider config + onProgress callback + AbortSignal.
- * [Output] orchestrates Ark Responses thinking model + low-resolution N family video tasks in parallel;
- *          resolves with per-family results.
+ * [Output] orchestrates Ark Responses thinking model + low-resolution custom-generation family video tasks in parallel,
+ *          or a user-prompted single-family retry that replaces one state.
  * [Pos] orchestrator node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
 
-import { FAMILIES } from "./families.js";
+import { CUSTOM_GENERATION_FAMILIES, FAMILIES } from "./families.js";
 import { buildImagePayload, bytesToDataUrl, uint8ToBase64 } from "./image.js";
 import { processImageForPipeline } from "./image-processing.js";
 import { resolveGenerationSpeedConfig } from "./pipeline-defaults.js";
-import { buildDryRunResponse, normalizePromptResponse } from "./prompts.js";
+import { buildDryRunResponse, normalizeFamilies, normalizePromptResponse } from "./prompts.js";
 import { callThinkingModel, DEFAULT_THINKING_MODEL } from "./thinking-model.js";
 import { runVolcanoFamily } from "./providers/volcano.js";
 import { runKlingFamily } from "./providers/kling.js";
@@ -30,6 +30,207 @@ export function resolveThinkingModelName(providerConfig = {}) {
     }
   }
   return thinkingModel || model || DEFAULT_THINKING_MODEL;
+}
+
+function resolveFamilyDefinition(family) {
+  if (family && typeof family === "object") return normalizeFamilies([family])[0];
+  const familyId = String(family || "").trim();
+  const known = FAMILIES.find((item) => item.family === familyId);
+  if (!known) throw new Error(`unknown family: ${familyId || "(empty)"}`);
+  return normalizeFamilies([known])[0];
+}
+
+export function buildSingleFamilyManifest({ family, prompt }) {
+  const familyDef = resolveFamilyDefinition(family);
+  const normalizedPrompt = String(prompt || "").trim();
+  if (!normalizedPrompt) throw new Error("单状态重生成需要填写 prompt");
+  return {
+    manifest_version: 1,
+    mode: "single_family_video",
+    persona: {},
+    entries: [
+      {
+        ...familyDef,
+        prompt: normalizedPrompt,
+        variation_notes: "user supplied single-state prompt",
+      },
+    ],
+  };
+}
+
+async function buildRuntimeImagePayload({
+  imageFile,
+  runtimeConfig,
+  signal,
+  onProgress,
+  skipProcessing,
+  dryRun,
+}) {
+  const originalImagePayload = await buildImagePayload(imageFile);
+  if (skipProcessing || dryRun) return originalImagePayload;
+
+  const processed = await processImageForPipeline(imageFile, {
+    maxDimension: runtimeConfig.imageMaxDimension,
+    signal,
+    onProgress,
+  });
+  const processedMime = "image/png";
+  const processedBase64 = uint8ToBase64(processed.processedBytes);
+  return {
+    bytes: processed.processedBytes,
+    mime: processedMime,
+    base64: processedBase64,
+    dataUrl: `data:${processedMime};base64,${processedBase64}`,
+    filename: originalImagePayload.filename,
+  };
+}
+
+async function runProviderFamily({
+  providerConfig,
+  prompt,
+  imagePayload,
+  signal,
+  onStage,
+}) {
+  if (providerConfig.provider === "kling") {
+    return runKlingFamily({
+      config: {
+        accessKey: providerConfig.accessKey || providerConfig.apiKey,
+        secretKey: providerConfig.secretKey,
+        baseUrl: providerConfig.baseUrl,
+        model: providerConfig.model,
+        mode: providerConfig.mode,
+        duration: providerConfig.duration,
+      },
+      prompt,
+      imageBase64: imagePayload.base64,
+      signal,
+      onStage,
+    });
+  }
+  if (providerConfig.provider === "custom") {
+    return runCustomFamily({
+      config: {
+        apiKey: providerConfig.apiKey,
+        baseUrl: providerConfig.baseUrl,
+        model: providerConfig.model,
+        advanced: providerConfig.advanced,
+      },
+      prompt,
+      imageDataUrl: imagePayload.dataUrl,
+      signal,
+      onStage,
+    });
+  }
+  return runVolcanoFamily({
+    config: {
+      apiKey: providerConfig.apiKey,
+      baseUrl: providerConfig.baseUrl,
+      model: providerConfig.model,
+      duration: providerConfig.duration,
+      ratio: providerConfig.ratio,
+      resolution: providerConfig.resolution,
+      generateAudio: providerConfig.generateAudio,
+      watermark: providerConfig.watermark,
+    },
+    prompt,
+    imageDataUrl: imagePayload.dataUrl,
+    signal,
+    onStage,
+  });
+}
+
+export async function runSingleFamilyVideo({
+  imageFile,
+  family,
+  prompt,
+  providerConfig,
+  signal,
+  onProgress,
+  dryRun = false,
+  skipProcessing = false,
+}) {
+  if (!imageFile) throw new Error("imageFile is required");
+  if (!providerConfig) throw new Error("providerConfig is required");
+  const manifest = buildSingleFamilyManifest({ family, prompt });
+  const entry = manifest.entries[0];
+  const runtimeConfig = resolveGenerationSpeedConfig(providerConfig);
+  const effectiveProviderConfig = runtimeConfig.providerConfig;
+
+  const emit = (patch) => {
+    onProgress?.({
+      family: entry.family,
+      stage: "processing",
+      message: "正在处理图片（去除背景并合成黑底）…",
+      ...patch,
+    });
+  };
+
+  emit({ stage: "processing" });
+  const imagePayload = await buildRuntimeImagePayload({
+    imageFile,
+    runtimeConfig,
+    signal,
+    skipProcessing,
+    dryRun,
+    onProgress: (stage) => {
+      const labels = {
+        removing_bg: "正在去除背景…",
+        compositing: "正在合成黑色背景…",
+        done: "图片处理完成",
+      };
+      emit({ stage: "processing", message: labels[stage] || "处理中…" });
+    },
+  });
+
+  emit({ stage: "generating", status: "submitting", message: `正在生成 ${entry.family} 状态视频…` });
+
+  let result;
+  if (dryRun) {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    result = {
+      taskId: `dry-run-${entry.family}`,
+      videoBytes: new Uint8Array([0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70]),
+      videoUrl: "dry-run://placeholder",
+      raw: { dry_run: true },
+    };
+  } else {
+    result = await runProviderFamily({
+      providerConfig: effectiveProviderConfig,
+      prompt: entry.prompt,
+      imagePayload,
+      signal,
+      onStage: ({ stage, detail }) => {
+        const stageLabels = {
+          submitting: "正在提交视频生成任务…",
+          polling: "正在等待视频生成完成…",
+          downloading: "正在下载生成结果…",
+          done: "单状态视频生成完成",
+        };
+        emit({
+          stage: "generating",
+          status: stage,
+          taskId: detail?.taskId,
+          message: stageLabels[stage] || "正在生成视频…",
+        });
+      },
+    });
+  }
+
+  emit({ stage: "done", status: "done", taskId: result.taskId, message: "单状态视频生成完成" });
+  return {
+    persona: {},
+    manifest,
+    imagePayload,
+    family: {
+      family: entry.family,
+      prompt: entry.prompt,
+      ok: true,
+      videoBytes: result.videoBytes,
+      taskId: result.taskId,
+      videoUrl: result.videoUrl,
+    },
+  };
 }
 
 /**
@@ -105,13 +306,14 @@ export async function runAvatarPipeline({
   if (!providerConfig) throw new Error("providerConfig is required");
   const runtimeConfig = resolveGenerationSpeedConfig(providerConfig);
   const effectiveProviderConfig = runtimeConfig.providerConfig;
+  const generationFamilies = CUSTOM_GENERATION_FAMILIES;
 
-  const total = FAMILIES.length;
+  const total = generationFamilies.length;
   const progress = {
     stage: "processing",
     completed: 0,
     total,
-    families: newFamilyState(FAMILIES),
+    families: newFamilyState(generationFamilies),
     message: "正在处理图片（去除背景）…",
   };
   const emit = () => onProgress?.({ ...progress, families: { ...progress.families } });
@@ -155,9 +357,10 @@ export async function runAvatarPipeline({
 
   let thinkingResult;
   if (dryRun) {
+    const dryRunResponse = buildDryRunResponse({ families: generationFamilies, sourceImageName: imageFile.name });
     thinkingResult = {
-      persona: buildDryRunResponse({ families: FAMILIES, sourceImageName: imageFile.name }).persona,
-      prompts: buildDryRunResponse({ families: FAMILIES, sourceImageName: imageFile.name }).prompts,
+      persona: dryRunResponse.persona,
+      prompts: dryRunResponse.prompts,
       raw: { dry_run: true },
     };
   } else {
@@ -169,6 +372,7 @@ export async function runAvatarPipeline({
         apiUrlOverride: effectiveProviderConfig.thinkingApiUrl,
       },
       image: imagePayload,
+      families: generationFamilies,
       appearanceName,
       personality,
       signal,
@@ -177,7 +381,7 @@ export async function runAvatarPipeline({
 
   const manifest = normalizePromptResponse({
     response: thinkingResult,
-    families: FAMILIES,
+    families: generationFamilies,
   });
 
   // 2) Submit + poll + download per family with bounded concurrency.

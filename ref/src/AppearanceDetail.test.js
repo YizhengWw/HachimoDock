@@ -1,8 +1,8 @@
 /**
  * [Input] Appearance detail source and shared stylesheet.
  * [Output] Static Node test coverage for detail navigation, guarded deletion,
- *          configurable state WAV cues, editable built-in audio overrides, built-in non-deletable records, generated-only materials,
- *          and codex pet source labels.
+ *          task-focused preview-first layout, configurable state WAV cues, closable background single-state generation,
+ *          built-in non-deletable records, generated-only materials, and codex pet source labels.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -17,6 +17,13 @@ const srcDir = dirname(fileURLToPath(import.meta.url));
 
 function readSource(fileName) {
   return readFileSync(join(srcDir, fileName), "utf8");
+}
+
+function extractCssRule(css, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`));
+  assert.ok(match, `Expected to find ${selector} CSS rule`);
+  return match.groups.body;
 }
 
 test("appearance detail stays focused on preview, deletion, and gallery navigation", () => {
@@ -79,6 +86,31 @@ test("appearance detail lets users configure a WAV cue for each generated state"
   assert.match(css, /\.state-card__sound\s*\{/);
 });
 
+test("appearance detail uses a preview-first workspace with controls beside it", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+  const audioRule = extractCssRule(css, ".detail-audio-config");
+
+  assert.match(source, /detail-workspace/);
+  assert.match(source, /detail-preview-panel/);
+  assert.match(source, /detail-control-panel/);
+  assert.match(source, /detail-context-drawer/);
+  assert.match(source, /detail-state-rail/);
+  assert.match(source, /detail-summary-card/);
+  assert.match(source, /detail-side-section detail-side-section--audio/);
+  assert.match(source, /detail-side-section detail-side-section--regenerate/);
+  assert.match(source, /detail-summary-card__description/);
+  assert.match(source, /detail-summary-card__meta/);
+  assert.match(css, /\.detail-workspace\s*\{[\s\S]*grid-template-columns:\s*minmax\(480px,\s*1fr\) minmax\(340px,\s*420px\);/);
+  assert.match(css, /\.detail-control-panel\s*\{[\s\S]*position:\s*sticky;/);
+  assert.match(css, /\.detail-context-drawer\s*\{[\s\S]*margin-top:\s*16px;/);
+  assert.match(css, /\.detail-state-rail\s*\{[\s\S]*grid-auto-flow:\s*column;/);
+  assert.doesNotMatch(css, /\.detail-meta\s*\{/);
+  assert.match(css, /\.detail-summary-card\s*\{/);
+  assert.match(css, /\.detail-side-section\s*\{[\s\S]*padding:\s*16px;/);
+  assert.doesNotMatch(audioRule, /padding-top:\s*12px;/);
+});
+
 test("appearance detail persists audio OTA reminders and exposes the sound downlink action", () => {
   const source = readSource("AppearanceDetail.jsx");
   const css = readSource("styles.css");
@@ -98,6 +130,62 @@ test("appearance detail persists audio OTA reminders and exposes the sound downl
   assert.match(css, /\.detail-audio-sync-message\s*\{/);
 });
 
+test("appearance detail can regenerate one selected state and replace it on the board", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const wizard = readSource("CustomAvatarWizard.jsx");
+  const css = readSource("styles.css");
+  const regenerateCtaRule = extractCssRule(css, ".detail-state-regenerate-entry__cta");
+
+  assert.match(source, /AvatarWizardStep1/);
+  assert.match(source, /AvatarWizardStep2/);
+  assert.match(source, /runSingleFamilyVideo/);
+  assert.match(source, /replaceFamilyVideo/);
+  assert.match(source, /saveProviderConfig/);
+  assert.match(source, /handleSingleStateGenerate/);
+  assert.match(source, /handleSyncSingleStateToDevice/);
+  assert.match(wizard, /accept="image\/png,image\/jpeg,image\/webp,image\/gif,image\/\*"/);
+  assert.match(source, /单状态重生成/);
+  assert.match(source, /重新生成当前状态/);
+  assert.match(source, /singleStateDialogOpen/);
+  assert.match(source, /single-state-regenerate-modal/);
+  assert.match(source, /<AvatarWizardStep1[\s\S]*identityFields=\{false\}/);
+  assert.match(source, /<AvatarWizardStep2[\s\S]*startLabel="生成并替换当前状态"/);
+  assert.match(source, /生成并替换当前状态/);
+  assert.match(source, /替换到板端/);
+  assert.match(source, /usb_sync_appearance/);
+  assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeRecord\.family/);
+  assert.match(source, /runSingleFamilyVideo\(\{[\s\S]*family: activeRecord\.family/);
+  assert.match(css, /\.detail-state-regenerate-entry\s*\{/);
+  assert.match(source, /detail-state-regenerate-entry__cta/);
+  assert.match(css, /\.detail-state-regenerate-entry__cta\s*\{/);
+  assert.doesNotMatch(regenerateCtaRule, /width:\s*100%;/);
+  assert.match(regenerateCtaRule, /min-height:\s*40px;/);
+  assert.match(regenerateCtaRule, /background:\s*var\(--accent-soft\);/);
+  assert.match(css, /\.detail-state-regenerate-entry__cta:hover:not\(:disabled\)\s*\{/);
+  assert.match(css, /\.single-state-regenerate-modal\s*\{/);
+  assert.doesNotMatch(source, /detail-state-regenerate__preview/);
+  assert.doesNotMatch(css, /\.detail-state-regenerate__preview\s*\{/);
+});
+
+test("single-state generation can keep running after the modal is closed", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /const handleCloseSingleStateDialog = useCallback\(\(\) => \{\s*setSingleStateDialogOpen\(false\);\s*\}, \[\]\);/);
+  assert.doesNotMatch(source, /if \(singleStateStatus === "generating" \|\| singleStateStatus === "syncing"\) return;/);
+  assert.doesNotMatch(source, /aria-label="关闭单状态重生成"[\s\S]{0,160}disabled=\{singleStateBusy\}/);
+  assert.match(source, /正在生成 \$\{activeRecord\.family\} 状态素材/);
+  assert.match(source, /setSingleStateStatus\("success"\);/);
+  assert.match(source, /setSingleStateMessage\(`已替换 \$\{activeRecord\.family\} 状态素材。需要在设备生效时，点击“替换到板端”。`\);/);
+});
+
+test("single-state replacement keeps the board-sync action available after updating the prompt", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /setSingleStatePrompt\(activeRecord\?\.prompt \|\| ""\);/);
+  assert.match(source, /\}, \[activeRecord\?\.family, record\?\.id\]\);/);
+  assert.doesNotMatch(source, /\}, \[activeRecord\?\.family, activeRecord\?\.prompt, record\?\.id\]\);/);
+});
+
 test("appearance detail keeps built-in appearances non-deletable and normalizes source labels", () => {
   const source = readSource("AppearanceDetail.jsx");
 
@@ -114,5 +202,6 @@ test("appearance detail only renders successfully generated family materials", (
   assert.match(source, /const generatedFamilies = useMemo\(/);
   assert.match(source, /record\?\.families\?\.filter\(\(family\) => family\.ok\) \|\| \[\]/);
   assert.match(source, /generatedFamilies\.map\(\(familyRecord\) =>/);
-  assert.match(source, /全部素材（\{generatedFamilies\.length\}）/);
+  assert.match(source, /全部状态/);
+  assert.match(source, /\{generatedFamilies\.length\} 个已生成素材/);
 });

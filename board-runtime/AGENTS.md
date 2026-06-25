@@ -35,6 +35,8 @@ HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
 
 `scripts/deploy-rpi.sh` 会同步源码到 `/opt/board-runtime-src`，在 Pi 上安装依赖、
 运行 CMake/make，复制产物到 `/opt/board-runtime`，安装 systemd unit，并重启服务。
+如果需要传入 sudo 密码，使用 `SUDO_PASSWORD="<password>"`；脚本会用 askpass 认证，
+避免把密码写进通过 stdin 生成的远端配置文件（例如 `/etc/asound.conf`）。
 
 Radxa Cubie A7Z 上完整构建可用 shell 或 PowerShell 部署脚本完成。
 macOS/Linux/WSL/Git Bash 使用 shell 脚本：

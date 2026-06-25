@@ -1,3 +1,9 @@
+/*
+ * USB serial bridge for board-server runtime sync.
+ * Appearance asset activation updates the active clip directory, then emits
+ * .clips-reload, .welcome-trigger, and .screen-interrupt so the board reloads
+ * assets and replays welcome once before resuming the current session state.
+ */
 #include <errno.h>
 #include <dirent.h>
 #include <fcntl.h>
@@ -42,6 +48,7 @@ typedef struct {
   char current_speech_path[BR_MAX_PATH];
   char speech_hold_until_path[BR_MAX_PATH];
   char screen_interrupt_path[BR_MAX_PATH];
+  char welcome_trigger_path[BR_MAX_PATH];
   char clips_reload_path[BR_MAX_PATH];
   char debug_session_path[BR_MAX_PATH];
   int fd;
@@ -710,6 +717,7 @@ static void br_serial_handle_asset_commit(
 
   snprintf(marker, sizeof(marker), "%lld assets\n", br_now_ms());
   (void) br_atomic_write_text(bridge->clips_reload_path, marker);
+  (void) br_atomic_write_text(bridge->welcome_trigger_path, marker);
   (void) br_atomic_write_text(bridge->screen_interrupt_path, marker);
   br_serial_send_asset_ack(bridge, transfer_id, "commit", true, "");
 }
@@ -854,6 +862,7 @@ static void br_serial_load_config(br_serial_bridge *bridge, const char *root_dir
   snprintf(bridge->current_speech_path, sizeof(bridge->current_speech_path), "%s/.current-speech", bridge->root_dir);
   snprintf(bridge->speech_hold_until_path, sizeof(bridge->speech_hold_until_path), "%s/.current-speech-hold-until", bridge->root_dir);
   snprintf(bridge->screen_interrupt_path, sizeof(bridge->screen_interrupt_path), "%s/.screen-interrupt", bridge->root_dir);
+  snprintf(bridge->welcome_trigger_path, sizeof(bridge->welcome_trigger_path), "%s/.welcome-trigger", bridge->root_dir);
   snprintf(bridge->clips_reload_path, sizeof(bridge->clips_reload_path), "%s/.clips-reload", bridge->root_dir);
   snprintf(bridge->debug_session_path, sizeof(bridge->debug_session_path), "%s/.debug-session-state.json", bridge->root_dir);
   br_session_machine_init(&bridge->session_machine, 3000, 300000);

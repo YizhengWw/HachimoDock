@@ -71,9 +71,13 @@ test("Follow confirmation syncs the selected agent appearance to the device", ()
   assert.match(source, /同步「\{appearanceName\}」到设备端展示/);
 });
 
-test("USB appearance sync progress stays inline instead of spawning repeated toasts", () => {
-  assert.match(source, /const \[syncProgress,\s*setSyncProgress\]\s*=\s*useState\(null\)/);
-  assert.match(source, /setSyncProgress\(normalizeSyncProgress\(p\)\)/);
+test("USB appearance sync progress stays inline and survives dashboard tab unmounts", () => {
+  assert.match(source, /appearanceSync/);
+  assert.match(source, /const\s+syncing\s*=\s*appearanceSync\?\.pending\s*===\s*true/);
+  assert.match(source, /appearanceSync\?\.progress/);
+  assert.doesNotMatch(source, /const \[syncProgress,\s*setSyncProgress\]\s*=\s*useState\(null\)/);
+  assert.doesNotMatch(source, /const \[syncing,\s*setSyncing\]\s*=\s*useState\(false\)/);
+  assert.doesNotMatch(source, /setSyncProgress\(normalizeSyncProgress\(p\)\)/);
   assert.doesNotMatch(source, /onProgress:\s*\(p\)\s*=>\s*push\(\{\s*tone:\s*"info"/);
   assert.match(source, /className="channel-matrix-sync"/);
   assert.match(source, /role="progressbar"/);

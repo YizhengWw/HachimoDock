@@ -1,3 +1,7 @@
+<!--
+  [Input] board runtime home/detail/task-screen web UI state, bridge frames, and local session task snapshots.
+  [Output] On-device Pet UI, including a task dashboard that only renders the single highest-priority current task card to keep board subtitles concise.
+-->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -7042,8 +7046,9 @@ function getTaskItems() {
 
 function renderTaskCards(tasks) {
     const perspective = getCurrentAgentViewModel().taskPerspective || {};
+    const visibleTasks = tasks.slice(0, 1);
 
-    if (!tasks.length) {
+    if (!visibleTasks.length) {
         taskList.innerHTML = `
             <div class="task-empty">
                 ${escapeHTML(perspective.emptyMessage || "当前没有可展示的任务。")}<br />
@@ -7053,7 +7058,7 @@ function renderTaskCards(tasks) {
         return;
     }
 
-    taskList.innerHTML = tasks.map((task) => {
+    taskList.innerHTML = visibleTasks.map((task) => {
         return `
             <article class="task-card">
                 <div class="task-card-title">${escapeHTML(task.title)}</div>

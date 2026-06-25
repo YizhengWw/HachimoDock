@@ -1,14 +1,14 @@
 /**
  * [Input] Wizard hands off `{ imageFile, providerConfig, ... }`; UI subscribes to state.
- * [Output] Module-level singleton that owns the current avatar-generation run so it
- *   survives navigation (the wizard component can unmount; the run keeps going) and reports concise provider errors.
+ * [Output] Module-level singleton that owns the current custom avatar-generation run so it
+ *   survives navigation, reports filtered-family progress, and reports concise provider errors.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update this header and any UI component subscribing
  *   via `subscribeGenerationTask` (currently App.jsx + AppearanceGallery.jsx).
  */
 
 import { resolveThinkingModelName, runAvatarPipeline } from "./avatar-pipeline/run.js";
-import { FAMILIES } from "./avatar-pipeline/families.js";
+import { CUSTOM_GENERATION_FAMILIES } from "./avatar-pipeline/families.js";
 import { replaceFamilyVideo, saveAppearance } from "./appearance-store.js";
 
 /**
@@ -115,8 +115,8 @@ export function startGenerationTask(input) {
     progress: {
       stage: "thinking",
       completed: 0,
-      total: FAMILIES.length,
-      families: Object.fromEntries(FAMILIES.map((f) => [f.family, { status: "pending" }])),
+      total: CUSTOM_GENERATION_FAMILIES.length,
+      families: Object.fromEntries(CUSTOM_GENERATION_FAMILIES.map((f) => [f.family, { status: "pending" }])),
       message: "正在分析图片并生成 prompt…",
     },
   });

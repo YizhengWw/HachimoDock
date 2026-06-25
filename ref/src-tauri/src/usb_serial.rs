@@ -1,8 +1,9 @@
 /*
  * [Input] serialport-enumerated CDC USB ports plus JSON-line OTA/state payloads.
  * [Output] USB serial manager for device handshake, state/speech forwarding,
- *          transactional appearance video/WAV cue asset OTA with checksum acks,
- *          audio-only patch commits, and widget .clawpkg OTA; macOS scans prefer /dev/cu.* callout
+ *          serialized transactional appearance video/WAV cue asset OTA with checksum acks,
+ *          audio-only patch commits, legacy full-sync fallback for boards that
+ *          do not support per-file asset acks yet, and widget .clawpkg OTA; macOS scans prefer /dev/cu.* callout
  *          ports to avoid blocking /dev/tty.* opens, and reconnects cancel stale
  *          reader clones before reopening the port.
  * [Pos] Tauri USB transport node in ref/src-tauri/src
@@ -94,6 +95,7 @@ pub struct UsbSerialManager {
     connection: Arc<Mutex<Option<UsbConnection>>>,
     desktop_device_id: Arc<Mutex<String>>,
     connect_guard: Arc<Mutex<()>>,
+    asset_transfer_guard: Arc<Mutex<()>>,
     next_connection_id: Arc<AtomicU64>,
     asset_ack_waiters: Arc<Mutex<Vec<AssetAckWaiter>>>,
     widget_ack_waiters: Arc<Mutex<Vec<WidgetAckWaiter>>>,
@@ -105,6 +107,7 @@ impl UsbSerialManager {
             connection: Arc::new(Mutex::new(None)),
             desktop_device_id: Arc::new(Mutex::new(String::new())),
             connect_guard: Arc::new(Mutex::new(())),
+            asset_transfer_guard: Arc::new(Mutex::new(())),
             next_connection_id: Arc::new(AtomicU64::new(0)),
             asset_ack_waiters: Arc::new(Mutex::new(Vec::new())),
             widget_ack_waiters: Arc::new(Mutex::new(Vec::new())),
@@ -833,6 +836,10 @@ impl UsbSerialManager {
     where
         F: Fn(u32, u32, u64, u64),
     {
+        let _asset_transfer_guard = self
+            .asset_transfer_guard
+            .lock()
+            .map_err(|e| e.to_string())?;
         let manifest_path = appearance_dir.join("manifest.json");
         let manifest_str = std::fs::read_to_string(&manifest_path)
             .map_err(|e| format!("读取 manifest 失败: {}", e))?;
@@ -843,14 +850,6 @@ impl UsbSerialManager {
             .get("families")
             .and_then(|v| v.as_array())
             .ok_or("manifest 中没有 families 数组")?;
-
-        let transfer_id = format!(
-            "sync-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
 
         // Pre-calculate total files and bytes for progress reporting.
         let assets = collect_appearance_assets(families, appearance_dir, app_data_dir);
@@ -876,7 +875,19 @@ impl UsbSerialManager {
                     .filter(|asset| paths.iter().any(|path| path == &asset.device_path))
                     .cloned()
                     .collect::<Vec<_>>();
-                return self.sync_appearance_audio_patch(changed_audio, on_progress);
+                match self.sync_appearance_audio_patch(changed_audio, &on_progress) {
+                    Ok(result) => return Ok(result),
+                    Err(error)
+                        if parse_missing_asset_ack_phase(&error)
+                            == Some(AppearanceAssetAckPhase::Patch) =>
+                    {
+                        eprintln!(
+                            "[usb-appearance-ota] patch commit unsupported; retrying full sync: {}",
+                            error
+                        );
+                    }
+                    Err(error) => return Err(error),
+                }
             }
             Ok(AppearanceSyncPlan::Full) => {}
             Err(error) => {
@@ -887,9 +898,76 @@ impl UsbSerialManager {
             }
         }
 
+        self.sync_appearance_full_with_legacy_fallback(
+            &assets,
+            total_files,
+            total_bytes,
+            &on_progress,
+        )
+    }
+
+    fn sync_appearance_full_with_legacy_fallback<F>(
+        &self,
+        assets: &[AppearanceAssetEntry],
+        total_files: u32,
+        total_bytes: u64,
+        on_progress: &F,
+    ) -> Result<(u32, u64), String>
+    where
+        F: Fn(u32, u32, u64, u64),
+    {
+        match self.sync_appearance_full(
+            assets,
+            total_files,
+            total_bytes,
+            on_progress,
+            AppearanceFullSyncMode::Verified,
+        ) {
+            Ok(result) => Ok(result),
+            Err(error) if should_retry_appearance_with_legacy_full_sync(&error) => {
+                eprintln!(
+                    "[usb-appearance-ota] falling back to legacy full sync after protocol timeout: {}",
+                    error
+                );
+                self.sync_appearance_full(
+                    assets,
+                    total_files,
+                    total_bytes,
+                    on_progress,
+                    AppearanceFullSyncMode::LegacyCommitOnly,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn sync_appearance_full<F>(
+        &self,
+        assets: &[AppearanceAssetEntry],
+        total_files: u32,
+        total_bytes: u64,
+        on_progress: &F,
+        mode: AppearanceFullSyncMode,
+    ) -> Result<(u32, u64), String>
+    where
+        F: Fn(u32, u32, u64, u64),
+    {
+        let transfer_prefix = match mode {
+            AppearanceFullSyncMode::Verified => "sync",
+            AppearanceFullSyncMode::LegacyCommitOnly => "legacy-sync",
+        };
+        let transfer_id = format!(
+            "{}-{}",
+            transfer_prefix,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
+
         eprintln!(
-            "[usb-appearance-ota] begin transfer_id={} files={} bytes={}",
-            transfer_id, total_files, total_bytes
+            "[usb-appearance-ota] begin transfer_id={} mode={:?} files={} bytes={}",
+            transfer_id, mode, total_files, total_bytes
         );
         self.send_asset_begin_checked(&transfer_id)?;
 
@@ -899,13 +977,13 @@ impl UsbSerialManager {
 
         for asset in assets {
             eprintln!(
-                "[usb-appearance-ota] file family={} kind={} path={}",
+                "[usb-appearance-ota] file family={} kind={} path={} mode={:?}",
                 asset.family_name,
                 asset.kind,
-                asset.source_path.display()
+                asset.source_path.display(),
+                mode
             );
 
-            // Read file
             let open_label = if asset.kind == "audio" {
                 "打开音效文件失败"
             } else {
@@ -922,7 +1000,6 @@ impl UsbSerialManager {
             file.read_to_end(&mut buf)
                 .map_err(|e| format!("{} {}: {}", read_label, asset.family_name, e))?;
 
-            // Send in chunks, report progress per chunk
             let file_size = buf.len() as u64;
             let checksum = asset_checksum_hex(&buf);
             let mut chunk_count = 0u64;
@@ -931,11 +1008,7 @@ impl UsbSerialManager {
                 self.send_asset_chunk(&transfer_id, &asset.device_path, &b64, i as u32)?;
                 chunk_count += 1;
                 let _ = self.flush();
-                // CDC writes return once macOS accepts the bytes, not when the
-                // board has drained them. Pace by encoded bytes so the board's
-                // line reader and staging writer do not silently lose payload.
                 std::thread::sleep(appearance_asset_chunk_delay(b64.len()));
-                // Report byte-level progress after each chunk
                 let chunk_bytes_sent =
                     std::cmp::min(((i + 1) * APPEARANCE_ASSET_CHUNK_SIZE) as u64, file_size);
                 on_progress(
@@ -945,13 +1018,15 @@ impl UsbSerialManager {
                     total_bytes,
                 );
             }
-            self.send_asset_file_commit_checked(
-                &transfer_id,
-                &asset.device_path,
-                file_size,
-                &checksum,
-                chunk_count,
-            )?;
+            if mode == AppearanceFullSyncMode::Verified {
+                self.send_asset_file_commit_checked(
+                    &transfer_id,
+                    &asset.device_path,
+                    file_size,
+                    &checksum,
+                    chunk_count,
+                )?;
+            }
 
             file_count += 1;
             byte_count += file_size;
@@ -960,8 +1035,8 @@ impl UsbSerialManager {
 
         self.send_asset_commit_checked(&transfer_id, file_count, byte_count)?;
         eprintln!(
-            "[usb-appearance-ota] commit transfer_id={} sent_files={} sent_bytes={}",
-            transfer_id, file_count, byte_count
+            "[usb-appearance-ota] commit transfer_id={} mode={:?} sent_files={} sent_bytes={}",
+            transfer_id, mode, file_count, byte_count
         );
 
         Ok((file_count, byte_count))
@@ -1010,7 +1085,7 @@ impl UsbSerialManager {
     fn sync_appearance_audio_patch<F>(
         &self,
         assets: Vec<AppearanceAssetEntry>,
-        on_progress: F,
+        on_progress: &F,
     ) -> Result<(u32, u64), String>
     where
         F: Fn(u32, u32, u64, u64),
@@ -1330,6 +1405,54 @@ enum AppearanceSyncPlan {
     Full,
     AudioPatch(Vec<String>),
     Skip,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppearanceFullSyncMode {
+    Verified,
+    LegacyCommitOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppearanceAssetAckPhase {
+    Begin,
+    Stat,
+    File,
+    Patch,
+    Commit,
+}
+
+fn parse_missing_asset_ack_phase(error: &str) -> Option<AppearanceAssetAckPhase> {
+    if !error.contains("未收到板端素材 OTA 确认:") {
+        return None;
+    }
+    if error.contains("phase=begin") {
+        return Some(AppearanceAssetAckPhase::Begin);
+    }
+    if error.contains("phase=stat") {
+        return Some(AppearanceAssetAckPhase::Stat);
+    }
+    if error.contains("phase=file") {
+        return Some(AppearanceAssetAckPhase::File);
+    }
+    if error.contains("phase=patch") {
+        return Some(AppearanceAssetAckPhase::Patch);
+    }
+    if error.contains("phase=commit") {
+        return Some(AppearanceAssetAckPhase::Commit);
+    }
+    None
+}
+
+fn should_retry_appearance_with_legacy_full_sync(error: &str) -> bool {
+    matches!(
+        parse_missing_asset_ack_phase(error),
+        Some(
+            AppearanceAssetAckPhase::Stat
+                | AppearanceAssetAckPhase::File
+                | AppearanceAssetAckPhase::Patch
+        )
+    )
 }
 
 fn manifest_asset_path(
@@ -1765,5 +1888,45 @@ mod tests {
             plan_appearance_sync_from_digests(&local, &remote, false),
             AppearanceSyncPlan::Skip
         );
+    }
+
+    #[test]
+    fn appearance_sync_timeout_phase_detection_identifies_protocol_gated_steps() {
+        assert_eq!(
+            parse_missing_asset_ack_phase("未收到板端素材 OTA 确认: transferId=t phase=stat path=videos/done.mp4"),
+            Some(AppearanceAssetAckPhase::Stat)
+        );
+        assert_eq!(
+            parse_missing_asset_ack_phase("未收到板端素材 OTA 确认: transferId=t phase=file path=videos/done.mp4"),
+            Some(AppearanceAssetAckPhase::File)
+        );
+        assert_eq!(
+            parse_missing_asset_ack_phase("未收到板端素材 OTA 确认: transferId=t phase=patch"),
+            Some(AppearanceAssetAckPhase::Patch)
+        );
+        assert_eq!(
+            parse_missing_asset_ack_phase("未收到板端素材 OTA 确认: transferId=t phase=commit"),
+            Some(AppearanceAssetAckPhase::Commit)
+        );
+        assert_eq!(parse_missing_asset_ack_phase("板端素材 OTA 写入失败"), None);
+    }
+
+    #[test]
+    fn appearance_sync_legacy_retry_is_limited_to_newer_protocol_phases() {
+        assert!(should_retry_appearance_with_legacy_full_sync(
+            "未收到板端素材 OTA 确认: transferId=t phase=stat path=videos/done.mp4"
+        ));
+        assert!(should_retry_appearance_with_legacy_full_sync(
+            "未收到板端素材 OTA 确认: transferId=t phase=file path=videos/done.mp4"
+        ));
+        assert!(should_retry_appearance_with_legacy_full_sync(
+            "未收到板端素材 OTA 确认: transferId=t phase=patch"
+        ));
+        assert!(!should_retry_appearance_with_legacy_full_sync(
+            "未收到板端素材 OTA 确认: transferId=t phase=begin"
+        ));
+        assert!(!should_retry_appearance_with_legacy_full_sync(
+            "未收到板端素材 OTA 确认: transferId=t phase=commit"
+        ));
     }
 }

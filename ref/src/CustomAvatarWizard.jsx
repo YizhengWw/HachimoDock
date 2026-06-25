@@ -1,9 +1,9 @@
 /**
  * [Input] User-uploaded image + provider config; orchestrates `lib/avatar-pipeline/run.js`.
  * [Output] On success persists via `lib/appearance-store.js`, with clear GIF first-frame copy,
- *          fixed-size reference upload preview, unified field help, Volcengine Ark API-key-only
- *          product-fit model dropdown with Seedance 1.5 first and 2.0 activation guidance,
- *          fast low-resolution defaults, and preflight generation requirements.
+ *          fixed-size reference upload preview, unified field help, shared provider-config persistence,
+ *          Volcengine Ark API-key-only product-fit model dropdown with Seedance 1.5 first and 2.0 activation guidance,
+ *          fast low-resolution defaults, reusable step components, and preflight generation requirements.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -19,64 +19,22 @@ import {
   FAST_VIDEO_GENERATION_PROFILE,
   PIPELINE_OUTPUT_ASPECT_RATIO,
 } from "./lib/avatar-pipeline/pipeline-defaults.js";
-import { DEFAULT_THINKING_MODEL } from "./lib/avatar-pipeline/thinking-model.js";
 import {
-  DEFAULT_VOLCANO_BASE_URL,
-  DEFAULT_VOLCANO_VIDEO_MODEL,
-} from "./lib/avatar-pipeline/providers/volcano.js";
+  DEFAULT_ADVANCED,
+  DEFAULT_PROVIDER_ID,
+  VIDEO_PROVIDERS,
+  VOLCENGINE_BASE_URL,
+  VOLCENGINE_CUSTOM_MODEL_OPTION,
+  VOLCENGINE_THINKING_MODEL,
+  loadProviderConfig,
+  saveProviderConfig,
+} from "./lib/avatar-pipeline/provider-config.js";
 import HelpTooltip from "./HelpTooltip.jsx";
 
-const VOLCENGINE_BASE_URL = DEFAULT_VOLCANO_BASE_URL;
-const VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL;
-const VOLCENGINE_CUSTOM_MODEL_OPTION = "__custom__";
 const FAST_REFERENCE_HEIGHT = Math.round(
   (FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension * PIPELINE_OUTPUT_ASPECT_RATIO.height) /
     PIPELINE_OUTPUT_ASPECT_RATIO.width,
 );
-const VOLCENGINE_VIDEO_MODEL_SUGGESTIONS = [
-  "doubao-seedance-1-5-pro-251215",
-  DEFAULT_VOLCANO_VIDEO_MODEL,
-];
-
-const VIDEO_PROVIDERS = [
-  {
-    id: "volcengine",
-    label: "火山引擎",
-    sub: "Ark / Seedance / 即梦",
-    baseUrl: VOLCENGINE_BASE_URL,
-    models: VOLCENGINE_VIDEO_MODEL_SUGGESTIONS,
-    thinkingModel: VOLCENGINE_THINKING_MODEL,
-  },
-  {
-    id: "kling",
-    label: "可灵 AI",
-    sub: "Kling 视频生成",
-    baseUrl: "https://api-beijing.klingai.com",
-    models: ["kling-v2-master", "kling-v1-6", "kling-v1-5"],
-    thinkingModel: "",
-  },
-  {
-    id: "custom",
-    label: "其他兼容 API",
-    sub: "聚合 / 代理 / OpenAI 风格",
-    baseUrl: "https://api.example.com",
-    models: [],
-    thinkingModel: "",
-  },
-];
-
-const STORAGE_KEY_PREFIX = "claw-pet.video-gen-config.";
-
-const DEFAULT_ADVANCED = {
-  authHeader: "Authorization",
-  authPrefix: "Bearer",
-  createPath: "/v1/video/generations",
-  queryPath: "/v1/tasks/{id}",
-  webhookUrl: "",
-  timeoutMs: 120000,
-  pollingIntervalMs: 3000,
-  resultPath: "data[0].url",
-};
 
 const HELP_TEXT = {
   apiKey:
@@ -87,24 +45,6 @@ const HELP_TEXT = {
     "下拉只保留当前新形象流程适配过的图生视频模型。火山 Ark 可用的新模型可以通过“自定义模型名称”兜底填写。",
 };
 
-function loadProviderConfig(provider) {
-  try {
-    const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${provider}`);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
-function saveProviderConfig(provider, config) {
-  try {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}${provider}`, JSON.stringify(config));
-  } catch {
-    /* ignore quota */
-  }
-}
-
 export default function CustomAvatarWizard({ onExit }) {
   const [step, setStep] = useState(0);
   const [file, setFile] = useState(null);
@@ -112,7 +52,7 @@ export default function CustomAvatarWizard({ onExit }) {
   const [appearanceName, setAppearanceName] = useState("");
   const [personality, setPersonality] = useState("");
 
-  const [providerId, setProviderId] = useState("volcengine");
+  const [providerId, setProviderId] = useState(DEFAULT_PROVIDER_ID);
   const provider = useMemo(
     () => VIDEO_PROVIDERS.find((item) => item.id === providerId) || VIDEO_PROVIDERS[0],
     [providerId],
@@ -145,31 +85,16 @@ export default function CustomAvatarWizard({ onExit }) {
 
   useEffect(() => {
     const saved = loadProviderConfig(providerId);
-    if (saved) {
-      const hasSavedFastGeneration = typeof saved.fastGeneration === "boolean";
-      if (typeof saved.apiKey === "string") setApiKey(saved.apiKey);
-      if (typeof saved.accessKey === "string") setAccessKey(saved.accessKey);
-      if (typeof saved.secretKey === "string") setSecretKey(saved.secretKey);
-      if (isVolcengine) setBaseUrl(VOLCENGINE_BASE_URL);
-      else if (typeof saved.baseUrl === "string") setBaseUrl(saved.baseUrl);
-      if (typeof saved.model === "string" && hasSavedFastGeneration) setModel(saved.model);
-      else setModel(provider.models[0] || saved.model || "");
-      if (isVolcengine) setThinkingModel(VOLCENGINE_THINKING_MODEL);
-      else if (typeof saved.thinkingModel === "string") setThinkingModel(saved.thinkingModel);
-      setFastGeneration(saved.fastGeneration !== false);
-      if (saved.advanced) setAdvanced({ ...DEFAULT_ADVANCED, ...saved.advanced });
-    } else {
-      setApiKey("");
-      setAccessKey("");
-      setSecretKey("");
-      setBaseUrl(provider.baseUrl);
-      setModel(provider.models[0] || "");
-      setThinkingModel(provider.thinkingModel || "");
-      setFastGeneration(true);
-      setAdvanced({ ...DEFAULT_ADVANCED });
-    }
+    setApiKey(saved.apiKey);
+    setAccessKey(saved.accessKey);
+    setSecretKey(saved.secretKey);
+    setBaseUrl(saved.baseUrl);
+    setModel(saved.model);
+    setThinkingModel(saved.thinkingModel);
+    setFastGeneration(saved.fastGeneration);
+    setAdvanced(saved.advanced);
     setTestFeedback(null);
-  }, [isVolcengine, provider, providerId]);
+  }, [providerId]);
 
   useEffect(() => {
     if (!file) {
@@ -373,7 +298,7 @@ export default function CustomAvatarWizard({ onExit }) {
         )}
 
         {step === 0 && (
-          <Step1
+          <AvatarWizardStep1
             file={file}
             previewUrl={previewUrl}
             appearanceName={appearanceName}
@@ -391,7 +316,7 @@ export default function CustomAvatarWizard({ onExit }) {
         )}
 
         {step === 1 && (
-          <Step2
+          <AvatarWizardStep2
             providerId={providerId}
             apiKey={apiKey}
             onApiKey={setApiKey}
@@ -428,7 +353,7 @@ export default function CustomAvatarWizard({ onExit }) {
   );
 }
 
-function Step1({
+export function AvatarWizardStep1({
   file,
   previewUrl,
   appearanceName,
@@ -442,10 +367,15 @@ function Step1({
   onCancel,
   canAdvance,
   onNext,
+  title = "第 1 步 · 上传参考图",
+  identityFields = true,
+  cancelLabel = "取消",
+  nextLabel = "下一步",
+  children,
 }) {
   return (
     <div className="ca-card">
-      <h3>第 1 步 · 上传参考图</h3>
+      <h3>{title}</h3>
       <div
         className="dropzone"
         onClick={onPickClick}
@@ -479,38 +409,44 @@ function Step1({
         />
       </div>
 
-      <div className="field">
-        <label className="field-label">形象名称</label>
-        <input
-          className="field-input"
-          placeholder="给这个形象起个名字"
-          value={appearanceName}
-          onChange={(event) => onAppearanceName(event.target.value)}
-        />
-      </div>
-      <div className="field">
-        <label className="field-label">性格描述（可选）</label>
-        <textarea
-          className="field-input"
-          style={{ height: 80, padding: "10px 12px", resize: "vertical" }}
-          placeholder="例如：安静、敏捷、喜欢互动"
-          value={personality}
-          onChange={(event) => onPersonality(event.target.value)}
-        />
-      </div>
+      {identityFields ? (
+        <>
+          <div className="field">
+            <label className="field-label">形象名称</label>
+            <input
+              className="field-input"
+              placeholder="给这个形象起个名字"
+              value={appearanceName}
+              onChange={(event) => onAppearanceName(event.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="field-label">性格描述（可选）</label>
+            <textarea
+              className="field-input"
+              style={{ height: 80, padding: "10px 12px", resize: "vertical" }}
+              placeholder="例如：安静、敏捷、喜欢互动"
+              value={personality}
+              onChange={(event) => onPersonality(event.target.value)}
+            />
+          </div>
+        </>
+      ) : (
+        children
+      )}
       <div className="ca-actions">
         <button className="btn-ghost" onClick={onCancel}>
-          取消
+          {cancelLabel}
         </button>
         <button className="btn-primary" onClick={onNext} disabled={!canAdvance}>
-          下一步
+          {nextLabel}
         </button>
       </div>
     </div>
   );
 }
 
-function Step2({
+export function AvatarWizardStep2({
   providerId,
   apiKey,
   onApiKey,
@@ -540,6 +476,9 @@ function Step2({
   onFastGeneration,
   onBack,
   onStart,
+  title = "第 2 步 · 生成配置",
+  backLabel = "上一步",
+  startLabel = "开始生成",
 }) {
   const provider = VIDEO_PROVIDERS.find((item) => item.id === providerId) || VIDEO_PROVIDERS[0];
   const isCustom = providerId === "custom";
@@ -552,7 +491,7 @@ function Step2({
 
   return (
     <div className="ca-card">
-      <h3>第 2 步 · 生成配置</h3>
+      <h3>{title}</h3>
       <div className="provider-grid">
         {VIDEO_PROVIDERS.map((item) => (
           <button
@@ -741,10 +680,10 @@ function Step2({
 
       <div className="ca-actions">
         <button className="btn-ghost" onClick={onBack}>
-          上一步
+          {backLabel}
         </button>
-        <button className="btn-primary" onClick={onStart} disabled={!canStart} title={generationReadyIssue || "开始生成"}>
-          开始生成
+        <button className="btn-primary" onClick={onStart} disabled={!canStart} title={generationReadyIssue || startLabel}>
+          {startLabel}
         </button>
       </div>
     </div>

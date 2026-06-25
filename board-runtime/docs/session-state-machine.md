@@ -47,6 +47,7 @@ desk/macbook-pro/state/openclaw
 - 维护 `done` 的 3 秒生命周期。
 - 写入 `.current-state` 和 `.current-event`。
 - 在需要即时响应时写入 `.screen-interrupt`。
+- 在 USB serial 激活新形象资产时写入 `.welcome-trigger`，让显示层先播放一次欢迎视频。
 - 维护 `.debug-session-state.json`。
 - 接收 `speech/text` 并写入 `.current-speech`。
 - 把 MQTT 状态桥接给本地 WebSocket 客户端。
@@ -57,10 +58,11 @@ desk/macbook-pro/state/openclaw
 
 - `.current-state`
 - `.current-event`
+- `.welcome-trigger`
 - `.screen-interrupt`
 - `.touch-request`
 
-因此 session 状态机和屏幕状态机之间的接口是文件接口。屏幕状态机在 clip 边界查询当前 resolved state；只有 `.screen-interrupt` 或本地 touch 会触发硬切换。
+因此 session 状态机和屏幕状态机之间的接口是文件接口。屏幕状态机在 clip 边界查询当前 resolved state；`.welcome-trigger` 用于新形象资产激活后的单次 `welcome` 回放，`.screen-interrupt` 和本地 touch 负责硬切换。
 
 ## MQTT Topic
 
