@@ -23,6 +23,8 @@
 
 ## 桌面端开发
 
+Windows 用户可以在仓库根目录双击 `open-manager.bat`。首次运行时，它会在需要时安装桌面端依赖、构建独立的 Tauri release 应用并打开；之后会直接打开已构建的 release exe，不需要先启动 `localhost:4173` 或执行 `npm run dev:web`。
+
 ```sh
 cd ref
 npm install
