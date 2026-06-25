@@ -3,28 +3,58 @@
 本教程的默认目标设备是 **Radxa Cubie A7Z + Debian + systemd**。目标是让一个
 全新用户从空白 microSD 卡开始，首次把本项目的画面显示到 A7Z 小屏硬件上。
 
-Raspberry Pi + Raspberry Pi OS + systemd 仍受支持，但属于兼容路线；如果没有特别
-说明，下文“首次部署”均指 Radxa Cubie A7Z。
+## 先看这个总览
 
-## 阅读方式和总体原则
+按三段走，不要一上来就查 USB 或改代码：
 
-这篇文档按“先让系统活起来，再部署项目，再让项目画面接管屏幕，最后打通桌面联动”
-的顺序写。全新用户不要跳步骤；AI 代执行时也要按每个检查点停下来确认结果。
+| 阶段 | 目标 | 最少硬件 | 通过标准 |
+|---|---|---|---|
+| 1. 写系统卡 | 把官方 A7Z Debian 镜像写入 microSD | 新 microSD 卡、读卡器、电脑 | Etcher 写入和校验成功 |
+| 2. 上板显示 | 让 `board-runtime` 接管 A7Z SPI 屏 | A7Z 开发板、PCB/PSB 转接板、SPI 屏、排线、稳定 USB-C 线 | 小屏显示项目画面或宠物状态 |
+| 3. 桌面联动 | 让 Pet Manager / agent 状态同步到板子 | 电脑和 A7Z 在同一局域网 | HTTP、MQTT、binding 都在线 |
 
-总体原则：
+Raspberry Pi 仍受支持，但属于兼容路线；如果没有特别说明，下文“首次部署”均指
+Radxa Cubie A7Z。
 
-1. **默认按 A7Z 路线执行。**Radxa Cubie A7Z 是当前复刻部署默认板型；Raspberry Pi
-   是兼容路线，旧 T113/MangoPi 是历史路线。A7Z 不使用 PhoenixCard，不使用 T113
-   镜像，也不依赖 Raspberry Pi 的 USB gadget `/dev/ttyGS0`。
+### 硬件现象速查
+
+| 现象 | 通常说明 | 先做什么 |
+|---|---|---|
+| 读卡器显示 `No Media` | 电脑看到了读卡器，但没读到 SD 卡 | 重插 SD 卡和读卡器，先别烧录 |
+| 板子完全没灯 / 换口不亮 | 供电口、线材或供电不足 | 换稳定 USB-C 数据/供电线和正确供电口 |
+| 电脑看到 `VID_1f3a_PID_efe8` / FEL | 板子进了 USB/FEL/烧录模式，没有正常从 SD 启动 | 查 SD 卡镜像、卡槽、BOOT/FEL 按键/拨码 |
+| 屏幕完全黑 | 背光/供电/GND/排线方向可能有问题 | 先查 BLK、3.3V、GND、排线 |
+| 屏幕亮白屏 | 屏幕有供电，但 SPI/RES/DC/CS/overlay/转接板可能不对 | 查 A7Z LCD 接线和 `/proc/fb` |
+| 屏幕显示 Debian login | 系统和 framebuffer 通了，但项目显示进程没接管 | 查 `board-runtime`、`fb-display.sh`、`.fb-display.lock` |
+| manager 显示 USB 未连接 | A7Z 默认不走 Raspberry Pi USB gadget | 先看 Wi-Fi、HTTP、MQTT、binding |
+
+详细原则、命令目录和故障处理在后文“执行约定”和“故障排查”。
+
+## 兼容路线：Raspberry Pi 一键部署
+
+如果你是首次复刻 A7Z，请先跳到下一节“Radxa Cubie A7Z 一键部署”。本节只适用于
+Raspberry Pi。
+
+```sh
+export BOARD_HOST="<pi-user>@<pi-ip>"
+HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
+```
+
+Windows 上部署 Raspberry Pi 时，建议在 WSL 或 Git Bash 中执行同一组命令。
+
+## 执行约定
+
+这些规则用于后续命令执行；不是烧卡前就必须全部满足的条件。
+
+1. **默认按 A7Z 路线执行。**A7Z 不使用 PhoenixCard，不使用 T113/MangoPi 镜像，
+   也不依赖 Raspberry Pi 的 USB gadget `/dev/ttyGS0`。
 2. **先系统联网，再 SSH 部署。**Wi-Fi 密码第一次写入的是 A7Z Debian 系统层；
    `/opt/board-runtime/network-config.json` 是项目 runtime 配置，不能替代首次联网。
 3. **每层只验证一件事。**先验证 SSH，再验证 `board-runtime` HTTP，再验证屏幕，
    最后验证 MQTT/binding。上一层没通过，不要继续下一层。
 4. **首次成功的核心验收是小屏显示项目画面。**先让 `board-runtime` 接管 SPI 屏；
    桌面端 agent 跟随和 MQTT/binding 是后续联动验收。
-5. **A7Z 联动主链路是 Wi-Fi + HTTP + MQTT + binding。**桌面端显示 USB 未连接，
-   不等于 A7Z 部署失败。
-6. **不要写死个人环境。**文档和提交里只使用 `<board-ip>`、`<pc-lan-ip>`、
+5. **不要写死个人环境。**文档和提交里只使用 `<board-ip>`、`<pc-lan-ip>`、
    `<wifi-ssid>` 等占位符。实际 IP 可以通过脚本探测或路由器 DHCP 固定。
 
 命令位置约定：
@@ -37,25 +67,6 @@ Raspberry Pi + Raspberry Pi OS + systemd 仍受支持，但属于兼容路线；
 | 桌面端目录 | `claw-pet-manager/ref/` | `npm install`、`npm run dev` |
 
 AI 执行时，如果命令块没有明确当前目录，先不要猜；回到上表确认后再执行。
-
-## 全局准备
-
-这些是开始阅读和执行教程前的通用准备，不代表每一步都已经满足：
-
-- 本地按命令块标注的目录执行命令；部署脚本在 `board-runtime/`，仓库级脚本在仓库根目录。
-- macOS/Linux 可直接运行 shell 脚本；Windows 运行 shell 脚本建议使用 WSL 或 Git Bash。
-- Radxa 既有 shell 部署脚本，也有 Windows PowerShell 部署脚本；Windows 首选 PowerShell 脚本。
-- 全新 A7Z 首次部署一开始通常还不能 SSH；SSH、sudo、apt 可用性要在写入系统 Wi-Fi
-  并拿到 `<board-ip>` 后再检查。
-
-## Raspberry Pi 一键部署
-
-```sh
-export BOARD_HOST="<pi-user>@<pi-ip>"
-HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
-```
-
-Windows 上部署 Raspberry Pi 时，建议在 WSL 或 Git Bash 中执行同一组命令。
 
 ## Radxa Cubie A7Z 一键部署
 
@@ -816,27 +827,115 @@ ssh radxa@<board-ip> 'dmesg | grep -E "fb_ili9341|graphics fb0" | tail'
 
 ## 故障排查
 
+### A7Z 硬件现象详解
+
+**读卡器显示 `No Media`**
+
+说明电脑只识别到读卡器，没有识别到 microSD 卡本体。此时不要继续烧录，避免误判
+或选错磁盘。
+
+处理：
+
+1. 把 SD 卡从读卡器拔出再插到底。
+2. 把读卡器从电脑拔下再插回。
+3. 确认系统能看到实际容量的可移动磁盘后，再用 Etcher 写入。
+
+**板子完全没灯，或某个 USB-C 口插上不亮**
+
+通常是供电口、线材或供电不足问题，不一定是系统问题。
+
+处理：
+
+1. 换稳定 USB-C 数据/供电线。
+2. 使用确认能给 A7Z 供电的 USB-C 口。
+3. 先让板子正常上电，再继续查 SD 卡和屏幕。
+
+**电脑看到 `VID_1f3a_PID_efe8` / FEL**
+
+这通常说明板子进了 Allwinner USB/FEL/烧录模式，没有正常从 SD 卡启动 Linux。
+
+常见原因：
+
+- SD 卡镜像不对，或仍是 T113/MangoPi/PhoenixCard 路线。
+- SD 卡没插好、卡槽接触不良。
+- BOOT/FEL 按键被按住，或启动拨码/焊接状态让板子进了 USB boot。
+
+处理：
+
+1. 确认 SD 卡写的是 A7Z 官方 GPT/A733 Debian 镜像。
+2. 断电重插 SD 卡，确认卡槽接触。
+3. 上电时不要按住 BOOT/FEL/USB boot 按键。
+4. 不要把开发板当读卡器隔空写 SD 卡；需要重写系统时，把 SD 卡拔到读卡器里写。
+
+**屏幕完全黑**
+
+黑屏优先查背光和供电，不要一上来重烧系统。
+
+处理：
+
+1. 确认 `BLK` 接 3.3V，或 backlight GPIO 与实际接线一致。
+2. 确认 VCC/GND、排线方向和屏幕座压扣。
+3. 如果能 SSH，继续查 `/proc/fb` 和 `dmesg`；如果不能 SSH，先回到系统启动和网络层。
+
+**屏幕亮白屏**
+
+白屏通常说明屏幕有供电，但 SPI 数据、RES、DC、CS、overlay 或中间 PCB/PSB 链路
+没有完整打通。
+
+处理：
+
+1. 确认 LCD CS 接 `PD10 / SPI1-CS0 / physical pin 24`。
+2. 确认 `RES=PL6`、`DC=PL7`，BLK 直连 3.3V。
+3. 确认执行过 `-ConfigureSpiLcd` 或 `CONFIGURE_SPI_LCD=1`。
+4. SSH 后检查：
+
+```sh
+ssh radxa@<board-ip> 'cat /proc/fb; ls -l /dev/fb*'
+ssh radxa@<board-ip> 'dmesg | grep -E "fb_ili9341|graphics fb0|spi1.0" | tail -40'
+```
+
+如果软件检查都正常，优先怀疑排线、屏幕座、PCB/PSB 转接板焊接或接触。
+
+**屏幕显示 Debian login**
+
+这反而是好消息：系统和 framebuffer 大概率已经通了。问题变成
+`board-runtime` / `fb-display.sh` 没有接管屏幕。
+
+处理：
+
+```sh
+ssh radxa@<board-ip> 'systemctl is-active board-runtime board-widget-runtime'
+ssh radxa@<board-ip> 'sudo journalctl -u board-runtime -n 120 --no-pager'
+ssh radxa@<board-ip> 'cat /opt/board-runtime/.fb-display.lock 2>/dev/null || true'
+```
+
+如果 `.fb-display.lock` 里是不存在的旧 PID，可以删除后重启：
+
+```sh
+ssh radxa@<board-ip> 'sudo rm -f /opt/board-runtime/.fb-display.lock && sudo systemctl restart board-runtime'
+```
+
 ### A7Z 首次部署常见卡点
 
 | 现象 | 常见原因 | 处理方法 |
 |---|---|---|
 | 资料里出现 T113、MangoPi、PhoenixCard | 看到了旧设备/旧脚本资料，和当前 A7Z 主线混用 | A7Z 只使用官方 A733/Cubie A7Z Debian GPT 镜像 + Balena Etcher；不要拖拽固件，也不要用 PhoenixCard |
-| 电脑看到 `VID_1f3a_PID_efe8` / FEL 类设备 | 板子进了 Allwinner USB/FEL/烧录模式，通常不是正常 Linux runtime 状态 | 先确认 SD 卡是 A7Z 官方镜像、卡槽接触、BOOT/FEL 按键或拨码；不要把开发板当读卡器隔空写 SD 卡 |
+| 电脑看到 `VID_1f3a_PID_efe8` / FEL 类设备 | 板子进了 Allwinner USB/FEL/烧录模式，通常不是正常 Linux runtime 状态 | 见上方“电脑看到 `VID_1f3a_PID_efe8` / FEL” |
 | 烧卡后无法 SSH | A7Z 还没有写入系统 Wi-Fi，或电脑和 A7Z 不在同一局域网 | 先用 HDMI+键盘或串口登录 A7Z，执行 `sudo nmcli dev wifi connect "<wifi-ssid>" password "<wifi-password>"`；再从路由器 DHCP、板载屏幕、串口日志或 `arp -a` 找 `<board-ip>` |
 | `start-hachimo-link.ps1` 找不到模块或启动后 1883 没监听 | 全新环境还没安装 bridge 依赖，或命令不在仓库根目录执行 | 在 `ref/` 和 `ref/src-tauri/bridge/packages/clawd-backend-service/` 分别运行 `npm install`；回仓库根目录再运行脚本 |
 | A7Z 连不上 `mqtt://<pc-lan-ip>:1883` | 电脑 IP 选错、Windows 防火墙拦 Node.js、电脑和板子不在同一 LAN | 用 `Get-NetTCPConnection` 确认 1883 监听；允许 Node.js 访问可信局域网；从 A7Z 用 Python socket 检查 `<pc-lan-ip>:1883` |
 | 只打开了 `npm run dev:web` 页面，但设备状态不动 | Vite Web 只是前端页面，bridge/本地 agent 状态发布没有完整启动 | 用 `npm run dev` 启动完整 Tauri 应用；或用 `start-hachimo-link.ps1` 启动 headless broker + bridge |
 | 电脑 USB 枚举异常，manager 显示 USB 未连接 | A7Z 标准路线不依赖 Raspberry Pi USB gadget `/dev/ttyGS0` | 不要把 USB 未连接当成 A7Z 部署失败；优先验证 Wi-Fi、HTTP、MQTT 和 remote binding |
-| 屏幕完全不亮 | 供电、GND、BLK、排线方向或屏幕模块供电问题 | 先确认板子能 SSH；背光不亮优先查 BLK/3.3V/GND/排线，不要先重烧系统 |
-| 屏幕亮白屏 | SPI LCD overlay、RES/DC/CS 接线、中间 PCB、排线接触问题 | 查 `/proc/fb`、`dmesg`、`fb_ili9341`；确认 `CS=PD10`、`RES=PL6`、`DC=PL7`、BLK 直连 3.3V；必要时绕过中间 PCB 或重新压屏幕排线 |
-| 屏幕显示 Debian login 控制台，不显示宠物 | framebuffer 通了，但 `fb-display.sh` 没有接管屏幕 | 查 `sudo journalctl -u board-runtime -n 120 --no-pager`；如出现 stale lock，删除 `/opt/board-runtime/.fb-display.lock` 并重启 `board-runtime` |
+| 屏幕完全不亮 | 供电、GND、BLK、排线方向或屏幕模块供电问题 | 见上方“屏幕完全黑” |
+| 屏幕亮白屏 | SPI LCD overlay、RES/DC/CS 接线、中间 PCB、排线接触问题 | 见上方“屏幕亮白屏” |
+| 屏幕显示 Debian login 控制台，不显示宠物 | framebuffer 通了，但 `fb-display.sh` 没有接管屏幕 | 见上方“屏幕显示 Debian login” |
 | 日志里出现 `set: Illegal option -` | Windows CRLF 行尾被同步到 Linux shell 脚本 | 把脚本转成 LF 后重新部署；不要手工用会改行尾的方式覆盖 `/opt/board-runtime/*.sh` |
 | 画面卡顿 | SPI 小屏带宽有限，FPS 配置过高，或 SPI 频率过低 | A7Z 默认 LCD 频率用 16 MHz；可把 `PET_CLAW_FB_FFMPEG_OUTPUT_FPS` 调到 12-15 之间试稳定性 |
 | binding 接口返回 `503` 或 no matching board | bridge 还没看到 A7Z online/hello，或板子不在同一个 broker | 先确认 broker/bridge 在跑，再确认 `network-config.json` 的 `mqttUrl` 和脚本输出的 `MQTT URL` 一致，重启 `board-runtime` |
 | 重启板子后 manager 又连不上 | 远程绑定没有持久化，或 board runtime 没重新订阅当前 broker | 确认 `/opt/board-runtime/network-config.json` 中有正确 `mqttUrl`、`desktopDeviceId` / `targetDeviceId`，并重启 `board-runtime` |
 | 重启电脑后又连不上 | 电脑换了 Wi-Fi 或 LAN IP 变化，A7Z 仍连旧 MQTT URL | 让电脑回到同一局域网；运行 `scripts/start-hachimo-link.ps1 -UpdateBoard -BoardHost radxa@<board-ip>`，长期建议在路由器做 DHCP 固定 IP |
 | MQTT broker 默认域名不可用 | `broker.openclaw.example` 是占位默认值，不是本地可用 broker | 开发/复刻时启动本地 broker + bridge，并给部署脚本传 `mqtt://<pc-lan-ip>:1883` |
-| 读卡器显示 `No Media` | SD 卡没插实、读卡器状态没刷新，或卡/读卡器接触不良 | 拔插 SD 卡和读卡器；确认系统看到 16GB/实际容量的可移动盘后再写卡 |
+| 读卡器显示 `No Media` | SD 卡没插实、读卡器状态没刷新，或卡/读卡器接触不良 | 见上方“读卡器显示 `No Media`” |
 
 **服务没起来**
 
