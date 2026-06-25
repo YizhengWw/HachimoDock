@@ -1,14 +1,18 @@
 # Codex — board-runtime
 
-本文是设备端目录的工作说明。当前设备端主线支持 Raspberry Pi 和 Radxa Cubie A7Z。
+本文是设备端目录的工作说明。当前首次复刻部署默认目标是 Radxa Cubie A7Z，
+目标是把项目画面首次显示到 A7Z 小屏硬件上；Raspberry Pi 是兼容路线。
 
 ## 硬件平台
 
-- **设备**: Raspberry Pi（当前实测为 `zero2w`，armv7l）；Radxa Cubie A7Z（arm64）
+- **默认设备**: Radxa Cubie A7Z（arm64）
+- **兼容设备**: Raspberry Pi（当前实测为 `zero2w`，armv7l）
 - **系统**: Raspberry Pi OS 或 Radxa Debian / systemd
 - **运行目录**: `/opt/board-runtime`
 - **源码同步目录**: `/opt/board-runtime-src`
 - **屏幕**: ILI9341 320x240 SPI framebuffer；Pi 通常是 `/dev/fb1`，Radxa 通常是 `/dev/fb0`
+- **A7Z 首次显示硬件**: 新 microSD 卡 + 读卡器用于写系统卡；上板激活至少需要
+  A7Z 开发板、PCB/PSB 转接板、SPI 屏幕和稳定 USB-C 数据/供电线连接好
 - **触屏**: XPT2046 / ADS7846，通过 `/dev/input/event*`；Radxa 触屏配置尚未作为默认部署启用
 - **输入**: GPIO 旋钮、顶部按钮、触屏
 - **服务管理**: `board-runtime.service`、`board-widget-runtime.service`
@@ -36,7 +40,11 @@ Radxa Cubie A7Z 上完整构建可用 shell 或 PowerShell 部署脚本完成。
 macOS/Linux/WSL/Git Bash 使用 shell 脚本：
 
 ```sh
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 ```
 
 Windows 使用 `powershell`：
@@ -46,11 +54,15 @@ Windows 使用 `powershell`：
 <https://docs.radxa.com/en/cubie/a7z/getting-started/install-system/microsd>。
 优先使用官方 GPT/A733 unified release 镜像，下载后解压 `.img` 并用 Balena Etcher
 写入 microSD。
+首次启动 A7Z 后必须先在 Debian 系统层写入 Wi-Fi 信息，确认 `ssh radxa@<board-ip>`
+可用后再运行部署脚本；AI 执行部署教程时应在这一步暂停并要求用户提供 `<board-ip>`。
+完整新手部署路径、MQTT/binding 验收和常见卡点以 `DEPLOY.md` 为准。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 
@@ -60,6 +72,7 @@ macOS/Linux 也可使用 PowerShell 7 的 `pwsh`：
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/deploy-radxa-a733.ps1 \
   -HostName radxa@<board-ip> \
   -SudoPassword <sudo-password> \
+  -MqttUrl mqtt://<pc-lan-ip>:1883 \
   -ConfigureSpiLcd
 ```
 
@@ -77,18 +90,24 @@ export BOARD_IP="<pi-ip>"
 HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
 
 # Radxa A7Z 完整部署
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 
 # Radxa A7Z on Windows PowerShell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 
 # Radxa A7Z on macOS/Linux
 pwsh -NoProfile -ExecutionPolicy Bypass -File ./scripts/deploy-radxa-a733.ps1 \
   -HostName radxa@<board-ip> \
   -SudoPassword <sudo-password> \
+  -MqttUrl mqtt://<pc-lan-ip>:1883 \
   -ConfigureSpiLcd
 
 # 服务状态

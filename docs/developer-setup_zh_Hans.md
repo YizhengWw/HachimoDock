@@ -1,7 +1,8 @@
 # 本地开发指南
 
-本文档用于从零构建 Pet Manager PC 端，并将板端 runtime 部署到
-Raspberry Pi 或 Radxa Cubie A7Z 设备。
+本文档用于从零构建 Pet Manager PC 端，并将板端 runtime 部署到设备。
+当前首次复刻部署默认目标是 **Radxa Cubie A7Z**，目标是让项目画面首次显示到
+A7Z 小屏硬件上；Raspberry Pi 仍是兼容路线。
 
 ## 项目结构
 
@@ -68,12 +69,16 @@ Radxa Cubie A7Z shell 部署命令。macOS 如需运行 PowerShell 版本的 Rad
 - Pi 能访问 apt 源，用于安装 `cmake`、`gcc`、`ffmpeg`、字体和 Python 依赖
 - 本机可用 `ssh`、`rsync`、`sh`
 
-部署到 Radxa Cubie A7Z 前，需确认：
+运行 Radxa Cubie A7Z 部署脚本前，需确认。注意：这些不是烧卡前条件；全新 A7Z
+必须先刷系统、写入系统 Wi-Fi 并拿到 `<board-ip>`，再检查下面这些项。
 
 - Radxa Cubie A7Z 已经刷入官方 Debian 镜像。下载入口见
   [Radxa Cubie A7Z Downloads](https://docs.radxa.com/en/cubie/a7z/download)；
   也可查看
-  [Radxa Cubie A7Z image releases](https://github.com/radxa-build/radxa-cubie-a7z/releases)
+  [Radxa Cubie A7Z image releases](https://github.com/radxa-build/radxa-cubie-a7z/releases)。
+  首次复刻默认选择 GPT/A733 Unified 的 Debian 11 KDE R6（或未来更新的最新
+  正式 `r*` SD/eMMC KDE/Desktop release）。
+- A7Z 已在 Debian 系统层写入 Wi-Fi 信息，并连接到电脑可达的局域网
 - 本机能 SSH 到 A7Z，例如 `radxa@<board-ip>`
 - A7Z 用户具备 sudo 权限
 - A7Z 能访问 apt 源，用于安装 `cmake`、`gcc`、`ffmpeg`、字体和 Python 依赖
@@ -258,9 +263,13 @@ ssh <pi-user>@<pi-ip>
 
 ## Radxa Cubie A7Z 准备
 
+完整首次部署主流程以 `board-runtime/DEPLOY.md` 为准。这里保留开发指南摘要；
+如果两处有差异，优先按 `board-runtime/DEPLOY.md` 执行。
+
 确保 A7Z 已经：
 
 - 使用官方 Debian 镜像刷入 microSD 卡并正常开机
+- 上板激活时，A7Z 开发板、PCB/PSB 转接板、SPI 屏幕、排线和稳定 USB-C 线已经连接好
 - 已连接 2.4 GHz Wi-Fi 或其它可用网络
 - 已开启 SSH
 - 当前电脑可以通过 SSH 登录
@@ -277,11 +286,30 @@ ssh <pi-user>@<pi-ip>
 
 1. 从 [Radxa Cubie A7Z Downloads](https://docs.radxa.com/en/cubie/a7z/download)
    或 [Radxa Cubie A7Z image releases](https://github.com/radxa-build/radxa-cubie-a7z/releases)
-   下载官方 A733/Cubie A7Z GPT Debian 镜像。
+   下载官方 A733/Cubie A7Z GPT Debian 镜像。首次复刻默认选
+   **Radxa Cubie A7Z Debian 11 KDE R6 (Latest) (SD / eMMC)**；如果官方已经发布
+   更新的正式版，则选最新 `r*` release 的 SD/eMMC KDE/Desktop 镜像。不要选
+   `test` / `pre-release` / `t*` beta、Legacy、Android、UFS、NVMe/SPI Nor、
+   T113/MangoPi 镜像。
 2. 使用 Balena Etcher 选择镜像文件和 microSD 卡，执行 `Flash!` 并等待校验完成。
-3. 把 microSD 插入 A7Z，接 5V USB-C 电源启动。
-4. 从路由器 DHCP 列表、板载屏幕、串口日志或 `arp -a` 找到 `<board-ip>`。
-5. 测试 SSH：
+3. 把 microSD 插入 A7Z，连接开发板、PCB/PSB 转接板、SPI 屏幕和稳定 USB-C
+   数据/供电线后启动。
+4. **暂停并写入系统 Wi-Fi 信息。**这一步不能省略；后续 SSH 部署、MQTT 绑定和
+   manager 发现设备都依赖 A7Z 已经联网。
+
+   如果还不能 SSH，先临时接 HDMI + 键盘，或通过串口登录 A7Z，然后在 A7Z 上执行：
+
+```bash
+sudo nmcli dev wifi connect "<wifi-ssid>" password "<wifi-password>"
+nmcli -t -f active,ssid dev wifi
+ip -4 addr
+```
+
+   AI 或自动化助手执行到这里必须停下来，提示用户完成 Wi-Fi 写入并返回
+   `<board-ip>`；拿到可 SSH 的 `<board-ip>` 前不要继续运行部署脚本。
+
+5. 从路由器 DHCP 列表、板载屏幕、串口日志或 `arp -a` 找到 `<board-ip>`。
+6. 测试 SSH：
 
 ```bash
 ssh radxa@<board-ip>
@@ -422,10 +450,13 @@ cd board-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 
 如果 A7Z 已配置免密 sudo，可以省略 `-SudoPassword`。
+如果使用本地电脑作为 MQTT broker，先在仓库根目录运行
+`scripts/start-hachimo-link.ps1`，并把脚本输出的 `MQTT URL` 作为 `-MqttUrl`。
 
 ### macOS / Linux / WSL / Git Bash
 
@@ -438,10 +469,16 @@ cd board-runtime
 部署并同时写入 A7Z SPI LCD overlay：
 
 ```bash
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 ```
 
 如果 A7Z 已配置免密 sudo，可以省略 `SUDO_PASSWORD`。
+如果使用本地电脑作为 MQTT broker，先在仓库根目录运行
+`scripts/start-hachimo-link.ps1`，并把脚本输出的 `MQTT URL` 作为 `MQTT_URL`。
 
 部署脚本会完成以下工作：
 
@@ -504,7 +541,8 @@ ssh "$BOARD_HOST" 'cat /sys/class/graphics/fb0/name /sys/class/graphics/fb0/virt
 ```
 
 A7Z 默认使用 Wi-Fi + SSH / MQTT，不依赖 Raspberry Pi 的 USB gadget
-`/dev/ttyGS0`。
+`/dev/ttyGS0`。在 A7Z 路线下，桌面端 USB 未连接不等于部署失败；优先检查
+`curl http://<board-ip>/board-runtime-config.json`、MQTT broker、bridge 和远程绑定。
 
 ## 双端联调
 
@@ -579,6 +617,10 @@ ssh "$BOARD_HOST" 'sudo journalctl -u board-runtime -n 80 --no-pager'
 
 ## 推荐的新手完整流程
 
+新手推荐先选定一条设备路线，不要混用。A7Z 路线是：
+官方 Debian 镜像 -> 系统 Wi-Fi -> SSH -> 本地 MQTT/bridge -> 部署 runtime ->
+Pet Manager 绑定。A7Z 不依赖 Raspberry Pi 的 USB gadget `/dev/ttyGS0`。
+
 ### 1. 启动桌面端
 
 ```bash
@@ -586,6 +628,25 @@ git clone <repo-url> claw-pet-manager
 cd claw-pet-manager/ref
 npm install
 npm run dev
+```
+
+如果是 A7Z 并使用本机作为 MQTT broker，另开 Windows PowerShell，在仓库根目录先启动
+broker + bridge：
+
+```powershell
+cd claw-pet-manager
+
+cd .\ref\src-tauri\bridge\packages\clawd-backend-service
+npm install
+
+cd ..\..\..\..\..
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-hachimo-link.ps1
+```
+
+记录脚本输出的：
+
+```text
+MQTT URL: mqtt://<pc-lan-ip>:1883
 ```
 
 ### 2. 部署设备端
@@ -607,6 +668,7 @@ cd claw-pet-manager\board-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 
@@ -615,7 +677,11 @@ Radxa Cubie A7Z：macOS / Linux / WSL / Git Bash 终端：
 ```bash
 cd claw-pet-manager/board-runtime
 
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 ```
 
 如果脚本提示需要重启：
@@ -652,7 +718,7 @@ ssh "$BOARD_HOST" 'cat /proc/fb; ls -l /dev/fb*'
 
 在 Pet Manager 中进入设备页面，确认：
 
-- USB 显示已连接，或 Wi-Fi 显示在线
+- A7Z 路线下 Wi-Fi/MQTT 显示在线；USB 未连接不等于失败
 - 可以扫描到设备
 - 可以切换 Agent
 - 可以更换形象并同步到设备端
@@ -686,6 +752,7 @@ cd board-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 

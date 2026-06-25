@@ -14,6 +14,13 @@ SPI 小屏上。
 
 ## 快速构建
 
+首次把项目画面部署到默认硬件 Radxa Cubie A7Z 时，请先按
+[DEPLOY.md](DEPLOY.md) 走完整流程。它是当前标准入口，包含空白 microSD 卡写系统、
+首次写入 Wi-Fi、SSH/sudo/apt 检查、SPI 屏幕接线与显示验收、MQTT/bridge 和
+Pet Manager 绑定。A7Z 系统镜像默认选择 Radxa 官方 GPT/A733 Unified 的
+Debian 11 KDE R6（或未来更新的最新正式 `r*` SD/eMMC KDE/Desktop release）。
+下面命令只适合已经完成前置检查后的开发部署摘要。
+
 本机开发验证可以直接用 CMake 构建 host 版本：
 
 ```sh
@@ -39,14 +46,19 @@ LCD 配置会写入已验证的 ILI9341 SPI 屏 overlay。
 - [Radxa Cubie A7Z Downloads](https://docs.radxa.com/en/cubie/a7z/download)
 - [Install System to microSD Card](https://docs.radxa.com/en/cubie/a7z/getting-started/install-system/microsd)
 
-推荐使用官方 GPT/A733 unified release 镜像，下载后解压 `.img`，再用 Balena Etcher
-写入 microSD 卡。
+推荐使用官方 GPT/A733 unified release 镜像；首次复刻默认下载 Debian 11 KDE R6
+（或未来更新的最新正式 `r*` SD/eMMC KDE/Desktop release），下载后解压 `.img`，
+再用 Balena Etcher 写入 microSD 卡。
 
 macOS/Linux/WSL/Git Bash：
 
 ```sh
 cd board-runtime
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 ```
 
 Windows PowerShell：
@@ -56,6 +68,7 @@ cd board-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 
@@ -81,6 +94,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.
 shell 脚本使用环境变量覆盖：
 
 ```sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
 HOST=radxa@<board-ip> \
 SUDO_PASSWORD=<sudo-password> \
 REMOTE_DIR=/opt/board-runtime \

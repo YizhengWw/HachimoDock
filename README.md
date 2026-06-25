@@ -51,6 +51,13 @@ npm run dev:web
 
 ## 设备端开发和部署
 
+首次复刻到默认硬件 Radxa Cubie A7Z 时，先读
+[board-runtime/DEPLOY.md](board-runtime/DEPLOY.md)。这篇是当前标准部署入口，
+覆盖从空白 microSD 卡写系统、首次写入 Wi-Fi、SSH 部署、SPI 屏幕显示、
+本地 MQTT/bridge 到 Pet Manager 绑定的完整流程。A7Z 系统镜像默认选择
+Radxa 官方 GPT/A733 Unified 的 Debian 11 KDE R6（或未来更新的最新正式 `r*`
+SD/eMMC KDE/Desktop release）；不要只复制下面的摘要命令。
+
 本机快速编译 C 代码：
 
 ```sh
@@ -71,7 +78,11 @@ HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
 
 ```sh
 cd board-runtime
-HOST=radxa@<board-ip> SUDO_PASSWORD=<sudo-password> CONFIGURE_SPI_LCD=1 sh scripts/deploy-radxa-a733.sh
+MQTT_URL="mqtt://<pc-lan-ip>:1883" \
+HOST=radxa@<board-ip> \
+SUDO_PASSWORD=<sudo-password> \
+CONFIGURE_SPI_LCD=1 \
+sh scripts/deploy-radxa-a733.sh
 ```
 
 部署到 Radxa Cubie A7Z（Windows PowerShell）：
@@ -81,11 +92,13 @@ cd board-runtime
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
   -HostName radxa@<board-ip> `
   -SudoPassword <sudo-password> `
+  -MqttUrl mqtt://<pc-lan-ip>:1883 `
   -ConfigureSpiLcd
 ```
 
 设备 IP、用户和密码不要写死在文档或业务代码里。不同板子使用不同的
-`BOARD_HOST` / `BOARD_IP` 即可；Radxa A7Z 刷写系统和 SPI 屏幕 overlay 说明见
+`BOARD_HOST` / `BOARD_IP` 即可；Radxa A7Z 首次显示、刷写系统、Wi-Fi、MQTT
+和 SPI 屏幕 overlay 说明见
 [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md)。
 
 更多设备端说明见 [board-runtime/README.md](board-runtime/README.md) 和
