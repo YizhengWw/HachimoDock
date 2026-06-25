@@ -17,5 +17,8 @@
   "dependencies": {
     "mqtt": "^5.15.1",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "mqtt-connection": "^4.1.0"
   }
 }

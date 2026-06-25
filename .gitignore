@@ -7,6 +7,8 @@ target/
 *.dmg
 test-results/
 tmp-captures/
+*.log
+codex-session-*-chat.md
 .DS_Store
 .claude/
 pet-claw/.env
