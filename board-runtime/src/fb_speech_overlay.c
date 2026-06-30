@@ -1,3 +1,8 @@
+/*
+ * Framebuffer overlay renderer.
+ * [Input] Runtime dot files for stats dashboards and explicit debug text.
+ * [Output] 32bpp framebuffer overlay frames; main-screen speech subtitles are suppressed.
+ */
 #include <errno.h>
 #include <math.h>
 #include <stdbool.h>
@@ -1423,17 +1428,16 @@ int main(int argc, char **argv) {
       event[0] = '\0';
     }
 
-    /* 文本来源：默认从 .current-speech 读；当 .screen-page=stats 时改读 .stats-display。
-     * stats 文件由 runtime_stats 模块预格式化为 STATS_DASHBOARD_V1 payload，
-     * overlay 只负责解析展示字段和绘制 framebuffer，不重新计算 token。 */
+    /* Main-screen subtitles are intentionally suppressed. The stats page still
+     * reads .stats-display so negative-screen dashboards keep working. */
     char screen_page[16];
     bool is_stats_page = false;
     if (br_overlay_read_text(config.screen_page_path, screen_page, sizeof(screen_page))) {
       is_stats_page = strcmp(screen_page, "stats") == 0;
     }
-    const char *active_text_path = is_stats_page ? config.stats_display_path : config.speech_path;
+    const char *active_text_path = is_stats_page ? config.stats_display_path : config.debug_speech_path;
 
-    if (!br_overlay_read_text(active_text_path, text, sizeof(text))) {
+    if (!is_stats_page || !br_overlay_read_text(active_text_path, text, sizeof(text))) {
       text[0] = '\0';
     }
     if (!br_overlay_read_text(config.debug_speech_path, debug_text, sizeof(debug_text))) {

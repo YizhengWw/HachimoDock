@@ -3,7 +3,7 @@
  * [Output] On success persists via `lib/appearance-store.js`, with clear GIF first-frame copy,
  *          fixed-size reference upload preview, unified field help, shared provider-config persistence,
  *          Volcengine Ark API-key-only product-fit model dropdown with Seedance 1.5 first and 2.0 activation guidance,
- *          fast low-resolution defaults, reusable step components, and preflight generation requirements.
+ *          fast low-resolution defaults, reusable step components, optional inline progress, and preflight generation requirements.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -476,6 +476,7 @@ export function AvatarWizardStep2({
   onFastGeneration,
   onBack,
   onStart,
+  progress,
   title = "第 2 步 · 生成配置",
   backLabel = "上一步",
   startLabel = "开始生成",
@@ -686,6 +687,22 @@ export function AvatarWizardStep2({
           {startLabel}
         </button>
       </div>
+      {progress && (
+        <div
+          className={`ca-inline-progress ${progress.tone === "success" ? "is-complete" : ""}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="ca-inline-progress__meta">
+            <span>{progress.label}</span>
+            <strong>{Math.round(progress.percent)}%</strong>
+          </div>
+          <div className="ca-inline-progress__bar" aria-hidden="true">
+            <span style={{ width: `${Math.max(0, Math.min(100, progress.percent))}%` }} />
+          </div>
+          {progress.message && <div className="ca-inline-progress__message">{progress.message}</div>}
+        </div>
+      )}
     </div>
   );
 }

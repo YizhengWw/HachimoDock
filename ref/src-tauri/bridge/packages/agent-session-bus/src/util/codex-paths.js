@@ -1,5 +1,12 @@
 "use strict";
 
+/*
+ * [Input] Codex session directory trees, metadata-bearing JSONL rows, and legacy flat session files.
+ * [Output] Active-session candidates that skip metadata-less rollout files before resume selection.
+ * [Pos] Codex session discovery helper for agent-session-bus.
+ * [Sync] If Codex session filtering changes, update `ref/.folder.md`.
+ */
+
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -45,6 +52,8 @@ function codexModelsCachePath({ env = process.env } = {}) {
  *              from the jsonl `session_meta.payload.id` field; it is NOT
  *              necessarily the file basename, since the basename is
  *              `rollout-<iso>-<uuid>` with extra prefix bits.
+ *              `rollout-*.jsonl` files without `session_meta` are skipped
+ *              because Codex app-server refuses to resume them.
  * - `cwd`    – the workspace the session ran in (from
  *              `session_meta.payload.cwd`). Optional; older builds may
  *              omit it.
@@ -81,11 +90,15 @@ function listCodexSessions({ cwd, limit = 100, env = process.env } = {}) {
   for (const fullPath of files) {
     let stat;
     try { stat = fs.statSync(fullPath); } catch { continue; }
+    const basename = path.basename(fullPath);
     const meta = readSessionMeta(fullPath);
-    // The basename UUID is a reliable fallback when payload parsing fails
-    // (e.g. partial-write at the head of the file). Use it as a last resort
-    // so the session is still resumable.
-    const fallbackId = extractUuidFromBasename(path.basename(fullPath));
+    // Codex Desktop's app-server rejects rollout files that do not begin with
+    // session_meta. Do not treat those as resumable just because the basename
+    // ends in a UUID; they are internal/non-session rollouts.
+    if (isRolloutBasename(basename) && !(meta && meta.id)) continue;
+    // Older flat layouts may be named directly after the session id. Keep the
+    // basename fallback for those non-rollout files.
+    const fallbackId = extractUuidFromBasename(basename);
     const id = (meta && meta.id) || fallbackId;
     if (!id) continue;
     const sessionCwd = meta && meta.cwd ? meta.cwd : "";
@@ -331,6 +344,10 @@ function extractUuidFromBasename(basename) {
   const match = noExt.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   if (match) return match[0];
   return noExt;
+}
+
+function isRolloutBasename(basename) {
+  return /^rollout-/i.test(String(basename || ""));
 }
 
 function sessionCreatedAt(filePath, stat) {

@@ -1,5 +1,12 @@
 "use strict";
 
+/*
+ * [Input] Fake Codex homes, JSONL session trees, and shimmed Codex CLI processes.
+ * [Output] Regression coverage for Codex adapter session selection, resume handling, and metadata-less rollout skipping.
+ * [Pos] Node tests for the agent-session-bus Codex adapter.
+ * [Sync] If Codex session filtering or resume behavior changes, update `ref/.folder.md`.
+ */
+
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -322,6 +329,27 @@ test("resolveActive returns newest started session, not oldest recently-written 
     const active = await a.resolveActive();
     assert.ok(active);
     assert.equal(active.id, "newer-started");
+  });
+});
+
+test("resolveActive ignores rollout files without Codex session metadata", async () => {
+  await withFakeHome({
+    sessions: {
+      "2026/06/30": {
+        "rollout-2026-06-30T10-58-56-019f1677-2c90-7bd3-933c-35304cc66962.jsonl": {
+          mtimeAgo: 100,
+        },
+        "rollout-2026-06-30T10-40-00-019f1600-0000-7000-8000-000000000001.jsonl": {
+          mtimeAgo: 60_000,
+          meta: { id: "valid-thread", cwd: "/repo" },
+        },
+      },
+    },
+  }, async (home) => {
+    const a = makeAdapter(home);
+    const active = await a.resolveActive();
+    assert.ok(active);
+    assert.equal(active.id, "valid-thread");
   });
 });
 

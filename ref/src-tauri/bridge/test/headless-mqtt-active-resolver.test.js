@@ -1,3 +1,10 @@
+/*
+ * [Input] Headless bridge HTTP/MQTT fixtures plus fake agent-session-bus streams.
+ * [Output] Regression coverage for selected-source state, mock/board voice injection, and stale Codex metadata recovery.
+ * [Pos] Integration-style Node tests for the managed status bridge.
+ * [Sync] If voice-injection recovery behavior changes, update `ref/.folder.md`.
+ */
+
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -403,5 +410,49 @@ test("injectViaAgentBus can send mock button text into a live bus session", asyn
     assert.ok(result.tokenChars > 0);
   } finally {
     await bus.stop();
+  }
+});
+
+test("injectViaAgentBus retries Codex metadata session failures with a fresh voice session", async () => {
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+      requests.push(body);
+      res.writeHead(200, { "Content-Type": "text/event-stream" });
+      if (requests.length === 1) {
+        res.write("event: error\n");
+        res.write("data: {\"code\":\"-32603\",\"message\":\"failed to read thread: rollout does not start with session metadata\"}\n\n");
+        res.end();
+        return;
+      }
+      res.write("event: ready\n");
+      res.write("data: {\"runId\":\"run-fresh\",\"agentId\":\"codex\",\"sessionId\":\"fresh-session\",\"opened\":true}\n\n");
+      res.write("event: token\n");
+      res.write("data: {\"text\":\"ok\"}\n\n");
+      res.write("event: done\n");
+      res.write("data: {\"sessionId\":\"fresh-session\",\"stopReason\":\"end_turn\"}\n\n");
+      res.end();
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const fakeBus = { port_: () => port };
+  try {
+    const result = await injectViaAgentBus(fakeBus, {
+      agentId: "codex",
+      sessionId: "auto",
+      text: "voice input",
+      metadata: { source: "board-voice-ptt" },
+    }, { timeoutMs: 10000 });
+    assert.equal(result.done.sessionId, "fresh-session");
+    assert.deepEqual(requests.map((request) => request.sessionId), ["auto", "new"]);
+    assert.equal(result.recoveredSession, true);
+    assert.equal(requests[1].metadata.source, "board-voice-ptt");
+    assert.equal(requests[1].metadata.recoveredFromSessionMetadataError, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
   }
 });

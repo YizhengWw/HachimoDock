@@ -1,6 +1,6 @@
 /**
  * [Input] children tree consuming useDeviceContext; Tauri invoke/listen for USB status, appearance sync progress, manual serial rescan, WiFi online, bindings, and agents; lib helpers for appearance/agent storage.
- * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent, appearanceSync); hydrates and reconciles active channel from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
+ * [Output] Single source of polling and derived state (binding, USB status, independent wifiOnline state, derived deviceOnline, force-refreshable appearances, agentAppearanceMap, enabledAgents, agentOptions, currentDisplay, currentComponent, appearanceSync); hydrates and reconciles active channel + desktop target id from the bridge profile before trusting localStorage cache; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
  * [Pos] component node in ref/src/shell
  * [Sync] If this file changes, update `ref/src/shell/.folder.md`.
  */
@@ -84,6 +84,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   const [agentAppearanceMap, setAgentAppearanceMap] = useState({});
   const [enabledAgents, setEnabledAgents] = useState(new Set());
   const [bridgeSelectedAgentId, setBridgeSelectedAgentId] = useState("");
+  const [bridgeDesktopDeviceId, setBridgeDesktopDeviceId] = useState("");
   const bindingReconcileRef = useRef("");
   const [agentOptions, setAgentOptions] = useState(() =>
     FIXED_AGENT_OPTIONS.map((agent) => ({ ...agent, detected: false })),
@@ -130,16 +131,23 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
           setWifiBoardDeviceId(id);
           const entry = id ? devices?.[id] : null;
           const targetSource = entry?.targetSource || "";
-          const targetDeviceId = entry?.targetDeviceId || entry?.desktopDeviceId || binding?.desktopDeviceId || "";
+          const observedTargetDeviceId = entry?.targetDeviceId || entry?.desktopDeviceId || "";
+          const desiredTargetDeviceId = bridgeDesktopDeviceId || binding?.desktopDeviceId || observedTargetDeviceId;
           const mqttNamespace = entry?.mqttNamespace || binding?.mqttNamespace || "desk";
-          if (id && targetDeviceId && bridgeSelectedAgentId && targetSource !== bridgeSelectedAgentId) {
-            const reconcileKey = `${id}:${targetDeviceId}:${targetSource}->${bridgeSelectedAgentId}`;
+          const targetSourceChanged = targetSource !== bridgeSelectedAgentId;
+          const targetDeviceIdChanged = observedTargetDeviceId !== desiredTargetDeviceId;
+          if (id && desiredTargetDeviceId && bridgeSelectedAgentId && (targetDeviceIdChanged || targetSourceChanged)) {
+            const reconcileKey = [
+              id,
+              `${observedTargetDeviceId || "(unset)"}->${desiredTargetDeviceId}`,
+              `${targetSource || "(unset)"}->${bridgeSelectedAgentId}`,
+            ].join(":");
             if (bindingReconcileRef.current !== reconcileKey) {
               bindingReconcileRef.current = reconcileKey;
               invoke("dispatch_remote_cli_binding", {
                 input: {
                   boardDeviceId: id,
-                  targetDeviceId,
+                  targetDeviceId: desiredTargetDeviceId,
                   targetSource: bridgeSelectedAgentId,
                   previousSource: targetSource,
                   mqttNamespace,
@@ -163,12 +171,12 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       cancelled = true;
       clearInterval(id);
     };
-  }, [binding, bridgeSelectedAgentId]);
+  }, [binding, bridgeDesktopDeviceId, bridgeSelectedAgentId]);
 
   // --- Initial: load bridge profile, detect agents, list appearances ---
-  const loadAppearancesData = useCallback(async () => {
+  const loadAppearancesData = useCallback(async ({ force = false } = {}) => {
     try {
-      const records = await listAppearances();
+      const records = await listAppearances({ force });
       setAppearances(records);
       const map = loadAgentAppearanceMap(records);
       setAgentAppearanceMap(map);
@@ -185,6 +193,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
     try {
       const profile = await invoke("load_bridge_profile");
       setBridgeSelectedAgentId(profile?.selectedAgentId || profile?.enabledAgents?.[0] || "");
+      setBridgeDesktopDeviceId(profile?.desktopDeviceId || "");
       const bridgeEnabled = bridgeEnabledAgents(profile);
       if (bridgeEnabled) {
         setEnabledAgents(bridgeEnabled);
@@ -226,7 +235,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
 
   const refresh = useCallback(async () => {
     await Promise.all([
-      loadAppearancesData().then(() => loadBridgeSelection()),
+      loadAppearancesData({ force: true }).then(() => loadBridgeSelection()),
       detectAgents(),
     ]);
   }, [loadAppearancesData, loadBridgeSelection, detectAgents]);

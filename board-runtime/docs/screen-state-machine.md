@@ -28,7 +28,7 @@
 - 在 clip 边界进行软切换。
 - 在 `.screen-interrupt` 或本地 touch 请求出现时进行硬打断。
 - 在 Raspberry Pi 上控制 ffmpeg 解码视频，并通过 `fb-rawvideo-blit.py` 写入 framebuffer。
-- 在真正开始播放某个 clip 时写入对应的状态字幕 `.current-speech`。
+- 在真正开始播放某个 clip 时写入对应的状态文案 `.current-speech`，但主屏不渲染字幕。
 - 写入 `.debug-screen-state.json` 和 `.current-debug-speech`。
 
 ### `board-touch-input`
@@ -42,10 +42,11 @@ touch 是屏幕本地抢占事件，不属于 session 主状态。
 
 ### `fb-speech-overlay`
 
-`fb-speech-overlay` 负责在 framebuffer 顶部叠加文字：
+`fb-speech-overlay` 负责在 32bpp framebuffer 上绘制负一屏 dashboard 和显式 debug 文本：
 
-- 普通模式下显示 `.current-speech`。
+- `.screen-page=stats` 时显示 `.stats-display`。
 - debug overlay 开启时显示 `.current-debug-speech`。
+- 普通 main 页不显示 `.current-speech` 字幕。
 
 debug 内容包括屏幕状态机状态和 session 状态机状态。
 
@@ -102,21 +103,22 @@ touch.lick.mp4
 
 这样播放器实现可以跟随 Raspberry Pi 的标准用户态工具链，不依赖旧平台的专用播放器。
 
-## 状态字幕同步
+## 状态文案同步
 
-状态类字幕由 `fb-display.sh` 在 clip 真正开始播放前写入 `.current-speech`，而不是由 `board-server` 在收到 MQTT 状态推送时立即写入。
+状态类文案由 `fb-display.sh` 在 clip 真正开始播放前写入 `.current-speech`，而不是由 `board-server` 在收到 MQTT 状态推送时立即写入。这个点文件保留给上游语音文本、配网提示和诊断读取；主屏不再把它渲染成字幕。
 
 这样可以保证：
 
 - `.current-state` 只是 session 期望状态。
 - `.current-speech` 跟屏幕实际播放的 clip 对齐。
-- `working -> done` 这类软切换不会提前出现 `搞定啦！`。
-- touch 字幕跟随实际随机到的 `touch.*` clip。
+- `working -> done` 这类软切换不会提前写入 `搞定啦！`。
+- 所有 `idle` / `idle.*` clip 的状态文案统一写成 `休息中`。
+- touch 文案跟随实际随机到的 `touch.*` clip。
 
-`board-server` 仍会在两类非状态字幕场景写 `.current-speech`：
+`board-server` 仍会在两类非状态文本场景写 `.current-speech`：
 
 - 配网等待提示，例如“请打开电脑端 Pet Manager 进行配网。”
-- 上游 `speech/text` topic 推送的实际文本内容；如果 payload 带 `source` + `sessionId` / `runId` / `sessionKey`，设备端会按 session 保留最近回复 30 秒，并按更新时间合并显示。
+- 上游 `speech/text` topic 推送的实际文本内容；如果 payload 带 `source` + `sessionId` / `runId` / `sessionKey`，设备端会按 session 保留最近回复 30 秒，并按更新时间合并写入。
 
 配网等待期间，`fb-display.sh` 不会用通用 `waiting_user` 文案覆盖配网提示。
 
@@ -290,4 +292,6 @@ touch.lick.mp4
 touch.what.mp4
 ```
 
-当前仓库实际还包含更多 `idle.*` 和 `working.thinking.mp4`，都会被动态加入对应 state 的随机池。
+当前仓库实际还包含更多 `idle.*` 和 `working.thinking.mp4`。一般 variant 会被动态加入对应
+state 的随机池；`working.typing.mp4` 和 `working.thinking.mp4` 同时存在时是特例，
+`fb-display.sh` 会按 typing -> thinking -> typing 的顺序交替播放，每个完整 clip 后切换一次。

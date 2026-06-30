@@ -739,7 +739,7 @@ ssh "$BOARD_HOST" 'systemctl is-active board-widget-runtime.service'
 | `board-rotary-input` | GPIO 旋钮/按钮输入 |
 | `fb-display.sh` | 视频播放驱动 |
 | `fb-rawvideo-blit.py` | rawvideo 写 framebuffer |
-| `fb-speech-overlay` | 32bpp framebuffer overlay |
+| `fb-speech-overlay` | 32bpp framebuffer 负一屏/debug overlay |
 | `board-widget-runtime.py` | `.clawpkg` widget runtime |
 | `board-voice-ptt.py` | 按住说话 |
 | `start-rpi.sh` | Raspberry Pi 启动编排 |
@@ -750,7 +750,7 @@ ssh "$BOARD_HOST" 'systemctl is-active board-widget-runtime.service'
 | `board-widget-runtime.service` | widget runtime unit 模板 |
 | `assets/` | 宠物素材和生成视频 |
 | `ui/` | 本地 UI / 配网页面 |
-| `unifont-*.hex.gz` | 字幕/中文字体资源 |
+| `unifont-*.hex.gz` | overlay/dashboard 中文字体资源 |
 
 这些文件是设备现场状态，不应被普通部署覆盖：
 

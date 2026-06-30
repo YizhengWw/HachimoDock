@@ -1,8 +1,9 @@
 /**
  * [Input] Appearance detail source and shared stylesheet.
  * [Output] Static Node test coverage for detail navigation, guarded deletion,
- *          task-focused preview-first layout, configurable state WAV cues, closable background single-state generation,
- *          built-in non-deletable records, generated-only materials, and codex pet source labels.
+ *          task-focused preview-first layout, configurable state WAV cues,
+ *          direct per-state MP4 replacement, closable background single-state generation
+ *          with inline progress, built-in non-deletable records, generated-only materials, and codex pet source labels.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -86,6 +87,26 @@ test("appearance detail lets users configure a WAV cue for each generated state"
   assert.match(css, /\.state-card__sound\s*\{/);
 });
 
+test("appearance detail lets users upload an MP4 to replace the selected state video", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /const \[stateVideoState, setStateVideoState\] = useState\("idle"\);/);
+  assert.match(source, /const \[stateVideoMessage, setStateVideoMessage\] = useState\(""\);/);
+  assert.match(source, /function isMp4VideoFile/);
+  assert.match(source, /readFileAsBytes\(file\)/);
+  assert.match(source, /handleStateVideoFileChange/);
+  assert.match(source, /accept="video\/mp4,\.mp4"/);
+  assert.match(source, /状态视频/);
+  assert.match(source, /上传 MP4 替换/);
+  assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeFamily,[\s\S]*videoBytes/);
+  assert.match(source, /已上传并替换 \$\{activeFamily\} 状态视频。需要在设备生效时，点击“替换到板端”。/);
+  assert.match(source, /setSingleStateStatus\("success"\);/);
+  assert.match(source, /detail-side-section detail-side-section--video/);
+  assert.match(css, /\.detail-state-video-upload\s*\{/);
+  assert.match(css, /\.detail-state-video-upload__actions\s*\{/);
+});
+
 test("appearance detail uses a preview-first workspace with controls beside it", () => {
   const source = readSource("AppearanceDetail.jsx");
   const css = readSource("styles.css");
@@ -155,9 +176,14 @@ test("appearance detail can regenerate one selected state and replace it on the 
   assert.match(source, /usb_sync_appearance/);
   assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeRecord\.family/);
   assert.match(source, /runSingleFamilyVideo\(\{[\s\S]*family: activeRecord\.family/);
+  assert.match(source, /singleStateProgressFromPipeline/);
+  assert.match(source, /singleStateProgress/);
+  assert.match(source, /progress=\{[\s\S]*singleStateProgress/);
   assert.match(css, /\.detail-state-regenerate-entry\s*\{/);
   assert.match(source, /detail-state-regenerate-entry__cta/);
   assert.match(css, /\.detail-state-regenerate-entry__cta\s*\{/);
+  assert.match(css, /\.ca-inline-progress\s*\{/);
+  assert.match(css, /\.ca-inline-progress__bar span\s*\{/);
   assert.doesNotMatch(regenerateCtaRule, /width:\s*100%;/);
   assert.match(regenerateCtaRule, /min-height:\s*40px;/);
   assert.match(regenerateCtaRule, /background:\s*var\(--accent-soft\);/);
@@ -175,7 +201,8 @@ test("single-state generation can keep running after the modal is closed", () =>
   assert.doesNotMatch(source, /aria-label="关闭单状态重生成"[\s\S]{0,160}disabled=\{singleStateBusy\}/);
   assert.match(source, /正在生成 \$\{activeRecord\.family\} 状态素材/);
   assert.match(source, /setSingleStateStatus\("success"\);/);
-  assert.match(source, /setSingleStateMessage\(`已替换 \$\{activeRecord\.family\} 状态素材。需要在设备生效时，点击“替换到板端”。`\);/);
+  assert.match(source, /const successMessage = `已替换 \$\{activeRecord\.family\} 状态素材。需要在设备生效时，点击“替换到板端”。`;/);
+  assert.match(source, /setSingleStateMessage\(successMessage\);/);
 });
 
 test("single-state replacement keeps the board-sync action available after updating the prompt", () => {
@@ -196,12 +223,13 @@ test("appearance detail keeps built-in appearances non-deletable and normalizes 
   assert.match(source, /"内置形象"/);
 });
 
-test("appearance detail only renders successfully generated family materials", () => {
+test("appearance detail renders every known state so missing videos can be replaced", () => {
   const source = readSource("AppearanceDetail.jsx");
 
-  assert.match(source, /const generatedFamilies = useMemo\(/);
-  assert.match(source, /record\?\.families\?\.filter\(\(family\) => family\.ok\) \|\| \[\]/);
-  assert.match(source, /generatedFamilies\.map\(\(familyRecord\) =>/);
+  assert.match(source, /const stateFamilyRecords = useMemo\(/);
+  assert.match(source, /FAMILIES\.map\(\(definition\) =>/);
+  assert.match(source, /stateFamilyRecords\.map\(\(familyRecord\) =>/);
   assert.match(source, /全部状态/);
-  assert.match(source, /\{generatedFamilies\.length\} 个已生成素材/);
+  assert.match(source, /\{generatedFamilies\.length\}\/\{stateFamilyRecords\.length\} 个已有素材/);
+  assert.match(source, /familyRecord\.ok \? "已生成" : "可上传替换"/);
 });

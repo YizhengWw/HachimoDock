@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment with inline non-blocking USB sync progress, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, airy detail-page summary sections, compact single-state regeneration CTA button, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
+ * [Output] Provide a Linear-inspired clean visual language for the Pet Manager desktop bridge configurator, shared form-control primitives, fixed-height desktop sidebar tabs, single desktop-pet channel/appearance assignment with inline non-blocking USB sync progress, compact single-column bound-device/runtime status density with a manual USB serial rescan action, board-runtime-sourced button configuration with a larger non-overlapping device-button SVG map beside compact per-button function editing for voice and negative-screen controls, voice-session mock injection and board voice action status panels, connection-gated dashboard modal apply actions, USB WiFi apply modal card chrome, two-method onboarding cards, single-channel onboarding confirmation, compact orange gallery action buttons, per-state WAV cue upload controls, airy detail-page summary sections, compact single-state regeneration CTA button and inline modal progress bar, fixed-size reference upload dropzone, unobstructed full Codex import gallery previews, dashboard-matched hover previews, responsive component-center built-in/draft/create grids with adaptive negative-screen previews that follow the card frame, unified card geometry, un-clamped card copy, top-left title, top-right status, bottom progress parity, and install-time button-function controls, current-channel component prompt generation with Step 2 tap/long-press guidance, MagicMirror hints, custom/generated draft install/delete actions, and community import paste/scan controls while preserving the existing setup and runtime interactions.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -6275,6 +6275,69 @@ input:focus-visible {
   margin-top: 6px;
 }
 
+.ca-inline-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 103, 0, 0.18);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(255, 241, 230, 0.92), rgba(255, 255, 255, 0.96));
+}
+
+.ca-inline-progress__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ca-inline-progress__meta strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.ca-inline-progress__bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 103, 0, 0.14);
+}
+
+.ca-inline-progress__bar span {
+  display: block;
+  height: 100%;
+  min-width: 8px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #ff9a55);
+  transition: width 0.28s ease;
+}
+
+.ca-inline-progress__message {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ca-inline-progress.is-complete {
+  border-color: rgba(21, 164, 102, 0.2);
+  background: var(--success-soft);
+}
+
+.ca-inline-progress.is-complete .ca-inline-progress__meta {
+  color: var(--success);
+}
+
+.ca-inline-progress.is-complete .ca-inline-progress__bar {
+  background: rgba(21, 164, 102, 0.16);
+}
+
+.ca-inline-progress.is-complete .ca-inline-progress__bar span {
+  background: var(--success);
+}
+
 .ca-progress-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -6505,6 +6568,19 @@ input:focus-visible {
   gap: 12px;
 }
 
+.detail-state-video-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.detail-state-video-upload__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .detail-audio-config__header,
 .detail-audio-config__actions {
   display: flex;
@@ -6726,6 +6802,21 @@ input:focus-visible {
 .state-card__hint {
   font-size: 10.5px;
   color: var(--text-muted);
+}
+
+.state-card__status {
+  align-self: flex-start;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.state-card.active .state-card__status {
+  background: var(--surface);
+  color: var(--accent-strong);
 }
 
 .state-card__sound {
@@ -6961,6 +7052,132 @@ input:focus-visible {
   font-weight: 600;
   color: var(--text-on-accent);
   line-height: 1;
+}
+
+/* ── Appearance creation source chooser ── */
+.creation-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.creation-source-card {
+  min-height: 112px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.creation-source-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 8px 20px rgba(255, 95, 21, 0.1);
+}
+
+.creation-source-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px var(--accent-ring);
+}
+
+.creation-source-card__icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.creation-source-card__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.creation-source-card__copy strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.creation-source-card__copy span {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.video-upload-modal__grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.85fr) minmax(0, 1.15fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.video-upload-modal__drop {
+  min-height: 214px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  text-align: center;
+  cursor: pointer;
+}
+
+.video-upload-modal__drop:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.video-upload-modal__drop strong {
+  max-width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.video-upload-modal__drop span {
+  font-size: 12px;
+}
+
+.video-upload-modal__drop input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.video-upload-modal__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (max-width: 780px) {
+  .creation-source-grid,
+  .video-upload-modal__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .video-upload-modal__drop {
+    min-height: 156px;
+  }
 }
 
 /* ── Community import modal ── */

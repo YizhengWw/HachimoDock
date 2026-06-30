@@ -1,6 +1,6 @@
 /**
  * [Input] Read ChannelMatrixCard.jsx source.
- * [Output] Static Node coverage: default export, detected-agent filtering, useDeviceContext field destructuring, followed row state, per-agent appearance saving, followed-agent device sync, inline USB sync progress, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
+ * [Output] Static Node coverage: default export, detected-agent filtering, useDeviceContext field destructuring, followed row state, per-agent appearance saving, picker-open appearance refresh, followed-agent device sync, inline USB sync progress, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -40,6 +40,7 @@ test("ChannelMatrixCard destructures multiple fields from useDeviceContext", () 
   assert.match(source, /deviceConnected/);
   assert.match(source, /applyDesktopPet/);
   assert.match(source, /saveAgentAppearance/);
+  assert.match(source, /refresh/);
 });
 
 test("ChannelMatrixCard applies is-active class to the active channel row", () => {
@@ -62,6 +63,13 @@ test("Agent appearance changes save locally unless the agent is currently follow
   assert.match(source, /saveAgentAppearance\(agentId, appearance\.id\)/);
   assert.match(source, /agentId === activeAgentId/);
   assert.match(source, /applyDesktopPet\(agentId, appearance/);
+});
+
+test("Opening the appearance picker refreshes disk-backed appearances first", () => {
+  assert.match(source, /const\s+openPicker\s*=\s*useCallback\(\s*async\s*\(agentId\)\s*=>/);
+  assert.match(source, /await\s+refresh\(\)/);
+  assert.match(source, /finally\s*\{[\s\S]*setPickerState\(\{\s*agentId\s*\}\)/);
+  assert.match(source, /onClick=\{\(\)\s*=>\s+openPicker\(agent\.id\)\}/);
 });
 
 test("Follow confirmation syncs the selected agent appearance to the device", () => {

@@ -16,7 +16,7 @@ overlay 还未作为默认部署启用。它需要完成：
 - 连接 MQTT broker。
 - 消费桌面端 per-source session 状态事件，并在设备端解析 active session 状态。
 - 播放宠物动画视频。
-- 显示字幕和 debug 信息。
+- 保留语音文本状态文件，并显示负一屏 dashboard / debug 信息；主屏不渲染字幕。
 - 采集触屏输入并回传给上游。
 - 提供本地 HTTP / WebSocket 调试和配网页面。
 
@@ -34,7 +34,7 @@ overlay 还未作为默认部署启用。它需要完成：
 | `board-rotary-input` | `src/board_rotary_input.c` | 读取 GPIO 旋钮和按钮，切屏、语音 PTT 或转发 widget 事件 |
 | `board-widget-runtime.py` | `board-widget-runtime.py` | 解释 `.clawpkg` widget，生成负一屏 payload |
 | `board-voice-ptt.py` | `board-voice-ptt.py` | 顶部按钮按住说话并注入 input action |
-| `fb-speech-overlay` | `src/fb_speech_overlay.c` | 在 32bpp framebuffer 顶部叠加字幕和 debug overlay；当前 Pi 的 16bpp 小屏会跳过 |
+| `fb-speech-overlay` | `src/fb_speech_overlay.c` | 在 32bpp framebuffer 上绘制负一屏 dashboard 和显式 debug overlay；主屏字幕默认不渲染，当前 Pi 的 16bpp 小屏会跳过 |
 
 设备上由 systemd 管理 `board-runtime.service` 和 `board-widget-runtime.service`。
 `board-runtime.service` 在 Raspberry Pi 上调用 `start-rpi.sh`，在 Radxa A7Z 上调用
@@ -54,7 +54,7 @@ overlay 还未作为默认部署启用。它需要完成：
 |---|---|
 | `board-server` | 主服务二进制 |
 | `board-touch-input` | 触屏输入二进制 |
-| `fb-speech-overlay` | 字幕 overlay 二进制 |
+| `fb-speech-overlay` | 负一屏/debug overlay 二进制 |
 | `fb-display.sh` | 视频播放驱动脚本 |
 | `terrier-clips/` | 当前使用的视频 clip 目录 |
 | `terrier-clips-durations.tsv` | clip 时长表 |
@@ -71,12 +71,14 @@ flowchart LR
   Upstream["PC / Agent<br/>per-source 状态事件"] -->|MQTT state/source| Server["board-server<br/>session 状态机"]
   Upstream -->|MQTT speech/text| Server
   Server -->|.current-state<br/>.current-event| Display["fb-display.sh"]
-  Server -->|speech text / pairing hint| Overlay["fb-speech-overlay"]
-  Display -->|state caption at clip entry| Overlay
+  TextFile[".current-speech<br/>text state file"]
+  Server -->|speech text / pairing hint| TextFile
+  Display -->|state text at clip entry| TextFile
   Server -->|.screen-interrupt| Display
   Server -->|.welcome-trigger| Display
   Touch["board-touch-input"] -->|.touch-request| Display
   Touch -->|MQTT input/action| Upstream
+  Server -->|.stats-display| Overlay["fb-speech-overlay"]
   Display -->|.debug-screen-state.json<br/>.current-debug-speech| Overlay
   Server -->|.debug-session-state.json| Overlay
   Server -->|HTTP / WebSocket| LocalUI["本地 UI / 配网页面 / 调试工具"]
@@ -86,7 +88,7 @@ flowchart LR
 
 - `fb-display.sh` 不直接订阅 MQTT。
 - `board-touch-input` 不直接控制播放器。
-- `fb-speech-overlay` 不理解业务状态，只渲染文本。
+- `fb-speech-overlay` 不理解业务状态，只渲染 stats payload 和显式 debug 文本；main 页不渲染 `.current-speech`。
 - `board-server` 不直接播放视频，只写状态文件和 interrupt marker。
 
 ## 本地文件契约
@@ -97,7 +99,7 @@ flowchart LR
 |---|---|---|---|
 | `.current-state` | `board-server` | `fb-display.sh` / `fb-speech-overlay` | 设备端 session 状态机解析出的 canonical state |
 | `.current-event` | `board-server` | `fb-speech-overlay` / debug | 当前 active record 的 event |
-| `.current-speech` | `fb-display.sh` / `board-server` | `fb-speech-overlay` | 普通字幕内容；状态字幕由 `fb-display.sh` 在 clip 入口写入，speech topic 会按 session 聚合最近 30 秒回复后由 `board-server` 写入，配网提示也由 `board-server` 写入 |
+| `.current-speech` | `fb-display.sh` / `board-server` | 上游诊断 / 文本状态消费者 | 语音文本和状态文案点文件；`fb-display.sh` 在 clip 入口写入状态文案，speech topic 会按 session 聚合最近 30 秒回复后由 `board-server` 写入，配网提示也由 `board-server` 写入；主屏默认不渲染字幕 |
 | `.welcome-trigger` | `board-server`（USB serial asset commit） | `fb-display.sh` | 新形象资产激活后的一次性 `welcome` marker；显示层只消费新 marker 一次，然后回到当前 session 状态 |
 | `.screen-interrupt` | `board-server` | `fb-display.sh` | 屏幕硬打断 marker |
 | `.touch-request` | `board-touch-input` | `fb-display.sh` | 本地 touch 动画请求 |
@@ -125,7 +127,7 @@ flowchart LR
 4. 解析 framebuffer，默认自动优先选择 SPI 小屏（Pi 常见 `/dev/fb1`，Radxa 常见 `/dev/fb0`）。
 5. 启动 `board-server`。
 6. 启动 `fb-display.sh`。
-7. 在 32bpp framebuffer 上启动 `fb-speech-overlay`；当前 16bpp Pi 小屏会跳过。
+7. 在 32bpp framebuffer 上启动 `fb-speech-overlay` 支持负一屏/debug overlay；当前 16bpp Pi 小屏会跳过。
 8. 启动 `board-touch-input`。
 9. 启动 `board-rotary-input`。
 10. 启动 `board-voice-ptt.py`。
@@ -193,7 +195,7 @@ desk
 |---|---|---|
 | `desk/<targetDeviceId>/state/+` | 订阅 | 桌面端 per-source session 状态事件 |
 | `desk/<targetDeviceId>/state/active` | 默认忽略 / 兼容订阅 | 旧版 active 状态；仅 `BOARD_ACCEPT_LEGACY_ACTIVE=1` 时消费 |
-| `desk/<targetDeviceId>/speech/text` | 订阅 | 上游语音 / 字幕文本；支持 `source` + `sessionId` / `runId` / `sessionKey`，设备端按 session 保留最近 30 秒回复 |
+| `desk/<targetDeviceId>/speech/text` | 订阅 | 上游语音文本；支持 `source` + `sessionId` / `runId` / `sessionKey`，设备端按 session 保留最近 30 秒回复并写入 `.current-speech`，主屏默认不显示字幕 |
 | `desk/<localDeviceId>/control/remote-cli-binding` | 订阅 | 远端绑定更新；更新后设备会重订阅 `state/<targetSource>` 并重新发布 availability |
 | `claw-pet/board/<boardDeviceId>/input/action` | 发布 / 订阅 | 触屏输入事件 |
 | `claw-pet/board/<boardDeviceId>/hello` | 发布 retained | 设备 hello |
@@ -207,7 +209,7 @@ session 状态的解析和归一化见 [Session 状态机设计说明](session-s
 显示系统由两部分组成：
 
 - `fb-display.sh` 使用 ffmpeg 解码视频，并通过 `fb-rawvideo-blit.py` 写入 framebuffer。
-- `fb-speech-overlay` 可直接写 32bpp framebuffer 顶部区域显示文字；当前 Pi 小屏是 16bpp 时会跳过。
+- `fb-speech-overlay` 可直接写 32bpp framebuffer 显示负一屏 dashboard 和显式 debug overlay；当前 Pi 小屏是 16bpp 时会跳过。
 
 视频素材要求：
 

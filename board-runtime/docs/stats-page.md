@@ -27,7 +27,7 @@ board-touch-input.c
 
 fb-speech-overlay.c
   if .screen-page = stats: 解析 .stats-display 并绘制全屏仪表盘
-  else:                    渲染 .current-speech （现状）
+  else:                    不渲染主屏 .current-speech 字幕
 
 fb-display.sh
   if .screen-page = stats: 不切 touch clip / 不响应 .current-state

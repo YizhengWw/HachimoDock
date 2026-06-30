@@ -99,8 +99,8 @@ export async function processImageForPipeline(imageBlob, options = {}) {
   // Stage 1: Background removal
   onProgress?.("removing_bg");
   const transparentBlob = await removeBackground(imageBlob, {
-    progress: (key, current, total) => {
-      // @imgly/background-removal fires progress events during model download
+    progress: (_key, current, total) => {
+      if (total > 0) onProgress?.("removing_bg", current / total);
     },
   });
 

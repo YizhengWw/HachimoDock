@@ -1,8 +1,8 @@
 /**
  * [Input] Read appearances persisted by `lib/appearance-store.js`.
  * [Output] Card grid with the built-in Terrier first, filled hover-play previews,
- *          compact import actions, cached local/Codex scans, cached initial render, unobstructed previews,
- *          gallery-only creation/import/detail management actions,
+ *          compact source chooser and direct MP4-upload creation, cached local/Codex scans,
+ *          cached initial render, unobstructed previews, gallery-only creation/import/detail management actions,
  *          and Codex/community import flows.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
@@ -20,12 +20,18 @@ import {
   CheckCircle,
   CheckCircle2,
   Sparkles,
+  UploadCloud,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCachedAppearances, listAppearances } from "./lib/appearance-store.js";
+import {
+  getCachedAppearances,
+  listAppearances,
+  saveUploadedVideoAppearance,
+} from "./lib/appearance-store.js";
 import { listBuiltinAppearances } from "./lib/builtin-appearances.js";
 import AppearancePreview from "./AppearancePreview.jsx";
 import { resolveGalleryPreviewMedia } from "./lib/appearance-preview.js";
+import { FAMILIES } from "./lib/avatar-pipeline/families.js";
 import {
   buildCodexPetSnapshot,
   findUpdatedCodexPets,
@@ -70,6 +76,10 @@ function codexPetPreviewSrc(pet) {
   return pet?.previewDataUrl || pet?.preview_data_url || "";
 }
 
+async function readFileAsBytes(file) {
+  return new Uint8Array(await file.arrayBuffer());
+}
+
 export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail }) {
   const { currentDisplay } = useDeviceContext();
 
@@ -87,6 +97,8 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
 
   // ── Community import modal ──
   const [communityModalOpen, setCommunityModalOpen] = useState(false);
+  const [creationModalOpen, setCreationModalOpen] = useState(false);
+  const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
 
   const reload = useCallback(async ({ force = false } = {}) => {
     setRefreshing(true);
@@ -176,6 +188,34 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
     [reload, onOpenDetail],
   );
 
+  const handleAiGenerateSource = useCallback(() => {
+    setCreationModalOpen(false);
+    onEnterWizard?.();
+  }, [onEnterWizard]);
+
+  const handleVideoUploadSource = useCallback(() => {
+    setCreationModalOpen(false);
+    setVideoUploadModalOpen(true);
+  }, []);
+
+  const handleCodexImportSource = useCallback(() => {
+    setCreationModalOpen(false);
+    openCodexImport();
+  }, [openCodexImport]);
+
+  const handleCommunityImportSource = useCallback(() => {
+    setCreationModalOpen(false);
+    setCommunityModalOpen(true);
+  }, []);
+
+  const handleUploadedVideoCreated = useCallback(
+    async (record) => {
+      await reload({ force: true });
+      if (record?.id) onOpenDetail?.(record.id);
+    },
+    [reload, onOpenDetail],
+  );
+
   const activeAppearanceId = currentDisplay.appearance?.id || "";
 
   const refreshButton = (
@@ -193,14 +233,8 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
 
   const addAppearanceActions = (
     <div key="add-actions" className="appearance-gallery-actions" aria-label="添加形象">
-      <button type="button" className="btn-primary btn-sm" onClick={onEnterWizard}>
+      <button type="button" className="btn-primary btn-sm" onClick={() => setCreationModalOpen(true)}>
         <Sparkles size={14} /> 新建自定义形象
-      </button>
-      <button type="button" className="btn-secondary btn-sm" onClick={openCodexImport}>
-        <Download size={14} /> 从 Codex 导入
-      </button>
-      <button type="button" className="btn-secondary btn-sm" onClick={() => setCommunityModalOpen(true)}>
-        <Globe size={14} /> 从社区导入
       </button>
     </div>
   );
@@ -256,6 +290,23 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
         </div>
       )}
 
+      {creationModalOpen && (
+        <CreationSourceModal
+          onClose={() => setCreationModalOpen(false)}
+          onAiGenerate={handleAiGenerateSource}
+          onVideoUpload={handleVideoUploadSource}
+          onCodexImport={handleCodexImportSource}
+          onCommunityImport={handleCommunityImportSource}
+        />
+      )}
+
+      {videoUploadModalOpen && (
+        <VideoUploadModal
+          onClose={() => setVideoUploadModalOpen(false)}
+          onCreated={handleUploadedVideoCreated}
+        />
+      )}
+
       {codexModalOpen && (
         <CodexImportModal
           loading={codexLoading}
@@ -283,6 +334,236 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
       )}
 
     </PageShell>
+  );
+}
+
+function CreationSourceModal({
+  onClose,
+  onAiGenerate,
+  onVideoUpload,
+  onCodexImport,
+  onCommunityImport,
+}) {
+  const options = [
+    {
+      key: "ai",
+      icon: <Sparkles size={18} />,
+      title: "图片AI生成",
+      desc: "上传参考图，用现有生成向导生成完整状态视频。",
+      action: onAiGenerate,
+    },
+    {
+      key: "video",
+      icon: <UploadCloud size={18} />,
+      title: "自定义上传视频",
+      desc: "直接上传 MP4 作为一个状态视频，再到详情页补齐或替换其他状态。",
+      action: onVideoUpload,
+    },
+    {
+      key: "codex",
+      icon: <Download size={18} />,
+      title: "Codex 导入",
+      desc: "扫描本机 Codex pets，并转换成 Pet Manager 形象。",
+      action: onCodexImport,
+    },
+    {
+      key: "community",
+      icon: <Globe size={18} />,
+      title: "从社区导入",
+      desc: "打开社区或粘贴安装命令，再导入到本地形象库。",
+      action: onCommunityImport,
+    },
+  ];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card modal-card--wide" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">新建自定义形象</h3>
+            <div className="modal-subtitle">选择素材来源，创建后可在详情页替换每个状态视频。</div>
+          </div>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="creation-source-grid">
+            {options.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className="creation-source-card"
+                onClick={option.action}
+              >
+                <span className="creation-source-card__icon">{option.icon}</span>
+                <span className="creation-source-card__copy">
+                  <strong>{option.title}</strong>
+                  <span>{option.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isMp4Upload(file) {
+  if (!file) return false;
+  if ((file.type || "").toLowerCase() === "video/mp4") return true;
+  return /\.mp4$/i.test(file.name || "");
+}
+
+function VideoUploadModal({ onClose, onCreated }) {
+  const [appearanceName, setAppearanceName] = useState("");
+  const [description, setDescription] = useState("");
+  const [family, setFamily] = useState(FAMILIES[0]?.family || "working");
+  const [videoFile, setVideoFile] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleVideoFile = useCallback((file) => {
+    if (!file) return;
+    if (!isMp4Upload(file)) {
+      setError("当前仅支持 MP4 状态视频。");
+      setVideoFile(null);
+      return;
+    }
+    setError("");
+    setVideoFile(file);
+    if (!appearanceName.trim()) {
+      setAppearanceName(file.name.replace(/\.mp4$/i, ""));
+    }
+  }, [appearanceName]);
+
+  const handleDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files?.[0];
+      if (file) handleVideoFile(file);
+    },
+    [handleVideoFile],
+  );
+
+  const handleCreate = useCallback(async () => {
+    if (!videoFile || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const videoBytes = await readFileAsBytes(videoFile);
+      const record = await saveUploadedVideoAppearance({
+        appearanceName: appearanceName,
+        description: description,
+        family: family,
+        videoBytes: videoBytes,
+        originalFilename: videoFile.name,
+      });
+      await onCreated?.(record);
+      onClose?.();
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [appearanceName, description, family, onClose, onCreated, saving, videoFile]);
+
+  return (
+    <div className="modal-backdrop" onClick={saving ? undefined : onClose}>
+      <div className="modal-card modal-card--wide" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">自定义上传视频</h3>
+            <div className="modal-subtitle">上传一个 MP4 作为初始状态视频，其他状态可稍后在详情页替换。</div>
+          </div>
+          <button className="icon-btn" type="button" onClick={onClose} disabled={saving} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="video-upload-modal__grid">
+            <label
+              className="video-upload-modal__drop"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+            >
+              <UploadCloud size={24} />
+              <strong>{videoFile ? videoFile.name : "选择或拖入 MP4 视频"}</strong>
+              <span>当前仅支持 MP4 状态视频</span>
+              <input
+                type="file"
+                accept="video/mp4,.mp4"
+                onChange={(event) => handleVideoFile(event.target.files?.[0])}
+                disabled={saving}
+              />
+            </label>
+            <div className="video-upload-modal__form">
+              <label className="ui-field">
+                <span className="ui-field__label">形象名称</span>
+                <input
+                  className="field-input"
+                  value={appearanceName}
+                  onChange={(event) => setAppearanceName(event.target.value)}
+                  placeholder="例如：小黑猫工作版"
+                  disabled={saving}
+                />
+              </label>
+              <label className="ui-field">
+                <span className="ui-field__label">初始状态</span>
+                <select
+                  className="field-input"
+                  value={family}
+                  onChange={(event) => setFamily(event.target.value)}
+                  disabled={saving}
+                >
+                  {FAMILIES.map((item) => (
+                    <option key={item.family} value={item.family}>
+                      {item.family} · {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="ui-field">
+                <span className="ui-field__label">描述</span>
+                <textarea
+                  className="field-input"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="可选，用来记录这个视频形象的来源或用途。"
+                  rows={3}
+                  disabled={saving}
+                />
+              </label>
+            </div>
+          </div>
+
+          {error && (
+            <div className="message-banner message-banner--error">
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          <div className="community-actions">
+            <button className="btn-secondary" type="button" onClick={onClose} disabled={saving}>
+              取消
+            </button>
+            <button className="btn-primary" type="button" onClick={handleCreate} disabled={!videoFile || saving}>
+              {saving ? (
+                <>
+                  <Loader size={14} className="spin" /> 保存中…
+                </>
+              ) : (
+                <>
+                  <UploadCloud size={14} /> 创建形象
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

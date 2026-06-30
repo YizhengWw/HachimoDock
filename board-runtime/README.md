@@ -3,7 +3,7 @@
 `board-runtime` 是 Pet Manager 的设备端运行时。当前支持
 Raspberry Pi（已在 Raspberry Pi Zero 2 W + Raspberry Pi OS 上使用）和
 Radxa Cubie A7Z（Debian 11/12 系列镜像），负责把
-桌面端的 agent/session 状态、语音字幕、按钮/触屏输入和负一屏组件展示到一块
+桌面端的 agent/session 状态、语音文本状态、按钮/触屏输入和负一屏组件展示到一块
 SPI 小屏上。
 
 运行时主体用 C 编写，配套少量 shell / Python：
@@ -139,12 +139,12 @@ http://<board-ip>/debug/state
 | `board-rotary-input` | 读取 GPIO 旋钮和按钮，切换页面、触发语音 PTT 或 widget 事件 |
 | `board-widget-runtime.py` | 解释 `.clawpkg` widget，生成负一屏展示 payload |
 | `board-voice-ptt.py` | 顶部按钮按住说话，转成 `/input/action` |
-| `fb-speech-overlay` | 32bpp framebuffer 上的字幕/负一屏 overlay；Pi 的 16bpp 小屏会跳过该进程 |
+| `fb-speech-overlay` | 32bpp framebuffer 上的负一屏/debug overlay；主屏字幕默认不渲染，Pi 的 16bpp 小屏会跳过该进程 |
 
 核心文件契约：
 
 - `.current-state`：当前宠物状态，如 `idle`、`working`、`done`。
-- `.current-speech`：主屏字幕。
+- `.current-speech`：上游语音文本、配网提示和状态文案的点文件；主屏默认不渲染字幕。
 - `.welcome-trigger`：新形象资产激活后的一次性 `welcome` marker；`fb-display.sh` 消费后回到当前 session 状态。
 - `.screen-interrupt`：屏幕硬打断 marker，促使主屏立即重算状态并切换 clip。
 - `.screen-page`：`main` 或 `stats`。

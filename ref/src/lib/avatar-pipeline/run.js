@@ -173,13 +173,13 @@ export async function runSingleFamilyVideo({
     signal,
     skipProcessing,
     dryRun,
-    onProgress: (stage) => {
+    onProgress: (stage, progress) => {
       const labels = {
         removing_bg: "正在去除背景…",
         compositing: "正在合成黑色背景…",
         done: "图片处理完成",
       };
-      emit({ stage: "processing", message: labels[stage] || "处理中…" });
+      emit({ stage: "processing", message: labels[stage] || "处理中…", progress });
     },
   });
 
@@ -329,13 +329,14 @@ export async function runAvatarPipeline({
     const processed = await processImageForPipeline(imageFile, {
       maxDimension: runtimeConfig.imageMaxDimension,
       signal,
-      onProgress: (stage) => {
+      onProgress: (stage, imageProgress) => {
         const labels = {
           removing_bg: "正在去除背景…",
           compositing: "正在合成黑色背景…",
           done: "图片处理完成",
         };
         progress.message = labels[stage] || "处理中…";
+        progress.imageProgress = imageProgress;
         emit();
       },
     });

@@ -2,10 +2,10 @@
 "use strict";
 
 /*
- * [Input] Local agent state monitors, bridge profile env, MQTT broker events, device availability, and mock button inject requests.
- * [Output] Per-source retained MQTT status, USB-forwarder state files, remote board binding commands, and optional agent-session injection requests.
+ * [Input] Local agent state monitors, bridge profile env, MQTT broker events, device availability, and mock/board voice inject requests.
+ * [Output] Per-source retained MQTT status, USB-forwarder state files, remote board binding commands, and agent-session injections with fresh-session recovery for stale Codex metadata.
  * [Pos] Headless status bridge for the Tauri Pet Manager runtime.
- * [Sync] If state-file or follow-source semantics change, update `ref/.folder.md`.
+ * [Sync] If state-file, follow-source, or voice-injection recovery semantics change, update `ref/.folder.md`.
  */
 
 const crypto = require("crypto");
@@ -1761,7 +1761,50 @@ function parseSseEventBlock(block) {
   return { event: eventName, data };
 }
 
-function injectViaAgentBus(agentBus, injectBody, options = {}) {
+function isSessionMetadataResumeError(error) {
+  const text = [
+    error?.message,
+    error?.detail,
+    error?.code,
+  ].filter(Boolean).join("\n").toLowerCase();
+  return text.includes("does not start with session metadata");
+}
+
+async function injectViaAgentBus(agentBus, injectBody, options = {}) {
+  const body = injectBody && typeof injectBody === "object" ? injectBody : {};
+  const requestedSessionId = typeof body.sessionId === "string" && body.sessionId.trim()
+    ? body.sessionId.trim()
+    : "auto";
+  const canRetryFresh = options.retryFreshOnSessionMetadataError !== false
+    && requestedSessionId === "auto";
+
+  try {
+    return await injectViaAgentBusOnce(agentBus, body, options);
+  } catch (error) {
+    if (!canRetryFresh || !isSessionMetadataResumeError(error)) {
+      throw error;
+    }
+    const retryBody = {
+      ...body,
+      sessionId: "new",
+      metadata: {
+        ...(body.metadata && typeof body.metadata === "object" ? body.metadata : {}),
+        recoveredFromSessionMetadataError: true,
+      },
+    };
+    const retryResult = await injectViaAgentBusOnce(agentBus, retryBody, {
+      ...options,
+      retryFreshOnSessionMetadataError: false,
+    });
+    return {
+      ...retryResult,
+      recoveredSession: true,
+      recoveredFromSessionId: requestedSessionId,
+    };
+  }
+}
+
+function injectViaAgentBusOnce(agentBus, injectBody, options = {}) {
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs >= 2000
     ? Math.floor(options.timeoutMs)
     : 120000;

@@ -1,7 +1,7 @@
 /**
  * [Input] provider config fragments used by the avatar pipeline runner.
  * [Output] Node regression coverage for choosing a valid thinking-model name, custom-generation family filtering,
- *          and building single-state retry manifests.
+ *          single-state progress forwarding, and building single-state retry manifests.
  * [Pos] test node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -75,6 +75,13 @@ test("single-family retry manifest uses only the selected state and user prompt"
   assert.equal(manifest.entries.length, 1);
   assert.equal(manifest.entries[0].family, "working");
   assert.equal(manifest.entries[0].prompt, "cute cat writes notes on a desk");
+});
+
+test("single-family retry forwards image-processing progress into UI progress events", () => {
+  const runSource = readSource("run.js");
+
+  assert.match(runSource, /onProgress:\s*\(stage,\s*progress\) =>/);
+  assert.match(runSource, /emit\(\{\s*stage:\s*"processing",\s*message:[\s\S]*progress\s*\}\)/);
 });
 
 test("custom avatar generation skips importer-only directional touch states", () => {

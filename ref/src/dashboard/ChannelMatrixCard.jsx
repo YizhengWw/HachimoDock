@@ -1,6 +1,6 @@
 /**
- * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/appearanceSync/applyDesktopPet/saveAgentAppearance; useToast for notices.
- * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress that survives dashboard tab unmounts.
+ * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/appearanceSync/refresh/applyDesktopPet/saveAgentAppearance; useToast for notices.
+ * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection that refreshes disk-backed appearance records before opening, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress that survives dashboard tab unmounts.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -69,6 +69,7 @@ export default function ChannelMatrixCard() {
     currentDisplay,
     deviceConnected,
     appearanceSync,
+    refresh,
     applyDesktopPet,
     saveAgentAppearance,
   } = useDeviceContext();
@@ -96,6 +97,14 @@ export default function ChannelMatrixCard() {
   );
 
   const closePicker = useCallback(() => setPickerState(null), []);
+
+  const openPicker = useCallback(async (agentId) => {
+    try {
+      await refresh();
+    } finally {
+      setPickerState({ agentId });
+    }
+  }, [refresh]);
 
   const handleConfirmAppearance = useCallback(async (agentId, appearance) => {
     if (!agentId || !appearance?.id) return;
@@ -222,7 +231,7 @@ export default function ChannelMatrixCard() {
                       <button
                         type="button"
                         className="btn-secondary btn-sm channel-row__change-inline"
-                        onClick={() => setPickerState({ agentId: agent.id })}
+                        onClick={() => openPicker(agent.id)}
                         disabled={syncing}
                       >
                         <ChevronDown size={14} /> 更换形象

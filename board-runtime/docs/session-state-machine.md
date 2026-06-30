@@ -380,9 +380,9 @@ working
 
 ## Speech 处理
 
-状态类字幕不由 `board-server` 在收到状态消息时立即写入。它只写 `.current-state` / `.current-event`，由 `fb-display.sh` 在真正进入对应 clip 时写 `.current-speech`。
+状态类文案不由 `board-server` 在收到状态消息时立即写入。它只写 `.current-state` / `.current-event`，由 `fb-display.sh` 在真正进入对应 clip 时写 `.current-speech`。
 
-这保证 `done` 字幕只会和 `done.mp4` 同步出现，而不会在 MQTT 状态刚到达、屏幕仍在播放 `working.*` 时提前显示。
+这保证 `done` 文案只会和 `done.mp4` 同步写入，而不会在 MQTT 状态刚到达、屏幕仍在播放 `working.*` 时提前写入。主屏默认不再把 `.current-speech` 渲染成字幕。
 
 如果收到 speech topic：
 
@@ -390,7 +390,7 @@ working
 <namespace>/<targetDeviceId>/speech/text
 ```
 
-则解析其中的 `displayTitle` / `sessionTitle` / `displayContent` / `content` / `text` 和 session 身份字段，更新 per-session speech records 后重新写入 `.current-speech`。
+则解析其中的 `displayTitle` / `sessionTitle` / `displayContent` / `content` / `text` 和 session 身份字段，更新 per-session speech records 后重新写入 `.current-speech`，供文本状态消费者和诊断读取。
 
 现在 speech topic 会保留最近 4 个 session 的回复记录，而不是只保留最后一条全局文本。记录 key 与状态 record 一致：
 

@@ -2,7 +2,7 @@
  * [Input] CustomAvatarWizard generation-config source.
  * [Output] Static Node regression coverage for reusable full-generation wizard steps,
  *          shared provider-config-backed Volcano Ark API-key-only setup, 1.5-first defaults,
- *          activation guidance, product-fit dropdown model names, and fixed reference upload sizing.
+ *          activation guidance, product-fit dropdown model names, inline progress support, and fixed reference upload sizing.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -34,6 +34,8 @@ test("full avatar generation exposes reusable step UI for single-state modal reg
   assert.match(wizard, /identityFields = true/);
   assert.match(wizard, /startLabel = "开始生成"/);
   assert.match(wizard, /children/);
+  assert.match(wizard, /progress/);
+  assert.match(wizard, /ca-inline-progress/);
   assert.match(wizard, /<AvatarWizardStep1/);
   assert.match(wizard, /<AvatarWizardStep2/);
   assert.doesNotMatch(wizard, /<Step1/);

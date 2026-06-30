@@ -103,20 +103,24 @@ done
         )
         try:
             deadline = time.time() + 10.0
-            observed_loop = 0
+            observed_clips: set[str] = set()
             while time.time() < deadline:
                 debug_file = runtime / ".debug-screen-state.json"
                 if debug_file.exists():
                     try:
                         payload = json.loads(debug_file.read_text())
-                        observed_loop = max(observed_loop, int(payload.get("loopRepeatCount", 0)))
                     except (ValueError, OSError):
                         pass
-                if observed_loop >= 2:
+                    else:
+                        if payload.get("displayedState") == "working":
+                            clip = str(payload.get("currentLoopFamily") or "")
+                            if clip:
+                                observed_clips.add(clip)
+                if {"working.typing.mp4", "working.thinking.mp4"}.issubset(observed_clips):
                     break
                 time.sleep(0.1)
             log_text = log_path.read_text() if log_path.exists() else ""
-            if observed_loop < 2:
+            if not {"working.typing.mp4", "working.thinking.mp4"}.issubset(observed_clips):
                 status = proc.poll()
                 proc.terminate()
                 try:
@@ -125,8 +129,8 @@ done
                     proc.kill()
                     stdout, stderr = proc.communicate(timeout=2)
                 return False, (
-                    "loop did not advance while fake tplayer stayed alive; "
-                    f"observed_loop={observed_loop}; status={status}; "
+                    "working clips did not alternate while fake tplayer stayed alive; "
+                    f"observed_clips={sorted(observed_clips)!r}; status={status}; "
                     f"log={log_text!r}; stdout={stdout!r}; stderr={stderr!r}"
                 )
             if "set loop:0" not in log_text or "play url:" not in log_text:
@@ -139,6 +143,93 @@ done
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(timeout=2)
+
+
+def run_ffmpeg_fallback_boundary_regression(script: Path, base_env: dict[str, str]) -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        clips = tmp_path / "terrier-clips"
+        runtime = tmp_path / "runtime"
+        tools = tmp_path / "tools"
+        log_path = tmp_path / "ffmpeg.log"
+        create_clips(clips)
+        runtime.mkdir()
+        tools.mkdir()
+        (runtime / ".current-state").write_text("working\n")
+        (runtime / ".current-event").write_text("UserPromptSubmit\n")
+        write_fake_tool(
+            tools / "ffmpeg",
+            f"""#!/bin/sh
+input=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-i" ]; then
+    input="$arg"
+  fi
+  prev="$arg"
+done
+echo "ffmpeg input=$(basename "$input")" >> {log_path}
+while :; do
+  printf '\\0'
+  sleep 0.02
+done
+""",
+        )
+        write_fake_tool(
+            tools / "python3",
+            "#!/bin/sh\ncat >/dev/null\n",
+        )
+        env = base_env.copy()
+        env.update(
+            {
+                "PATH": f"{tools}{os.pathsep}{env.get('PATH', '')}",
+                "PET_CLAW_RUNTIME_ROOT": str(runtime),
+                "PET_CLAW_CLIPS_DIR": str(clips),
+                "PET_CLAW_FB_DEV": "/dev/null",
+                "PET_CLAW_FB_DISABLE_CACHE": "1",
+                "PET_CLAW_FB_FAKE_DURATION_SECONDS": "0.2",
+                "PET_CLAW_FB_FFMPEG_MIN_PLAY_SECONDS": "0.2",
+                "PET_CLAW_FB_WORKING_MAX_LOOPS": "1",
+                "PET_CLAW_FB_DEBUG_OVERLAY": "1",
+                "PET_CLAW_FB_CLIP_MAX_SECONDS": "30",
+                "PET_CLAW_FB_STATS_RENDERER": str(tmp_path / "missing-stats-renderer.py"),
+            }
+        )
+        proc = subprocess.Popen(
+            ["sh", str(script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        try:
+            deadline = time.time() + 8.0
+            while time.time() < deadline:
+                log_text = log_path.read_text() if log_path.exists() else ""
+                if (
+                    "ffmpeg input=working.typing.mp4" in log_text
+                    and "ffmpeg input=working.thinking.mp4" in log_text
+                ):
+                    return True, ""
+                time.sleep(0.1)
+            status = proc.poll()
+            proc.terminate()
+            try:
+                stdout, stderr = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout, stderr = proc.communicate(timeout=2)
+            log_text = log_path.read_text() if log_path.exists() else ""
+            return False, (
+                "ffmpeg fallback did not advance at the clip boundary; "
+                f"status={status}; log={log_text!r}; stdout={stdout!r}; stderr={stderr!r}"
+            )
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 
 def run_state_speech_sync_regression(script: Path, base_env: dict[str, str]) -> tuple[bool, str]:
@@ -239,7 +330,7 @@ done
                 proc.wait(timeout=2)
 
 
-def run_multi_speech_bubble_regression(script: Path, base_env: dict[str, str]) -> tuple[bool, str]:
+def run_speech_filter_disabled_regression(script: Path, base_env: dict[str, str]) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         runtime = tmp_path / "runtime"
@@ -270,12 +361,10 @@ def run_multi_speech_bubble_regression(script: Path, base_env: dict[str, str]) -
         if result.returncode != 0:
             return False, f"speech-filter failed: stdout={result.stdout!r}; stderr={result.stderr!r}"
         filter_text = result.stdout
-        if not (runtime / ".current-speech-render.0").exists() or not (runtime / ".current-speech-render.1").exists():
-            return False, "multi speech render files were not created"
-        if ".current-speech-render.0" not in filter_text or ".current-speech-render.1" not in filter_text:
-            return False, f"multi speech drawtext files missing from filter: {filter_text!r}"
-        if filter_text.count("drawtext=fontfile=") < 2:
-            return False, f"expected at least two speech drawtext filters: {filter_text!r}"
+        if filter_text.strip() != "base":
+            return False, f"speech filter should not append subtitle filters: {filter_text!r}"
+        if (runtime / ".current-speech-render.0").exists() or (runtime / ".current-speech-render.1").exists():
+            return False, "speech render files should not be created when subtitles are disabled"
         return True, ""
 
 
@@ -538,8 +627,9 @@ def main() -> int:
         )
 
         persistent_ok, persistent_error = run_persistent_player_regression(script, os.environ.copy())
+        ffmpeg_boundary_ok, ffmpeg_boundary_error = run_ffmpeg_fallback_boundary_regression(script, os.environ.copy())
         speech_sync_ok, speech_sync_error = run_state_speech_sync_regression(script, os.environ.copy())
-        multi_speech_ok, multi_speech_error = run_multi_speech_bubble_regression(script, os.environ.copy())
+        speech_filter_ok, speech_filter_error = run_speech_filter_disabled_regression(script, os.environ.copy())
         audio_cue_ok, audio_cue_error = run_state_audio_cue_regression(script, os.environ.copy())
         welcome_trigger_ok, welcome_trigger_error = run_welcome_trigger_regression(script, os.environ.copy())
 
@@ -570,6 +660,10 @@ def main() -> int:
         sys.stderr.write(persistent_error)
         sys.stderr.write("\n")
         return 1
+    if not ffmpeg_boundary_ok:
+        sys.stderr.write(ffmpeg_boundary_error)
+        sys.stderr.write("\n")
+        return 1
     if not speech_sync_ok:
         sys.stderr.write(speech_sync_error)
         sys.stderr.write("\n")
@@ -582,8 +676,8 @@ def main() -> int:
         sys.stderr.write(welcome_trigger_error)
         sys.stderr.write("\n")
         return 1
-    if not multi_speech_ok:
-        sys.stderr.write(multi_speech_error)
+    if not speech_filter_ok:
+        sys.stderr.write(speech_filter_error)
         sys.stderr.write("\n")
         return 1
 
@@ -594,6 +688,9 @@ def main() -> int:
         "canonical tool_running=working",
         "canonical notification=waiting_user",
         "canonical touch.lick=idle",
+        "speech idle.playing=休息中",
+        "pick working name=working.typing.mp4",
+        "pick working next name=working.thinking.mp4",
         "pick touch state=touch",
         "touch_allowed waiting_user=no",
         "touch_allowed error=no",
@@ -612,7 +709,8 @@ def main() -> int:
     compat_expected = [
         "state working count=3 max=5",
         "rand sample=1",
-        "pick working name=working.thinking.mp4",
+        "pick working name=working.typing.mp4",
+        "pick working next name=working.thinking.mp4",
         "pick touch name=touch.what.mp4",
     ]
     compat_missing = [line for line in compat_expected if line not in compat_result.stdout]
@@ -628,6 +726,7 @@ def main() -> int:
     single_working_expected = [
         "state working count=1 max=5",
         "pick working name=working.mp4",
+        "pick working next name=working.mp4",
     ]
     single_working_missing = [line for line in single_working_expected if line not in single_working_result.stdout]
     if single_working_missing:

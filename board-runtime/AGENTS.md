@@ -138,11 +138,12 @@ ssh "$BOARD_HOST" 'sudo systemctl restart board-widget-runtime.service'
 | `board-rotary-input` | GPIO 旋钮和按钮输入 |
 | `board-widget-runtime.py` | `.clawpkg` widget 解释和负一屏 payload |
 | `board-voice-ptt.py` | 顶部按钮语音输入 |
-| `fb-speech-overlay` | 32bpp framebuffer overlay；Pi 的 16bpp 小屏通常跳过 |
+| `fb-speech-overlay` | 32bpp framebuffer 负一屏/debug overlay；主屏字幕默认不渲染，Pi 的 16bpp 小屏通常跳过 |
 
 模块之间优先通过 `/opt/board-runtime` 下的点文件通信，例如
 `.current-state`、`.current-speech`、`.screen-page`、`.stats-display`、
-`.button-config`、`.widget-events`。不要让输入进程直接控制播放器，也不要让
+`.button-config`、`.widget-events`。`.current-speech` 保留为语音文本/配网提示点文件，
+主屏默认不把它渲染成字幕。不要让输入进程直接控制播放器，也不要让
 `fb-display.sh` 直接订阅 MQTT。
 
 ## 常用设备操作

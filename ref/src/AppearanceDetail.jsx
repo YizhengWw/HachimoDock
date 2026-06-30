@@ -1,7 +1,8 @@
 /**
  * [Input] An appearanceId persisted by `lib/appearance-store.js`.
  * [Output] Preview-first appearance workspace, sticky current-state controls, contextual details drawer,
- *          configurable per-family WAV cue overrides, background single-state image+prompt regeneration, and state rail.
+ *          configurable per-family WAV cue overrides, direct per-state MP4 replacement,
+ *          background single-state image+prompt regeneration with inline progress, and full known-state rail.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -76,6 +77,64 @@ function isImageFile(file) {
   return /\.(png|jpe?g|webp|gif)$/i.test(file.name || "");
 }
 
+function isMp4VideoFile(file) {
+  if (!file) return false;
+  if ((file.type || "").toLowerCase() === "video/mp4") return true;
+  return /\.mp4$/i.test(file.name || "");
+}
+
+async function readFileAsBytes(file) {
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+function clampPercent(value) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function percentFromUnitProgress(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return min;
+  const normalized = numeric > 1 ? numeric / 100 : numeric;
+  return Math.round(min + Math.max(0, Math.min(1, normalized)) * (max - min));
+}
+
+function singleStateProgressFromPipeline(progress, fallbackFamily) {
+  const stage = progress?.stage || "processing";
+  const status = progress?.status || "";
+  const family = progress?.family || fallbackFamily || "当前状态";
+  const message = progress?.message || `正在生成 ${family} 状态素材…`;
+
+  if (stage === "processing") {
+    const percent = typeof progress?.progress === "number"
+      ? percentFromUnitProgress(progress.progress, 12, 34)
+      : message.includes("完成")
+        ? 36
+        : message.includes("合成")
+          ? 30
+          : 12;
+    return { label: "处理参考图", percent: clampPercent(percent), message, tone: "running" };
+  }
+  if (stage === "generating") {
+    const statusPercent = {
+      submitting: 44,
+      polling: 64,
+      downloading: 84,
+      done: 94,
+    };
+    return {
+      label: status === "downloading" ? "下载生成结果" : "生成状态视频",
+      percent: clampPercent(statusPercent[status] || 50),
+      message,
+      tone: "running",
+    };
+  }
+  if (stage === "done") {
+    return { label: "写入客户端素材", percent: 94, message, tone: "running" };
+  }
+  return { label: "生成中", percent: 24, message, tone: "running" };
+}
+
 export default function AppearanceDetail({ appearanceId, onBack }) {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState("");
@@ -83,6 +142,8 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [audioUrl, setAudioUrl] = useState("");
   const [audioErr, setAudioErr] = useState("");
   const [audioState, setAudioState] = useState("idle");
+  const [stateVideoState, setStateVideoState] = useState("idle");
+  const [stateVideoMessage, setStateVideoMessage] = useState("");
   const [audioSyncDirty, setAudioSyncDirty] = useState(() => readAudioSyncDirty(appearanceId));
   const [audioSyncState, setAudioSyncState] = useState("idle"); // idle | syncing | success | error
   const [audioSyncMessage, setAudioSyncMessage] = useState("");
@@ -93,6 +154,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [singleStatePrompt, setSingleStatePrompt] = useState("");
   const [singleStateStatus, setSingleStateStatus] = useState("idle"); // idle | generating | success | error | syncing | synced
   const [singleStateMessage, setSingleStateMessage] = useState("");
+  const [singleStateProgress, setSingleStateProgress] = useState(null);
   const [singleStateDialogOpen, setSingleStateDialogOpen] = useState(false);
   const [singleStateStep, setSingleStateStep] = useState(0);
   const singleStateInputRef = useRef(null);
@@ -115,19 +177,35 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [removeBg, setRemoveBg] = useState(true);
   const [fastGeneration, setFastGeneration] = useState(true);
 
+  const stateFamilyRecords = useMemo(() => {
+    if (!record) return [];
+    const stored = new Map((record.families || []).map((family) => [family.family, family]));
+    const known = new Set(FAMILIES.map((definition) => definition.family));
+    const merged = FAMILIES.map((definition) => (
+      stored.get(definition.family) || {
+        family: definition.family,
+        ok: false,
+        prompt: "",
+        error: "尚未上传状态视频",
+      }
+    ));
+    for (const family of record.families || []) {
+      if (!known.has(family.family)) merged.push(family);
+    }
+    return merged;
+  }, [record]);
+
   const familyByName = useMemo(() => {
     const map = new Map();
-    if (record) {
-      for (const family of record.families) map.set(family.family, family);
-    }
+    for (const family of stateFamilyRecords) map.set(family.family, family);
     return map;
-  }, [record]);
+  }, [stateFamilyRecords]);
 
   const activeRecord = familyByName.get(activeFamily);
 
   const generatedFamilies = useMemo(
-    () => record?.families?.filter((family) => family.ok) || [],
-    [record],
+    () => stateFamilyRecords.filter((family) => family.ok),
+    [stateFamilyRecords],
   );
 
   const audioFamilyNames = useMemo(
@@ -141,7 +219,10 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     setSingleStatePrompt(activeRecord?.prompt || "");
     setSingleStateImageFile(null);
     setSingleStateMessage("");
+    setSingleStateProgress(null);
     setSingleStateStatus("idle");
+    setStateVideoState("idle");
+    setStateVideoMessage("");
     setSingleStateDialogOpen(false);
     setSingleStateStep(0);
   }, [activeRecord?.family, record?.id]);
@@ -204,7 +285,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       const nextRecord = await getAppearance(appearanceId);
       setRecord(nextRecord);
       const firstOk = nextRecord.families.find((family) => family.ok);
-      setActiveFamily(firstOk?.family || "");
+      setActiveFamily(firstOk?.family || nextRecord.families[0]?.family || FAMILIES[0]?.family || "");
     } catch (loadError) {
       setError(loadError?.message || String(loadError));
     }
@@ -324,6 +405,46 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     }
   }, [activeFamily, audioState, markAudioSyncDirty, record]);
 
+  const handleStateVideoFileChange = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !record || !activeFamily || stateVideoState === "saving") return;
+    if (record.type === "builtin") {
+      setStateVideoState("error");
+      setStateVideoMessage("内置形象不能直接替换状态视频，请先创建自定义形象后再编辑。");
+      return;
+    }
+    if (!isMp4VideoFile(file)) {
+      setStateVideoState("error");
+      setStateVideoMessage("请上传 MP4 格式的状态视频。");
+      return;
+    }
+    setStateVideoState("saving");
+    setStateVideoMessage("正在写入客户端状态视频...");
+    try {
+      const videoBytes = await readFileAsBytes(file);
+      const nextRecord = await replaceFamilyVideo({
+        appearanceId: record.id,
+        family: activeFamily,
+        videoBytes,
+        taskId: `local-upload-${Date.now().toString(36)}`,
+        videoUrl: file.name,
+        prompt: activeRecord?.prompt || `用户上传的 ${activeFamily} 状态视频`,
+      });
+      setRecord(nextRecord);
+      const message = `已上传并替换 ${activeFamily} 状态视频。需要在设备生效时，点击“替换到板端”。`;
+      setStateVideoState("success");
+      setStateVideoMessage(message);
+      setSingleStateStatus("success");
+      setSingleStateMessage(message);
+      setSingleStateProgress(null);
+    } catch (replaceFailure) {
+      console.error(replaceFailure);
+      setStateVideoState("error");
+      setStateVideoMessage(replaceFailure?.message || String(replaceFailure));
+    }
+  }, [activeFamily, activeRecord?.prompt, record, stateVideoState]);
+
   const handleSyncAudioCues = useCallback(async () => {
     if (!record || audioSyncState === "syncing") return;
     if (!hasTauriRuntime()) {
@@ -420,11 +541,13 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     if (!isImageFile(file)) {
       setSingleStateStatus("error");
       setSingleStateMessage("请上传 PNG / JPEG / WebP / GIF 图片。");
+      setSingleStateProgress(null);
       return;
     }
     setSingleStateImageFile(file);
     setSingleStateStatus("idle");
     setSingleStateMessage("");
+    setSingleStateProgress(null);
   }, []);
 
   const handleSingleStatePickClick = useCallback(() => {
@@ -496,6 +619,12 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
 
     setSingleStateStatus("generating");
     setSingleStateMessage(`正在生成 ${activeRecord.family} 状态素材…`);
+    setSingleStateProgress({
+      label: "准备生成",
+      percent: 6,
+      message: `正在生成 ${activeRecord.family} 状态素材…`,
+      tone: "running",
+    });
     try {
       const result = await runSingleFamilyVideo({
         imageFile: singleStateImageFile,
@@ -505,7 +634,14 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
         skipProcessing: !removeBg,
         onProgress: (progress) => {
           if (progress?.message) setSingleStateMessage(progress.message);
+          setSingleStateProgress(singleStateProgressFromPipeline(progress, activeRecord.family));
         },
+      });
+      setSingleStateProgress({
+        label: "写入客户端素材",
+        percent: 96,
+        message: "正在替换本地状态视频…",
+        tone: "running",
       });
       const nextRecord = await replaceFamilyVideo({
         appearanceId: record.id,
@@ -517,11 +653,19 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       });
       setRecord(nextRecord);
       setSingleStateStatus("success");
-      setSingleStateMessage(`已替换 ${activeRecord.family} 状态素材。需要在设备生效时，点击“替换到板端”。`);
+      const successMessage = `已替换 ${activeRecord.family} 状态素材。需要在设备生效时，点击“替换到板端”。`;
+      setSingleStateMessage(successMessage);
+      setSingleStateProgress({
+        label: "客户端素材已替换",
+        percent: 100,
+        message: successMessage,
+        tone: "success",
+      });
     } catch (generationFailure) {
       console.error(generationFailure);
       setSingleStateStatus("error");
       setSingleStateMessage(generationFailure?.message || String(generationFailure));
+      setSingleStateProgress(null);
     }
   }, [
     activeRecord,
@@ -555,17 +699,26 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
 
     setSingleStateStatus("syncing");
     setSingleStateMessage("正在通过素材 OTA 通道替换到板端…");
+    setStateVideoState("saving");
+    setStateVideoMessage("正在通过素材 OTA 通道替换到板端…");
+    setSingleStateProgress(null);
     try {
       const result = await invoke("usb_sync_appearance", { appearanceId: record.id });
       if (!result?.ok) {
         throw new Error(result?.error || "设备未确认素材替换");
       }
       setSingleStateStatus("synced");
-      setSingleStateMessage(`已替换到板端（${result.fileCount || 0} 个素材，${result.byteCount || 0} bytes）。`);
+      const message = `已替换到板端（${result.fileCount || 0} 个素材，${result.byteCount || 0} bytes）。`;
+      setSingleStateMessage(message);
+      setStateVideoState("success");
+      setStateVideoMessage(message);
     } catch (syncFailure) {
       console.error(syncFailure);
       setSingleStateStatus("error");
-      setSingleStateMessage(syncFailure?.message || String(syncFailure));
+      const message = syncFailure?.message || String(syncFailure);
+      setSingleStateMessage(message);
+      setStateVideoState("error");
+      setStateVideoMessage(message);
     }
   }, [record, singleStateStatus]);
 
@@ -606,7 +759,10 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const isBuiltin = record.type === "builtin";
   const canEditAudio = activeRecord?.ok;
   const audioInputId = `audio-cue-${record.id}-${activeFamily || "none"}`;
+  const stateVideoInputId = `state-video-${record.id}-${activeFamily || "none"}`;
   const singleStateBusy = singleStateStatus === "generating" || singleStateStatus === "syncing";
+  const stateVideoBusy = stateVideoState === "saving";
+  const canUploadStateVideo = Boolean(activeRecord) && !isBuiltin && !singleStateBusy && !stateVideoBusy;
   const canRegenerateState = activeRecord?.ok && !isBuiltin && !singleStateBusy;
   const canSyncSingleState = !isBuiltin && (singleStateStatus === "success" || singleStateStatus === "synced");
   const singleStateStartIssue = !singleStateImageFile
@@ -708,18 +864,18 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
           <section className="detail-state-rail-section">
             <div className="detail-section-heading">
               <h4>全部状态</h4>
-              <span className="muted small">{generatedFamilies.length} 个已生成素材</span>
+              <span className="muted small">{generatedFamilies.length}/{stateFamilyRecords.length} 个已有素材</span>
             </div>
-            {generatedFamilies.length === 0 ? (
+            {stateFamilyRecords.length === 0 ? (
               <div className="empty-state">
                 <div>
                   <strong>暂无可用素材</strong>
                 </div>
-                <div className="muted small">未成功生成的 family 已隐藏。</div>
+                <div className="muted small">暂无可编辑状态。</div>
               </div>
             ) : (
               <div className="detail-state-rail">
-                {generatedFamilies.map((familyRecord) => {
+                {stateFamilyRecords.map((familyRecord) => {
                   const definition =
                     FAMILIES.find((item) => item.family === familyRecord.family) || {
                       family: familyRecord.family,
@@ -735,13 +891,16 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                     >
                       <span className="state-card__thumb">
                         <AppearancePreview
-                          media={mediaFromFamily(familyRecord)}
+                          media={familyRecord.ok ? mediaFromFamily(familyRecord) : null}
                           className="state-card__media"
                           emptyClassName="state-card__media state-card__media--empty"
                         />
                       </span>
                       <span className="state-card__family">{familyRecord.family}</span>
                       <span className="state-card__hint">{definition.label}</span>
+                      <span className="state-card__status">
+                        {familyRecord.ok ? "已生成" : "可上传替换"}
+                      </span>
                       {(familyRecord.audioPath || familyRecord.audioSrc) && (
                         <span className="state-card__sound">提示音</span>
                       )}
@@ -758,6 +917,69 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
             <span className="muted small">当前状态</span>
             <strong>{activeRecord?.family || "—"}</strong>
           </div>
+          {activeRecord && (
+            <section className="detail-side-section detail-side-section--video">
+              <div className="detail-state-video-upload">
+                <div className="detail-audio-config__header">
+                  <span>
+                    <UploadCloud size={15} />
+                    状态视频
+                  </span>
+                  <span className="muted small">{activeRecord.family}</span>
+                </div>
+                <div className="muted small">
+                  上传 MP4 直接替换当前状态视频；保存后点击“替换到板端”才会同步到设备。
+                </div>
+                {stateVideoMessage && (
+                  <div
+                    className={`message-banner detail-state-regenerate-entry__message ${
+                      stateVideoState === "error"
+                        ? "message-banner--error"
+                        : stateVideoState === "success"
+                          ? "message-banner--success"
+                          : "message-banner--muted"
+                    }`}
+                  >
+                    {stateVideoBusy ? <Loader size={14} className="spin" /> : <AlertCircle size={14} />}
+                    {stateVideoMessage}
+                  </div>
+                )}
+                <div className="detail-state-video-upload__actions">
+                  <input
+                    id={stateVideoInputId}
+                    className="detail-audio-config__input"
+                    type="file"
+                    accept="video/mp4,.mp4"
+                    onChange={handleStateVideoFileChange}
+                    disabled={!canUploadStateVideo}
+                  />
+                  <label
+                    className={`btn-ghost${canUploadStateVideo ? "" : " is-disabled"}`}
+                    htmlFor={canUploadStateVideo ? stateVideoInputId : undefined}
+                  >
+                    {stateVideoBusy ? <Loader size={14} className="spin" /> : <Upload size={14} />}
+                    上传 MP4 替换
+                  </label>
+                  {canSyncSingleState && (
+                    <button
+                      className="btn-primary"
+                      type="button"
+                      onClick={handleSyncSingleStateToDevice}
+                      disabled={singleStateBusy}
+                    >
+                      {singleStateStatus === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
+                      替换到板端
+                    </button>
+                  )}
+                </div>
+                {isBuiltin && (
+                  <div className="muted small">
+                    内置形象不能直接替换状态视频，请先创建自定义形象后再编辑。
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           {activeRecord?.ok && (
             <section className="detail-side-section detail-side-section--audio">
               <div className="detail-audio-config">
@@ -1024,12 +1246,17 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                     onFastGeneration={setFastGeneration}
                     onBack={() => setSingleStateStep(0)}
                     onStart={handleSingleStateGenerate}
+                    progress={
+                      singleStateStatus !== "error" && singleStateProgress
+                        ? singleStateProgress
+                        : null
+                    }
                     title={`第 2 步 · 生成 ${activeRecord.family}`}
                     startLabel="生成并替换当前状态"
                   />
                 )}
 
-                {singleStateStatus !== "error" && singleStateMessage && (
+                {singleStateStatus !== "error" && singleStateMessage && !singleStateProgress && (
                   <div
                     className={`message-banner single-state-regenerate-modal__message ${
                       singleStateStatus === "success" || singleStateStatus === "synced"

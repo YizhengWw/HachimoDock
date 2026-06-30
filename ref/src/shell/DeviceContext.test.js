@@ -1,6 +1,6 @@
 /**
  * [Input] Read DeviceContext.jsx source + runtime-import deriveCurrentDisplay.
- * [Output] Static + runtime Node coverage that the provider exposes the documented context shape, hydrates active channel state from the bridge profile, keeps USB and WiFi online state separate, polls USB status without owning serial auto-connect, offers a manual USB serial rescan action, and the pure derivation reflects the active desktop assignment.
+ * [Output] Static + runtime Node coverage that the provider exposes the documented context shape, force-refreshes appearance records on manual refresh, hydrates active channel and desktop target id from the bridge profile, keeps USB and WiFi online state separate, polls USB status without owning serial auto-connect, offers a manual USB serial rescan action, and the pure derivation reflects the active desktop assignment.
  * [Pos] test node in ref/src/shell
  * [Sync] If this file changes, update `ref/src/shell/.folder.md`.
  */
@@ -113,11 +113,26 @@ test("provider reconciles online board targetSource with the selected client cha
   assert.match(availabilityEffect[0], /targetSource:\s*bridgeSelectedAgentId/);
 });
 
+test("provider reconciles stale board targetDeviceId even when targetSource already matches", () => {
+  const availabilityEffect = source.match(/\/\/ --- WiFi availability poll[\s\S]*?\n  \}, \[[^\]]*\]\);/);
+  assert.ok(availabilityEffect, "expected WiFi availability poll effect");
+  assert.match(availabilityEffect[0], /desiredTargetDeviceId/);
+  assert.match(availabilityEffect[0], /targetDeviceIdChanged/);
+  assert.match(availabilityEffect[0], /targetDeviceIdChanged\s*\|\|\s*targetSourceChanged/);
+  assert.match(availabilityEffect[0], /targetDeviceId:\s*desiredTargetDeviceId/);
+});
+
 test("provider exposes manual USB serial rescan and connect action", () => {
   assert.match(source, /const\s+rescanUsbDevices\s*=\s*useCallback\(\s*async\s*\(\)\s*=>/);
   assert.match(source, /invoke\(["']usb_scan_devices["']\)/);
   assert.match(source, /invoke\(["']usb_connect["'],\s*\{\s*portName:/);
   assert.match(source, /rescanUsbDevices/);
+});
+
+test("provider refresh bypasses cached appearance records before picker use", () => {
+  assert.match(source, /const\s+loadAppearancesData\s*=\s*useCallback\(\s*async\s*\(\{\s*force\s*=\s*false\s*\}\s*=\s*\{\}\)\s*=>/);
+  assert.match(source, /listAppearances\(\{\s*force\s*\}\)/);
+  assert.match(source, /const\s+refresh\s*=\s*useCallback\(\s*async\s*\(\)\s*=>[\s\S]*loadAppearancesData\(\{\s*force:\s*true\s*\}\)/);
 });
 
 test("provider exposes the documented context shape fields", () => {

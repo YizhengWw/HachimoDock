@@ -1,14 +1,19 @@
 /**
  * [Input] image-processing layout helpers for avatar reference frames.
  * [Output] Node regression coverage for 4:3 black-canvas compositing geometry, alpha matte decontamination,
- *          and Ark minimum size.
+ *          progress passthrough, and Ark minimum size.
  * [Pos] test node in ref/src/lib/avatar-pipeline
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { computeFourThreeCanvasLayout, decontaminateAlphaMattePixels } from "./image-processing.js";
+
+const srcDir = dirname(fileURLToPath(import.meta.url));
 
 test("four-three canvas layout uses Ark-safe 400x300 in fast mode and fits wide images", () => {
   const layout = computeFourThreeCanvasLayout({
@@ -71,4 +76,11 @@ test("alpha matte decontamination prevents pale subjects blending into black", (
     255, 255, 255, 0,
     32, 28, 24, 255,
   ]);
+});
+
+test("background-removal progress is forwarded to pipeline callers", () => {
+  const source = readFileSync(join(srcDir, "image-processing.js"), "utf8");
+
+  assert.match(source, /progress:\s*\(_key,\s*current,\s*total\) =>/);
+  assert.match(source, /onProgress\?\.\("removing_bg",\s*current \/ total\)/);
 });

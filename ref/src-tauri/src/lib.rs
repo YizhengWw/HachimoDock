@@ -3,7 +3,8 @@
  * [Output] Desktop runtime services for device pairing, bridge management,
  *          local agent discovery, Codex pet import, external/community help links,
  *          controlled Codex Pets CLI installs, device follow-source binding,
- *          stale-state-safe USB forwarding with active speech sync, built-in
+ *          stale-state-safe USB-first forwarding with SSH state fallback and
+ *          active speech sync, built-in
  *          appearance default/override WAV cue sync, USB desktop identity propagation,
  *          generated component-draft listing/deletion
  *          with manifest descriptions for component-center card summaries,
@@ -11,7 +12,9 @@
  *          overrides, dashboard full-button USB OTA with backend-held
  *          board ack confirmation and stale USB writer reconnect retry,
  *          managed bridge-only voice injection, stale
- *          LaunchAgent/legacy bridge cleanup, and packaged-resource bridge assets.
+ *          LaunchAgent/legacy bridge cleanup with Node PATH propagation for
+ *          CLI shims, selected-agent adapter health self-restart, and
+ *          packaged-resource bridge assets.
  * [Pos] Tauri runtime node in ref/src-tauri/src
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -48,6 +51,7 @@ const DESKTOP_DEVICE_ID_FILE_NAME: &str = "desktop-device-id";
 const DEVICE_BINDINGS_FILE_NAME: &str = "device-bindings.json";
 
 const BRIDGE_PROFILE_FILE_NAME: &str = "pet-bridge.json";
+const PET_SCREENS_FILE_NAME: &str = "pet-screens.json";
 const DEFAULT_NAMESPACE: &str = "desk";
 const DEFAULT_DESKTOP_DEVICE_ID: &str = "linux-pet-01";
 const DEFAULT_MQTT_URL: &str = "mqtt://broker.openclaw.example:1883";
@@ -57,6 +61,7 @@ const BUNDLED_MQTT_USERNAME: Option<&str> = option_env!("PET_MANAGER_BUNDLED_MQT
 const BUNDLED_MQTT_PASSWORD: Option<&str> = option_env!("PET_MANAGER_BUNDLED_MQTT_PASSWORD");
 const DEFAULT_PET_CHANNEL_ID: &str = "openclaw";
 const DEFAULT_BRIDGE_PORT: u16 = 23333;
+const DEFAULT_AGENT_BUS_PORT: u16 = 8181;
 const CLAW_PET_DIR_NAME: &str = ".claw-pet";
 const LEGACY_OPENCLAW_DIR_NAME: &str = ".openclaw";
 const COMPONENT_DRAFTS_DIR_NAME: &str = "component-drafts";
@@ -64,6 +69,8 @@ const LEGACY_BRIDGE_PORT: u16 = 23334;
 const BUTTON_CONFIG_ACK_TIMEOUT_SECS: u64 = 12;
 const BUTTON_CONFIG_ACK_TIMEOUT_MESSAGE: &str =
     "未收到板端按钮配置确认；设备端可能还没更新到支持 button-config-ack 的运行时，或板端未写入 .button-config。";
+const DEFAULT_BOARD_RUNTIME_ROOT: &str = "/opt/board-runtime";
+const SSH_STATE_FALLBACK_ERROR_LOG_MS: u64 = 10_000;
 
 fn bundled_value(value: Option<&'static str>) -> Option<String> {
     value
@@ -546,6 +553,33 @@ struct BridgeProfileFile {
     pet_channel_id: String,
     enabled_agents: Vec<String>,
     selected_agent_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct PetScreensStoreFile {
+    screens: Vec<PetScreenStateFallbackConfig>,
+    active_board_device_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct PetScreenStateFallbackConfig {
+    board_device_id: String,
+    host: String,
+    ssh_host: String,
+    ssh_user: String,
+    ssh_port: Option<u16>,
+    ssh_password: String,
+    ssh_root_dir: String,
+}
+
+#[derive(Debug, Clone)]
+struct SshStateFallbackTarget {
+    host: String,
+    port: Option<u16>,
+    password: String,
+    root_dir: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2180,6 +2214,45 @@ fn ensure_bridge_runtime(
         } else {
             "bridge 已尝试启动，但当前还没有连上本地状态端口。请检查日志。".to_string()
         };
+    }
+
+    if running {
+        if let Ok(Some(status)) = fetch_bridge_agent_status() {
+            if bridge_agent_status_needs_restart(&profile, &status) {
+                eprintln!(
+                    "[bridge-runtime] selected agent adapter is recoverably unhealthy; restarting bridge"
+                );
+                stop_managed_bridge(&runtime_paths.pid_path);
+                stop_process_on_port(DEFAULT_BRIDGE_PORT);
+                thread::sleep(Duration::from_millis(250));
+                pid = Some(
+                    start_bridge_direct(
+                        &node_path,
+                        &bridge_assets,
+                        &profile,
+                        &runtime_paths.log_path,
+                        &runtime_paths.pid_path,
+                    )
+                    .or_else(|_| {
+                        start_bridge_process(
+                            &runtime_paths.launch_script_path,
+                            &runtime_paths.log_path,
+                            &runtime_paths.pid_path,
+                        )
+                    })?,
+                );
+                running = wait_for_bridge_ready(DEFAULT_BRIDGE_PORT, 36, 200);
+                mode = if running { "ready" } else { "error" };
+                message = if running {
+                    format!(
+                        "bridge 已自愈重启，正在发布到 {}。",
+                        build_topic_base(&profile)
+                    )
+                } else {
+                    "bridge 已尝试自愈重启，但当前还没有连上本地状态端口。请检查日志。".to_string()
+                };
+            }
+        }
     }
 
     Ok(build_bridge_runtime_status(
@@ -4406,6 +4479,213 @@ fn build_disabled_usb_state_payload(source: &str) -> serde_json::Value {
     })
 }
 
+fn non_empty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn parse_u16_env(name: &str) -> Option<u16> {
+    non_empty_env(name).and_then(|value| value.parse::<u16>().ok())
+}
+
+fn normalize_state_for_board(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "thinking" | "tool_running" | "working" => "working".to_string(),
+        "speaking" => "speaking".to_string(),
+        "waiting_user" | "waiting" | "needs_user" => "waiting_user".to_string(),
+        "done" | "complete" | "completed" => "done".to_string(),
+        "error" | "failed" => "error".to_string(),
+        "idle" | "" => "idle".to_string(),
+        _ => "idle".to_string(),
+    }
+}
+
+fn fallback_speech_text_for_state(state: &str) -> &'static str {
+    match state {
+        "working" => "努力工作中",
+        "speaking" => "正在回复",
+        "waiting_user" => "等你确认",
+        "done" => "任务完成",
+        "error" => "出错了",
+        _ => "休息中",
+    }
+}
+
+fn speech_text_for_state_payload(payload: &serde_json::Value, state: &str) -> String {
+    first_non_empty_string_field(
+        payload,
+        &[
+            "displayContent",
+            "display_content",
+            "speechText",
+            "speech_text",
+            "content",
+            "text",
+            "message",
+        ],
+    )
+    .unwrap_or_else(|| fallback_speech_text_for_state(state).to_string())
+}
+
+fn pet_screens_config_paths() -> Result<Vec<PathBuf>, String> {
+    let home = get_home_dir()?;
+    Ok(vec![
+        home.join(CLAW_PET_DIR_NAME).join(PET_SCREENS_FILE_NAME),
+        home.join(LEGACY_OPENCLAW_DIR_NAME).join(PET_SCREENS_FILE_NAME),
+    ])
+}
+
+fn read_pet_screen_ssh_fallback_from_file(path: &Path) -> Option<SshStateFallbackTarget> {
+    let raw = fs::read_to_string(path).ok()?;
+    let store: PetScreensStoreFile = serde_json::from_str(&raw).ok()?;
+    let active = store.active_board_device_id.trim();
+    let screen = store
+        .screens
+        .iter()
+        .find(|screen| !active.is_empty() && screen.board_device_id.trim() == active)
+        .or_else(|| store.screens.first())?;
+    let host = if !screen.ssh_host.trim().is_empty() {
+        screen.ssh_host.trim().to_string()
+    } else if !screen.ssh_user.trim().is_empty() && !screen.host.trim().is_empty() {
+        format!("{}@{}", screen.ssh_user.trim(), screen.host.trim())
+    } else {
+        String::new()
+    };
+    if host.is_empty() {
+        return None;
+    }
+    Some(SshStateFallbackTarget {
+        host,
+        port: screen.ssh_port,
+        password: screen.ssh_password.trim().to_string(),
+        root_dir: if screen.ssh_root_dir.trim().is_empty() {
+            DEFAULT_BOARD_RUNTIME_ROOT.to_string()
+        } else {
+            screen.ssh_root_dir.trim().to_string()
+        },
+    })
+}
+
+fn resolve_ssh_state_fallback_target() -> Option<SshStateFallbackTarget> {
+    if let Some(host) = non_empty_env("PET_MANAGER_STATE_FALLBACK_SSH_HOST")
+        .or_else(|| non_empty_env("PET_CLAW_STATE_FALLBACK_SSH_HOST"))
+    {
+        return Some(SshStateFallbackTarget {
+            host,
+            port: parse_u16_env("PET_MANAGER_STATE_FALLBACK_SSH_PORT")
+                .or_else(|| parse_u16_env("PET_CLAW_STATE_FALLBACK_SSH_PORT")),
+            password: non_empty_env("PET_MANAGER_STATE_FALLBACK_SSH_PASSWORD")
+                .or_else(|| non_empty_env("PET_CLAW_STATE_FALLBACK_SSH_PASSWORD"))
+                .unwrap_or_default(),
+            root_dir: non_empty_env("PET_MANAGER_STATE_FALLBACK_ROOT")
+                .or_else(|| non_empty_env("PET_CLAW_STATE_FALLBACK_ROOT"))
+                .unwrap_or_else(|| DEFAULT_BOARD_RUNTIME_ROOT.to_string()),
+        });
+    }
+
+    let paths = pet_screens_config_paths().ok()?;
+    paths
+        .iter()
+        .find_map(|path| read_pet_screen_ssh_fallback_from_file(path))
+}
+
+fn build_ssh_fallback_debug_json(
+    source: &str,
+    payload: &serde_json::Value,
+    state: &str,
+    event: &str,
+    reason: &str,
+    now_ms: u64,
+) -> String {
+    let session_id = first_non_empty_string_field(payload, &["sessionId", "session_id"]);
+    let session_key = first_non_empty_string_field(payload, &["sessionKey", "session_key"]);
+    let active_key = session_id
+        .as_ref()
+        .map(|id| format!("{source}:session:{id}"))
+        .or_else(|| session_key.as_ref().map(|id| format!("{source}:session:{id}")))
+        .unwrap_or_else(|| format!("{source}:source:{source}"));
+    serde_json::json!({
+        "resolvedState": state,
+        "resolvedEvent": event,
+        "activeSessionKey": active_key,
+        "lastReason": reason,
+        "updatedAtMs": now_ms,
+        "records": [{
+            "sessionKey": active_key,
+            "source": source,
+            "state": state,
+            "event": event,
+            "seq": 0,
+            "updatedAtMs": now_ms,
+            "displayUntilMs": 0,
+            "candidate": true
+        }]
+    })
+    .to_string()
+}
+
+fn send_state_via_ssh_fallback(source: &str, payload: &serde_json::Value) -> Result<(), String> {
+    let target = resolve_ssh_state_fallback_target()
+        .ok_or_else(|| "未配置 SSH 状态 fallback 目标。".to_string())?;
+    let state = normalize_state_for_board(
+        payload
+            .get("state")
+            .and_then(|value| value.as_str())
+            .unwrap_or("idle"),
+    );
+    let event = first_non_empty_string_field(payload, &["event"]).unwrap_or_default();
+    let reason = first_non_empty_string_field(payload, &["reason"]).unwrap_or_default();
+    let speech = speech_text_for_state_payload(payload, &state);
+    let now_ms = current_timestamp_ms();
+    let debug_json = build_ssh_fallback_debug_json(source, payload, &state, &event, &reason, now_ms);
+    let script = format!(
+        "set -eu\nroot={root}\nstate={state}\nevent={event}\nspeech={speech}\ndebug_json={debug_json}\nsudo mkdir -p \"$root\"\nprintf '%s' \"$state\" | sudo tee \"$root/.current-state\" >/dev/null\nprintf '%s' \"$event\" | sudo tee \"$root/.current-event\" >/dev/null\nprintf '%s' \"$speech\" | sudo tee \"$root/.current-speech\" >/dev/null\nprintf '%s' \"$debug_json\" | sudo tee \"$root/.debug-session-state.json\" >/dev/null\n",
+        root = shell_quote(&target.root_dir),
+        state = shell_quote(&state),
+        event = shell_quote(&event),
+        speech = shell_quote(&speech),
+        debug_json = shell_quote(&debug_json),
+    );
+
+    let mut command = if target.password.is_empty() {
+        let mut command = command_for_host("ssh");
+        command.arg("-o").arg("BatchMode=yes");
+        command
+    } else {
+        let mut command = command_for_host("sshpass");
+        command.arg("-e").arg("ssh");
+        command.env("SSHPASS", &target.password);
+        command
+    };
+    command
+        .arg("-o")
+        .arg("StrictHostKeyChecking=no")
+        .arg("-o")
+        .arg("UserKnownHostsFile=/dev/null")
+        .arg("-o")
+        .arg("ConnectTimeout=2");
+    if let Some(port) = target.port {
+        command.arg("-p").arg(port.to_string());
+    }
+    let output = command
+        .arg(&target.host)
+        .arg(script)
+        .output()
+        .map_err(|error| format!("SSH fallback 启动失败: {error}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(format!(
+            "SSH fallback 写入失败 ({}): {}",
+            output.status,
+            stderr
+        ))
+    }
+}
+
 fn enabled_usb_filter_signature(enabled_agents: &HashSet<String>) -> String {
     let mut sources: Vec<&str> = enabled_agents.iter().map(String::as_str).collect();
     sources.sort_unstable();
@@ -4611,6 +4891,7 @@ fn pick_best_usb_bridge_state(exclude_speaking: bool) -> Option<(String, serde_j
     let enabled_agents = load_enabled_agents_filter_for_usb();
     let selected_agent = load_selected_agent_for_usb();
     let entries = fs::read_dir(&state_dir).ok()?;
+    let now_ms = current_timestamp_ms();
 
     let mut best_source = String::new();
     let mut best_payload: Option<serde_json::Value> = None;
@@ -4640,6 +4921,9 @@ fn pick_best_usb_bridge_state(exclude_speaking: bool) -> Option<(String, serde_j
             Ok(payload) => payload,
             Err(_) => continue,
         };
+        if !usb_state_payload_is_fresh(&path, &payload, now_ms) {
+            continue;
+        }
 
         let state = payload
             .get("state")
@@ -4688,6 +4972,7 @@ fn pick_usb_bridge_state_for_source(
         .unwrap_or_else(|_| env::temp_dir());
     let state_dir = tmp.join("pet-manager-bridge-state");
     let entries = fs::read_dir(&state_dir).ok()?;
+    let now_ms = current_timestamp_ms();
 
     let mut best_payload: Option<serde_json::Value> = None;
     let mut best_ts_ms = 0u64;
@@ -4715,6 +5000,9 @@ fn pick_usb_bridge_state_for_source(
             Ok(payload) => payload,
             Err(_) => continue,
         };
+        if !usb_state_payload_is_fresh(&path, &payload, now_ms) {
+            continue;
+        }
         let state = payload
             .get("state")
             .and_then(|value| value.as_str())
@@ -4874,12 +5162,14 @@ fn start_usb_state_forwarder(usb_manager: usb_serial::UsbSerialManager) {
         let mut last_active_signature = String::new();
         let mut last_active_speech_text = String::new();
         let mut last_disabled_filter_signature = String::new();
+        let mut last_ssh_fallback_signature = String::new();
+        let mut last_ssh_fallback_error_ms: u64 = 0;
         let mut was_usb_connected = false;
 
         loop {
             thread::sleep(Duration::from_millis(800));
 
-            // Only forward when USB is connected
+            let now_ms = current_timestamp_ms();
             let status = usb_manager.status();
             if !status.connected {
                 if was_usb_connected {
@@ -4888,8 +5178,38 @@ fn start_usb_state_forwarder(usb_manager: usb_serial::UsbSerialManager) {
                     last_active_signature.clear();
                     last_active_speech_text.clear();
                     last_disabled_filter_signature.clear();
+                    last_ssh_fallback_signature.clear();
                 }
                 was_usb_connected = false;
+                if let Some((source, payload)) =
+                    pick_best_usb_bridge_state(true).or_else(|| pick_best_usb_bridge_state(false))
+                {
+                    let signature = format!(
+                        "{}|{}",
+                        source,
+                        serde_json::to_string(&payload).unwrap_or_default()
+                    );
+                    if signature != last_ssh_fallback_signature {
+                        match send_state_via_ssh_fallback(&source, &payload) {
+                            Ok(()) => {
+                                last_ssh_fallback_signature = signature;
+                                eprintln!(
+                                    "[state-forwarder] ssh fallback sent source={} -> {:?}",
+                                    source,
+                                    payload.get("state")
+                                );
+                            }
+                            Err(error) => {
+                                if now_ms.saturating_sub(last_ssh_fallback_error_ms)
+                                    > SSH_STATE_FALLBACK_ERROR_LOG_MS
+                                {
+                                    eprintln!("[state-forwarder] ssh fallback skipped: {}", error);
+                                    last_ssh_fallback_error_ms = now_ms;
+                                }
+                            }
+                        }
+                    }
+                }
                 continue;
             }
             if !was_usb_connected {
@@ -4898,10 +5218,10 @@ fn start_usb_state_forwarder(usb_manager: usb_serial::UsbSerialManager) {
                 last_active_signature.clear();
                 last_active_speech_text.clear();
                 last_disabled_filter_signature.clear();
+                last_ssh_fallback_signature.clear();
                 was_usb_connected = true;
             }
 
-            let now_ms = current_timestamp_ms();
             if now_ms.saturating_sub(last_enabled_refresh_ms) > 2500 {
                 let previous_enabled_agents = enabled_agents.clone();
                 let mut next_enabled_agents: std::collections::HashSet<String> =
@@ -5747,6 +6067,10 @@ fn agent_enabled_env(profile: &BridgeProfileFile, id: &str) -> &'static str {
     }
 }
 
+fn node_dir_for_path(node_path: &Path) -> Option<&Path> {
+    node_path.parent().filter(|path| !path.as_os_str().is_empty())
+}
+
 fn write_launch_script(
     script_path: &Path,
     log_path: &Path,
@@ -5759,8 +6083,11 @@ fn write_launch_script(
         .map(|path| shell_quote(path.to_string_lossy().as_ref()))
         .collect::<Vec<_>>()
         .join(" ");
+    let node_dir = node_dir_for_path(node_path)
+        .map(|path| shell_quote(path.to_string_lossy().as_ref()))
+        .unwrap_or_else(|| "''".to_string());
     let script = format!(
-        "#!/bin/sh\nset -eu\nmkdir -p {logs_dir}\nBRIDGE_ROOT=''\nfor candidate in {bridge_root_candidates}; do\n  if [ -f \"$candidate/{entry_relative_path}\" ]; then\n    BRIDGE_ROOT=\"$candidate\"\n    break\n  fi\ndone\nif [ -z \"$BRIDGE_ROOT\" ]; then\n  printf '%s\\n' 'bridge resources not found in any detected local path' >> {log_path}\n  exit 1\nfi\ncd \"$BRIDGE_ROOT/{workspace_relative_path}\"\nexport NODE_PATH=\"$BRIDGE_ROOT/node_modules${{NODE_PATH:+:$NODE_PATH}}\"\nexport MQTT_URL={mqtt_url}\nexport MQTT_USERNAME={mqtt_username}\nexport MQTT_PASSWORD={mqtt_password}\nexport STATUS_NAMESPACE={namespace}\nexport STATUS_DEVICE_ID={device_id}\nexport STATUS_BRIDGE_LOCAL_STATE_DIR={local_state_dir}\nexport CLAWD_BRIDGE_PORT={bridge_port}\nexport CLAWD_ENABLED_AGENTS={enabled_agents}\nexport CLAWD_SELECTED_AGENT_ID={selected_agent_id}\nexport CLAWD_ENABLE_CLAUDE_LOG_MONITOR={claude_enabled}\nexport CLAWD_SYNC_HOOKS={claude_enabled}\nexport CLAWD_ENABLE_CODEX_MONITOR={codex_enabled}\nexport CLAWD_CODEX_SESSION_DIR={codex_session_dir}\nexport OPENCLAW_ENABLE={openclaw_enabled}\nexec {node_path} \"$BRIDGE_ROOT/{entry_relative_path}\" >> {log_path} 2>&1\n",
+        "#!/bin/sh\nset -eu\nmkdir -p {logs_dir}\nBRIDGE_ROOT=''\nfor candidate in {bridge_root_candidates}; do\n  if [ -f \"$candidate/{entry_relative_path}\" ]; then\n    BRIDGE_ROOT=\"$candidate\"\n    break\n  fi\ndone\nif [ -z \"$BRIDGE_ROOT\" ]; then\n  printf '%s\\n' 'bridge resources not found in any detected local path' >> {log_path}\n  exit 1\nfi\ncd \"$BRIDGE_ROOT/{workspace_relative_path}\"\nexport PATH={node_dir}${{PATH:+:$PATH}}\nexport NODE_PATH=\"$BRIDGE_ROOT/node_modules${{NODE_PATH:+:$NODE_PATH}}\"\nexport MQTT_URL={mqtt_url}\nexport MQTT_USERNAME={mqtt_username}\nexport MQTT_PASSWORD={mqtt_password}\nexport STATUS_NAMESPACE={namespace}\nexport STATUS_DEVICE_ID={device_id}\nexport STATUS_BRIDGE_LOCAL_STATE_DIR={local_state_dir}\nexport CLAWD_BRIDGE_PORT={bridge_port}\nexport CLAWD_ENABLED_AGENTS={enabled_agents}\nexport CLAWD_SELECTED_AGENT_ID={selected_agent_id}\nexport CLAWD_ENABLE_CLAUDE_LOG_MONITOR={claude_enabled}\nexport CLAWD_SYNC_HOOKS={claude_enabled}\nexport CLAWD_ENABLE_CODEX_MONITOR={codex_enabled}\nexport CLAWD_CODEX_SESSION_DIR={codex_session_dir}\nexport OPENCLAW_ENABLE={openclaw_enabled}\nexec {node_path} \"$BRIDGE_ROOT/{entry_relative_path}\" >> {log_path} 2>&1\n",
         logs_dir = shell_quote(
             log_path
                 .parent()
@@ -5770,6 +6097,7 @@ fn write_launch_script(
         bridge_root_candidates = bridge_root_candidates,
         workspace_relative_path = BRIDGE_WORKSPACE_RELATIVE_PATH,
         entry_relative_path = BRIDGE_ENTRY_RELATIVE_PATH,
+        node_dir = node_dir,
         mqtt_url = shell_quote(&profile.mqtt_url),
         mqtt_username = shell_quote(&profile.mqtt_username),
         mqtt_password = shell_quote(&profile.mqtt_password),
@@ -6077,6 +6405,15 @@ fn start_bridge_direct(
     let mut command = command_for_host(node_path);
     command.arg(&bridge_assets.entry_path);
     command.current_dir(&bridge_assets.workspace_root);
+    if let Some(node_dir) = node_dir_for_path(node_path) {
+        let path_separator = if cfg!(windows) { ";" } else { ":" };
+        let mut path_env = node_dir.as_os_str().to_owned();
+        if let Some(existing) = env::var_os("PATH") {
+            path_env.push(path_separator);
+            path_env.push(existing);
+        }
+        command.env("PATH", path_env);
+    }
     command.env("NODE_PATH", node_path_env);
     command.env("MQTT_URL", &profile.mqtt_url);
     command.env("MQTT_USERNAME", &profile.mqtt_username);
@@ -6461,6 +6798,81 @@ fn terminate_process_force(_pid: u32) {}
 fn read_pid(pid_path: &Path) -> Option<u32> {
     let raw = fs::read_to_string(pid_path).ok()?;
     raw.trim().parse::<u32>().ok()
+}
+
+fn fetch_bridge_agent_status() -> Result<Option<serde_json::Value>, String> {
+    let url = format!("http://127.0.0.1:{DEFAULT_AGENT_BUS_PORT}/agent/status");
+    let response = lan_http_client(Duration::from_millis(1200))?
+        .get(url)
+        .send()
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Ok(None);
+    }
+    let text = response.text().map_err(|error| error.to_string())?;
+    serde_json::from_str::<serde_json::Value>(&text)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+fn bridge_agent_status_needs_restart(
+    profile: &BridgeProfileFile,
+    status: &serde_json::Value,
+) -> bool {
+    let selected = normalize_agent_id(&profile.selected_agent_id)
+        .or_else(|| {
+            profile
+                .enabled_agents
+                .iter()
+                .find_map(|agent| normalize_agent_id(agent))
+        })
+        .unwrap_or_default();
+    if selected.is_empty() {
+        return false;
+    }
+
+    let adapters = status
+        .get("adapters")
+        .or_else(|| status.get("agents"))
+        .and_then(|value| value.as_array());
+    let Some(adapters) = adapters else {
+        return false;
+    };
+
+    adapters.iter().any(|adapter| {
+        let agent_id = adapter
+            .get("agentId")
+            .and_then(|value| value.as_str())
+            .and_then(normalize_agent_id)
+            .unwrap_or_default();
+        if agent_id != selected {
+            return false;
+        }
+        if adapter
+            .get("ready")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        let reason = adapter
+            .get("reason")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        bridge_adapter_reason_is_recoverable(&agent_id, reason)
+    })
+}
+
+fn bridge_adapter_reason_is_recoverable(agent_id: &str, reason: &str) -> bool {
+    let reason = reason.to_ascii_lowercase();
+    match agent_id {
+        "codex" => {
+            reason.contains("codex --version")
+                || (reason.contains("node") && reason.contains("no such file"))
+                || reason.contains("env: node")
+        }
+        _ => false,
+    }
 }
 
 fn probe_bridge_running(port: u16) -> bool {
@@ -7185,6 +7597,65 @@ mod tests {
         assert!(!script.contains(r"\\?\C:\Users"));
         assert!(!script.contains("CLAWD_CODEX_MODEL"));
         assert!(!script.contains("--model"));
+    }
+
+    #[test]
+    fn bridge_launch_script_exports_node_dir_on_path_for_cli_shims() {
+        let tmp = tempfile::tempdir().unwrap();
+        let script_path = tmp.path().join("run-status-bridge.sh");
+        let log_path = tmp.path().join("logs").join("status-bridge.log");
+        let bridge_root = tmp.path().join("bridge");
+        let workspace_root = bridge_root.join(BRIDGE_WORKSPACE_RELATIVE_PATH);
+        let entry_path = bridge_root.join(BRIDGE_ENTRY_RELATIVE_PATH);
+        std::fs::create_dir_all(entry_path.parent().unwrap()).unwrap();
+        std::fs::write(&entry_path, "console.log('bridge');").unwrap();
+
+        let profile = BridgeProfileFile {
+            mqtt_url: "mqtt://example.invalid:1883".to_string(),
+            mqtt_namespace: "desk".to_string(),
+            mqtt_username: "device".to_string(),
+            mqtt_password: "secret".to_string(),
+            desktop_device_id: "desktop-test".to_string(),
+            enabled_agents: vec!["codex".to_string()],
+            selected_agent_id: "codex".to_string(),
+            ..BridgeProfileFile::default()
+        };
+        let bridge_assets = ResolvedBridgeAssets {
+            resource_root: bridge_root,
+            workspace_root,
+            entry_path,
+        };
+
+        write_launch_script(
+            &script_path,
+            &log_path,
+            &profile,
+            &bridge_assets,
+            Path::new("/opt/pet-manager/runtime/node"),
+        )
+        .unwrap();
+
+        let script = std::fs::read_to_string(script_path).unwrap();
+        assert!(script.contains("export PATH='/opt/pet-manager/runtime'"));
+        assert!(script.contains("${PATH:+:$PATH}"));
+    }
+
+    #[test]
+    fn bridge_agent_status_requests_restart_when_selected_codex_cli_shim_lacks_node() {
+        let profile = BridgeProfileFile {
+            selected_agent_id: "codex".to_string(),
+            enabled_agents: vec!["codex".to_string()],
+            ..BridgeProfileFile::default()
+        };
+        let status = serde_json::json!({
+            "ok": true,
+            "adapters": [
+                { "agentId": "codex", "ready": false, "reason": "codex --version 调用失败 (/Users/me/.npm-global/bin/codex)" },
+                { "agentId": "claude-code", "ready": true, "reason": null }
+            ]
+        });
+
+        assert!(bridge_agent_status_needs_restart(&profile, &status));
     }
 
     #[test]

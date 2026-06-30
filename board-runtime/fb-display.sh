@@ -2,6 +2,11 @@
 # Framebuffer video driver for the board runtime.
 # New model: each animation is one complete clip under terrier-clips, with
 # optional same-family WAV cues for terminal states.
+# When both working.typing and working.thinking are present, the working state
+# alternates those two clips one full clip at a time instead of choosing random
+# working variants.
+# Main-screen subtitle rendering is disabled; .current-speech remains a data
+# handoff file for upstream text, pairing hints, and diagnostics.
 # The screen pulls .current-state at clip boundaries; .screen-interrupt means
 # "stop now and pull the current state again", while .welcome-trigger injects
 # a one-shot welcome clip before returning to the current session state.
@@ -564,193 +569,7 @@ stop_stats_serve() {
 }
 
 append_speech_draw_filter() {
-  if [ -z "$FONTFILE" ] || [ ! -f "$FONTFILE" ] || [ ! -s "$SPEECH_PATH" ]; then
-    clear_multi_speech_render_files
-    return
-  fi
-
-  case "${PET_CLAW_FB_SPEECH_BUBBLE:-1}" in
-    0|false|FALSE|no|NO)
-      SPEECH_Y=$((FB_HEIGHT - 48))
-      if [ "$SPEECH_Y" -lt 0 ]; then
-        SPEECH_Y=0
-      fi
-      DRAW_FILTER="$DRAW_FILTER,drawtext=fontfile=$FONTFILE:textfile=$SPEECH_PATH:reload=1:x=8:y=$SPEECH_Y:fontsize=18:fontcolor=white:box=1:boxcolor=black@0.58:boxborderw=8"
-      return
-      ;;
-  esac
-
-  if append_multi_speech_draw_filter; then
-    return
-  fi
   clear_multi_speech_render_files
-
-  FONT_SIZE=$(speech_int "${PET_CLAW_FB_SPEECH_FONT_SIZE:-15}" 15)
-  LINE_SPACING=$(speech_int "${PET_CLAW_FB_SPEECH_LINE_SPACING:-2}" 2)
-  BUBBLE_COLOR="${PET_CLAW_FB_SPEECH_BUBBLE_COLOR:-white@0.70}"
-  FONT_COLOR="${PET_CLAW_FB_SPEECH_FONT_COLOR:-black}"
-  SHORT_MAX_COLS=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_MAX_COLS:-20}" 20)
-  WRAP_COLS=$(speech_int "${PET_CLAW_FB_SPEECH_WRAP_COLS:-34}" 34)
-  TITLE_COLS=$(speech_int "${PET_CLAW_FB_SPEECH_TITLE_COLS:-26}" 26)
-  MAX_LINES=$(speech_int "${PET_CLAW_FB_SPEECH_MAX_LINES:-3}" 3)
-  if [ "$MAX_LINES" -lt 1 ]; then
-    MAX_LINES=1
-  fi
-  if [ "$MAX_LINES" -gt 4 ]; then
-    MAX_LINES=4
-  fi
-  STATUS_STATE=$(read_runtime_file "$RUNTIME_ROOT/.current-state")
-  [ -n "$STATUS_STATE" ] || STATUS_STATE="$CURRENT_STATE"
-  SPEECH_METRICS=$(python3 - "$SPEECH_PATH" "$SPEECH_RENDER_PATH" "$WRAP_COLS" "$MAX_LINES" "$TITLE_COLS" <<'PY' 2>/dev/null || echo "1|1|2|24"
-import sys
-import unicodedata
-
-src_path, dst_path = sys.argv[1], sys.argv[2]
-wrap_cols = max(8, int(sys.argv[3]))
-max_lines = max(1, int(sys.argv[4]))
-title_cols = max(8, int(sys.argv[5]))
-try:
-    text = open(src_path, "r", encoding="utf-8", errors="ignore").read().strip("\n")
-except Exception:
-    text = ""
-
-def width(line):
-    total = 0
-    for ch in line:
-        total += 2 if unicodedata.east_asian_width(ch) in ("F", "W") else 1
-    return total
-
-def ellipsize(value, cols, force=False):
-    suffix = "..."
-    if not force and width(value) <= cols:
-        return value
-    limit = max(8, cols - 2) if force else cols
-    chars = list(value)
-    while chars and width("".join(chars) + suffix) > limit:
-        chars.pop()
-    return "".join(chars) + suffix
-
-def wrap_paragraph(value, cols):
-    lines = []
-    current = ""
-    current_width = 0
-    for ch in value:
-        ch_width = 2 if unicodedata.east_asian_width(ch) in ("F", "W") else 1
-        if current and current_width + ch_width > cols:
-            lines.append(current.rstrip())
-            current = ch
-            current_width = ch_width
-        else:
-            current += ch
-            current_width += ch_width
-    lines.append(current.rstrip())
-    return lines or [""]
-
-raw_lines = [line.strip() for line in text.splitlines()] or [""]
-title = raw_lines[0] if raw_lines else ""
-body = " ".join(line for line in raw_lines[1:] if line)
-raw_cols = max(width(title), width(body))
-
-wrapped = []
-if body:
-    wrapped.append(ellipsize(title, title_cols) if title else "")
-    remaining = max_lines - len(wrapped)
-    if remaining > 0:
-        body_lines = wrap_paragraph(body, wrap_cols)
-        if len(body_lines) > remaining:
-            body_lines = body_lines[:remaining]
-            body_lines[-1] = ellipsize(body_lines[-1], wrap_cols, True)
-        wrapped.extend(body_lines)
-else:
-    wrapped = wrap_paragraph(title, wrap_cols)
-
-wrapped = wrapped or [""]
-if len(wrapped) > max_lines:
-    clipped = wrapped[:max_lines]
-    clipped[-1] = ellipsize(clipped[-1], wrap_cols, True)
-    wrapped = clipped
-try:
-    with open(dst_path, "w", encoding="utf-8") as output:
-        output.write("\n".join(wrapped))
-except Exception:
-    pass
-render_cols = max(width(line) for line in wrapped)
-print(f"{len(raw_lines)}|{raw_cols}|{len(wrapped)}|{render_cols}")
-PY
-)
-  OLD_IFS="$IFS"
-  IFS="|"
-  set -- $SPEECH_METRICS
-  IFS="$OLD_IFS"
-  RAW_SPEECH_LINES=$(speech_int "${1:-1}" 1)
-  RAW_SPEECH_COLS=$(speech_int "${2:-1}" 1)
-  SPEECH_LINES=$(speech_int "${3:-2}" 2)
-  SPEECH_COLS=$(speech_int "${4:-24}" 24)
-
-  BUBBLE_X=$(speech_int "${PET_CLAW_FB_SPEECH_BUBBLE_X:-6}" 6)
-  BUBBLE_PAD_X=$(speech_int "${PET_CLAW_FB_SPEECH_PADDING_X:-14}" 14)
-  BUBBLE_PAD_Y=$(speech_int "${PET_CLAW_FB_SPEECH_PADDING_Y:-8}" 8)
-  TEXT_BLOCK_H=$((SPEECH_LINES * FONT_SIZE + (SPEECH_LINES - 1) * LINE_SPACING))
-  DEFAULT_BUBBLE_H=$((TEXT_BLOCK_H + BUBBLE_PAD_Y * 2 + 10))
-  if [ "$DEFAULT_BUBBLE_H" -lt 54 ]; then
-    DEFAULT_BUBBLE_H=54
-  fi
-  if [ "$DEFAULT_BUBBLE_H" -gt 84 ]; then
-    DEFAULT_BUBBLE_H=84
-  fi
-  BUBBLE_H=$(speech_int "${PET_CLAW_FB_SPEECH_BUBBLE_H:-$DEFAULT_BUBBLE_H}" "$DEFAULT_BUBBLE_H")
-  BUBBLE_R=$(speech_int "${PET_CLAW_FB_SPEECH_BUBBLE_R:-16}" 16)
-  MAX_BUBBLE_W=$((FB_WIDTH - BUBBLE_X * 2))
-  if [ "$MAX_BUBBLE_W" -lt 120 ]; then
-    MAX_BUBBLE_W="$FB_WIDTH"
-    BUBBLE_X=0
-  fi
-  BUBBLE_W=$(speech_int "${PET_CLAW_FB_SPEECH_BUBBLE_W:-$MAX_BUBBLE_W}" "$MAX_BUBBLE_W")
-  if [ "$BUBBLE_W" -gt "$MAX_BUBBLE_W" ]; then
-    BUBBLE_W="$MAX_BUBBLE_W"
-  fi
-  BUBBLE_SHORT=0
-  SHORT_ALLOWED=0
-  case "$STATUS_STATE" in
-    idle|welcome|waiting_user|ready|resting|sleep|sleeping)
-      SHORT_ALLOWED=1
-      ;;
-  esac
-  if [ "$SHORT_ALLOWED" = "1" ] && [ "$RAW_SPEECH_LINES" -le 1 ] && [ "$RAW_SPEECH_COLS" -le "$SHORT_MAX_COLS" ]; then
-    BUBBLE_SHORT=1
-    BUBBLE_PAD_X=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_PADDING_X:-12}" 12)
-    BUBBLE_PAD_Y=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_PADDING_Y:-7}" 7)
-    BUBBLE_H=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_BUBBLE_H:-34}" 34)
-    BUBBLE_R=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_BUBBLE_R:-14}" 14)
-    COL_PX=$(speech_int "${PET_CLAW_FB_SPEECH_COL_PX:-8}" 8)
-    BUBBLE_W=$((BUBBLE_PAD_X * 2 + SPEECH_COLS * COL_PX))
-    MIN_W=$(speech_int "${PET_CLAW_FB_SPEECH_SHORT_MIN_W:-64}" 64)
-    if [ "$BUBBLE_W" -lt "$MIN_W" ]; then
-      BUBBLE_W="$MIN_W"
-    fi
-    if [ "$BUBBLE_W" -gt "$MAX_BUBBLE_W" ]; then
-      BUBBLE_W="$MAX_BUBBLE_W"
-    fi
-  fi
-  BOTTOM_MARGIN=$(speech_int "${PET_CLAW_FB_SPEECH_BOTTOM_MARGIN:-6}" 6)
-  DEFAULT_BUBBLE_Y=$((FB_HEIGHT - BUBBLE_H - BOTTOM_MARGIN))
-  if [ "$DEFAULT_BUBBLE_Y" -lt 0 ]; then
-    DEFAULT_BUBBLE_Y=0
-  fi
-  BUBBLE_Y=$(speech_int "${PET_CLAW_FB_SPEECH_BUBBLE_Y:-$DEFAULT_BUBBLE_Y}" "$DEFAULT_BUBBLE_Y")
-
-  TEXT_X=$((BUBBLE_X + BUBBLE_PAD_X))
-  TEXT_Y=$((BUBBLE_Y + BUBBLE_PAD_Y))
-  TEXT_Y_EXPR="$TEXT_Y"
-  if [ "$BUBBLE_SHORT" = "1" ]; then
-    TEXT_Y_EXPR="$BUBBLE_Y+($BUBBLE_H-text_h)/2"
-  fi
-
-  append_speech_bubble_background_filter
-
-  append_speech_status_filter
-
-  DRAW_FILTER="$DRAW_FILTER,drawtext=fontfile=$FONTFILE:textfile=$SPEECH_RENDER_PATH:reload=1:x=$TEXT_X:y=$TEXT_Y_EXPR:fontsize=$FONT_SIZE:fontcolor=$FONT_COLOR:line_spacing=$LINE_SPACING:fix_bounds=1"
 }
 
 now_ms() {
@@ -841,13 +660,7 @@ state_speech_text() {
   STATE="$1"
   REASON="$2"
   case "$REASON" in
-    idle.playing) echo "玩一小会儿"; return;;
-    idle.wandering) echo "到处晃晃"; return;;
-    idle.begging) echo "看看我"; return;;
-    idle.reading) echo "翻翻这个"; return;;
-    idle.eating) echo "嚼嚼嚼，啊呜啊呜"; return;;
-    idle.traveling) echo "出去转转"; return;;
-    idle.daydreaming) echo "发呆中..."; return;;
+    idle|idle.*) echo "休息中"; return;;
     working.*|tool_running.*) echo "努力工作中"; return;;
     touch.lick) echo "贴一下你"; return;;
     touch.what) echo "咦，是你呀？"; return;;
@@ -1214,11 +1027,65 @@ clip_count() {
   wc -l < "$FILE" | tr -d ' '
 }
 
-pick_clip_for_state() {
-  case "$1" in
-    touch|touch.*) STATE="touch";;
-    *) STATE=$(canonical_state "$1");;
+clip_for_exact_name() {
+  STATE="$1"
+  NAME="$2"
+  FILE="$INDEX_DIR/$STATE.list"
+  if [ ! -f "$FILE" ]; then
+    return 1
+  fi
+  while IFS= read -r CLIP_PATH; do
+    if [ "$(basename "$CLIP_PATH")" = "$NAME" ]; then
+      echo "$CLIP_PATH"
+      return 0
+    fi
+  done < "$FILE"
+  return 1
+}
+
+working_alternation_available() {
+  clip_for_exact_name "working" "working.typing.mp4" >/dev/null 2>&1 &&
+    clip_for_exact_name "working" "working.thinking.mp4" >/dev/null 2>&1
+}
+
+working_sequence_file() {
+  if [ -n "${INDEX_DIR:-}" ]; then
+    echo "$INDEX_DIR/working-sequence-next"
+    return
+  fi
+  echo "$RUNTIME_ROOT/.fb-working-sequence-next"
+}
+
+working_sequence_next_variant() {
+  NEXT=$(read_runtime_file "$(working_sequence_file)")
+  case "$NEXT" in
+    thinking) echo "thinking";;
+    *) echo "typing";;
   esac
+}
+
+set_working_sequence_next_variant() {
+  write_runtime_file "$(working_sequence_file)" "$1"
+}
+
+pick_working_sequence_clip() {
+  NEXT_VARIANT=$(working_sequence_next_variant)
+  if [ "$NEXT_VARIANT" = "thinking" ]; then
+    CLIP_PATH=$(clip_for_exact_name "working" "working.thinking.mp4" || true)
+    set_working_sequence_next_variant "typing"
+  else
+    CLIP_PATH=$(clip_for_exact_name "working" "working.typing.mp4" || true)
+    set_working_sequence_next_variant "thinking"
+  fi
+  if [ -n "${CLIP_PATH:-}" ]; then
+    echo "$CLIP_PATH"
+    return
+  fi
+  pick_random_clip_for_state "working"
+}
+
+pick_random_clip_for_state() {
+  STATE="$1"
   COUNT=$(clip_count "$STATE")
   if [ "$COUNT" -le 0 ] 2>/dev/null && [ "$STATE" != "idle" ]; then
     log "no clip for state=$STATE, falling back to idle"
@@ -1231,6 +1098,27 @@ pick_clip_for_state() {
   fi
   INDEX=$((1 + $(rand_n "$COUNT")))
   sed -n "${INDEX}p" "$INDEX_DIR/$STATE.list"
+}
+
+pick_clip_for_state() {
+  case "$1" in
+    touch|touch.*) STATE="touch";;
+    *) STATE=$(canonical_state "$1");;
+  esac
+  if [ "$STATE" = "working" ] && working_alternation_available; then
+    pick_working_sequence_clip
+    return
+  fi
+  pick_random_clip_for_state "$STATE"
+}
+
+pick_loop_target_for_state() {
+  STATE="$1"
+  if [ "$STATE" = "working" ] && working_alternation_available; then
+    echo 1
+    return
+  fi
+  pick_loop_target "$STATE"
 }
 
 get_current_top_state() {
@@ -1481,6 +1369,10 @@ play_clip_once() {
         fi
         sleep 0.2
         TICKS=$((TICKS + 1))
+        if [ "$TARGET_TICKS" -gt 0 ] 2>/dev/null && [ "$TICKS" -ge "$TARGET_TICKS" ]; then
+          STOP_PLAYER=1
+          break
+        fi
       done
       if [ "$STOP_PLAYER" = "1" ]; then
         pkill -P "$PLAYER_PID" 2>/dev/null || true
@@ -1550,7 +1442,7 @@ enter_state() {
   fi
   CURRENT_STATE="$TARGET"
   CURRENT_CLIP="$CLIP"
-  CURRENT_LOOP_TARGET=$(pick_loop_target "$CURRENT_STATE")
+  CURRENT_LOOP_TARGET=$(pick_loop_target_for_state "$CURRENT_STATE")
   CURRENT_LOOP_COUNT=0
   CURRENT_AUDIO_CUE_KEY=""
   stop_state_audio
@@ -1567,7 +1459,7 @@ advance_same_state() {
     return
   fi
   CURRENT_CLIP=$(pick_clip_for_state "$CURRENT_STATE")
-  CURRENT_LOOP_TARGET=$(pick_loop_target "$CURRENT_STATE")
+  CURRENT_LOOP_TARGET=$(pick_loop_target_for_state "$CURRENT_STATE")
   CURRENT_LOOP_COUNT=0
   log "variant next state=$CURRENT_STATE target_loops=$CURRENT_LOOP_TARGET clip=$(basename "$CURRENT_CLIP")"
 }
@@ -1672,9 +1564,12 @@ self_test() {
   echo "canonical tool_running=$(canonical_state tool_running)"
   echo "canonical notification=$(canonical_state notification)"
   echo "canonical touch.lick=$(canonical_state touch.lick)"
+  echo "speech idle.playing=$(state_speech_text idle idle.playing)"
   echo "rand sample=$(rand_n 3)"
   WORKING_PICK=$(pick_clip_for_state "working")
   echo "pick working name=$(basename "$WORKING_PICK")"
+  WORKING_PICK_NEXT=$(pick_clip_for_state "working")
+  echo "pick working next name=$(basename "$WORKING_PICK_NEXT")"
   TOUCH_PICK=$(pick_clip_for_state "touch")
   echo "pick touch name=$(basename "$TOUCH_PICK")"
   echo "pick touch state=$(clip_state_from_name "$(basename "$TOUCH_PICK")")"

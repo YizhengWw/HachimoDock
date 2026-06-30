@@ -1,6 +1,7 @@
 /**
- * [Input] pipeline output (image bytes + per-family video bytes + manifest metadata).
- * [Output] cached local filesystem persistence, synchronous cached list reads, built-in appearance fallback/override merging, source-preview/audio cue asset URLs, and blob URL readers.
+ * [Input] pipeline output or direct uploaded video bytes plus per-family manifest metadata.
+ * [Output] cached local filesystem persistence, synchronous cached list reads, direct uploaded-video appearances,
+ *          built-in appearance fallback/override merging, source-preview/audio cue asset URLs, and blob URL readers.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update this header and any UI components that consume the appearance manifest shape.
  */
@@ -21,6 +22,7 @@ import { appLocalDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { createAsyncCache } from "./client-cache.js";
 import { extensionFromMime } from "./avatar-pipeline/image.js";
+import { FAMILIES } from "./avatar-pipeline/families.js";
 import {
   BUILTIN_TERRIER_APPEARANCE_ID,
   createBuiltinTerrierAppearance,
@@ -145,6 +147,28 @@ function withDefaultAudioCues(record) {
   };
 }
 
+function buildUploadedVideoFamilies(selectedFamily, videoRel, originalFilename = "") {
+  return FAMILIES.map((definition) => {
+    const prompt = `用户上传的 ${definition.family} 状态视频`;
+    if (definition.family === selectedFamily) {
+      return {
+        family: definition.family,
+        ok: definition.family === selectedFamily,
+        prompt,
+        videoPath: videoRel,
+        taskId: `local-upload-${Date.now().toString(36)}`,
+        videoUrl: originalFilename || "",
+      };
+    }
+    return {
+      family: definition.family,
+      ok: definition.family === selectedFamily,
+      prompt,
+      error: "尚未上传状态视频",
+    };
+  });
+}
+
 /**
  * Persist a freshly generated appearance.
  *
@@ -206,6 +230,53 @@ export async function saveAppearance(input) {
     source_image: sourceRel,
     source_mime: input.imagePayload.mime,
     families: familiesOut,
+    created_at: new Date().toISOString(),
+  };
+
+  await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
+    baseDir: BaseDirectory.AppLocalData,
+  });
+
+  invalidateAppearanceCache();
+  return toRecord(manifest, await absolutePathFor(dir), await getRoot());
+}
+
+/**
+ * Persist a user-uploaded MP4 as a custom appearance. The selected family gets
+ * the uploaded video immediately; the other known state slots stay present so
+ * the detail page can add or replace them one by one.
+ *
+ * @param {{
+ *   appearanceName?: string,
+ *   description?: string,
+ *   family?: string,
+ *   videoBytes: Uint8Array,
+ *   originalFilename?: string,
+ * }} input
+ * @returns {Promise<AppearanceRecord>}
+ */
+export async function saveUploadedVideoAppearance(input) {
+  if (!input?.videoBytes) throw new Error("请先选择一个 MP4 状态视频。");
+  const selectedFamily = input.family || FAMILIES[0]?.family || "working";
+  const id = uuid();
+  const dir = await ensureAppearanceDir(id);
+  const videoRel = `${dir}/${VIDEO_DIR}/${selectedFamily}.mp4`;
+  await writeFile(videoRel, input.videoBytes, { baseDir: BaseDirectory.AppLocalData });
+
+  const manifest = {
+    schema_version: 1,
+    id,
+    type: "custom",
+    name: input.appearanceName?.trim() || input.originalFilename?.replace(/\.mp4$/i, "") || "上传视频形象",
+    description: input.description?.trim() || "自定义上传视频形象",
+    provider: "local-upload",
+    model: "uploaded-mp4",
+    base_url: "",
+    thinking_model: "",
+    persona: {},
+    source_image: "",
+    source_mime: "",
+    families: buildUploadedVideoFamilies(selectedFamily, videoRel, input.originalFilename),
     created_at: new Date().toISOString(),
   };
 
@@ -419,9 +490,9 @@ export async function removeFamilyAudioCue({ appearanceId, family }) {
  *   model: string,
  *   thinking_model: string,
  *   persona: object,
- *   source_image: string,
- *   source_image_src: string,
- *   source_mime: string,
+ *   source_image?: string,
+ *   source_image_src?: string,
+ *   source_mime?: string,
  *   source_preview?: string,
  *   source_preview_src?: string,
  *   source_preview_mime?: string,

@@ -1,6 +1,7 @@
 /**
  * [Input] Appearance gallery source and shared stylesheet.
  * [Output] Static Node test coverage for gallery-only creation/import/detail management,
+ *          the source chooser behind 新建自定义形象, direct uploaded-video appearances,
  *          filled card preview media, full Codex import previews, unobstructed gallery cards,
  *          and removal of desktop-pet assignment controls from the gallery.
  * [Pos] test node in ref/src
@@ -26,7 +27,7 @@ function extractCssRule(css, selector) {
   return match.groups.body;
 }
 
-test("gallery renders inside PageShell with refresh plus flat creation actions", () => {
+test("gallery renders inside PageShell with refresh plus a four-source creation chooser", () => {
   const gallery = readSource("AppearanceGallery.jsx");
   const css = readSource("styles.css");
   const actions = extractCssRule(css, ".appearance-gallery-actions");
@@ -35,13 +36,42 @@ test("gallery renders inside PageShell with refresh plus flat creation actions",
   assert.match(gallery, /<PageShell\b[\s\S]*title="形象画廊"/);
   assert.match(gallery, /actions=\{\[refreshButton, addAppearanceActions\]\}/);
   assert.match(gallery, /className="appearance-gallery-actions"/);
-  assert.match(gallery, /onClick=\{onEnterWizard\}/);
-  assert.match(gallery, /onClick=\{openCodexImport\}/);
-  assert.match(gallery, /onClick=\{\(\) => setCommunityModalOpen\(true\)\}/);
+  assert.match(gallery, /const \[creationModalOpen, setCreationModalOpen\] = useState\(false\);/);
+  assert.match(gallery, /onClick=\{\(\) => setCreationModalOpen\(true\)\}/);
+  assert.match(gallery, /<CreationSourceModal\b/);
+  assert.match(gallery, /onAiGenerate=\{handleAiGenerateSource\}/);
+  assert.match(gallery, /onVideoUpload=\{handleVideoUploadSource\}/);
+  assert.match(gallery, /onCodexImport=\{handleCodexImportSource\}/);
+  assert.match(gallery, /onCommunityImport=\{handleCommunityImportSource\}/);
+  assert.match(gallery, /图片AI生成/);
+  assert.match(gallery, /自定义上传视频/);
+  assert.match(gallery, /Codex 导入/);
+  assert.match(gallery, /从社区导入/);
+  assert.match(css, /\.creation-source-grid\s*\{/);
+  assert.match(css, /\.creation-source-card\s*\{/);
   assert.doesNotMatch(gallery, /function SplitButton\(/);
   assert.doesNotMatch(gallery, /split-button__/);
   assert.match(actions, /display:\s*inline-flex;/);
   assert.match(actions, /flex-wrap:\s*wrap;/);
+});
+
+test("gallery can create a custom appearance from an uploaded MP4 state video", () => {
+  const gallery = readSource("AppearanceGallery.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(gallery, /saveUploadedVideoAppearance/);
+  assert.match(gallery, /import \{ FAMILIES \} from "\.\/lib\/avatar-pipeline\/families\.js";/);
+  assert.match(gallery, /const \[videoUploadModalOpen, setVideoUploadModalOpen\] = useState\(false\);/);
+  assert.match(gallery, /function VideoUploadModal\(/);
+  assert.match(gallery, /accept="video\/mp4,\.mp4"/);
+  assert.match(gallery, /readFileAsBytes\(videoFile\)/);
+  assert.match(gallery, /saveUploadedVideoAppearance\(\{[\s\S]*appearanceName:[\s\S]*family:[\s\S]*videoBytes:/);
+  assert.match(gallery, /onOpenDetail\?\.\(record\.id\)/);
+  assert.match(gallery, /当前仅支持 MP4 状态视频/);
+  assert.match(gallery, /className="video-upload-modal__drop"/);
+  assert.match(gallery, /className="video-upload-modal__grid"/);
+  assert.match(css, /\.video-upload-modal__grid\s*\{/);
+  assert.match(css, /\.video-upload-modal__drop\s*\{/);
 });
 
 test("gallery is generation/import/detail management only, not desktop-pet assignment", () => {
