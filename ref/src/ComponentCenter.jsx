@@ -34,107 +34,17 @@ import { useDeviceContext } from "./shell/DeviceContext.jsx";
 import NowShowingHero from "./component-center/NowShowingHero.jsx";
 import CandidateCard from "./component-center/CandidateCard.jsx";
 import ComponentPreviewModal from "./component-center/ComponentPreviewModal.jsx";
-import { isRoutedWidgetBinding } from "./component-center/binding-labels.js";
+import {
+  CONTROL_HELP,
+  bindingKey,
+  defaultControlLabelForBinding,
+  isRoutedWidgetBinding,
+  optionForControlLabel,
+} from "./component-center/binding-labels.js";
+import { buildDraftGoal, matchesDraftPath } from "./component-center/draft-utils.js";
 
 const ACTIVE_COMPONENT_STORAGE_KEY = "pet-manager:active-component";
 
-/* Controls a widget action can be bound to at install time. Each maps to a
- * NATIVE board event the widget runtime matches in buttons.json. Screen region
- * events are forwarded by the touch runtime when the widget is active. Screen
- * swipe stays a pure system page-switch gesture and is intentionally NOT
- * bindable here. Knob rotation is fixed to system volume and is not offered as
- * a live widget control in this UI.
- *
- * 与设备端 board-runtime 同步：负一屏路由见 board_rotary_input.c
- * br_rotary_dispatch_button_action 与 board_touch_input.c；swipe
- * 仍由 screen_page.c 截走切页，因此不在可绑定列表里。
- */
-const CONTROL_OPTIONS = [
-  {
-    label: "屏幕点击",
-    shortLabel: "点击",
-    control: "屏幕区域",
-    event: "screen.region.tap",
-    help: "点 stats 页屏幕区域触发这个组件动作。",
-  },
-  {
-    label: "屏幕长按",
-    shortLabel: "长按",
-    control: "屏幕区域",
-    event: "screen.region.long_press",
-    help: "长按 stats 页屏幕区域触发这个组件动作。",
-  },
-];
-
-const CONTROL_HELP = Object.fromEntries(
-  CONTROL_OPTIONS.map((option) => [option.label, option.help]),
-);
-
-function bindingKey(componentId, action) {
-  return `${componentId}:${action}`;
-}
-
-function defaultControlLabelForBinding(binding) {
-  const event = binding.event || "";
-  const control = binding.control || "";
-  const exactMatch = CONTROL_OPTIONS.find(
-    (option) => option.control === control && option.event === event,
-  );
-  if (exactMatch) return exactMatch.label;
-  const eventMatch = CONTROL_OPTIONS.find((option) => option.event === event);
-  if (eventMatch) return eventMatch.label;
-  const controlMatch = CONTROL_OPTIONS.find((option) => option.control === control);
-  return controlMatch?.label || control || CONTROL_OPTIONS[0].label;
-}
-
-function optionForControlLabel(label) {
-  return CONTROL_OPTIONS.find((option) => option.label === label) || null;
-}
-
-function normalizeDashboardProgress(progress) {
-  if (!progress) return null;
-  if (typeof progress === "object") {
-    const value = Number(progress.value);
-    if (!Number.isFinite(value)) return null;
-    return {
-      value: Math.max(0, Math.min(100, value)),
-      label: typeof progress.label === "string" ? progress.label : "",
-    };
-  }
-  if (typeof progress === "string") {
-    const [rawValue, ...labelParts] = progress.split(":");
-    const value = Number(rawValue);
-    if (!Number.isFinite(value)) return null;
-    return {
-      value: Math.max(0, Math.min(100, value)),
-      label: labelParts.join(":"),
-    };
-  }
-  return null;
-}
-
-function buildDraftGoal(draft) {
-  const description = typeof draft.description === "string" ? draft.description.trim() : "";
-  return description || "自定义草稿 · 可预览后安装到负一屏。";
-}
-
-function normalizeLocalPath(value) {
-  return String(value || "").replaceAll("\\", "/");
-}
-
-function pathContainsComponentId(value, componentId) {
-  const id = String(componentId || "").trim();
-  if (!id) return false;
-  return normalizeLocalPath(value)
-    .split("/")
-    .some((segment) => segment === id || segment === `${id}.clawpkg` || segment === `${id}.zip`);
-}
-
-function matchesDraftPath(draft, clawpkgPath) {
-  if (!draft || !clawpkgPath) return false;
-  return normalizeLocalPath(draft.path) === normalizeLocalPath(clawpkgPath)
-    || pathContainsComponentId(clawpkgPath, draft.id);
-}
 
 export default function ComponentCenter() {
   const { push } = useToast();

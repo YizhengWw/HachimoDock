@@ -66,8 +66,11 @@ test("Library filters out the currently-installed component", () => {
 
 test("draft cards use manifest description instead of exposing local draft paths", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /draft\.description/);
-  assert.match(component, /自定义草稿 · 可预览后安装到负一屏/);
+  // Draft summary copy (manifest description, else the default line) now lives in
+  // component-center/draft-utils.js and is covered in draft-utils.test.js; here we
+  // assert ComponentCenter renders drafts through buildDraftGoal, not raw paths.
+  assert.match(component, /buildDraftGoal/);
+  assert.match(component, /from "\.\/component-center\/draft-utils\.js"/);
   assert.doesNotMatch(component, /goal:\s*`自定义草稿 · \$\{draft\.path\.replace/);
 });
 
@@ -193,11 +196,14 @@ test("component center preserves all install + delete pipelines", () => {
   assert.match(component, /install_widget_skill/);
   assert.match(component, /delete_component_draft/);
 
-  // Binding resolution preserved
-  assert.match(component, /CONTROL_OPTIONS = \[/);
-  assert.match(component, /屏幕点击/);
-  assert.doesNotMatch(component, /顶部红钮短按/);
-  assert.doesNotMatch(component, /label:\s*"旋钮旋转"/);
+  // Binding resolution preserved — the CONTROL_OPTIONS vocabulary + label helpers
+  // moved to component-center/binding-labels.js (covered in binding-labels.test.js);
+  // here we assert ComponentCenter imports and wires them.
+  assert.match(
+    component,
+    /import\s*\{[\s\S]*defaultControlLabelForBinding[\s\S]*\}\s*from\s*"\.\/component-center\/binding-labels\.js"/,
+  );
+  assert.match(component, /bindingKey/);
   assert.match(component, /const \[bindingOverrides, setBindingOverrides\] = useState\(\{\}\)/);
   assert.match(component, /buildBindingOverridesForInstall/);
   assert.match(component, /isRoutedWidgetBinding/);
@@ -235,11 +241,11 @@ test("component center preserves component generation features", () => {
 
 test("component center matches draft component paths across Windows and POSIX separators", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /function pathContainsComponentId/);
-  assert.match(component, /replaceAll\("\\\\", "\/"\)|replace\(\/\\\\\\\\\/g, "\/"\)/);
-  assert.match(component, /function matchesDraftPath/);
+  // The cross-separator matching rules moved to component-center/draft-utils.js
+  // (covered in draft-utils.test.js); here we assert ComponentCenter wires them.
   assert.match(component, /matchesDraftPath\(d, otaPendingPath\)/);
   assert.match(component, /matchesDraftPath\(d, clawpkgPath\)/);
+  assert.match(component, /from "\.\/component-center\/draft-utils\.js"/);
   assert.doesNotMatch(component, /includes\(`\/\$\{d\.id\}`\)/);
 });
 
