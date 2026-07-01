@@ -6,6 +6,7 @@
  */
 
 import { DEVICE_SETUP_FIXTURES } from "./fixtures.js";
+import { normalizeText } from "./lib/normalize-text.js";
 
 export const SETUP_STATES = Object.freeze({
   setupUninitialized: "setup_uninitialized",
@@ -278,11 +279,6 @@ const SCENARIO_FAILURE_KEYS = {
   [DEVICE_SETUP_SCENARIOS.networkError]: "network",
   [DEVICE_SETUP_SCENARIOS.channelError]: "channel",
 };
-
-function normalizeText(value, fallback = "") {
-  const normalized = String(value || "").trim();
-  return normalized || String(fallback || "").trim();
-}
 
 function slugify(value, fallback) {
   const normalized = normalizeText(value, fallback)

@@ -27,6 +27,7 @@ import {
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
 import petManagerMark from "./assets/logo/pet-manager-mark.svg";
+import { hasTauriRuntime } from "./lib/tauri-env.js";
 
 const DEV_DIRECT_DASHBOARD_BINDING = {
   boardDeviceId: "board-dev-direct-001",
@@ -36,10 +37,6 @@ const DEV_DIRECT_DASHBOARD_BINDING = {
 
 function devDirectDashboardBinding() {
   return import.meta.env.DEV && !hasTauriRuntime() ? DEV_DIRECT_DASHBOARD_BINDING : null;
-}
-
-function hasTauriRuntime() {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
 export default function App() {
