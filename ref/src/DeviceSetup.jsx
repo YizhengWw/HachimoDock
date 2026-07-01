@@ -26,6 +26,7 @@ import {
 import AppearancePreview from "./AppearancePreview.jsx";
 import { listAppearances } from "./lib/appearance-store.js";
 import { resolveGalleryPreviewMedia } from "./lib/appearance-preview.js";
+import { hasTauriRuntime } from "./lib/tauri-env.js";
 import {
   assignAppearanceToAgent,
   assignedAgentIds,
@@ -179,10 +180,6 @@ function reducer(state, action) {
     default:
       return state;
   }
-}
-
-function hasTauriRuntime() {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
 function StepBar({ currentPhase }) {

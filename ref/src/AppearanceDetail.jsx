@@ -43,6 +43,7 @@ import {
   saveProviderConfig,
 } from "./lib/avatar-pipeline/provider-config.js";
 import { AvatarWizardStep1, AvatarWizardStep2 } from "./CustomAvatarWizard.jsx";
+import { hasTauriRuntime } from "./lib/tauri-env.js";
 
 const AUDIO_SYNC_DIRTY_PREFIX = "pet-manager.appearance-audio-dirty.";
 
@@ -50,10 +51,6 @@ function appearanceSourceLabel(record) {
   if (record.type === "builtin") return "内置形象";
   if (record.type === "codex-import") return "codex pet";
   return "自定义形象";
-}
-
-function hasTauriRuntime() {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
 function dirtyStorageKey(appearanceId) {

@@ -131,8 +131,9 @@ test("app shell routes device, pet album, component center, detail, wizard, and 
   assert.match(app, /const \[view, setView\] = useState\("loading"\)/);
   assert.match(app, /const \[detailAppearanceId, setDetailAppearanceId\] = useState\(""\)/);
   assert.match(app, /DEV_DIRECT_DASHBOARD_BINDING/);
-  assert.match(app, /function hasTauriRuntime\(\)/);
-  assert.match(app, /return typeof window !== "undefined" && Boolean\(window\.__TAURI_INTERNALS__\);/);
+  // hasTauriRuntime is now a single source of truth in lib/tauri-env.js (covered
+  // by lib/tauri-env.test.js); App imports it rather than redefining the helper.
+  assert.match(app, /import\s*\{\s*hasTauriRuntime\s*\}\s*from\s*"\.\/lib\/tauri-env\.js"/);
   assert.match(app, /import\.meta\.env\.DEV && !hasTauriRuntime\(\) \? DEV_DIRECT_DASHBOARD_BINDING : null/);
   assert.match(app, /enterBestAvailableDeviceSurface/);
   assert.match(app, /const galleryViews = new Set\(\["gallery", "wizard", "detail"\]\);/);

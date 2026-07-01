@@ -6,6 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { hasTauriRuntime } from "./lib/tauri-env.js";
 import {
   AGENT_DISCOVERY_SCENARIOS,
   AGENT_STATUS,
@@ -15,10 +16,6 @@ import {
 
 const WEB_STORAGE_KEY = "pet-manager.channel-config.v1";
 const DEFAULT_TARGET = "电脑端 -> 副屏设备";
-
-function hasTauriRuntime() {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
-}
 
 function safeReadStorage() {
   if (typeof window === "undefined" || !window.localStorage) {

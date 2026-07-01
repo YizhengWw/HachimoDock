@@ -6,6 +6,8 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { hasTauriRuntime } from "./lib/tauri-env.js";
+import { normalizeText } from "./lib/normalize-text.js";
 
 const WEB_STORAGE_KEY = "pet-manager.bridge-device-config.v1";
 const WEB_CONFIG_PATH = "browser://localStorage/pet-manager.bridge-device-config.v1";
@@ -22,15 +24,6 @@ const DEFAULT_MQTT_BROKER_URL = "mqtt://broker.openclaw.example:1883";
 const DEFAULT_TEST_DEVICE_ID = "linux-pet-01";
 const REMOTE_CONTROL_TOPIC_SEGMENT = "control/remote-cli-binding";
 const DEFAULT_PET_SCREEN_AP_BROKER_URL = "mqtt://192.168.44.1:1883";
-
-function hasTauriRuntime() {
-  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
-}
-
-function normalizeText(value, fallback = "") {
-  const normalized = String(value || "").trim();
-  return normalized || String(fallback || "").trim();
-}
 
 function readBrowserConfig() {
   if (typeof window === "undefined" || !window.localStorage) {
