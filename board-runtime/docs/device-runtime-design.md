@@ -218,6 +218,7 @@ terrier-clips/<state>[.<variant>].mp4
 ```
 
 `fb-display.sh` 启动时动态扫描 `terrier-clips/*.mp4`，不需要为新增 variant 改代码。clip 时长优先来自 `terrier-clips-durations.tsv`。
+当前仓库的内置默认素材仍使用 `terrier-clips` 兼容路径，但视频内容已由桌面端乌萨奇自定义形象导出并转成板端友好的 `800x480`、`24fps`、黑底 H.264 MP4。
 
 屏幕状态机的完整切换规则见 [屏幕状态机设计说明](screen-state-machine.md)。
 

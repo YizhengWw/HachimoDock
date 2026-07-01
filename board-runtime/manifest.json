@@ -18,9 +18,9 @@
     ".welcome-trigger"
   ],
   "sizes": {
-    "assetsBytes": 5661084,
-    "uiBytes": 399934,
+    "assetsBytes": 21061015,
+    "uiBytes": 422455,
     "sourceBytes": 0,
-    "totalBytes": 6061018
+    "totalBytes": 21483470
   }
 }
