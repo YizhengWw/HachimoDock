@@ -2,7 +2,8 @@
  * [Input] An appearanceId persisted by `lib/appearance-store.js`.
  * [Output] Preview-first appearance workspace, sticky current-state controls, contextual details drawer,
  *          configurable per-family WAV cue overrides, direct per-state MP4 replacement,
- *          background single-state image+prompt regeneration with inline progress, and full known-state rail.
+ *          background single-state image+prompt regeneration that only replaces the client video
+ *          before manual board downlink, inline progress, and full known-state rail.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -653,7 +654,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       });
       setRecord(nextRecord);
       setSingleStateStatus("success");
-      const successMessage = `已替换 ${activeRecord.family} 状态素材。需要在设备生效时，点击“替换到板端”。`;
+      const successMessage = `已替换 ${activeRecord.family} 状态视频文件，已保存到客户端。`;
       setSingleStateMessage(successMessage);
       setSingleStateProgress({
         label: "客户端素材已替换",
@@ -1075,7 +1076,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                 </div>
                 <div className="detail-state-regenerate-entry__actions">
                   <button
-                    className="detail-state-regenerate-entry__cta"
+                    className="btn-ghost"
                     type="button"
                     onClick={handleOpenSingleStateDialog}
                     disabled={!canRegenerateState}
@@ -1157,7 +1158,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                   单状态重生成
                 </h3>
                 <div className="modal-subtitle">
-                  当前状态：{activeRecord.family}。关闭弹窗不会取消生成，完成后会先替换客户端素材，再由“替换到板端”下发。
+                  当前状态：{activeRecord.family}。关闭弹窗不会取消生成，完成后只替换客户端视频文件；需要设备生效时，关闭弹窗后手动点击“替换到板端”。
                 </div>
               </div>
               <button
@@ -1252,7 +1253,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                         : null
                     }
                     title={`第 2 步 · 生成 ${activeRecord.family}`}
-                    startLabel="生成并替换当前状态"
+                    startLabel="生成并替换客户端视频"
                   />
                 )}
 
@@ -1277,15 +1278,6 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                 onClick={handleCloseSingleStateDialog}
               >
                 关闭
-              </button>
-              <button
-                className="btn-primary"
-                type="button"
-                onClick={handleSyncSingleStateToDevice}
-                disabled={!canSyncSingleState || singleStateBusy}
-              >
-                {singleStateStatus === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
-                替换到板端
               </button>
             </div>
           </div>

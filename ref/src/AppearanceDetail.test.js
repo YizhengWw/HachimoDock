@@ -3,7 +3,8 @@
  * [Output] Static Node test coverage for detail navigation, guarded deletion,
  *          task-focused preview-first layout, configurable state WAV cues,
  *          direct per-state MP4 replacement, closable background single-state generation
- *          with inline progress, built-in non-deletable records, generated-only materials, and codex pet source labels.
+ *          that replaces client videos before manual board sync, flat modal chrome,
+ *          inline progress, built-in non-deletable records, generated-only materials, and codex pet source labels.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -24,6 +25,12 @@ function extractCssRule(css, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`));
   assert.ok(match, `Expected to find ${selector} CSS rule`);
+  return match.groups.body;
+}
+
+function extractModalFooter(source) {
+  const match = source.match(/<div className="single-state-regenerate-modal__footer">(?<body>[\s\S]*?)<\/div>/);
+  assert.ok(match, "Expected to find single-state regenerate modal footer");
   return match.groups.body;
 }
 
@@ -151,11 +158,12 @@ test("appearance detail persists audio OTA reminders and exposes the sound downl
   assert.match(css, /\.detail-audio-sync-message\s*\{/);
 });
 
-test("appearance detail can regenerate one selected state and replace it on the board", () => {
+test("appearance detail regenerates one selected state locally before manual board sync", () => {
   const source = readSource("AppearanceDetail.jsx");
   const wizard = readSource("CustomAvatarWizard.jsx");
   const css = readSource("styles.css");
-  const regenerateCtaRule = extractCssRule(css, ".detail-state-regenerate-entry__cta");
+  const flatModalCardRule = extractCssRule(css, ".single-state-regenerate-modal .ca-card");
+  const modalFooter = extractModalFooter(source);
 
   assert.match(source, /AvatarWizardStep1/);
   assert.match(source, /AvatarWizardStep2/);
@@ -169,26 +177,37 @@ test("appearance detail can regenerate one selected state and replace it on the 
   assert.match(source, /重新生成当前状态/);
   assert.match(source, /singleStateDialogOpen/);
   assert.match(source, /single-state-regenerate-modal/);
+  assert.match(source, /完成后只替换客户端视频文件/);
+  assert.doesNotMatch(source, /完成后会先替换客户端素材，再由“替换到板端”下发/);
   assert.match(source, /<AvatarWizardStep1[\s\S]*identityFields=\{false\}/);
-  assert.match(source, /<AvatarWizardStep2[\s\S]*startLabel="生成并替换当前状态"/);
-  assert.match(source, /生成并替换当前状态/);
+  assert.match(source, /<AvatarWizardStep2[\s\S]*startLabel="生成并替换客户端视频"/);
+  assert.match(source, /生成并替换客户端视频/);
   assert.match(source, /替换到板端/);
   assert.match(source, /usb_sync_appearance/);
+  assert.doesNotMatch(modalFooter, /handleSyncSingleStateToDevice/);
+  assert.doesNotMatch(modalFooter, /替换到板端/);
+  assert.doesNotMatch(modalFooter, /UploadCloud/);
   assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeRecord\.family/);
   assert.match(source, /runSingleFamilyVideo\(\{[\s\S]*family: activeRecord\.family/);
   assert.match(source, /singleStateProgressFromPipeline/);
   assert.match(source, /singleStateProgress/);
   assert.match(source, /progress=\{[\s\S]*singleStateProgress/);
   assert.match(css, /\.detail-state-regenerate-entry\s*\{/);
-  assert.match(source, /detail-state-regenerate-entry__cta/);
-  assert.match(css, /\.detail-state-regenerate-entry__cta\s*\{/);
+  // The 重新生成当前状态 CTA now shares the quiet btn-ghost style with the
+  // 上传 MP4 / 上传 WAV buttons — unified, no bespoke accent button.
+  assert.match(
+    source,
+    /className="btn-ghost"[\s\S]{0,160}onClick=\{handleOpenSingleStateDialog\}/,
+  );
+  assert.doesNotMatch(source, /detail-state-regenerate-entry__cta/);
+  assert.doesNotMatch(css, /detail-state-regenerate-entry__cta/);
   assert.match(css, /\.ca-inline-progress\s*\{/);
   assert.match(css, /\.ca-inline-progress__bar span\s*\{/);
-  assert.doesNotMatch(regenerateCtaRule, /width:\s*100%;/);
-  assert.match(regenerateCtaRule, /min-height:\s*40px;/);
-  assert.match(regenerateCtaRule, /background:\s*var\(--accent-soft\);/);
-  assert.match(css, /\.detail-state-regenerate-entry__cta:hover:not\(:disabled\)\s*\{/);
   assert.match(css, /\.single-state-regenerate-modal\s*\{/);
+  assert.match(flatModalCardRule, /border:\s*0;/);
+  assert.match(flatModalCardRule, /box-shadow:\s*none;/);
+  assert.match(flatModalCardRule, /background:\s*transparent;/);
+  assert.match(flatModalCardRule, /padding:\s*0;/);
   assert.doesNotMatch(source, /detail-state-regenerate__preview/);
   assert.doesNotMatch(css, /\.detail-state-regenerate__preview\s*\{/);
 });
@@ -201,7 +220,7 @@ test("single-state generation can keep running after the modal is closed", () =>
   assert.doesNotMatch(source, /aria-label="关闭单状态重生成"[\s\S]{0,160}disabled=\{singleStateBusy\}/);
   assert.match(source, /正在生成 \$\{activeRecord\.family\} 状态素材/);
   assert.match(source, /setSingleStateStatus\("success"\);/);
-  assert.match(source, /const successMessage = `已替换 \$\{activeRecord\.family\} 状态素材。需要在设备生效时，点击“替换到板端”。`;/);
+  assert.match(source, /const successMessage = `已替换 \$\{activeRecord\.family\} 状态视频文件，已保存到客户端。`;/);
   assert.match(source, /setSingleStateMessage\(successMessage\);/);
 });
 
