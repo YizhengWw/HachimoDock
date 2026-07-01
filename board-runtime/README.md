@@ -12,6 +12,11 @@ SPI 小屏上。
 - shell：启动编排、framebuffer 视频播放、Wi-Fi/AP/USB gadget 辅助脚本。
 - Python：负一屏 widget runtime、语音 PTT。
 
+当前仓库内置宠物视频仍沿用 `assets/pets/terrier` 与 `terrier-clips` 目录名作为运行时兼容路径；
+实际视频内容已替换为桌面端乌萨奇自定义形象导出的板端版本。部署脚本会继续从
+`assets/pets/terrier/generated-videos/*/*.loop.raw.mp4` 生成 `terrier-clips/<state>.mp4`
+链接，因此状态名和下发协议不需要改变。
+
 ## 快速构建
 
 首次把项目画面部署到默认硬件 Radxa Cubie A7Z 时，请先按
