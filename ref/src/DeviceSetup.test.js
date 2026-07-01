@@ -105,8 +105,9 @@ test("setup requires choosing one device display channel before entering dashboa
   assert.match(source, /默认形象/);
   assert.match(source, /未检测到可用 CLI agent/);
   assert.match(source, /完成绑定/);
-  assert.match(source, /case "set_result":[\s\S]*phase: "choose_agent_appearance"/);
-  assert.match(source, /case "set_completed":[\s\S]*phase: "completed"/);
+  // The set_result → choose_agent_appearance and set_completed → completed
+  // transitions now live in device-setup-state.js and are covered behaviorally
+  // in device-setup-state.test.js.
   assert.match(source, /setup-agent-channel-list/);
   assert.match(source, /setup-agent-channel-card/);
   assert.match(source, /role="radiogroup"/);
