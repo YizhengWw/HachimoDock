@@ -6649,36 +6649,6 @@ input:focus-visible {
   color: var(--text);
 }
 
-.detail-state-regenerate-entry__cta {
-  min-height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  padding: 0 14px;
-  border: 1px solid rgba(255, 103, 0, 0.22);
-  border-radius: var(--radius-md);
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-  font-size: 13px;
-  font-weight: 700;
-  box-shadow: 0 6px 14px rgba(255, 95, 21, 0.1);
-  cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
-}
-
-.detail-state-regenerate-entry__cta:hover:not(:disabled) {
-  border-color: rgba(255, 103, 0, 0.38);
-  background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface));
-  box-shadow: 0 8px 18px rgba(255, 95, 21, 0.14);
-}
-
-.detail-state-regenerate-entry__cta:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  box-shadow: none;
-}
-
 .detail-state-regenerate-entry__message,
 .single-state-regenerate-modal__message {
   margin-top: 0;
@@ -6693,6 +6663,16 @@ input:focus-visible {
 
 .single-state-regenerate-modal__wizard {
   max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.single-state-regenerate-modal .ca-card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
 }
 
 .single-state-regenerate-modal__prompt textarea {
