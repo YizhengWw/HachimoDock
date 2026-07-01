@@ -62,7 +62,6 @@ test("agent appearance matrix filters installed agents and syncs only the follow
 
 test("voice button configuration exposes direct per-button settings before OTA", () => {
   const source = readSource("dashboard/BoardButtonPanel.jsx");
-  const dashboard = readSource("DeviceDashboard.jsx");
   const css = readSource("styles.css");
 
   assert.match(source, /voice-button-action-list/);
@@ -71,7 +70,8 @@ test("voice button configuration exposes direct per-button settings before OTA",
   assert.match(source, /BUTTON_FUNCTION_OPTIONS\.filter/);
   assert.match(source, /通过 USB OTA 下发按钮配置/);
   assert.match(source, /需 USB OTA 生效/);
-  assert.match(dashboard, /label:\s*"不绑定"[\s\S]*忽略该输入/);
+  // The "不绑定/disabled" option contract is covered behaviorally in
+  // dashboard/board-button-config.test.js now that the option list lives there.
 
   assert.match(css, /\.voice-config-switch\s*\{/);
   assert.match(css, /\.voice-button-config-section\s*\{/);
@@ -80,30 +80,10 @@ test("voice button configuration exposes direct per-button settings before OTA",
   assert.match(css, /\.voice-config-footer\s*\{/);
 });
 
-test("front encoder rotation is fixed to volume adjustment in the device UI", () => {
-  const dashboard = readSource("DeviceDashboard.jsx");
-  const rotateRowMatch = dashboard.match(/id:\s*"encoder_rotate"[\s\S]*?actionOptions:\s*\[([^\]]+)\]/);
-  assert.ok(rotateRowMatch, "expected encoder_rotate control row");
-  assert.match(rotateRowMatch[1], /"volume_adjust"/);
-  assert.doesNotMatch(rotateRowMatch[1], /"system_page"/);
-  assert.doesNotMatch(rotateRowMatch[1], /"negative_screen_adjust"/);
-  assert.doesNotMatch(rotateRowMatch[1], /"disabled"/);
-  assert.match(dashboard, /encoder_rotate:\s*"volume_adjust"/);
-  assert.doesNotMatch(dashboard, /encoder_rotate:\s*"negative_screen_adjust"/);
-  assert.match(dashboard, /action:\s*row\.actionOptions\.includes\(buttonActions\[row\.id\]\)\s*\?\s*buttonActions\[row\.id\]\s*:\s*row\.defaultAction/);
-});
-
-test("negative-screen touch gestures are not exposed as button config rows", () => {
-  const dashboard = readSource("DeviceDashboard.jsx");
-  const rowsBlock = dashboard.match(/export const BOARD_BUTTON_CONTROL_ROWS = \[([\s\S]*?)\];/);
-  assert.ok(rowsBlock, "expected BOARD_BUTTON_CONTROL_ROWS");
-  assert.doesNotMatch(rowsBlock[1], /screen_tap/);
-  assert.doesNotMatch(rowsBlock[1], /screen_long_press/);
-  assert.doesNotMatch(rowsBlock[1], /screen\.region\.tap/);
-  assert.doesNotMatch(rowsBlock[1], /screen\.region\.long_press/);
-  assert.doesNotMatch(dashboard, /screen_tap:\s*"negative_screen_primary"/);
-  assert.doesNotMatch(dashboard, /screen_long_press:\s*"negative_screen_secondary"/);
-});
+// Board button rows + per-button action clamping (encoder rotation fixed to
+// volume_adjust, no negative-screen touch rows) moved out of the orchestrator
+// into dashboard/board-button-config.js and are now covered behaviorally in
+// dashboard/board-button-config.test.js.
 
 // ---- PORTED: board button map now in BoardButtonPanel ----
 
@@ -111,9 +91,12 @@ test("button configuration shows a board button map with current assignments", (
   const source = readSource("dashboard/BoardButtonPanel.jsx");
   const css = readSource("styles.css");
 
-  // Constants and board-runtime source still live in the orchestrator or are imported.
-  const orchestrator = readSource("DeviceDashboard.jsx");
-  assert.match(orchestrator, /BOARD_BUTTON_CONTROL_ROWS/);
+  // The board control rows now live in the shared config module; the panel
+  // imports them from there rather than from the orchestrator.
+  assert.match(
+    source,
+    /import\s*\{[\s\S]*BOARD_BUTTON_CONTROL_ROWS[\s\S]*\}\s*from\s*"\.\/board-button-config\.js"/,
+  );
 
   // Panel-level callout labels.
   assert.match(source, /board-button-panel__callout-label/);
@@ -224,11 +207,9 @@ test("board button config sends the full visible button map over USB OTA", () =>
   const rust = readRepoFile("src-tauri", "src", "lib.rs");
 
   assert.match(source, /VOICE_BUTTON_OPTIONS/);
-  assert.match(source, /trigger:\s*"encoder_button\.hold"/);
   assert.doesNotMatch(source, /top_button\.hold/);
   assert.match(source, /voiceConfig/);
   assert.match(source, /onApplyVoiceConfig/);
-  assert.match(source, /VOICE_CONFIG_STORAGE_KEY/);
   assert.match(source, /buildBoardButtonConfigBindings/);
   // button_config_signal invoke now lives in the shared dispatchBoardButtonConfig
   // helper, reused by both the manual OTA button and the component-center install.

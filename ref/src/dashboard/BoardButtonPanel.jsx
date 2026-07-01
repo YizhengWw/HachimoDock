@@ -13,7 +13,7 @@ import {
   DEFAULT_BUTTON_ACTIONS,
   DEFAULT_VOICE_CONFIG,
   actionOptionById,
-} from "../DeviceDashboard.jsx";
+} from "./board-button-config.js";
 
 // Each callout has an (x,y) anchor in the enlarged SVG viewport where the label is drawn.
 const CALLOUT_ANCHORS = {
