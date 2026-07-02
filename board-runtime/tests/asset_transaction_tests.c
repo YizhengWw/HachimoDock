@@ -179,7 +179,7 @@ static void read_small_file(const char *path, char *buf, size_t buf_size) {
 }
 
 /* The shared OTA helpers carry the streaming mechanics for BOTH the appearance
-   (asset/*) and widget (widget/*) channels, so pin their behavior directly:
+   (asset) and widget (widget) channels, so pin their behavior directly:
    staging prep, truncate-on-index-0 / append-after chunk writes, path-traversal
    rejection, and the rotate→activate commit step. */
 static void test_ota_shared_transfer_helpers(void) {

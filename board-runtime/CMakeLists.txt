@@ -14,6 +14,7 @@ option(BOARD_RUNTIME_BUILD_TESTS "Build board runtime unit tests" ON)
 
 add_library(board_runtime_common STATIC
   src/runtime_common.c
+  src/board_asset_ota.c
   src/runtime_json.c
   src/runtime_protocol.c
   src/runtime_mqtt.c
