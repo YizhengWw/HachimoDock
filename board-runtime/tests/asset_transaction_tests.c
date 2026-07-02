@@ -164,11 +164,91 @@ static void test_config_json_uses_config_mqtt_url_when_client_not_connected(void
                   "config brokerUrl falls back to configured MQTT URL");
 }
 
+static void read_small_file(const char *path, char *buf, size_t buf_size) {
+  int fd = open(path, O_RDONLY);
+  ssize_t nread;
+  if (fd < 0) {
+    fail("open small file for read");
+  }
+  nread = read(fd, buf, buf_size - 1);
+  close(fd);
+  if (nread < 0) {
+    fail("read small file");
+  }
+  buf[nread] = '\0';
+}
+
+/* The shared OTA helpers carry the streaming mechanics for BOTH the appearance
+   (asset) and widget (widget) channels, so pin their behavior directly:
+   staging prep, truncate-on-index-0 / append-after chunk writes, path-traversal
+   rejection, and the rotate→activate commit step. */
+static void test_ota_shared_transfer_helpers(void) {
+  char root[] = "/tmp/br-ota-helpers-XXXXXX";
+  br_server_state server;
+  char tid[128];
+  char path[BR_MAX_PATH];
+  char staging[BR_MAX_PATH], target[BR_MAX_PATH], previous[BR_MAX_PATH];
+  char content[256];
+  const char *err;
+
+  assert_true(mkdtemp(root) != NULL, "mkdtemp ota helper root");
+  memset(&server, 0, sizeof(server));
+  snprintf(server.config.root_dir, sizeof(server.config.root_dir), "%s", root);
+
+  /* begin: staging dir is created clean */
+  assert_true(br_ota_prepare_staging(&server, ".incoming-test") == NULL, "prepare staging succeeds");
+  snprintf(staging, sizeof(staging), "%s/.incoming-test", root);
+  assert_true(access(staging, R_OK) == 0, "staging dir exists");
+
+  /* chunk index 0 truncates, later indexes append newline-terminated b64 */
+  err = br_ota_stream_chunk(&server, ".incoming-test",
+    "{\"transferId\":\"t1\",\"path\":\"videos/a.bin\",\"data\":\"aGVsbG8=\",\"index\":\"0\"}",
+    tid, sizeof(tid));
+  assert_true(err == NULL, "first chunk streams");
+  assert_string(tid, "t1", "chunk fills transferId");
+  err = br_ota_stream_chunk(&server, ".incoming-test",
+    "{\"transferId\":\"t1\",\"path\":\"videos/a.bin\",\"data\":\"d29ybGQ=\",\"index\":\"1\"}",
+    tid, sizeof(tid));
+  assert_true(err == NULL, "second chunk appends");
+  snprintf(path, sizeof(path), "%s/videos/a.bin.b64", staging);
+  read_small_file(path, content, sizeof(content));
+  assert_string(content, "aGVsbG8=\nd29ybGQ=\n", "chunks append newline-terminated b64");
+  err = br_ota_stream_chunk(&server, ".incoming-test",
+    "{\"transferId\":\"t1\",\"path\":\"videos/a.bin\",\"data\":\"cmVzZXQ=\",\"index\":\"0\"}",
+    tid, sizeof(tid));
+  assert_true(err == NULL, "index 0 restart streams");
+  read_small_file(path, content, sizeof(content));
+  assert_string(content, "cmVzZXQ=\n", "index 0 truncates the staged file");
+
+  /* invalid chunks are rejected with a short error for the caller's ack */
+  err = br_ota_stream_chunk(&server, ".incoming-test", "not json", tid, sizeof(tid));
+  assert_true(err != NULL && tid[0] == '\0', "bad json rejected with empty tid");
+  err = br_ota_stream_chunk(&server, ".incoming-test",
+    "{\"transferId\":\"t1\",\"path\":\"../evil\",\"data\":\"eA==\",\"index\":\"0\"}",
+    tid, sizeof(tid));
+  assert_true(err != NULL, "path traversal rejected");
+
+  /* commit: rotate existing target to previous, activate staging */
+  snprintf(target, sizeof(target), "%s/widgets-current", root);
+  snprintf(previous, sizeof(previous), "%s/widgets-current.previous", root);
+  assert_true(br_asset_mkdir_p(target) == 0, "mkdir existing target");
+  snprintf(path, sizeof(path), "%s/old.txt", target);
+  write_text_file(path, "old install");
+  assert_true(br_ota_rotate_activate(staging, target, previous) == NULL, "rotate+activate succeeds");
+  snprintf(path, sizeof(path), "%s/videos/a.bin.b64", target);
+  assert_true(access(path, R_OK) == 0, "staged tree became the target");
+  snprintf(path, sizeof(path), "%s/old.txt", previous);
+  assert_true(access(path, R_OK) == 0, "old install rotated to previous");
+
+  (void) br_asset_remove_tree(root);
+}
+
 int main(void) {
   test_file_decode_checksum_and_tree_stats();
   test_audio_patch_path_validation();
   test_websocket_accept_uses_rfc_magic_guid();
   test_config_json_uses_config_mqtt_url_when_client_not_connected();
+  test_ota_shared_transfer_helpers();
   printf("asset transaction tests passed\n");
   return 0;
 }
