@@ -13,7 +13,8 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "tauri": "tauri",
     "pack-builtins": "node ../scripts/pack-builtin-clawpkgs.js",
-    "test": "find src -name '*.test.js' -type f -print0 | xargs -0 node --test"
+    "test": "find src -name '*.test.js' -type f -print0 | xargs -0 node --test",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@imgly/background-removal": "^1.5.0",
@@ -26,6 +27,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@tauri-apps/cli": "^2.10.1",
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^5.4.10"
