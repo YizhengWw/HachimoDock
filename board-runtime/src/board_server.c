@@ -2049,6 +2049,86 @@ static bool br_asset_safe_path(const char *p);
 static bool br_asset_is_audio_patch_path(const char *p);
 static int br_asset_write_all(int fd, const char *buf, size_t len);
 
+/* ─── shared OTA transfer helpers ───
+   The appearance (asset/*) and widget (widget/*) OTA channels stream files the
+   same way: begin prepares a clean staging dir, each chunk appends newline-
+   terminated base64 into <staging>/<path>.b64, and commit rotates the previous
+   install away before activating the staged tree. These helpers hold that
+   shared mechanic once. The handlers keep their own JSON envelopes and ack
+   functions because the two channels speak different ack topics/fields.
+   Helpers return NULL on success or a short error string for the caller's ack. */
+
+static const char *br_ota_prepare_staging(br_server_state *server, const char *staging_name) {
+  char staging[BR_MAX_PATH];
+  snprintf(staging, sizeof(staging), "%s/%s", server->config.root_dir, staging_name);
+  if (br_asset_remove_tree(staging) != 0 || br_asset_mkdir_p(staging) != 0) {
+    return "cannot prepare staging";
+  }
+  return NULL;
+}
+
+/* Stream one base64 chunk into <staging>/<path>.b64 (truncate on index 0,
+   append otherwise), newline-terminated for line-by-line decode at commit.
+   Decode is deferred to commit so the main loop stays responsive. Fills tid
+   for the caller's ack (left empty on bad json). */
+static const char *br_ota_stream_chunk(
+  br_server_state *server,
+  const char *staging_name,
+  const char *payload,
+  char *tid,
+  size_t tid_size
+) {
+  br_json_token tokens[32]; char rel[BR_MAX_PATH];
+  static char data[90000];
+  char staging[BR_MAX_PATH], target[BR_MAX_PATH];
+  int index_val, flags, fd;
+  size_t data_len;
+
+  tid[0] = '\0';
+  int count = br_json_parse(payload, strlen(payload), tokens, 32);
+  if (count < 1) return "bad json";
+
+  int ti = br_json_find_key(payload, tokens, count, 0, "transferId");
+  int pi = br_json_find_key(payload, tokens, count, 0, "path");
+  int di = br_json_find_key(payload, tokens, count, 0, "data");
+  int ii = br_json_find_key(payload, tokens, count, 0, "index");
+
+  rel[0] = data[0] = '\0';
+  if (ti >= 0) br_json_token_to_string(payload, &tokens[ti], tid, tid_size);
+  if (pi >= 0) br_json_token_to_string(payload, &tokens[pi], rel, sizeof(rel));
+  if (di >= 0) br_json_token_to_string(payload, &tokens[di], data, sizeof(data));
+
+  char idx_str[32] = "0";
+  if (ii >= 0) br_json_token_to_string(payload, &tokens[ii], idx_str, sizeof(idx_str));
+  index_val = atoi(idx_str);
+
+  if (!tid[0] || !br_asset_safe_path(rel) || !data[0]) return "invalid chunk";
+
+  data_len = strlen(data);
+  snprintf(staging, sizeof(staging), "%s/%s", server->config.root_dir, staging_name);
+  snprintf(target, sizeof(target), "%s/%s.b64", staging, rel);
+  if (br_asset_ensure_parent(target) != 0) return "mkdir failed";
+  flags = O_CREAT | O_WRONLY | (index_val == 0 ? O_TRUNC : O_APPEND);
+  fd = open(target, flags, 0644);
+  if (fd < 0) return "open failed";
+  if (br_asset_write_all(fd, data, data_len) != 0 ||
+      br_asset_write_all(fd, "\n", 1) != 0) {
+    close(fd);
+    return "write failed";
+  }
+  close(fd);
+  return NULL;
+}
+
+/* Rotate target → previous (best-effort clearing the stale previous first)
+   and activate staging as the new target. */
+static const char *br_ota_rotate_activate(const char *staging, const char *target, const char *previous) {
+  (void) br_asset_remove_tree(previous);
+  if (access(target, F_OK) == 0 && rename(target, previous) != 0) return "rotate failed";
+  if (rename(staging, target) != 0) return "activate failed";
+  return NULL;
+}
+
 /* ─────────── widget OTA handlers ───────────────────────────────────────────
    Parallel to asset_* (appearance OTA), but for .clawpkg widget directories:
      widget/begin   {transferId, widgetId}     → create .incoming-widget staging
@@ -2081,7 +2161,7 @@ static void br_widget_send_ack(br_server_state *server, const char *tid, const c
 }
 
 static void br_handle_widget_install_begin(br_server_state *server, const char *payload) {
-  br_json_token tokens[32]; char tid[128]; char wid[128]; char staging[BR_MAX_PATH];
+  br_json_token tokens[32]; char tid[128]; char wid[128];
   int count = br_json_parse(payload, strlen(payload), tokens, 32);
   if (count < 1) { br_widget_send_ack(server, "", "begin", false, "bad json"); return; }
   int ti = br_json_find_key(payload, tokens, count, 0, "transferId");
@@ -2098,56 +2178,16 @@ static void br_handle_widget_install_begin(br_server_state *server, const char *
       br_widget_send_ack(server, tid, "begin", false, "widgetId must be [a-z0-9_-]+"); return;
     }
   }
-  snprintf(staging, sizeof(staging), "%s/.incoming-widget", server->config.root_dir);
-  if (br_asset_remove_tree(staging) != 0 || br_asset_mkdir_p(staging) != 0) {
-    br_widget_send_ack(server, tid, "begin", false, "cannot prepare staging"); return;
-  }
+  const char *err = br_ota_prepare_staging(server, ".incoming-widget");
+  if (err) { br_widget_send_ack(server, tid, "begin", false, err); return; }
   br_server_logf("widget_install_begin: %s id=%s", tid, wid);
   br_widget_send_ack(server, tid, "begin", true, "");
 }
 
 static void br_handle_widget_install_chunk(br_server_state *server, const char *payload) {
-  br_json_token tokens[32]; char tid[128], rel[BR_MAX_PATH];
-  static char data[90000];
-  char staging[BR_MAX_PATH], target[BR_MAX_PATH];
-  int index_val, flags, fd;
-  size_t data_len;
-
-  int count = br_json_parse(payload, strlen(payload), tokens, 32);
-  if (count < 1) { br_widget_send_ack(server, "", "chunk", false, "bad json"); return; }
-
-  int ti = br_json_find_key(payload, tokens, count, 0, "transferId");
-  int pi = br_json_find_key(payload, tokens, count, 0, "path");
-  int di = br_json_find_key(payload, tokens, count, 0, "data");
-  int ii = br_json_find_key(payload, tokens, count, 0, "index");
-
-  tid[0] = rel[0] = data[0] = '\0';
-  if (ti >= 0) br_json_token_to_string(payload, &tokens[ti], tid, sizeof(tid));
-  if (pi >= 0) br_json_token_to_string(payload, &tokens[pi], rel, sizeof(rel));
-  if (di >= 0) br_json_token_to_string(payload, &tokens[di], data, sizeof(data));
-
-  char idx_str[32] = "0";
-  if (ii >= 0) br_json_token_to_string(payload, &tokens[ii], idx_str, sizeof(idx_str));
-  index_val = atoi(idx_str);
-
-  if (!tid[0] || !br_asset_safe_path(rel) || !data[0]) {
-    br_widget_send_ack(server, tid, "chunk", false, "invalid chunk"); return;
-  }
-
-  data_len = strlen(data);
-  snprintf(staging, sizeof(staging), "%s/.incoming-widget", server->config.root_dir);
-  snprintf(target, sizeof(target), "%s/%s.b64", staging, rel);
-  if (br_asset_ensure_parent(target) != 0) {
-    br_widget_send_ack(server, tid, "chunk", false, "mkdir failed"); return;
-  }
-  flags = O_CREAT | O_WRONLY | (index_val == 0 ? O_TRUNC : O_APPEND);
-  fd = open(target, flags, 0644);
-  if (fd < 0) { br_widget_send_ack(server, tid, "chunk", false, "open failed"); return; }
-  if (br_asset_write_all(fd, data, data_len) != 0 ||
-      br_asset_write_all(fd, "\n", 1) != 0) {
-    close(fd); br_widget_send_ack(server, tid, "chunk", false, "write failed"); return;
-  }
-  close(fd);
+  char tid[128];
+  const char *err = br_ota_stream_chunk(server, ".incoming-widget", payload, tid, sizeof(tid));
+  if (err) { br_widget_send_ack(server, tid, "chunk", false, err); return; }
   /* skip ack for successful chunks — client streams without waiting */
 }
 
@@ -2185,14 +2225,11 @@ static void br_handle_widget_install_commit(br_server_state *server, const char 
   if (br_asset_mkdir_p(widgets_root) != 0) {
     br_widget_send_ack(server, tid, "commit", false, "mkdir widgets/ failed"); return;
   }
-  /* Rotate existing widgets/<id>/ → widgets/<id>.previous/ */
-  (void) br_asset_remove_tree(previous);
-  if (access(target, F_OK) == 0 && rename(target, previous) != 0) {
-    br_widget_send_ack(server, tid, "commit", false, "rotate failed"); return;
-  }
-  /* Move staging → widgets/<id>/ */
-  if (rename(staging, target) != 0) {
-    br_widget_send_ack(server, tid, "commit", false, "activate failed"); return;
+  /* Rotate existing widgets/<id>/ → widgets/<id>.previous/, then move
+     staging → widgets/<id>/. */
+  {
+    const char *err = br_ota_rotate_activate(staging, target, previous);
+    if (err) { br_widget_send_ack(server, tid, "commit", false, err); return; }
   }
 
   /* Activate: write widget id to .active-widget. board-widget-runtime polls
@@ -2212,17 +2249,15 @@ static void br_handle_widget_install_commit(br_server_state *server, const char 
 }
 
 static void br_handle_asset_begin(br_server_state *server, const char *payload) {
-  br_json_token tokens[32]; char tid[128]; char staging[BR_MAX_PATH];
+  br_json_token tokens[32]; char tid[128];
   int count = br_json_parse(payload, strlen(payload), tokens, 32);
   if (count < 1) { br_asset_send_ack(server, "", "begin", false, "bad json"); return; }
   int idx = br_json_find_key(payload, tokens, count, 0, "transferId");
   if (idx < 0 || !br_json_token_to_string(payload, &tokens[idx], tid, sizeof(tid)) || !tid[0]) {
     br_asset_send_ack(server, "", "begin", false, "missing transferId"); return;
   }
-  snprintf(staging, sizeof(staging), "%s/.incoming-desktop-pet", server->config.root_dir);
-  if (br_asset_remove_tree(staging) != 0 || br_asset_mkdir_p(staging) != 0) {
-    br_asset_send_ack(server, tid, "begin", false, "cannot prepare staging"); return;
-  }
+  const char *err = br_ota_prepare_staging(server, ".incoming-desktop-pet");
+  if (err) { br_asset_send_ack(server, tid, "begin", false, err); return; }
   br_server_logf("asset_begin: %s", tid);
   br_asset_send_ack(server, tid, "begin", true, "");
 }
@@ -2262,50 +2297,9 @@ static void br_handle_asset_stat(br_server_state *server, const char *payload) {
 }
 
 static void br_handle_asset_chunk(br_server_state *server, const char *payload) {
-  br_json_token tokens[32]; char tid[128], rel[BR_MAX_PATH];
-  static char data[90000];
-  char staging[BR_MAX_PATH], target[BR_MAX_PATH];
-  int index_val, flags, fd;
-  size_t data_len;
-
-  int count = br_json_parse(payload, strlen(payload), tokens, 32);
-  if (count < 1) { br_asset_send_ack(server, "", "chunk", false, "bad json"); return; }
-
-  int ti = br_json_find_key(payload, tokens, count, 0, "transferId");
-  int pi = br_json_find_key(payload, tokens, count, 0, "path");
-  int di = br_json_find_key(payload, tokens, count, 0, "data");
-  int ii = br_json_find_key(payload, tokens, count, 0, "index");
-
-  tid[0] = rel[0] = data[0] = '\0';
-  if (ti >= 0) br_json_token_to_string(payload, &tokens[ti], tid, sizeof(tid));
-  if (pi >= 0) br_json_token_to_string(payload, &tokens[pi], rel, sizeof(rel));
-  if (di >= 0) br_json_token_to_string(payload, &tokens[di], data, sizeof(data));
-
-  char idx_str[32] = "0";
-  if (ii >= 0) br_json_token_to_string(payload, &tokens[ii], idx_str, sizeof(idx_str));
-  index_val = atoi(idx_str);
-
-  if (!tid[0] || !br_asset_safe_path(rel) || !data[0]) {
-    br_asset_send_ack(server, tid, "chunk", false, "invalid chunk"); return;
-  }
-
-  /* Fast path: write base64 text directly to .b64 staging file.
-     Each chunk's base64 is followed by a newline for line-by-line decode at commit.
-     Defer decode to commit phase so main loop stays responsive. */
-  data_len = strlen(data);
-  snprintf(staging, sizeof(staging), "%s/.incoming-desktop-pet", server->config.root_dir);
-  snprintf(target, sizeof(target), "%s/%s.b64", staging, rel);
-  if (br_asset_ensure_parent(target) != 0) {
-    br_asset_send_ack(server, tid, "chunk", false, "mkdir failed"); return;
-  }
-  flags = O_CREAT | O_WRONLY | (index_val == 0 ? O_TRUNC : O_APPEND);
-  fd = open(target, flags, 0644);
-  if (fd < 0) { br_asset_send_ack(server, tid, "chunk", false, "open failed"); return; }
-  if (br_asset_write_all(fd, data, data_len) != 0 ||
-      br_asset_write_all(fd, "\n", 1) != 0) {
-    close(fd); br_asset_send_ack(server, tid, "chunk", false, "write failed"); return;
-  }
-  close(fd);
+  char tid[128];
+  const char *err = br_ota_stream_chunk(server, ".incoming-desktop-pet", payload, tid, sizeof(tid));
+  if (err) { br_asset_send_ack(server, tid, "chunk", false, err); return; }
   /* Skip ack for successful chunks — desktop streams without waiting */
 }
 
@@ -2762,12 +2756,9 @@ static void br_handle_asset_commit(br_server_state *server, const char *payload)
       br_asset_send_ack(server, tid, "commit", false, "b64 decode failed"); return;
     }
   }
-  (void)br_asset_remove_tree(previous);
-  if (access(current, F_OK) == 0 && rename(current, previous) != 0) {
-    br_asset_send_ack(server, tid, "commit", false, "rotate failed"); return;
-  }
-  if (rename(staging, current) != 0) {
-    br_asset_send_ack(server, tid, "commit", false, "activate failed"); return;
+  {
+    const char *err = br_ota_rotate_activate(staging, current, previous);
+    if (err) { br_asset_send_ack(server, tid, "commit", false, err); return; }
   }
   (void)br_asset_remove_tree(clips_prev);
   if (access(clips, F_OK) == 0) (void)rename(clips, clips_prev);
