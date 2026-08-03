@@ -98,7 +98,7 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 
 <table>
   <tr>
-    <td width="50%"><img src="https://image.lceda.cn/oshwhub/pullImage/18f78518850542b0815732d2552d4050.png" alt="Session 气泡与任务内容" /></td>
+    <td width="50%"><img src="docs/assets/readme/session-bubbles.webp" alt="Session 气泡与任务内容" /></td>
     <td width="50%"><img src="https://image.lceda.cn/oshwhub/pullImage/0dddebc05c064f3a812d278b7c5dbe6e.png" alt="设备语音输入" /></td>
   </tr>
   <tr>
@@ -117,7 +117,7 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 ### 状态跟随与互动
 
 <p align="center">
-  <img src="https://image.lceda.cn/oshwhub/pullImage/369ca3da496442379a84795c2db3d7a8.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
+  <img src="docs/assets/readme/agent-status.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
   <br />
   <sub>Agent 状态变化时，宠物动画随之变化。</sub>
 </p>
