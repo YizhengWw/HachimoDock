@@ -30,7 +30,7 @@
   </p>
 </div>
 
-![HachimoDock（哈基米机）产品图](docs/assets/readme/product-hero.webp)
+![HachimoDock（哈基米机）产品图](https://image.lceda.cn/oshwhub/pullImage/507a23d52ed54d08a73c715a18c35ee9.png)
 
 ## 项目简介
 
@@ -49,14 +49,14 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 <table>
   <tr>
     <td width="50%">
-      <img src="docs/assets/readme/live-photo.webp" alt="HachimoDock（哈基米机）实拍图" />
+      <img src="https://image.lceda.cn/oshwhub/pullImage/6c47814b144549beb179528ea77cd75e.png" alt="HachimoDock（哈基米机）实拍图" />
       <br />
       <sub>桌面小屏实拍：把 Agent 状态放到工位视野里。</sub>
     </td>
     <td width="50%">
-      <img src="docs/assets/readme/desktop-ui.webp" alt="HachimoDock（哈基米机）桌面端界面" />
+      <img src="https://image.lceda.cn/oshwhub/pullImage/0187d6df22f74724acda54e111c7c850.png" alt="HachimoDock（哈基米机）设备近景" />
       <br />
-      <sub>桌面端管理：设备绑定、Agent 跟随、形象和组件配置。</sub>
+      <sub>新版三按键与旋钮机身，屏幕显示内置西高地形象。</sub>
     </td>
   </tr>
 </table>
@@ -96,6 +96,17 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 - Session 进入 done 或 error 后保留 60 秒；idle、历史完成任务和 Agent 内部会话不会作为新气泡下发。
 - 气泡数量由 Agent 当前活跃 Session 自动决定，不需要用户手动配置。
 
+<table>
+  <tr>
+    <td width="50%"><img src="https://image.lceda.cn/oshwhub/pullImage/18f78518850542b0815732d2552d4050.png" alt="Session 气泡与任务内容" /></td>
+    <td width="50%"><img src="https://image.lceda.cn/oshwhub/pullImage/0dddebc05c064f3a812d278b7c5dbe6e.png" alt="设备语音输入" /></td>
+  </tr>
+  <tr>
+    <td><sub>气泡自动对应当前正在工作的 Agent Session。</sub></td>
+    <td><sub>长按按键录音，把 ASR 文字送入目标 Session。</sub></td>
+  </tr>
+</table>
+
 ### PetUI 组件工作流
 
 1. 在 ChatGPT（Codex）或 Claude 中调用 `petui` Skill，并描述希望生成的小游戏或工具。
@@ -105,42 +116,15 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 
 ### 状态跟随与互动
 
-<table>
-  <tr>
-    <td width="34%">
-      <img src="docs/assets/readme/status-follow.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
-      <br />
-      <sub>Agent 状态变化时，小屏同步切换表情和动作。</sub>
-    </td>
-    <td width="33%">
-      <img src="docs/assets/readme/status-example-1.webp" alt="HachimoDock（哈基米机）状态示例一" />
-      <br />
-      <sub>一眼识别当前状态，不必盯着终端窗口。</sub>
-    </td>
-    <td width="33%">
-      <img src="docs/assets/readme/status-example-2.webp" alt="HachimoDock（哈基米机）状态示例二" />
-      <br />
-      <sub>字幕和短标签提示 Agent 正在做什么。</sub>
-    </td>
-  </tr>
-</table>
+<p align="center">
+  <img src="https://image.lceda.cn/oshwhub/pullImage/369ca3da496442379a84795c2db3d7a8.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
+  <br />
+  <sub>Agent 状态变化时，宠物动画随之变化。</sub>
+</p>
 
 ### 自定义形象与组件
 
-<table>
-  <tr>
-    <td width="50%">
-      <img src="docs/assets/readme/custom-avatar.webp" alt="HachimoDock（哈基米机）自定义形象" />
-      <br />
-      <sub>上传宠物照片、头像或原创角色，生成自己的桌面搭子。</sub>
-    </td>
-    <td width="50%">
-      <img src="docs/assets/readme/component-example.webp" alt="HachimoDock（哈基米机）组件示例" />
-      <br />
-      <sub>负一屏组件承载番茄钟、喝水提醒、Token 消耗等轻量工具。</sub>
-    </td>
-  </tr>
-</table>
+上传本地视频、导入社区形象，或使用 AI 生成自己的宠物动作；通过 `petui` Skill 还可以创建番茄钟、喝水提醒、Token 仪表盘和小游戏。新机型对应的形象管理与组件中心截图将在完整代码同步后补充。
 
 ## 硬件方案
 
@@ -156,12 +140,6 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 | 音频 | 板载麦克风语音采集，桌面端 ASR 与 Agent 输入路由 |
 | 连接 | USB-UART 用于烧录、日志和日常数据传输；硬件保留原生 USB HS OTG 能力 |
 | 扩展 | PetUI 通用小组件/小游戏运行时，组件通过桌面端同步到设备 |
-
-<p align="center">
-  <img src="docs/assets/readme/hardware-bom.webp" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
-  <br />
-  <sub>HachimoDock 的核心物料示意，具体版本以硬件复刻页面为准。</sub>
-</p>
 
 ## 硬件端资料
 
@@ -199,12 +177,6 @@ flowchart LR
 开发阶段通过板载 USB-UART 进行构建、烧录和日志调试。首次烧录建议先擦除整片 Flash，再写入完整镜像；日常升级可只更新应用固件。具体命令以 `esp-p4-runtime/` 中的构建脚本和说明为准。
 
 ## 快速开始
-
-<p align="center">
-  <img src="docs/assets/readme/usage-ui.webp" alt="HachimoDock（哈基米机）使用界面" />
-  <br />
-  <sub>桌面端负责绑定、跟随、形象、组件和诊断。</sub>
-</p>
 
 ### 启动桌面端
 
