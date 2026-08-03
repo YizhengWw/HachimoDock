@@ -3,7 +3,7 @@
   <h1>HachimoDock（哈基米机）</h1>
   <p><strong>哈基米机 HachimoDock：让你的宠物 / 朋友 / 你推变成 AI Agent，和你一起工作</strong></p>
   <p>
-    把 Codex、Claude Code、OpenClaw 等 CLI Agent 的状态变成桌上小宠物的表情、动作、字幕和提醒。
+    把 ChatGPT（Codex）、Claude 等 Agent 的实时工作状态变成桌上宠物的表情、动作、Session 气泡和提醒。
   </p>
   <p>
     <a href="https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB">
@@ -22,7 +22,7 @@
   <p>
     <img alt="AGPL-3.0-only" src="https://img.shields.io/badge/license-AGPL--3.0--only-2a2620" />
     <img alt="Desktop" src="https://img.shields.io/badge/desktop-macOS%20%7C%20Windows-db3b2b" />
-    <img alt="Runtime" src="https://img.shields.io/badge/runtime-Radxa%20A7Z%20%7C%20Raspberry%20Pi-e8a23a" />
+    <img alt="Device" src="https://img.shields.io/badge/device-ESP32--P4%20%7C%20480%C3%97640-e8a23a" />
   </p>
   <p>
     <a href="https://github.com/YizhengWw/HachimoDock/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/YizhengWw/HachimoDock?style=social" /></a>
@@ -34,14 +34,14 @@
 
 ## 项目简介
 
-HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件/运行时 + 开源硬件方案。它把电脑里正在运行的 Agent 状态同步到桌面小屏上，让 AI 工作状态从终端窗口里走出来，变成一只可以抬头看见、可以触摸互动、可以语音唤起的小搭子。
+HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件和开源硬件方案。它把电脑里正在运行的 Agent Session 实时同步到桌面小屏，让 AI 的思考、执行、完成和报错状态变成看得见的宠物动画与气泡；实体按键、旋钮和麦克风又能把操作与语音送回 Agent。
 
 这个 GitHub 仓库主要托管软件端和固件端代码；硬件端资料在 OSHWHub 维护。
 
 | 端 | 入口 | 说明 |
 |---|---|---|
-| 软件端 | [`ref/`](ref/) | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB/MQTT 下发和本地 bridge sidecar。 |
-| 固件端 / 设备运行时 | [`board-runtime/`](board-runtime/) | Raspberry Pi / Radxa Cubie A7Z 设备端运行时。负责显示宠物动画、接收桌面端状态、处理输入、运行负一屏 widget 和配网页面。 |
+| 软件端 | [`ref/`](ref/) | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB 下发和本地 bridge sidecar。 |
+| 固件端 / 设备运行时 | `esp-p4-runtime/` | ESP32-P4 固件。负责 MIPI 屏渲染、宠物动画、Session 气泡、按键与旋钮、语音采集、PetUI 组件和 USB 协议。 |
 | 硬件端 | [OSHWHub 硬件复刻页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) | PCB、BOM、结构/装配和硬件复刻资料。 |
 
 ## 图集
@@ -68,9 +68,9 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件
 | Agent 状态跟随 | Agent 思考、执行工具、等待确认、完成或报错时，设备屏会显示对应表情、动作、颜色和短标签。 |
 | 桌面小屏常驻 | 不用切窗口，抬头就能看到当前 Agent 是否还在工作、是否需要用户决策。 |
 | 自定义宠物形象 | 内置西高地小狗状态动画，也可以导入或生成自己的宠物形象。 |
-| 负一屏组件 | 内置摸鱼倒计时、番茄钟、喝水提醒、Token 消耗等 `.clawpkg` 组件，并支持自然语言生成新组件。 |
-| 多链路通信 | Raspberry Pi 方案支持 USB gadget 直连；Radxa A7Z 方案当前默认走 Wi-Fi + MQTT/SSH。 |
-| 语音与实体交互 | Raspberry Pi 方案已验证触摸、旋钮/按钮和语音链路；Radxa A7Z 方案保留硬件与软件扩展位。 |
+| PetUI 组件中心 | 内置接住星星、Flappy Bird、像素方块、像素贪食蛇、番茄钟、喝水提醒和 Token 仪表盘，并支持通过 Agent Skill 生成新组件。 |
+| USB 直连 | PC 与 ESP32-P4 通过 USB 串行协议同步状态、按钮配置、形象和组件，无需设备加入局域网。 |
+| 语音与实体交互 | 三个按键的短按/长按、旋钮左旋/右旋/短按均可配置；长按语音键可把 ASR 文本发送到当前 Agent Session。 |
 
 ### 状态跟随与互动
 
@@ -116,17 +116,20 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件
 本仓库给出软件和固件配套；PCB、BOM、硬件装配和复刻资料请看：
 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
 
-| 方案 | 推荐用途 | 当前已验证 | 当前未默认启用 |
-|---|---|---|---|
-| 方案一：Radxa Cubie A7Z | 默认复刻硬件，性能更高，适合走 Wi-Fi + MQTT/SSH 部署 | Debian 11/12、SPI ILI9341 LCD、framebuffer 显示、HTTP/MQTT、负一屏 widget、桌面端状态同步 | XPT2046/PEN 触摸 overlay、GPIO 旋钮/按钮、板端语音 PTT、USB gadget `/dev/ttyGS0` |
-| 方案二：Raspberry Pi Zero 2 W | 兼容方案，适合完整体验触摸、旋钮、语音和 USB 直连 | Raspberry Pi OS、SPI ILI9341 LCD、XPT2046/ADS7846 触摸、GPIO 旋钮/按钮、VoiceHAT 语音、USB gadget、HTTP/MQTT、负一屏 widget、桌面端状态同步 | 无线和音频效果仍取决于实际镜像、声卡和网络配置 |
-
-`ESP32` 不是当前 `board-runtime/` 已支持目标；如需使用，需要另起移植工程。
+| 模块 | 当前方案 |
+|---|---|
+| 主控 | ESP32-P4，RISC-V 双核，HP 最高 400MHz |
+| 存储 | 32MB Flash，32MB PSRAM |
+| 屏幕 | 2.8 英寸 480×640 MIPI-DSI，竖屏显示 |
+| 输入 | 3 个实体按键 + 1 个带按压旋钮，共 8 种可配置操作 |
+| 音频 | 板载麦克风语音采集，桌面端 ASR 与 Agent 输入路由 |
+| 连接 | USB-UART 用于烧录、日志和日常数据传输；硬件保留原生 USB HS OTG 能力 |
+| 扩展 | PetUI 通用小组件/小游戏运行时，组件通过桌面端同步到设备 |
 
 <p align="center">
   <img src="docs/assets/readme/hardware-bom.webp" alt="HachimoDock（哈基米机）硬件 BOM 平铺图" />
   <br />
-  <sub>方案一 Radxa A7Z 的核心物料示意。</sub>
+  <sub>HachimoDock 的核心物料示意，具体版本以硬件复刻页面为准。</sub>
 </p>
 
 ## 硬件端资料
@@ -138,68 +141,31 @@ HachimoDock（哈基米机）是一套桌面端管理器 + 小屏设备端固件
 | 硬件复刻总入口 | [OSHWHub 项目页](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) |
 | 软件端和固件端 | 本 GitHub 仓库 |
 | 桌面端开发说明 | [ref/README.md](ref/README.md) |
-| 设备端部署说明 | [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md) |
+| 设备端固件 | `esp-p4-runtime/` |
 
 ## 软件架构
 
 ```mermaid
 flowchart LR
-  agent["CLI Agent<br/>Codex / Claude Code / OpenClaw"]
+  agent["Agent<br/>ChatGPT（Codex）/ Claude"]
   desktop["HachimoDock（哈基米机）桌面端<br/>Tauri + React"]
-  bridge["Bridge sidecar<br/>session / MQTT / USB"]
-  board["board-runtime<br/>C service + shell/Python helpers"]
-  screen["桌面小屏<br/>宠物动画 / 字幕 / 负一屏组件"]
+  bridge["Bridge sidecar<br/>Session / ASR / USB"]
+  board["ESP32-P4 firmware<br/>renderer / input / PetUI runtime"]
+  screen["480×640 MIPI 小屏<br/>宠物动画 / 气泡 / PetUI 组件"]
 
   agent --> desktop
   desktop --> bridge
-  bridge -->|"USB serial 或 MQTT"| board
+  bridge -->|"USB serial"| board
   board --> screen
 ```
 
-桌面端读取 Agent session、归一化状态和字幕，再通过 USB serial 或 MQTT 下发到设备端。设备端 `board-server` 写入 `.current-state`、`.current-speech`、`.stats-display` 等本地状态文件，显示进程、输入进程和 widget runtime 通过这些文件协作。
+桌面端读取并归一化 Agent Session，将正在设备上显示的活跃任务及其状态变化通过 USB 下发。ESP32-P4 固件负责动画和气泡生命周期、输入事件、资源双槽以及 PetUI 组件运行；设备输入则由桌面端路由回对应 Agent。
 
 ## 复刻与部署
 
-首次复刻到默认硬件 Radxa Cubie A7Z 时，先读
-[board-runtime/DEPLOY.md](board-runtime/DEPLOY.md)。这篇是当前标准部署入口，
-覆盖从空白 microSD 卡写系统、首次写入 Wi-Fi、SSH 部署、SPI 屏幕显示、
-本地 MQTT/bridge 到 Pet Manager 绑定的完整流程。
+硬件复刻请从 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) 开始，页面提供 PCB、BOM、结构与装配资料。设备端采用完整 ESP32-P4 镜像，镜像同时包含应用固件、分区表、内置西高地形象和默认 PetUI 组件，避免首次安装后缺少资源。
 
-### Raspberry Pi
-
-```sh
-cd board-runtime
-export BOARD_HOST="<pi-user>@<pi-ip>"
-HOST="$BOARD_HOST" sh scripts/deploy-rpi.sh
-```
-
-### Radxa Cubie A7Z
-
-macOS / Linux / WSL / Git Bash：
-
-```sh
-cd board-runtime
-MQTT_URL="mqtt://<pc-lan-ip>:1883" \
-HOST=radxa@<board-ip> \
-SUDO_PASSWORD=<sudo-password> \
-CONFIGURE_SPI_LCD=1 \
-sh scripts/deploy-radxa-a733.sh
-```
-
-Windows PowerShell：
-
-```powershell
-cd board-runtime
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-radxa-a733.ps1 `
-  -HostName radxa@<board-ip> `
-  -SudoPassword <sudo-password> `
-  -MqttUrl mqtt://<pc-lan-ip>:1883 `
-  -ConfigureSpiLcd
-```
-
-设备 IP、用户名、密码、board id 和 desktop id 不要写死在文档或业务代码里。调试具体板子时使用 `BOARD_HOST="<pi-user>@<pi-ip>"` 和 `BOARD_IP="<pi-ip>"`。
-
-部署细节见 [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md)，安全部署与鉴权见 [board-runtime/docs/security-hardening.md](board-runtime/docs/security-hardening.md)。
+开发阶段通过板载 USB-UART 进行构建、烧录和日志调试。首次烧录建议先擦除整片 Flash，再写入完整镜像；日常升级可只更新应用固件。具体命令以 `esp-p4-runtime/` 中的构建脚本和说明为准。
 
 ## 快速开始
 
@@ -234,15 +200,9 @@ npm run build
 
 更多说明见 [ref/README.md](ref/README.md)。
 
-### 编译设备端
+### 构建设备端
 
-```sh
-cd board-runtime
-cmake -S . -B /tmp/board-runtime-build-check
-cmake --build /tmp/board-runtime-build-check --target board-server
-```
-
-更多说明见 [board-runtime/README.md](board-runtime/README.md)。
+设备固件基于 ESP-IDF。同步完整代码后，进入 `esp-p4-runtime/`，按目录内说明配置 ESP-IDF、构建完整镜像并通过串口烧录。不要只复制单个 app 分区作为首次安装包。
 
 ## 常见问题
 
@@ -251,20 +211,20 @@ cmake --build /tmp/board-runtime-build-check --target board-server
 包含软件端和固件端：
 
 - 软件端：`ref/`，也就是 HachimoDock（哈基米机）桌面管理器。
-- 固件端 / 设备运行时：`board-runtime/`，部署到 Raspberry Pi 或 Radxa Cubie A7Z。
+- 固件端 / 设备运行时：`esp-p4-runtime/`，构建并烧录到 ESP32-P4。
 - 硬件端：PCB、BOM、装配和复刻资料在 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
 
-### 一定要用 Radxa Cubie A7Z 吗？
+### 一定要使用 ESP32-P4 吗？
 
-不是。当前文档同时照顾 Radxa Cubie A7Z 和 Raspberry Pi Zero 2 W。A7Z 是默认复刻硬件，性能更高；Pi 方案更适合完整体验 USB gadget、触摸、旋钮/按钮和语音链路。
+当前固件、完整镜像、MIPI 显示、资源分区和 USB 协议均针对 ESP32-P4 实现。更换主控需要重新适配显示、输入、存储布局和桌面端通信协议。
 
 ### 屏幕、麦克风、喇叭和旋钮能换型号吗？
 
-可以，但需要确认接口和驱动。屏幕建议保持 2.8 英寸 240×320 SPI、ILI9341；Raspberry Pi 方案已验证 XPT2046/ADS7846 触摸和 EC11/按钮。Radxa A7Z 方案当前默认验证 LCD 显示，触摸、旋钮和语音需要后续 overlay、GPIO 和声卡适配。
+可以，但必须确认接口、电压、排线定义和初始化序列。当前固件按 2.8 英寸 480×640 MIPI-DSI 屏、三个按键、带按压旋钮和配套音频电路适配；仅仅驱动 IC 相同不代表屏幕可以直接互换。
 
 ### 屏幕一定要带触摸吗？
 
-不是必须。无触摸版本也能用于状态显示；带 XPT2046 触摸屏可以体验触摸反馈和更多交互。
+不需要。当前产品交互以三个实体按键、旋钮和语音为主，固件不依赖触摸屏。
 
 ### 必须做定制 PCB 底板吗？
 
@@ -272,23 +232,23 @@ cmake --build /tmp/board-runtime-build-check --target board-server
 
 ### 大概成本多少？
 
-方案一 Radxa A7Z 的电子料大约在几百元级别，具体取决于主控、屏幕、音频模块、外壳和打样方式。方案二 Raspberry Pi Zero 2 W 的成本受主板供货、声卡和转接件影响更大。
+成本取决于 ESP32-P4 主板、MIPI 屏、PCB、音频器件、旋钮按键、外壳和打样数量，请以硬件复刻页面的最新 BOM 为准。
 
 ### 支持哪些 Agent？
 
-面向 CLI Agent 设计，内置适配 Codex、Claude Code、OpenClaw 等。状态协议开放，第三方 Agent 也可以接入。
+当前重点适配 ChatGPT（Codex）和 Claude 桌面 Agent，并通过本地 bridge 读取 Session、切换会话和路由语音输入。状态协议保持可扩展，后续可以接入更多 Agent。
 
 ### 设备一定要联网吗？
 
-取决于方案。Raspberry Pi 可走 USB gadget 直连；Radxa A7Z 当前默认走 Wi-Fi + MQTT/SSH，需要网络。
+设备状态、形象和组件同步走 USB，不要求 ESP32-P4 加入局域网。语音识别、Agent 本身以及 AI 形象或组件生成仍可能需要电脑联网。
 
 ### 语音交互怎么用？
 
-当前完整验证的是 Raspberry Pi 方案：按住按钮说话，板端把语音转成文本后通过输入事件送到桌面端，再注入目标 Agent。语音识别链路需要可用网络和 STT 服务。Radxa A7Z 方案当前默认不启动板端语音 PTT。
+按住绑定的语音输入键开始录音，松开后由桌面端完成 ASR，并把文字注入当前气泡对应的 Agent Session。设备没有气泡时，桌面端会拉起当前跟随的 Agent，再定位其输入框。语音识别需要已配置且可用的 ASR 服务。
 
 ### 能自己加组件吗？
 
-可以。组件中心使用 `.clawpkg` 结构，内置 skill 可以根据自然语言生成负一屏组件，并在 USB 或 SSH/MQTT 链路可用时下发到设备。
+可以。项目提供 `petui` Skill，用户可以在 Agent 中用自然语言生成小组件或小游戏，校验并发布到统一组件库，再由桌面端通过 USB 同步到设备。
 
 ### 用什么开源协议？
 
@@ -304,8 +264,7 @@ cmake --build /tmp/board-runtime-build-check --target board-server
 |---|---|
 | [docs/developer-setup_zh_Hans.md](docs/developer-setup_zh_Hans.md) | 从零搭建桌面端和设备端开发环境。 |
 | [ref/README.md](ref/README.md) | 桌面端结构、开发命令和通信说明。 |
-| [board-runtime/README.md](board-runtime/README.md) | 设备端模块、构建、部署和调试入口。 |
-| [board-runtime/DEPLOY.md](board-runtime/DEPLOY.md) | Raspberry Pi / Radxa A7Z 部署细节。 |
+| `esp-p4-runtime/README.md` | ESP32-P4 固件、完整镜像、构建、烧录和调试入口。 |
 | [docs/voice-architecture.md](docs/voice-architecture.md) | 桌面端、Agent bus 和板端语音链路设计。 |
 | [docs/open-source-compliance-prep.md](docs/open-source-compliance-prep.md) | 开源合规与第三方资源检查记录。 |
 
@@ -317,20 +276,7 @@ npm test
 npm run build
 ```
 
-```sh
-cd board-runtime
-cmake -S . -B /tmp/board-runtime-build-check
-cmake --build /tmp/board-runtime-build-check --target board-server
-```
-
-设备端部署后检查：
-
-```sh
-export BOARD_HOST="<board-user>@<board-ip>"
-export BOARD_IP="<board-ip>"
-ssh "$BOARD_HOST" 'systemctl is-active board-runtime'
-curl -fsS http://$BOARD_IP/board-runtime-config.json
-```
+设备端应完成 ESP-IDF 构建测试、协议测试，并在真实 ESP32-P4 上验证启动、动画、Session 气泡、全部实体输入、语音、形象同步和 PetUI 组件。完整发布镜像还应执行一次整片擦除后的冷启动验证。
 
 ## 致谢 / Acknowledgements
 
