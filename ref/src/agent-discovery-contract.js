@@ -7,7 +7,6 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { AGENT_DISCOVERY_FIXTURES } from "./fixtures.js";
-import { normalizeText } from "./lib/normalize-text.js";
 
 export const AGENT_STATUS = Object.freeze({
   ready: "ready",
@@ -21,6 +20,11 @@ export const AGENT_DISCOVERY_SCENARIOS = Object.freeze({
   noReady: "no_ready",
   helperUnavailable: "helper_unavailable",
 });
+
+function normalizeText(value, fallback = "") {
+  const normalized = String(value || "").trim();
+  return normalized || String(fallback || "").trim();
+}
 
 function normalizeAgentStatus(value) {
   const normalized = normalizeText(value);

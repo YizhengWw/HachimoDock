@@ -3,7 +3,8 @@
  * [Output] Card grid with the built-in Terrier first, filled hover-play previews,
  *          compact source chooser and direct MP4-upload creation, cached local/Codex scans,
  *          cached initial render, unobstructed previews, gallery-only creation/import/detail management actions,
- *          and Codex/community import flows.
+ *          Codex/community import flows, and a first-visit quick-start modal
+ *          that stays reopenable from the page help action.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -52,6 +53,10 @@ import {
 import PageShell from "./shell/PageShell.jsx";
 import Card from "./shell/Card.jsx";
 import { useDeviceContext } from "./shell/DeviceContext.jsx";
+import PageOnboardingModal, {
+  usePageOnboarding,
+} from "./shell/PageOnboardingModal.jsx";
+import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
 
 // Per-family stage labels surfaced inside the RunningTaskCard so the user can
 // tell whether the slow phase is submission, polling, or download.
@@ -82,6 +87,7 @@ async function readFileAsBytes(file) {
 
 export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail }) {
   const { currentDisplay } = useDeviceContext();
+  const onboarding = usePageOnboarding(ONBOARDING_PAGE_IDS.APPEARANCE_GALLERY);
 
   const [items, setItems] = useState(() => getCachedAppearances() || null);
   const [error, setError] = useState("");
@@ -244,7 +250,40 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
       title="形象画廊"
       subtitle="浏览默认形象与你的自定义形象，进入详情可预览每个 family 的视频。"
       actions={[refreshButton, addAppearanceActions]}
+      help={onboarding.show}
     >
+      <PageOnboardingModal
+        id="appearance-gallery"
+        open={onboarding.open}
+        onClose={onboarding.dismiss}
+        title="创建并使用自定义形象，只要三步"
+        description="画廊负责创建和管理；设备页负责把形象应用给当前 Agent。"
+        steps={[
+          {
+            title: "选择来源",
+            description: "AI 生成、上传 MP4、Codex 或社区导入，任选一种。",
+          },
+          {
+            title: "预览并完善",
+            description: "进入详情检查各个动作，也可以单独替换视频和声音。",
+          },
+          {
+            title: "应用到设备",
+            description: "回到设备页为当前 Agent 更换形象，素材会随切换同步。",
+          },
+        ]}
+        actions={[
+          {
+            label: "选择创建方式",
+            variant: "primary",
+            icon: <Sparkles size={14} />,
+            onClick: () => {
+              setCreationModalOpen(true);
+            },
+          },
+        ]}
+      />
+
       {error && (
         <div className="message-banner message-banner--error">
           <AlertCircle size={14} /> 读取形象失败：{error}

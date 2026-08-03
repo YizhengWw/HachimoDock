@@ -3,6 +3,10 @@ $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot
 $RefDir = Join-Path $RootDir "ref"
 $ReleaseExe = Join-Path $RefDir "src-tauri\target\release\pet-manager-tauri.exe"
+$EnvironmentScript = Join-Path $PSScriptRoot "windows-utf8.ps1"
+
+. $EnvironmentScript
+Initialize-HachimoUtf8Environment -RepoRoot $RootDir
 
 function Show-ExistingManager {
   param([string] $TargetPath)

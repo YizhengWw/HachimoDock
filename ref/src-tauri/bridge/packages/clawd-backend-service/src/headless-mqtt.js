@@ -2,8 +2,8 @@
 "use strict";
 
 /*
- * [Input] Local agent state monitors, bridge profile env, MQTT broker events, device availability, and mock/board voice inject requests.
- * [Output] Per-source retained MQTT status, USB-forwarder state files, remote board binding commands, and agent-session injections with fresh-session recovery for stale Codex metadata.
+ * [Input] Local agent state monitors, cumulative/per-turn token metadata, bridge profile env, MQTT broker events, device availability, and mock/board voice inject requests.
+ * [Output] Parent-bound Bridge lifecycle plus per-source retained MQTT status with session-stable token usage, hook/plugin-enriched Claude and MiMoCode session cards, atomically committed USB-forwarder state files, and agent-session injections with fresh-session recovery for stale Codex metadata.
  * [Pos] Headless status bridge for the Tauri Pet Manager runtime.
  * [Sync] If state-file, follow-source, or voice-injection recovery semantics change, update `ref/.folder.md`.
  */
@@ -13,6 +13,7 @@ const fs = require("fs");
 const http = require("http");
 const os = require("os");
 const path = require("path");
+const { Worker } = require("worker_threads");
 const process = require("process");
 
 const {
@@ -33,7 +34,7 @@ const SPEECH_EXPIRES_MS = 30000;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const STATUS_VALUES = new Set(["idle", "working", "speaking", "done", "error", "waiting_user"]);
 const LEGACY_WORKING_STATUS_VALUES = new Set(["thinking", "tool_running"]);
-const KNOWN_AGENT_SOURCES = ["codex", "claude-code", "openclaw"];
+const KNOWN_AGENT_SOURCES = ["codex", "claude-code", "openclaw", "mimocode"];
 
 function requireOptional(name) {
   try {
@@ -230,6 +231,43 @@ function ensureParentDir(filePath) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
 }
 
+function fsyncDirectoryBestEffort(directory) {
+  let descriptor;
+  try {
+    descriptor = fs.openSync(directory, fs.constants.O_RDONLY);
+    fs.fsyncSync(descriptor);
+  } catch {
+  } finally {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+    }
+  }
+}
+
+function writeSnapshotAtomicSync(filePath, content) {
+  ensureParentDir(filePath);
+  const tempPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
+  let descriptor;
+  try {
+    descriptor = fs.openSync(tempPath, "wx", 0o600);
+    fs.writeFileSync(descriptor, content, { encoding: "utf8" });
+    fs.fsyncSync(descriptor);
+    fs.closeSync(descriptor);
+    descriptor = undefined;
+    fs.renameSync(tempPath, filePath);
+    fsyncDirectoryBestEffort(path.dirname(filePath));
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+    }
+    try { fs.unlinkSync(tempPath); } catch {}
+    throw error;
+  }
+}
+
 function loadOrCreateDeviceIdentity(identityPath) {
   try {
     if (fs.existsSync(identityPath)) {
@@ -327,6 +365,13 @@ function normalizeTokenUsage(raw) {
       raw.reasoning_tokens
     ),
     totalTokens: readFiniteNumber(raw.totalTokens, raw.total_tokens),
+    lastInputTokens: readFiniteNumber(raw.lastInputTokens, raw.last_input_tokens),
+    lastOutputTokens: readFiniteNumber(raw.lastOutputTokens, raw.last_output_tokens),
+    lastCachedInputTokens: readFiniteNumber(raw.lastCachedInputTokens, raw.last_cached_input_tokens),
+    lastTotalTokens: readFiniteNumber(raw.lastTotalTokens, raw.last_total_tokens),
+    currentContextTokens: readFiniteNumber(raw.currentContextTokens, raw.current_context_tokens),
+    contextUsedTokens: readFiniteNumber(raw.contextUsedTokens, raw.context_used_tokens),
+    modelContextWindow: readFiniteNumber(raw.modelContextWindow, raw.model_context_window),
     contextTokens: readFiniteNumber(raw.contextTokens, raw.context_tokens),
     estimatedCostUsd: readFiniteNumber(raw.estimatedCostUsd, raw.estimated_cost_usd, raw.costUsd, raw.cost_usd),
   };
@@ -530,6 +575,7 @@ class MqttPublisher {
     this.connected = false;
     this.pendingByTopic = new Map();
     this.lastByTopic = new Map();
+    this.latestStateBySource = new Map();
     this.deviceAvailability = new Map();
 
     const namespace = normalizeTopicPart(config.namespace, "desk");
@@ -721,61 +767,8 @@ class MqttPublisher {
     return "";
   }
 
-  resolveRemoteBindingBoardIds({ boardDeviceId, targetDeviceId, mqttNamespace }) {
-    return this.resolveRemoteBindingTargets({ boardDeviceId, targetDeviceId, mqttNamespace })
-      .map((target) => target.boardDeviceId);
-  }
-
-  resolveRemoteBindingTargets({ boardDeviceId, targetDeviceId, mqttNamespace }) {
-    const ids = [];
-    const targets = [];
-    const add = (value) => {
-      const id = normalizeTopicPart(value || "", "");
-      if (!id || ids.includes(id)) return;
-      ids.push(id);
-      targets.push({
-        boardDeviceId: id,
-        localDeviceId: id,
-        controlTopic: `${normalizeTopicPart(mqttNamespace || this.config.namespace || "desk", "desk")}/${id}/control/remote-cli-binding`,
-      });
-    };
-    const addStatus = (id, status) => {
-      const boardId = normalizeTopicPart((status && status.boardDeviceId) || id || "", "");
-      const localId = normalizeTopicPart((status && status.localDeviceId) || boardId || "", "");
-      if (!boardId || ids.includes(boardId)) return;
-      ids.push(boardId);
-      targets.push({
-        boardDeviceId: boardId,
-        localDeviceId: localId,
-        controlTopic: `${normalizeTopicPart(mqttNamespace || this.config.namespace || "desk", "desk")}/${localId}/control/remote-cli-binding`,
-      });
-    };
-    const target = normalizeTopicPart(targetDeviceId || "", "");
-    const namespace = normalizeTopicPart(mqttNamespace || this.config.namespace || "", "");
-    const onlineFallbackIds = [];
-
-    add(boardDeviceId);
-
-    for (const [id, status] of this.deviceAvailability.entries()) {
-      if (!status || status.online !== true) continue;
-      const onlineId = normalizeTopicPart(status.boardDeviceId || id, "");
-      if (onlineId) onlineFallbackIds.push(onlineId);
-      const statusTarget = normalizeTopicPart(
-        status.targetDeviceId || status.desktopDeviceId || "",
-        "",
-      );
-      const statusNamespace = normalizeTopicPart(status.mqttNamespace || "", "");
-      if (!target || statusTarget !== target) continue;
-      if (statusNamespace && namespace && statusNamespace !== namespace) continue;
-      addStatus(id, status);
-    }
-
-    if (ids.length <= (boardDeviceId ? 1 : 0) && onlineFallbackIds.length === 1) {
-      const fallbackId = onlineFallbackIds[0];
-      addStatus(fallbackId, this.deviceAvailability.get(fallbackId));
-    }
-
-    return targets;
+  getSourceState(sourceId) {
+    return this.latestStateBySource.get(normalizeAgentId(sourceId || "")) || "";
   }
 
   sourceTopic(sourceId) {
@@ -818,6 +811,7 @@ class MqttPublisher {
 
   publishSource(payload) {
     const source = normalizeAgentId(payload.source || "unknown");
+    this.latestStateBySource.set(source, normalizeStatus(payload.state) || "");
     this.publishJson(this.sourceTopic(source), payload, { retain: Boolean(this.config.retain) });
     // Write latest state to local file for USB serial bridge to poll
     this._writeLocalState(source, payload);
@@ -838,24 +832,30 @@ class MqttPublisher {
     try {
       fs.mkdirSync(this.localStateDir, { recursive: true });
       const filePath = path.join(this.localStateDir, `${source}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(payload) + "\n", "utf8");
+      writeSnapshotAtomicSync(filePath, JSON.stringify(payload) + "\n");
+      this._writeLocalSessionPayload(source, payload, this.localStateDir);
     } catch (e) {
       // best-effort, don't break MQTT flow
     }
   }
 
+  _writeLocalSessionPayload(source, payload, directory) {
+    const sessionId = typeof payload?.sessionId === "string" ? payload.sessionId.trim() : "";
+    if (!sessionId) return;
+    const sessionKey = crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 24);
+    const filePath = path.join(directory, `${source}--session-${sessionKey}.json`);
+    writeSnapshotAtomicSync(filePath, JSON.stringify(payload) + "\n");
+  }
+
   _writeLocalSpeech(source, payload) {
     try {
       if (!this._localSpeechDir) {
-        const os = require("os");
-        const path = require("path");
         this._localSpeechDir = path.join(os.tmpdir(), "pet-manager-bridge-speech");
-        require("fs").mkdirSync(this._localSpeechDir, { recursive: true });
+        fs.mkdirSync(this._localSpeechDir, { recursive: true });
       }
-      const path = require("path");
-      const fs = require("fs");
       const filePath = path.join(this._localSpeechDir, `${source}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(payload) + "\n", "utf8");
+      writeSnapshotAtomicSync(filePath, JSON.stringify(payload) + "\n");
+      this._writeLocalSessionPayload(source, payload, this._localSpeechDir);
     } catch (e) {
       // best-effort, don't break MQTT flow
     }
@@ -1354,7 +1354,9 @@ class HookHttpServer {
   start() {
     return new Promise((resolve, reject) => {
       const preferredPort = Number.isInteger(this.config.port) ? this.config.port : readRuntimePort() || DEFAULT_SERVER_PORT;
-      const candidates = getPortCandidates(preferredPort);
+      const candidates = this.config.strictPort
+        ? [preferredPort]
+        : getPortCandidates(preferredPort);
 
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
 
@@ -1527,86 +1529,6 @@ class HookHttpServer {
           } else {
             this.sendJson(res, 200, { ok: true, topic, command: command || (rawPayload && rawPayload.type) || "" });
           }
-        });
-      });
-      return;
-    }
-
-    if (req.method === "POST" && req.url === "/publish-remote-binding") {
-      this.readRequestJson(req, 16 * 1024, (error, payload) => {
-        if (error) {
-          this.sendJson(res, 400, { ok: false, error: String(error.message || error) });
-          return;
-        }
-        const publisher = this.config.publisher;
-        if (!publisher || !publisher.connected) {
-          this.sendJson(res, 503, { ok: false, error: "MQTT not connected" });
-          return;
-        }
-        const namespace = normalizeTopicPart(payload.mqttNamespace || "desk", "desk");
-        const boardDeviceId = normalizeTopicPart(payload.boardDeviceId || "", "");
-        const binding = payload.binding && typeof payload.binding === "object" ? payload.binding : {};
-        const targetDeviceId = normalizeTopicPart(binding.targetDeviceId || "", "");
-        const targetSource = normalizeAgentId(binding.targetSource || "");
-        const previousSource = normalizeAgentId(binding.previousSource || "");
-        const targetBoards = publisher.resolveRemoteBindingTargets({
-          boardDeviceId,
-          targetDeviceId,
-          mqttNamespace: namespace,
-        });
-        if (!targetDeviceId || !targetSource || targetBoards.length === 0) {
-          this.sendJson(res, 400, {
-            ok: false,
-            error: "binding.targetDeviceId, binding.targetSource, and a matching online boardDeviceId are required",
-          });
-          return;
-        }
-        const bindingPayload = JSON.stringify({
-          command: "remote_cli_binding.update",
-          enabled: true,
-          targetDeviceId,
-          targetSource,
-          mqttNamespace: namespace,
-          updatedBy: binding.updatedBy || "pet-manager",
-          ts: nowIso(),
-          tsMs: Date.now(),
-        });
-        if (previousSource && previousSource !== targetSource) {
-          publisher.publishJson(`${namespace}/${targetDeviceId}/state/${previousSource}`, {
-            source: previousSource,
-            state: "idle",
-            reason: "source.disabled",
-            event: "source.disabled",
-            ts: nowIso(),
-            tsMs: Date.now(),
-          }, { retain: true });
-        }
-        const topics = targetBoards.map((target) => target.controlTopic);
-        let pending = topics.length;
-        const errors = [];
-        const finish = () => {
-          if (pending > 0) return;
-          if (errors.length === topics.length) {
-            this.sendJson(res, 500, { ok: false, error: errors.join("; ") });
-          } else {
-            this.sendJson(res, 200, {
-              ok: true,
-              topic: topics[0],
-              topics,
-              boardDeviceIds: targetBoards.map((target) => target.boardDeviceId),
-              targetDeviceId,
-              targetSource,
-              mqttSent: true,
-              usbSent: false,
-            });
-          }
-        };
-        topics.forEach((topic) => {
-          publisher.client.publish(topic, bindingPayload, { qos: 1, retain: false }, (err) => {
-            if (err) errors.push(String(err));
-            pending -= 1;
-            finish();
-          });
         });
       });
       return;
@@ -1966,16 +1888,83 @@ function resolvePermissionDecision(config, payload) {
   return { behavior: "allow" };
 }
 
+function compactHookText(value, maxLength) {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
+}
+
+function firstHookLine(value, maxLength = 120) {
+  const text = compactHookText(value, maxLength * 2);
+  if (!text) return "";
+  return compactHookText(text.split(/[。！？!?\n]/)[0] || text, maxLength);
+}
+
+function buildClaudeHookDisplay(payload, status, event) {
+  const prompt = compactHookText(payload?.prompt, 1200);
+  const finalMessage = compactHookText(payload?.last_assistant_message, 2400);
+  const notification = compactHookText(payload?.message, 600);
+  const explicitTitle = compactHookText(payload?.session_title, 160);
+  const title = explicitTitle || firstHookLine(prompt, 120);
+  let content = "";
+
+  if (event === "UserPromptSubmit") content = "正在思考";
+  else if (event === "PreToolUse") {
+    const toolName = compactHookText(payload?.tool_name, 80);
+    content = toolName ? `正在执行 ${toolName}` : "正在执行任务";
+  } else if (event === "Stop") content = finalMessage || "已完成";
+  else if (event === "StopFailure" || event === "PostToolUseFailure") content = notification || "执行失败";
+  else if (event === "Notification" || event === "Elicitation") content = notification || "等待确认";
+  else if (status === "working") content = "正在处理";
+
+  if (!title && !content) return undefined;
+  return {
+    title: compactHookText(title, 120),
+    content: compactHookText(content, 240),
+    status,
+    event,
+    updatedAtMs: Date.now(),
+  };
+}
+
+function buildMiMoCodeHookDisplay(payload, status, event) {
+  const title = compactHookText(payload?.display_title || payload?.session_title, 120) || "MiMoCode";
+  let content = compactHookText(payload?.display_content, 320);
+  if (!content && status === "working") content = "正在处理";
+  else if (!content && status === "speaking") content = "正在回复";
+  else if (!content && status === "waiting_user") content = "等待操作";
+  else if (!content && status === "done") content = compactHookText(payload?.last_assistant_message, 320) || "已完成";
+  else if (!content && status === "error") content = "执行失败";
+  if (!title && !content) return undefined;
+  return {
+    title,
+    content: compactHookText(content, 320),
+    status,
+    event,
+    updatedAtMs: Date.now(),
+  };
+}
+
 function publishClawdState(config, payload) {
   const clawdState = typeof payload.state === "string" ? payload.state : "";
   const event = typeof payload.event === "string" ? payload.event : "";
   const source = normalizeAgentId(payload.agent_id || "claude-code");
   const status = normalizeStatus(clawdState) || mapClawdStateToStatus(clawdState, event) || "idle";
   const tokenUsage = extractTokenUsageFromPayload(payload);
+  const display = source === "claude-code"
+    ? buildClaudeHookDisplay(payload, status, event)
+    : source === "mimocode"
+      ? buildMiMoCodeHookDisplay(payload, status, event)
+      : undefined;
+  const explicitSessionTitle = compactHookText(payload.session_title, 160);
+  const sessionTitle = explicitSessionTitle
+    || (display && display.title)
+    || undefined;
 
   const out = {
     source,
-    channel: "clawd-hook",
+    channel: source === "mimocode" ? "mimocode-plugin" : "clawd-hook",
     bridge: APP_NAME,
     bridgeVersion: APP_VERSION,
     state: status,
@@ -1983,7 +1972,22 @@ function publishClawdState(config, payload) {
     reason: `clawd.${event || clawdState || "unknown"}`,
     event: event || undefined,
     sessionId: typeof payload.session_id === "string" ? payload.session_id : undefined,
+    sessionTitle,
+    sessionTitleExplicit: Boolean(explicitSessionTitle) && payload.session_title_explicit !== false,
     cwd: typeof payload.cwd === "string" ? payload.cwd : undefined,
+    transcriptPath: typeof payload.transcript_path === "string" ? payload.transcript_path : undefined,
+    display,
+    session: typeof payload.session_id === "string" ? {
+      id: payload.session_id,
+      title: sessionTitle || "",
+      cwd: typeof payload.cwd === "string" ? payload.cwd : "",
+      transcriptPath: typeof payload.transcript_path === "string" ? payload.transcript_path : "",
+    } : undefined,
+    messages: source === "claude-code" || source === "mimocode" ? {
+      lastUser: compactHookText(payload.prompt || payload.last_user_message, 1200),
+      lastAgent: compactHookText(payload.last_assistant_message, 2400),
+    } : undefined,
+    detail: typeof payload.tool_name === "string" ? { toolName: payload.tool_name } : undefined,
     host: typeof payload.host === "string" ? payload.host : undefined,
     headless: payload.headless === true,
     sourcePid: Number.isFinite(payload.source_pid) ? payload.source_pid : undefined,
@@ -2023,45 +2027,147 @@ function publishPermissionRequest(config, payload) {
   config.publisher.publishSource(enriched);
 }
 
-function syncHooks(port, autoStart) {
-  const outcomes = [];
-
-  try {
-    const { registerHooks } = require("../../../hooks/install.js");
-    const result = registerHooks({
-      silent: true,
-      autoStart,
+function syncHooks(port, autoStart, options = {}) {
+  const workerPath = path.resolve(__dirname, "../../../hooks/sync-all.js");
+  const worker = new Worker(workerPath, {
+    workerData: {
       port,
+      autoStart: Boolean(autoStart),
+      syncLegacyHooks: options.syncLegacyHooks !== false,
+      syncMiMoCode: options.syncMiMoCode === true,
+    },
+  });
+  worker.once("message", logHookSyncOutcomes);
+  worker.once("error", (error) => {
+    log("warn", "hook sync worker failed", { error: String(error?.message || error) });
+  });
+  worker.unref();
+  return worker;
+}
+
+function isAgentBusyState(state) {
+  return state === "working" || state === "speaking" || state === "waiting_user";
+}
+
+function createLatestHardwareInputQueue(options = {}) {
+  const retryMs = Math.max(10, Number(options.retryMs) || 500);
+  const ttlMs = Math.max(retryMs, Number(options.ttlMs) || 5 * 60 * 1000);
+  const pending = new Map();
+  const timers = new Map();
+  let stopped = false;
+
+  const schedule = (agentId) => {
+    if (stopped || timers.has(agentId)) return;
+    const timer = setTimeout(() => {
+      timers.delete(agentId);
+      void drain(agentId);
+    }, retryMs);
+    timer.unref?.();
+    timers.set(agentId, timer);
+  };
+
+  const drain = async (agentId) => {
+    if (stopped) return;
+    const entry = pending.get(agentId);
+    if (!entry) return;
+    if (Date.now() - entry.queuedAt > ttlMs) {
+      pending.delete(agentId);
+      options.onExpired?.(agentId, entry.value);
+      return;
+    }
+    if (options.isBusy?.(agentId)) {
+      schedule(agentId);
+      return;
+    }
+
+    pending.delete(agentId);
+    try {
+      const result = await options.inject(entry.value);
+      options.onDelivered?.(agentId, entry.value, result);
+    } catch (error) {
+      const retryable = error?.code === "AGENT_BUSY" || options.isBusy?.(agentId);
+      if (retryable && Date.now() - entry.queuedAt <= ttlMs) {
+        if (!pending.has(agentId)) pending.set(agentId, entry);
+        schedule(agentId);
+        return;
+      }
+      options.onError?.(agentId, entry.value, error);
+    }
+  };
+
+  const enqueue = (agentId, value) => {
+    const normalizedAgentId = normalizeAgentId(agentId || "codex");
+    const replaced = pending.has(normalizedAgentId);
+    pending.set(normalizedAgentId, { value, queuedAt: Date.now() });
+    schedule(normalizedAgentId);
+    return { queued: true, replaced };
+  };
+
+  return {
+    enqueue,
+    async submit(agentId, value) {
+      const normalizedAgentId = normalizeAgentId(agentId || "codex");
+      if (options.isBusy?.(normalizedAgentId)) return enqueue(normalizedAgentId, value);
+      try {
+        const result = await options.inject(value);
+        return { queued: false, replaced: false, result };
+      } catch (error) {
+        if (error?.code !== "AGENT_BUSY" && !options.isBusy?.(normalizedAgentId)) throw error;
+        return enqueue(normalizedAgentId, value);
+      }
+    },
+    stop() {
+      stopped = true;
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      pending.clear();
+    },
+  };
+}
+
+function startAgentLogMonitorWorker(kind, onState) {
+  const workerPath = path.resolve(__dirname, "../../../agents/log-monitor-worker.js");
+  const worker = new Worker(workerPath, { workerData: { kind } });
+  let stopped = false;
+
+  worker.on("message", (message) => {
+    if (message?.type === "ready") {
+      log("info", `${kind} log monitor ready`, {});
+      return;
+    }
+    if (message?.type !== "state") return;
+    try {
+      onState(message.sessionId, message.state, message.event, message.extra);
+    } catch (error) {
+      log("warn", `${kind} log monitor event failed`, {
+        error: String(error?.message || error),
+      });
+    }
+  });
+  worker.on("error", (error) => {
+    log("warn", `${kind} log monitor worker failed`, {
+      error: String(error?.message || error),
     });
-    outcomes.push({ name: "claude", result });
-  } catch (error) {
-    outcomes.push({ name: "claude", error: String(error.message || error) });
-  }
+  });
+  worker.on("exit", (code) => {
+    if (!stopped && code !== 0) {
+      log("warn", `${kind} log monitor worker exited`, { code });
+    }
+  });
+  worker.unref();
 
-  try {
-    const { registerGeminiHooks } = require("../../../hooks/gemini-install.js");
-    const result = registerGeminiHooks({ silent: true });
-    outcomes.push({ name: "gemini", result });
-  } catch (error) {
-    outcomes.push({ name: "gemini", error: String(error.message || error) });
-  }
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      try { worker.postMessage({ type: "stop" }); } catch {}
+      worker.terminate().catch(() => {});
+    },
+  };
+}
 
-  try {
-    const { registerCursorHooks } = require("../../../hooks/cursor-install.js");
-    const result = registerCursorHooks({ silent: true });
-    outcomes.push({ name: "cursor", result });
-  } catch (error) {
-    outcomes.push({ name: "cursor", error: String(error.message || error) });
-  }
-
-  try {
-    const { registerCodeBuddyHooks } = require("../../../hooks/codebuddy-install.js");
-    const result = registerCodeBuddyHooks({ silent: true });
-    outcomes.push({ name: "codebuddy", result });
-  } catch (error) {
-    outcomes.push({ name: "codebuddy", error: String(error.message || error) });
-  }
-
+function logHookSyncOutcomes(outcomes) {
+  if (!Array.isArray(outcomes)) return;
   for (const item of outcomes) {
     if (item.error) {
       log("warn", "hook sync failed", { source: item.name, error: item.error });
@@ -2091,13 +2197,16 @@ function startCodexMonitor(config) {
   ]);
   const allowedCodexEvents = new Set([
     ...visibleCodexEvents,
+    "event_msg:user_message",
+    "response_item:function_call",
+    "response_item:custom_tool_call",
+    "response_item:web_search_call",
+    "event_msg:context_compacted",
+    "event_msg:turn_aborted",
     "event_msg:token_count",
   ]);
   try {
-    const CodexLogMonitor = require("../../../agents/codex-log-monitor");
-    const codexAgent = require("../../../agents/codex");
-
-    monitor = new CodexLogMonitor(codexAgent, (sessionId, state, event, extra) => {
+    monitor = startAgentLogMonitorWorker("codex", (sessionId, state, event, extra) => {
       if (!allowedCodexEvents.has(event)) return;
       const isVisibleEvent = visibleCodexEvents.has(event);
       const normalized = state === "codex-permission"
@@ -2154,8 +2263,7 @@ function startCodexMonitor(config) {
       }
     });
 
-    monitor.start();
-    log("info", "codex log monitor started", {});
+    log("info", "codex log monitor worker started", {});
   } catch (error) {
     log("warn", "codex log monitor not started", { error: String(error.message || error) });
   }
@@ -2176,10 +2284,7 @@ function startClaudeLogMonitor(config) {
     "claude:assistant_message",
   ]);
   try {
-    const ClaudeLogMonitor = require("../../../agents/claude-log-monitor");
-    const claudeAgent = require("../../../agents/claude-code");
-
-    monitor = new ClaudeLogMonitor(claudeAgent, (sessionId, state, event, extra) => {
+    monitor = startAgentLogMonitorWorker("claude", (sessionId, state, event, extra) => {
       const normalized = mapClawdStateToStatus(state, event) || "idle";
       const out = {
         source: "claude-code",
@@ -2231,8 +2336,7 @@ function startClaudeLogMonitor(config) {
       }
     });
 
-    monitor.start();
-    log("info", "claude log monitor started", {});
+    log("info", "claude log monitor worker started", {});
   } catch (error) {
     log("warn", "claude log monitor not started", { error: String(error.message || error) });
   }
@@ -2276,6 +2380,7 @@ function resolveConfig() {
     },
     http: {
       port: getEnvInt("CLAWD_BRIDGE_PORT", readRuntimePort() || DEFAULT_SERVER_PORT),
+      strictPort: getEnvBool("CLAWD_BRIDGE_STRICT_PORT", false),
       syncHooks: getEnvBool("CLAWD_SYNC_HOOKS", true),
       autoStartHook: getEnvBool("CLAWD_AUTO_START_HOOK", false),
       permissionBehavior: getEnv("CLAWD_PERMISSION_BEHAVIOR", "allow").toLowerCase(),
@@ -2320,6 +2425,9 @@ function resolveConfig() {
         path.join(getEnv("STATUS_BRIDGE_STATE_DIR", stateDirFallback), "openclaw-device.json"),
       ),
     },
+    mimocode: {
+      enabled: getEnvBool("CLAWD_ENABLE_MIMOCODE", true),
+    },
     openclawState: {
       idleTimeoutMs: Math.max(1000, getEnvInt("STATUS_IDLE_TIMEOUT_MS", 15000)),
       idleWatchTickMs: Math.max(500, getEnvInt("STATUS_IDLE_WATCH_TICK_MS", 1000)),
@@ -2350,6 +2458,34 @@ function tryLoadAgentSessionBus() {
   }
 }
 
+function startParentProcessWatchdog(onParentExit) {
+  const parentPid = getEnvInt("PET_MANAGER_PARENT_PID", 0);
+  if (!Number.isInteger(parentPid) || parentPid <= 0 || parentPid === process.pid) {
+    return { stop() {} };
+  }
+
+  let stopped = false;
+  const timer = setInterval(() => {
+    if (stopped) return;
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      stopped = true;
+      clearInterval(timer);
+      onParentExit(parentPid);
+    }
+  }, 1000);
+  timer.unref?.();
+
+  return {
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      clearInterval(timer);
+    },
+  };
+}
+
 async function main() {
   const config = resolveConfig();
   ensureDependencies(config);
@@ -2357,6 +2493,61 @@ async function main() {
   const metricsTracker = new SessionMetricsTracker();
   let agentBus = null;
   let publisher = null;
+  const activeHardwareInjectAgents = new Set();
+  const runResolvedHardwareInject = async (resolved) => {
+    activeHardwareInjectAgents.add(resolved.agentId);
+    let injected;
+    try {
+      injected = await injectViaAgentBus(agentBus, resolved.injectBody, {
+        timeoutMs: config.http.mockButtonTimeoutMs,
+      });
+    } finally {
+      activeHardwareInjectAgents.delete(resolved.agentId);
+    }
+    log("info", "hardware input inject completed", {
+      agentId: resolved.agentId,
+      sessionId: injected?.done?.sessionId || injected?.ready?.sessionId || resolved.sessionId,
+      runId: injected?.ready?.runId,
+    });
+    if (publisher && injected?.tokenPreview) {
+      publisher.publishSpeech(resolved.agentId, {
+        displayTitle: "Voice Reply",
+        displayContent: injected.tokenPreview,
+        source: "board-voice-ptt",
+        ts: nowIso(),
+        tsMs: Date.now(),
+      });
+    }
+    return injected;
+  };
+  const queuedHardwareInputs = createLatestHardwareInputQueue({
+    isBusy: (agentId) => (
+      isAgentBusyState(publisher?.getSourceState(agentId))
+      || activeHardwareInjectAgents.has(agentId)
+    ),
+    inject: runResolvedHardwareInject,
+    onDelivered: (agentId, resolved) => {
+      log("info", "queued hardware input delivered", {
+        agentId,
+        sessionId: resolved.sessionId,
+        chars: resolved.text.length,
+      });
+    },
+    onExpired: (agentId, resolved) => {
+      log("warn", "queued hardware input expired", {
+        agentId,
+        sessionId: resolved.sessionId,
+        chars: resolved.text.length,
+      });
+    },
+    onError: (agentId, resolved, error) => {
+      log("warn", "queued hardware input failed", {
+        agentId,
+        sessionId: resolved.sessionId,
+        error: String(error?.message || error),
+      });
+    },
+  });
 
   const onBoardInputAction = async ({ boardDeviceId, payload, topic }) => {
     const data = payload && typeof payload === "object" ? payload : {};
@@ -2434,8 +2625,9 @@ async function main() {
 
   const server = new HookHttpServer({
     port: config.http.port,
+    strictPort: config.http.strictPort,
     publisher,
-    onState: config.http.syncHooks
+    onState: config.http.syncHooks || config.mimocode.enabled
       ? (payload) => publishClawdState({
           publisher,
           metricsTracker,
@@ -2467,14 +2659,30 @@ async function main() {
         defaultSessionId: config.http.mockButtonDefaultSessionId,
         defaultText: config.http.mockButtonDefaultText,
       });
-      const injected = await injectViaAgentBus(agentBus, resolved.injectBody, {
-        timeoutMs: config.http.mockButtonTimeoutMs,
-      });
-      log("info", "mock button inject completed", {
-        agentId: resolved.agentId,
-        sessionId: injected?.done?.sessionId || injected?.ready?.sessionId || resolved.sessionId,
-        runId: injected?.ready?.runId,
-      });
+      const submission = await queuedHardwareInputs.submit(resolved.agentId, resolved);
+      if (submission.queued) {
+        log("info", "hardware input queued while agent is busy", {
+          agentId: resolved.agentId,
+          sessionId: resolved.sessionId,
+          replaced: submission.replaced,
+          chars: resolved.text.length,
+        });
+        return {
+          queued: true,
+          replaced: submission.replaced,
+          message: submission.replaced
+            ? "当前任务仍在运行，已用最新一条设备语音更新队列。"
+            : "当前任务仍在运行，设备语音已排队，将在本轮结束后自动发送。",
+          request: {
+            agentId: resolved.agentId,
+            sessionId: resolved.sessionId,
+            buttonEvent: resolved.buttonEvent,
+            text: resolved.text,
+          },
+        };
+      }
+
+      const injected = submission.result;
       return {
         request: {
           agentId: resolved.agentId,
@@ -2498,10 +2706,15 @@ async function main() {
     mockButtonInjectPath: "http://127.0.0.1:" + port + "/mock-button-inject",
   });
 
-  if (config.http.syncHooks) {
-    syncHooks(port, config.http.autoStartHook);
+  if (config.http.syncHooks || config.mimocode.enabled) {
+    syncHooks(port, config.http.autoStartHook, {
+      syncLegacyHooks: config.http.syncHooks,
+      syncMiMoCode: config.mimocode.enabled,
+    });
   } else {
-    log("info", "hook sync skipped", { reason: "CLAWD_SYNC_HOOKS=false" });
+    log("info", "hook sync skipped", {
+      reason: "CLAWD_SYNC_HOOKS=false and CLAWD_ENABLE_MIMOCODE=false",
+    });
   }
 
   const codexMonitor = config.codex.enabled
@@ -2540,36 +2753,54 @@ async function main() {
   // See docs/voice-architecture.md for the full design.
   if (process.env.AGENT_BUS_DISABLED !== "1") {
     const busModule = tryLoadAgentSessionBus();
-    if (busModule) {
-      const {
-        createAgentSessionBus,
-        ClaudeCodeAdapter,
-        CodexAdapter,
-        OpenClawAdapter,
-      } = busModule;
-      const busLog = (level, message, details) => log(level, `bus :: ${message}`, details);
-      const adapters = [
-        new ClaudeCodeAdapter({ log: busLog }),
-        new CodexAdapter({ log: busLog }),
-        new OpenClawAdapter({ log: busLog }),
-      ];
-      agentBus = createAgentSessionBus({ adapters, log: busLog });
-      try {
-        const port = await agentBus.start();
-        log("info", "agent-session-bus listening", { port, adapters: adapters.map((a) => a.agentId) });
-      } catch (error) {
-        log("error", "agent-session-bus failed to start", {
-          error: String(error && error.message ? error.message : error),
-        });
-        agentBus = null;
-      }
+    if (!busModule) {
+      throw new Error("agent-session-bus is required but could not be loaded");
+    }
+    const {
+      createAgentSessionBus,
+      ClaudeCodeAdapter,
+      CodexAdapter,
+      OpenClawAdapter,
+      MiMoCodeAdapter,
+    } = busModule;
+    const busLog = (level, message, details) => log(level, `bus :: ${message}`, details);
+    const adapters = [
+      new ClaudeCodeAdapter({ log: busLog }),
+      new CodexAdapter({ log: busLog }),
+      new OpenClawAdapter({ log: busLog }),
+      new MiMoCodeAdapter({ log: busLog }),
+    ];
+    agentBus = createAgentSessionBus({
+      adapters,
+      sessionStatusProvider: (agentId) => metricsTracker.sessionStatuses(agentId),
+      sessionEventProvider: (agentId, options) => metricsTracker.sessionEvents(agentId, options),
+      log: busLog,
+    });
+    try {
+      const port = await agentBus.start();
+      log("info", "agent-session-bus listening", {
+        port,
+        adapters: adapters.map((adapter) => adapter.agentId),
+      });
+    } catch (error) {
+      log("error", "agent-session-bus failed to start", {
+        error: String(error && error.message ? error.message : error),
+      });
+      agentBus = null;
+      throw error;
     }
   } else {
     log("info", "agent-session-bus disabled", { reason: "AGENT_BUS_DISABLED=1" });
   }
 
+  let shuttingDown = false;
+  let parentWatchdog = { stop() {} };
   function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log("info", "shutdown requested", { signal });
+    parentWatchdog.stop();
+    queuedHardwareInputs.stop();
     if (agentBus) {
       Promise.resolve(agentBus.stop()).catch(() => {});
     }
@@ -2584,6 +2815,9 @@ async function main() {
 
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  parentWatchdog = startParentProcessWatchdog((parentPid) => {
+    shutdown(`parent-exited:${parentPid}`);
+  });
 
   log("info", "bridge boot complete", {
     app: APP_NAME,
@@ -2593,6 +2827,7 @@ async function main() {
     codexMonitor: config.codex.enabled,
     claudeLogMonitor: config.claude.enabledLogMonitor,
     openclawEnabled: config.openclaw.enabled,
+    mimocodeEnabled: config.mimocode.enabled,
     agentBusEnabled: Boolean(agentBus),
   });
 }
@@ -2608,9 +2843,15 @@ if (require.main === module) {
 
 module.exports = {
   MqttPublisher,
+  writeSnapshotAtomicSync,
   HookHttpServer,
+  startParentProcessWatchdog,
   mapClawdStateToStatus,
   normalizeStatus,
   resolveMockButtonInjectRequest,
   injectViaAgentBus,
+  isAgentBusyState,
+  createLatestHardwareInputQueue,
+  buildClaudeHookDisplay,
+  buildMiMoCodeHookDisplay,
 };

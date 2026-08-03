@@ -1,0 +1,15 @@
+{
+  "dashboard": {
+    "title": "像素方块",
+    "eyebrow": "自动下落",
+    "headline": "按 SW3 开始",
+    "metricLabel": "分数",
+    "metricValue": "0",
+    "note": "READY",
+    "footer": "SW3开始 · 旋钮移动 · SW1旋转 · SW2落下 · 旋钮长按退出",
+    "visualStyle": "pixel",
+    "visualPalette": "arcade",
+    "visualLayout": "arcade",
+    "visualSprite": "blocks"
+  }
+}

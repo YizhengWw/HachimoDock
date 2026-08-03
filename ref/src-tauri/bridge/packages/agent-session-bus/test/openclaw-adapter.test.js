@@ -105,6 +105,50 @@ test("locateOpenClaw checks the Windows npm global package directory", async () 
   });
 });
 
+test("locateOpenClaw skips package-manager commands on Windows", async () => {
+  await withFakeHome(null, async (home) => {
+    let commandCalls = 0;
+    const found = locateOpenClaw({
+      env: {
+        USERPROFILE: home,
+        PATH: "",
+      },
+      platform: "win32",
+      execPath: path.join(home, "node", "node.exe"),
+      commandRunner() {
+        commandCalls += 1;
+        throw new Error("Windows must not invoke package-manager commands");
+      },
+    });
+    assert.equal(found, null);
+    assert.equal(commandCalls, 0);
+  });
+});
+
+test("locateOpenClaw checks beside the current Node executable", async () => {
+  await withFakeHome(null, async (home) => {
+    const nodeDir = path.join(home, "node");
+    const packageRoot = path.join(nodeDir, "node_modules", "openclaw");
+    fs.mkdirSync(path.join(packageRoot, "dist", "plugin-sdk"), { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "package.json"), JSON.stringify({
+      name: "openclaw",
+      version: "8.8.8-test",
+    }));
+    fs.writeFileSync(path.join(packageRoot, "dist", "plugin-sdk", "agent-runtime.js"), "");
+
+    const found = locateOpenClaw({
+      env: { USERPROFILE: home, PATH: "" },
+      platform: "win32",
+      execPath: path.join(nodeDir, "node.exe"),
+      commandRunner() {
+        throw new Error("known paths should resolve before command probes");
+      },
+    });
+    assert.equal(found?.packageRoot, packageRoot);
+    assert.equal(found?.packageVersion, "8.8.8-test");
+  });
+});
+
 test("listSessions returns [] when ~/.openclaw is missing", async () => {
   await withFakeHome(null, async (home) => {
     const a = makeAdapter(home);

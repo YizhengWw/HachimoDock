@@ -1,18 +1,18 @@
 /**
  * [Input] onSendTest / onCopyDesktopId / onUnbind callbacks plus optional应急 callbacks
  *         onDeviceReturnHome / onForceSyncAppearance (opt-in：caller 传才渲染，
- *         保证既有调用方/测试不破)，以及可选 onApplyWifi opt-in
- *         (renders an extra 📶 通过 USB 配 WiFi item).
+ *         保证既有调用方/测试不破)，以及可选 onUpdateFirmware /
+ *         onDiagnostics opt-ins for P4 A/B updates and diagnostics.
  * [Output] Menu mounted into PageShell actions: 发送测试消息 / 复制桌面设备 ID /
- *          [⤴ 设备返回主屏]? / [🔄 强制同步形象]? / [opt-in] 📶 通过 USB 配 WiFi /
- *          解绑设备 (danger).
+ *          [⤴ 设备返回主屏]? / [🔄 强制同步形象]? /
+ *          [opt-in] 固件升级 / 设备诊断 / 解绑设备 (danger).
  *          应急两项在物理按键失灵切不回主屏、客户端 UI 与设备形象脱节时使用。
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, Wifi } from "lucide-react";
+import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp } from "lucide-react";
 
 export default function DashboardActionsMenu({
   onSendTest,
@@ -20,7 +20,8 @@ export default function DashboardActionsMenu({
   onUnbind,
   onDeviceReturnHome,
   onForceSyncAppearance,
-  onApplyWifi,
+  onUpdateFirmware,
+  onDiagnostics,
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -95,15 +96,26 @@ export default function DashboardActionsMenu({
               🔄 强制同步形象
             </button>
           )}
-          {onApplyWifi && (
+          {onUpdateFirmware && (
             <button
               type="button"
               className="dashboard-actions-menu__item"
               role="menuitem"
-              onClick={dispatch(onApplyWifi)}
+              onClick={dispatch(onUpdateFirmware)}
             >
-              <Wifi size={14} />
-              📶 通过 USB 配 WiFi
+              <FileUp size={14} />
+              升级 ESP32-P4 固件
+            </button>
+          )}
+          {onDiagnostics && (
+            <button
+              type="button"
+              className="dashboard-actions-menu__item"
+              role="menuitem"
+              onClick={dispatch(onDiagnostics)}
+            >
+              <Activity size={14} />
+              ESP32-P4 设备诊断
             </button>
           )}
           <button

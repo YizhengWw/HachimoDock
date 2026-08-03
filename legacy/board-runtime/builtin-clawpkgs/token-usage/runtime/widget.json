@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "agent_label": { "type": "string", "init": "当前 Agent" },
+    "headline_text": { "type": "string", "init": "等待实时统计" },
+    "total_display": { "type": "string", "init": "—" },
+    "input_display": { "type": "string", "init": "—" },
+    "output_display": { "type": "string", "init": "—" },
+    "cache_display": { "type": "string", "init": "缓存 —" },
+    "breakdown_text": { "type": "string", "init": "" }
+  },
+  "states": ["live"],
+  "initial_state": "live",
+  "pages": [
+    { "id": "total", "label": "总量" },
+    { "id": "input", "label": "输入" },
+    { "id": "output", "label": "输出" }
+  ],
+  "initial_page": "total",
+  "transitions": [
+    { "from": "*", "on": "stats.show_total", "page": "total" },
+    { "from": "*", "on": "stats.show_input", "page": "input" },
+    { "from": "*", "on": "stats.show_output", "page": "output" }
+  ],
+  "tick": [],
+  "readers": {
+    "agent_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^agent=(.+)$",
+      "into": "agent_label"
+    },
+    "headline_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^headline=(.+)$",
+      "into": "headline_text"
+    },
+    "total_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^tokenTotal=(.+)$",
+      "into": "total_display"
+    },
+    "input_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^tokenInput=(.+)$",
+      "into": "input_display"
+    },
+    "output_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^tokenOutput=(.+)$",
+      "into": "output_display"
+    },
+    "cache_field": {
+      "path": ".stats-display",
+      "every_s": 2,
+      "field_pattern": "(?m)^tokenCache=(.+)$",
+      "into": "cache_display"
+    }
+  },
+  "dashboard": {
+    "title": "Token 仪表盘",
+    "eyebrow": { "var": "agent_label" },
+    "headline": { "var": "headline_text" },
+    "metricLabel": {
+      "switch_page": {
+        "total": "总 Token",
+        "input": "输入 Token",
+        "output": "输出 Token"
+      }
+    },
+    "metricValue": {
+      "switch_page": {
+        "total": { "var": "total_display" },
+        "input": { "var": "input_display" },
+        "output": { "var": "output_display" }
+      }
+    },
+    "metricUnit": "TOKEN",
+    "note": { "var": "cache_display" },
+    "footer": "SW1总量 · SW2输入 · SW3输出",
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_page": {
+        "total": "arcade",
+        "input": "mint",
+        "output": "sunset"
+      }
+    },
+    "visualLayout": "tool",
+    "visualSprite": {
+      "switch_page": {
+        "total": "gauge",
+        "input": "bolt",
+        "output": "gauge"
+      }
+    }
+  }
+}

@@ -61,7 +61,9 @@ test("env var override is ignored when path does not exist", () => {
   });
 });
 
-test("PATH is searched after extraPathDirs are prepended", () => {
+test("PATH is searched after extraPathDirs are prepended", {
+  skip: process.platform === "win32" ? "POSIX executable-bit fixture" : false,
+}, () => {
   withTmp((dir) => {
     const extra = path.join(dir, "extra");
     const onPath = path.join(dir, "onpath");
@@ -105,7 +107,9 @@ test("returns null when nothing matches", () => {
   });
 });
 
-test("non-executable file in fallback path is rejected", () => {
+test("non-executable file in fallback path is rejected", {
+  skip: process.platform === "win32" ? "Windows does not use POSIX executable bits" : false,
+}, () => {
   withTmp((dir) => {
     const file = path.join(dir, "claude");
     fs.writeFileSync(file, "not a script");
@@ -120,7 +124,9 @@ test("non-executable file in fallback path is rejected", () => {
   });
 });
 
-test("augmentPath dedupes and preserves order", () => {
+test("augmentPath dedupes and preserves order", {
+  skip: process.platform === "win32" ? "POSIX path fixture" : false,
+}, () => {
   const out = _internal.augmentPath("/usr/bin:/usr/local/bin", ["/opt/homebrew/bin", "/usr/bin"], "/home/x", "linux");
   // extras come first, then PATH; duplicates suppressed
   assert.equal(out, "/opt/homebrew/bin:/usr/bin:/usr/local/bin");

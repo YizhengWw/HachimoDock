@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "score": { "type": "int", "init": 0 },
+    "remaining_s": { "type": "int", "init": 30 },
+    "round_s": { "type": "int", "init": 30 }
+  },
+  "states": ["ready", "playing", "result"],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "catch.start",
+      "to": "playing",
+      "set": { "score": 0, "remaining_s": 30 }
+    },
+    { "from": "playing", "on": "catch.left" },
+    { "from": "playing", "on": "catch.right" }
+  ],
+  "tick": [
+    {
+      "every_ms": 1000,
+      "while_state": "playing",
+      "inc": { "remaining_s": -1 },
+      "when": { "var": "remaining_s", "lte": 0 },
+      "then": { "to": "result", "set": { "remaining_s": 0 } }
+    }
+  ],
+  "scene": {
+    "tick_ms": 140,
+    "active_state": "playing",
+    "score_var": "score",
+    "grid": { "width": 12, "height": 8 },
+    "entities": [
+      { "id": "player", "x": 5, "y": 7, "width": 2, "height": 1, "tone": 3, "bounds": "clamp" },
+      { "id": "star", "x": 5, "y": 0, "tone": 2, "vy": 1, "bounds": "hide" }
+    ],
+    "rules": [
+      { "on": "catch.start", "do": [{ "op": "restart" }] },
+      { "on": "catch.left", "do": [{ "op": "move", "entity": "player", "dx": -1, "dy": 0 }] },
+      { "on": "catch.right", "do": [{ "op": "move", "entity": "player", "dx": 1, "dy": 0 }] },
+      {
+        "on": "collision",
+        "entity": "player",
+        "with": "star",
+        "do": [
+          { "op": "score", "add": 1 },
+          { "op": "place", "entity": "star", "x": [0, 11], "y": 0 }
+        ]
+      },
+      {
+        "on": "edge",
+        "entity": "star",
+        "edge": "bottom",
+        "do": [
+          { "op": "score", "add": -1 },
+          { "op": "place", "entity": "star", "x": [0, 11], "y": 0 }
+        ]
+      }
+    ]
+  },
+  "dashboard": {
+    "title": "接住星星",
+    "eyebrow": "限时 30 秒",
+    "headline": {
+      "switch_state": {
+        "ready": "按旋钮开始",
+        "playing": "接住星星",
+        "result": "本轮结束"
+      }
+    },
+    "metricLabel": "得分",
+    "metricValue": { "var": "score" },
+    "note": "SW1 左移 · SW2 右移",
+    "footer": {
+      "switch_state": {
+        "ready": "SW1左移 · SW2右移 · 旋钮开始",
+        "playing": "SW1左移 · SW2右移 · SW3退出",
+        "result": "旋钮短按重开 · SW3退出"
+      }
+    },
+    "progress": { "pct_of": "remaining_s", "of_max": "round_s", "label": "剩余时间" },
+    "visualStyle": "pixel",
+    "visualPalette": "arcade",
+    "visualLayout": "arcade",
+    "visualSprite": "star"
+  }
+}

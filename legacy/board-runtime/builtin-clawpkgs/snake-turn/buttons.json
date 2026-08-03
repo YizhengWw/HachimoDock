@@ -1,0 +1,26 @@
+[
+  {
+    "action": "snake.start",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "开始/重开"
+  },
+  {
+    "action": "snake.turn_left",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "向左转"
+  },
+  {
+    "action": "snake.turn_right",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
+    "label": "向右转"
+  },
+  {
+    "action": "page_main",
+    "control": "SW3",
+    "event": "button.sw3.long_press",
+    "label": "返回桌宠"
+  }
+]

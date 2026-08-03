@@ -1,6 +1,16 @@
 "use strict";
 
+/*
+ * [Input] Normalized Agent events with session, display, path, and cumulative/per-turn token metadata.
+ * [Output] Per-session live metrics, retained token usage, and a bounded ordered lifecycle-event stream for device consumers.
+ * [Pos] In-memory session enrichment store for the managed bridge.
+ */
+
+const crypto = require("crypto");
+
 const ACTIVE_TURN_STATES = new Set(["working", "thinking", "tool_running", "speaking", "waiting_user"]);
+const TERMINAL_TURN_STATES = new Set(["done", "error"]);
+const DEFAULT_SESSION_EVENT_LIMIT = 512;
 const TOOL_START_EVENTS = new Set([
   "PreToolUse",
   "BeforeTool",
@@ -29,14 +39,48 @@ function roundTo(value, digits) {
 
 function calculateContextUsagePct(tokenUsage) {
   if (!tokenUsage || typeof tokenUsage !== "object") return undefined;
-  const totalTokens = readFiniteNumber(tokenUsage.totalTokens);
+  const usedTokens = readFiniteNumber(
+    tokenUsage.currentContextTokens,
+    tokenUsage.contextUsedTokens,
+    tokenUsage.lastInputTokens,
+    tokenUsage.lastTotalTokens,
+    tokenUsage.inputTokens,
+    tokenUsage.totalTokens
+  );
   const contextWindow = readFiniteNumber(tokenUsage.modelContextWindow, tokenUsage.contextTokens);
-  if (!Number.isFinite(totalTokens) || !Number.isFinite(contextWindow) || contextWindow <= 0) return undefined;
-  return roundTo((totalTokens / contextWindow) * 100, 2);
+  if (!Number.isFinite(usedTokens) || !Number.isFinite(contextWindow) || contextWindow <= 0) return undefined;
+  return Math.min(100, roundTo((usedTokens / contextWindow) * 100, 2));
+}
+
+function readTokenUsage(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  return Object.values(value).some(Number.isFinite) ? { ...value } : null;
 }
 
 function normalizeLower(value) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function isNewTurnStartSignal(payload) {
+  const event = normalizeLower(payload?.event);
+  const reason = normalizeLower(payload?.reason);
+  return [
+    "userpromptsubmit",
+    "user_message",
+    "task_started",
+    "session.start",
+    "session.pre",
+    "agent.lifecycle.start",
+    "sessions.changed.start",
+    "sessions.changed.send",
+    "sessions.changed.steer",
+  ].some((marker) => event.includes(marker) || reason.includes(marker));
+}
+
+function shouldPreserveTerminalState(payload, incomingState, previousState) {
+  if (!TERMINAL_TURN_STATES.has(previousState)) return false;
+  if (TERMINAL_TURN_STATES.has(incomingState)) return false;
+  return !isNewTurnStartSignal(payload);
 }
 
 function buildToolSignature(payload) {
@@ -79,30 +123,62 @@ function isToolErrorSignal(payload, state) {
 class SessionMetricsTracker {
   constructor(config = {}) {
     const ttlMs = Number.parseInt(config.sessionTtlMs, 10);
+    const eventLimit = Number.parseInt(config.sessionEventLimit, 10);
     this.sessionTtlMs = Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : 30 * 60 * 1000;
+    this.sessionEventLimit = Number.isFinite(eventLimit) && eventLimit > 0
+      ? eventLimit
+      : DEFAULT_SESSION_EVENT_LIMIT;
     this.sessions = new Map();
+    this.sessionEventSequence = 0;
+    this.sessionEventStreamId = crypto.randomUUID();
+    this.sessionEventLog = [];
+    this.sessionEventSignatures = new Map();
   }
 
   apply(payload, nowMs = Date.now()) {
     if (!payload || typeof payload !== "object") return payload;
 
-    const source = typeof payload.source === "string" && payload.source ? payload.source : "unknown";
+    const source = normalizeLower(payload.source) || "unknown";
     const scope = this._resolveScope(payload);
     const key = `${source}|${scope}`;
-    const state = typeof payload.state === "string" ? payload.state : "idle";
+    const incomingState = typeof payload.state === "string" ? payload.state : "idle";
     const sourceFallbackKey = `${source}|source`;
     const record = this._getOrCreateRecord(
       key,
       nowMs,
       scope === "source" ? null : sourceFallbackKey
     );
-    record.lastSeenAt = nowMs;
+    const previousState = record.lastState;
+    const preserveTerminalState = shouldPreserveTerminalState(
+      payload,
+      incomingState,
+      previousState
+    );
+    const state = preserveTerminalState ? previousState : incomingState;
+    const display = payload.display && typeof payload.display === "object" ? payload.display : null;
+    const displayTitle = typeof display?.title === "string" ? display.title.trim() : "";
+    const displayContent = typeof display?.content === "string" ? display.content.trim() : "";
+    if (!preserveTerminalState) {
+      record.lastSeenAt = nowMs;
+      if (displayTitle) record.displayTitle = displayTitle;
+      if (displayContent) record.displayContent = displayContent;
+    }
+    const sessionTitle = typeof payload.sessionTitle === "string" ? payload.sessionTitle.trim() : "";
+    const cwd = typeof payload.cwd === "string" ? payload.cwd.trim() : "";
+    const transcriptPath = typeof payload.transcriptPath === "string" ? payload.transcriptPath.trim() : "";
+    if (sessionTitle && (!record.sessionTitle || payload.sessionTitleExplicit === true)) {
+      record.sessionTitle = sessionTitle;
+    }
+    if (cwd) record.cwd = cwd;
+    if (transcriptPath) record.transcriptPath = transcriptPath;
+    const incomingTokenUsage = readTokenUsage(payload.tokenUsage);
+    if (incomingTokenUsage) record.tokenUsage = incomingTokenUsage;
+    const tokenUsage = incomingTokenUsage || record.tokenUsage || null;
 
     if (!record.turn && ACTIVE_TURN_STATES.has(state)) {
       this._startTurn(record, nowMs);
     }
 
-    const previousState = record.lastState;
     const turn = record.turn;
     if (turn) {
       if (state === "speaking" && turn.firstTokenMs === undefined) {
@@ -128,7 +204,7 @@ class SessionMetricsTracker {
       this._trackWaitingUser(turn, state, nowMs);
     }
 
-    const contextUsagePct = calculateContextUsagePct(payload.tokenUsage);
+    const contextUsagePct = calculateContextUsagePct(tokenUsage);
     let metrics = this._buildMetrics(record, contextUsagePct, nowMs);
 
     if (record.turn && (state === "done" || state === "error")) {
@@ -144,14 +220,164 @@ class SessionMetricsTracker {
     record.lastState = state;
     this._cleanup(nowMs);
 
-    const hasMetrics = metrics && this._hasAnyMetrics(metrics);
-    if (!hasMetrics) {
-      if (!Object.prototype.hasOwnProperty.call(payload, "metrics")) return payload;
-      const next = { ...payload };
-      delete next.metrics;
-      return next;
+    let effectivePayload = preserveTerminalState
+      ? {
+        ...payload,
+        state,
+        ...(record.displayTitle || record.displayContent
+          ? {
+            display: {
+              title: record.displayTitle || "",
+              content: record.displayContent || "",
+              status: state,
+              event: payload.event,
+              updatedAtMs: record.lastSeenAt,
+            },
+          }
+          : {}),
+      }
+      : payload;
+    if (tokenUsage && tokenUsage !== payload.tokenUsage) {
+      effectivePayload = { ...effectivePayload, tokenUsage };
     }
-    return { ...payload, metrics };
+    const hasMetrics = metrics && this._hasAnyMetrics(metrics);
+    let result = effectivePayload;
+    if (!hasMetrics && Object.prototype.hasOwnProperty.call(effectivePayload, "metrics")) {
+      result = { ...effectivePayload };
+      delete result.metrics;
+    } else if (hasMetrics) {
+      result = { ...effectivePayload, metrics };
+    }
+    this._recordSessionEvent(source, scope, record, result, nowMs);
+    return result;
+  }
+
+  sessionStatuses(source, nowMs = Date.now()) {
+    this._cleanup(nowMs);
+    const normalizedSource = typeof source === "string" ? source.trim().toLowerCase() : "";
+    const prefix = `${normalizedSource}|session:`;
+    const statuses = [];
+    for (const [key, record] of this.sessions.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      statuses.push({
+        id: key.slice(prefix.length),
+        state: record.lastState || "idle",
+        updatedAt: record.lastSeenAt || 0,
+        ...(record.displayTitle ? { displayTitle: record.displayTitle } : {}),
+        ...(record.displayContent ? { displayContent: record.displayContent } : {}),
+        ...(record.sessionTitle ? { title: record.sessionTitle } : {}),
+        ...(record.cwd ? { cwd: record.cwd } : {}),
+        ...(record.transcriptPath ? { transcriptPath: record.transcriptPath } : {}),
+      });
+    }
+    return statuses;
+  }
+
+  sessionEvents(source, options = {}) {
+    const normalizedSource = typeof source === "string" ? source.trim().toLowerCase() : "";
+    const streamId = typeof options.streamId === "string" ? options.streamId.trim() : "";
+    const hasCursor = Number.isFinite(Number(options.cursor));
+    const cursor = hasCursor ? Math.max(0, Math.floor(Number(options.cursor))) : null;
+    const requestedLimit = Number.parseInt(options.limit, 10);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(requestedLimit, this.sessionEventLimit)
+      : 100;
+    const streamChanged = Boolean(streamId && streamId !== this.sessionEventStreamId);
+    const latestCursor = this.sessionEventSequence;
+    const oldestCursor = this.sessionEventLog.length > 0
+      ? this.sessionEventLog[0].cursor
+      : latestCursor + 1;
+    const cursorExpired = cursor !== null
+      && (cursor > latestCursor || cursor < oldestCursor - 1);
+
+    if (cursor === null || streamChanged || cursorExpired) {
+      const events = this.sessionStatuses(normalizedSource)
+        .filter((status) => ACTIVE_TURN_STATES.has(normalizeLower(status.state)))
+        .map((status) => ({
+          cursor: latestCursor,
+          source: normalizedSource,
+          state: status.state,
+          event: "session.bootstrap",
+          updatedAt: status.updatedAt,
+          session: this._statusToEventSession(status),
+          bootstrap: true,
+        }));
+      return {
+        streamId: this.sessionEventStreamId,
+        cursor: latestCursor,
+        reset: streamChanged || cursorExpired,
+        events,
+      };
+    }
+
+    const matching = this.sessionEventLog.filter(
+      (event) => event.cursor > cursor && event.source === normalizedSource
+    );
+    const events = matching.slice(0, limit);
+    const nextCursor = matching.length > limit && events.length > 0
+      ? events[events.length - 1].cursor
+      : latestCursor;
+    return {
+      streamId: this.sessionEventStreamId,
+      cursor: nextCursor,
+      reset: false,
+      events,
+    };
+  }
+
+  _statusToEventSession(status) {
+    return {
+      id: status.id,
+      state: status.state || "idle",
+      statusUpdatedAt: status.updatedAt || 0,
+      ...(status.title ? { name: status.title, summary: status.title } : {}),
+      ...(status.displayTitle ? { displayTitle: status.displayTitle } : {}),
+      ...(status.displayContent ? { displayContent: status.displayContent } : {}),
+      ...(status.cwd ? { cwd: status.cwd } : {}),
+      ...(status.transcriptPath ? { transcriptPath: status.transcriptPath } : {}),
+    };
+  }
+
+  _recordSessionEvent(source, scope, record, payload, nowMs) {
+    if (!scope.startsWith("session:")) return;
+    const id = scope.slice("session:".length).trim();
+    if (!id) return;
+    const state = normalizeLower(payload?.state) || "idle";
+    const status = {
+      id,
+      state,
+      updatedAt: record.lastSeenAt || nowMs,
+      ...(record.displayTitle ? { displayTitle: record.displayTitle } : {}),
+      ...(record.displayContent ? { displayContent: record.displayContent } : {}),
+      ...(record.sessionTitle ? { title: record.sessionTitle } : {}),
+      ...(record.cwd ? { cwd: record.cwd } : {}),
+      ...(record.transcriptPath ? { transcriptPath: record.transcriptPath } : {}),
+    };
+    const signatureKey = `${source}|${id}`;
+    const signature = JSON.stringify([
+      state,
+      status.displayTitle || "",
+      status.displayContent || "",
+      status.title || "",
+      status.cwd || "",
+      status.transcriptPath || "",
+    ]);
+    if (this.sessionEventSignatures.get(signatureKey) === signature) return;
+    this.sessionEventSignatures.set(signatureKey, signature);
+
+    const event = {
+      cursor: ++this.sessionEventSequence,
+      source: normalizeLower(source),
+      state,
+      event: typeof payload?.event === "string" ? payload.event : "",
+      reason: typeof payload?.reason === "string" ? payload.reason : "",
+      updatedAt: status.updatedAt,
+      session: this._statusToEventSession(status),
+    };
+    this.sessionEventLog.push(event);
+    if (this.sessionEventLog.length > this.sessionEventLimit) {
+      this.sessionEventLog.splice(0, this.sessionEventLog.length - this.sessionEventLimit);
+    }
   }
 
   _resolveScope(payload) {
@@ -256,6 +482,12 @@ class SessionMetricsTracker {
     for (const [key, record] of this.sessions.entries()) {
       if (nowMs - record.lastSeenAt > this.sessionTtlMs) {
         this.sessions.delete(key);
+        const separator = key.indexOf("|session:");
+        if (separator >= 0) {
+          const source = key.slice(0, separator);
+          const id = key.slice(separator + "|session:".length);
+          this.sessionEventSignatures.delete(`${source}|${id}`);
+        }
       }
     }
   }

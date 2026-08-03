@@ -17,6 +17,7 @@ path:
 | `claude-code`  | spawn `claude -p ... --resume <sid> --output-format stream-json` |
 | `codex`        | resume Desktop threads via `codex app-server --listen stdio://`; new sessions use `codex exec --json` |
 | `openclaw`     | spawn helper → `import('openclaw/dist/plugin-sdk/agent-runtime').agentCommand({...})` |
+| `mimocode`     | official `mimo session list --format json`; status comes from the managed MiMoCode plugin (voice injection is phase two) |
 
 Centralising the "find the user's latest session, pipe text in, stream tokens
 out" logic here keeps voice-service-node a pure audio frontend, and keeps each
@@ -42,7 +43,7 @@ voice-service-node                 agent-session-bus              <agent>
 Body:
 ```jsonc
 {
-  "agentId": "claude-code" | "codex" | "openclaw",
+  "agentId": "claude-code" | "codex" | "openclaw" | "mimocode",
   "sessionId": "auto" | "<adapter-specific id>",
   "text": "<STT utterance>",
   "metadata": { "source": "voice", "stt": {...}, "locale": "zh-CN" }
@@ -72,7 +73,8 @@ Returns availability info for every registered adapter:
   "adapters": [
     { "agentId": "claude-code", "ready": true,  "detail": null },
     { "agentId": "codex",       "ready": true,  "detail": null },
-    { "agentId": "openclaw",    "ready": false, "detail": "openclaw npm pkg not found" }
+    { "agentId": "openclaw",    "ready": false, "detail": "openclaw npm pkg not found" },
+    { "agentId": "mimocode",    "ready": true,  "detail": null }
   ]
 }
 ```
@@ -82,6 +84,12 @@ Returns availability info for every registered adapter:
 Returns the most-recent sessions for the given agent (used by the UI session
 dropdown).
 
+### `GET /agent/session-events?agentId=<id>&cursor=<n>&streamId=<id>`
+
+Returns lightweight, ordered in-memory lifecycle updates. Omit `cursor` for a
+cold bootstrap: only currently active sessions are returned, so completed
+history is never replayed. Subsequent calls pass the returned `cursor` and
+`streamId`; `reset: true` means the bounded log expired or the bridge restarted.
 ### `POST /agent/cancel`
 
 Body: `{ "runId": "..." }` — cancels an in-flight `inject` SSE. The agent run

@@ -1,0 +1,19 @@
+{
+  "dashboard": {
+    "title": "10秒连点",
+    "eyebrow": "限时 10 秒",
+    "headline": "待开始",
+    "metricLabel": "得分",
+    "metricValue": "0",
+    "note": "00:10",
+    "footer": "SW1/2/3连按 · 旋钮重开 · SW3长按退出",
+    "progress": {
+      "value": 100,
+      "label": "剩余时间"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "candy",
+    "visualLayout": "arcade",
+    "visualSprite": "target"
+  }
+}

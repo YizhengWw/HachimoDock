@@ -1,7 +1,7 @@
 /**
  * [Input] Preview media descriptors produced by `lib/appearance-preview.js`.
- * [Output] Resilient image/video preview element with local-image blob loading, metadata-only idle videos,
- *          asset URL fallback, source-image fallback, and controlled playback.
+ * [Output] Resilient image/video preview element with local-image blob loading, viewport-aware video playback,
+ *          asset URL fallback, source-image fallback, and controlled media cleanup.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -68,25 +68,69 @@ function seekToPosterFrame(video) {
   }
 }
 
+function usePreviewPlaybackAllowed(videoRef, requested, mediaKey) {
+  const [nearViewport, setNearViewport] = useState(false);
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const handleVisibilityChange = () => {
+      setDocumentVisible(document.visibilityState === "visible");
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    if (!requested) {
+      setNearViewport(false);
+      return undefined;
+    }
+    const video = videoRef.current;
+    if (!video || typeof IntersectionObserver !== "function") {
+      setNearViewport(true);
+      return undefined;
+    }
+
+    setNearViewport(false);
+    const observer = new IntersectionObserver(
+      ([entry]) => setNearViewport(Boolean(entry?.isIntersecting)),
+      { rootMargin: "160px 0px" },
+    );
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, [mediaKey, requested, videoRef]);
+
+  return requested && documentVisible && nearViewport;
+}
+
 export default function AppearancePreview({ media, className, emptyClassName, playing = false }) {
   const videoRef = useRef(null);
   const { url, assetFailed, blobFailed, preferLocalBlob, markAssetFailed } = useResolvedPreviewUrl(media);
   const fallbackMedia = media?.fallback;
+  const mediaKey = `${media?.kind || ""}:${media?.src || ""}:${media?.path || ""}`;
+  const shouldPlay = usePreviewPlaybackAllowed(
+    videoRef,
+    playing && media?.kind === "video" && Boolean(url),
+    mediaKey,
+  );
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video || media?.kind !== "video" || !url) return;
-    if (playing) {
+    if (shouldPlay) {
       const promise = video.play();
       if (promise && typeof promise.catch === "function") promise.catch(() => {});
       return;
     }
     video.pause();
     seekToPosterFrame(video);
-  }, [media?.kind, playing, url]);
+  }, [media?.kind, shouldPlay, url]);
 
   const handleLoadedData = () => {
-    if (!playing) seekToPosterFrame(videoRef.current);
+    if (!shouldPlay) seekToPosterFrame(videoRef.current);
   };
 
   if ((assetFailed || (preferLocalBlob && blobFailed)) && fallbackMedia && (!media?.path || blobFailed)) {
@@ -109,7 +153,7 @@ export default function AppearancePreview({ media, className, emptyClassName, pl
         muted
         loop
         playsInline
-        preload={playing ? "auto" : "metadata"}
+        preload={shouldPlay ? "auto" : "metadata"}
         onLoadedData={handleLoadedData}
         onError={markAssetFailed}
       />

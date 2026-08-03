@@ -1,6 +1,6 @@
 /**
  * [Input] Detected local coding agents, persisted appearance records, and localStorage bridge assignment state.
- * [Output] Shared per-channel appearance mapping plus single active desktop-channel helpers used by setup, dashboard, and gallery.
+ * [Output] ChatGPT（Codex）-first fixed Agent ordering, explicit first-run selection, shared per-channel appearance mapping, and single active desktop-channel helpers used by setup, dashboard, and gallery.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md` and consumers that persist agent assignments.
  */
@@ -9,22 +9,28 @@ import { BUILTIN_TERRIER_APPEARANCE_ID } from "./builtin-appearances.js";
 
 export const AGENT_APPEARANCE_MAP_STORAGE_KEY = "pet-manager.agent-appearance-map";
 export const ENABLED_AGENTS_STORAGE_KEY = "pet-manager.enabled-agents";
+export const DEFAULT_AGENT_ID = "codex";
 
 export const FIXED_AGENT_OPTIONS = [
   {
-    id: "claude-code",
-    label: "Claude Code",
-    detail: "Claude Code 本地 CLI 渠道",
+    id: "codex",
+    label: "ChatGPT（Codex）",
+    detail: "ChatGPT 客户端的 Codex 任务与状态渠道",
   },
   {
-    id: "codex",
-    label: "Codex",
-    detail: "Codex 本地任务与状态渠道",
+    id: "claude-code",
+    label: "Claude",
+    detail: "Claude 客户端与本地 CLI 渠道",
   },
   {
     id: "openclaw",
     label: "OpenClaw",
     detail: "OpenClaw 本地运行时渠道",
+  },
+  {
+    id: "mimocode",
+    label: "MiMoCode",
+    detail: "MiMoCode 本地会话与实时状态渠道",
   },
 ];
 
@@ -47,7 +53,8 @@ export function normalizeDetectedAgents(agents = []) {
     return {
       ...option,
       ...(detected || {}),
-      label: detected?.label || option.label,
+      // Keep product-facing names stable even when an older bridge scan is cached.
+      label: option.label,
       detail: detected?.detail || option.detail,
       detected: Boolean(detected?.detected),
     };

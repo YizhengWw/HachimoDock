@@ -192,6 +192,13 @@ export function normalizeGenerationErrorMessage(error) {
     return `请求参数不被当前模型接受：请检查所选模型是否支持当前图生视频输入、首尾帧角色、比例和时长。${truncateMessage(primary, 360)}`;
   }
 
+  if (
+    /^(Load failed|Failed to load)$/i.test(primary)
+    || /no available backend found|Importing a module script failed|Failed to create session/i.test(primary)
+  ) {
+    return "自动去背景模型加载失败：请检查网络后重试，或关闭“自动去背景”并直接使用原图生成。";
+  }
+
   if (/Failed to fetch|NetworkError|无法连接|timeout|timed out/i.test(primary)) {
     return `网络或服务连接失败：请检查网络、代理和 Ark 服务地址后重试。${truncateMessage(primary, 360)}`;
   }

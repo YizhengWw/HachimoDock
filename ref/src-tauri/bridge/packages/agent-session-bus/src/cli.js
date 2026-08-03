@@ -16,6 +16,7 @@ const {
   ClaudeCodeAdapter,
   CodexAdapter,
   OpenClawAdapter,
+  MiMoCodeAdapter,
 } = require("./index");
 const { defaultLog, withScope } = require("./log");
 const { readBool } = require("./env");
@@ -35,6 +36,7 @@ async function main() {
   adapters.push(new ClaudeCodeAdapter({ log: withScope(defaultLog, "claude") }));
   adapters.push(new CodexAdapter({ log: withScope(defaultLog, "codex") }));
   adapters.push(new OpenClawAdapter({ log: withScope(defaultLog, "openclaw") }));
+  adapters.push(new MiMoCodeAdapter({ log: withScope(defaultLog, "mimocode") }));
 
   const bus = createAgentSessionBus({ adapters, log: withScope(defaultLog, "bus") });
   const port = await bus.start();

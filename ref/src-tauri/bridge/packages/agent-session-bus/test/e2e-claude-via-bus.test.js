@@ -23,6 +23,15 @@ const { createAgentSessionBus, ClaudeCodeAdapter } = require("../src/index");
 
 const FAKE_CLAUDE = path.join(__dirname, "fixtures", "fake-claude.js");
 
+function fakeClaudeEntryForHost(home) {
+  if (process.platform !== "win32") return FAKE_CLAUDE;
+  const shim = path.join(home, "fake-claude.cmd");
+  const nodePath = process.execPath.replace(/"/g, '""');
+  const scriptPath = FAKE_CLAUDE.replace(/"/g, '""');
+  fs.writeFileSync(shim, `@echo off\r\n"${nodePath}" "${scriptPath}" %*\r\n`, "utf8");
+  return shim;
+}
+
 test("end-to-end: bus → ClaudeCodeAdapter → fake-claude → SSE", async () => {
   // Use a hermetic HOME so resolveActive() (which walks ~/.claude/projects)
   // doesn't pick up the developer's actual claude session history when
@@ -34,7 +43,7 @@ test("end-to-end: bus → ClaudeCodeAdapter → fake-claude → SSE", async () =
     env: {
       ...process.env,
       HOME: tmpHome,
-      CLAUDE_CLI_PATH: FAKE_CLAUDE,
+      CLAUDE_CLI_PATH: fakeClaudeEntryForHost(tmpHome),
       FAKE_CLAUDE_REPLY: "改完了",
     },
     cwd: tmpHome,
@@ -88,6 +97,11 @@ test("end-to-end: bus → ClaudeCodeAdapter → fake-claude → SSE", async () =
     assert.match(done.data.sessionId, /^fake-sid-/);
   } finally {
     await bus.stop();
-    fs.rmSync(tmpHome, { recursive: true, force: true });
+    fs.rmSync(tmpHome, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
   }
 });

@@ -1,0 +1,60 @@
+name: Pet Manager source checks
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "ref/**"
+      - "scripts/prepare-desktop-resources.mjs"
+      - "skills/petui/**"
+      - ".github/workflows/pet-manager-desktop-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows source validation
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: ref
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ref/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:bridge
+      - run: npm run build:web
+      - run: npm run prepare:desktop
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  macos:
+    name: macOS source validation
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ref
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ref/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:bridge
+      - run: npm run build:web
+      - run: npm run prepare:desktop
+      - run: cargo check --manifest-path src-tauri/Cargo.toml

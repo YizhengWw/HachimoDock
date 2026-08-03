@@ -1,35 +1,151 @@
 {
   "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
   "vars": {
     "remaining_s": { "type": "int", "init": 1500 },
-    "completed_today": { "type": "int", "init": 0 }
+    "phase_total_s": { "type": "int", "init": 1500 },
+    "completed_sessions": { "type": "int", "init": 0 }
   },
-  "states": ["focus", "rest", "paused"],
+  "states": ["focus", "focus_paused", "rest", "rest_paused"],
   "initial_state": "focus",
   "transitions": [
-    { "from": "focus", "on": "tomato.start_pause", "to": "paused" },
-    { "from": "paused", "on": "tomato.start_pause", "to": "focus" },
-    { "from": "rest", "on": "tomato.start_pause", "to": "focus", "set": { "remaining_s": 1500 } },
-    { "from": "*", "on": "tomato.reset", "to": "focus", "set": { "remaining_s": 1500 } }
+    { "from": "focus", "on": "tomato.start_pause", "to": "focus_paused" },
+    { "from": "focus_paused", "on": "tomato.start_pause", "to": "focus" },
+    { "from": "rest", "on": "tomato.start_pause", "to": "rest_paused" },
+    { "from": "rest_paused", "on": "tomato.start_pause", "to": "rest" },
+    {
+      "from": "focus",
+      "on": "tomato.skip_phase",
+      "to": "rest",
+      "set": { "remaining_s": 300, "phase_total_s": 300 },
+      "inc": { "completed_sessions": 1 }
+    },
+    {
+      "from": "focus_paused",
+      "on": "tomato.skip_phase",
+      "to": "rest",
+      "set": { "remaining_s": 300, "phase_total_s": 300 },
+      "inc": { "completed_sessions": 1 }
+    },
+    {
+      "from": "rest",
+      "on": "tomato.skip_phase",
+      "to": "focus",
+      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+    },
+    {
+      "from": "rest_paused",
+      "on": "tomato.skip_phase",
+      "to": "focus",
+      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+    },
+    {
+      "from": "focus",
+      "on": "tomato.reset_phase",
+      "to": "focus",
+      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+    },
+    {
+      "from": "focus_paused",
+      "on": "tomato.reset_phase",
+      "to": "focus",
+      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+    },
+    {
+      "from": "rest",
+      "on": "tomato.reset_phase",
+      "to": "rest",
+      "set": { "remaining_s": 300, "phase_total_s": 300 }
+    },
+    {
+      "from": "rest_paused",
+      "on": "tomato.reset_phase",
+      "to": "rest",
+      "set": { "remaining_s": 300, "phase_total_s": 300 }
+    }
   ],
   "tick": [
-    { "every_ms": 1000, "while_state": "focus", "inc": { "remaining_s": -1 } },
-    { "every_ms": 1000, "while_state": "rest", "inc": { "remaining_s": -1 } }
+    {
+      "every_ms": 1000,
+      "while_state": "focus",
+      "inc": { "remaining_s": -1 },
+      "when": { "var": "remaining_s", "lte": 0 },
+      "then": {
+        "to": "rest",
+        "set": { "remaining_s": 300, "phase_total_s": 300 },
+        "inc": { "completed_sessions": 1 }
+      }
+    },
+    {
+      "every_ms": 1000,
+      "while_state": "rest",
+      "inc": { "remaining_s": -1 },
+      "when": { "var": "remaining_s", "lte": 0 },
+      "then": {
+        "to": "focus",
+        "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+      }
+    }
   ],
   "dashboard": {
     "title": "番茄钟",
-    "eyebrow": { "switch_state": { "focus": "专注阶段", "rest": "休息阶段", "paused": "暂停中" } },
-    "headline": { "switch_state": { "focus": "专注中", "rest": "喘口气", "paused": "已暂停" } },
-    "metricLabel": "剩余",
+    "eyebrow": {
+      "switch_state": {
+        "focus": "专注阶段",
+        "focus_paused": "专注已暂停",
+        "rest": "休息阶段",
+        "rest_paused": "休息已暂停"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "focus": "专注中",
+        "focus_paused": "暂停中",
+        "rest": "放松一下",
+        "rest_paused": "暂停中"
+      }
+    },
+    "metricLabel": "剩余时间",
     "metricValue": { "fmt_mmss": "remaining_s" },
     "metricUnit": "",
-    "badge": { "var": "completed_today" },
-    "note": "今日完成数显示在右上",
+    "badge": { "var": "completed_sessions" },
+    "note": {
+      "switch_state": {
+        "focus": "右上显示完成轮次",
+        "focus_paused": "计时已暂停",
+        "rest": "完成休息后继续专注",
+        "rest_paused": "休息计时已暂停"
+      }
+    },
     "footer": {
       "switch_state": {
-        "focus": "自动计时 · 点击暂停 · 长按重置",
-        "rest": "自动休息 · 点击切专注 · 长按重置",
-        "paused": "点击继续 · 长按重置"
+        "focus": "SW1暂停 · SW2跳过 · SW3重置",
+        "focus_paused": "SW1继续 · SW2跳过 · SW3重置",
+        "rest": "SW1暂停 · SW2跳过 · SW3重置",
+        "rest_paused": "SW1继续 · SW2跳过 · SW3重置"
+      }
+    },
+    "progress": {
+      "pct_of": "remaining_s",
+      "of_max": "phase_total_s",
+      "label": "本轮剩余"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_state": {
+        "focus": "sunset",
+        "focus_paused": "arcade",
+        "rest": "mint",
+        "rest_paused": "arcade"
+      }
+    },
+    "visualLayout": "tool",
+    "visualSprite": {
+      "switch_state": {
+        "focus": "timer",
+        "focus_paused": "star",
+        "rest": "coffee",
+        "rest_paused": "star"
       }
     }
   }

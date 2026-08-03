@@ -42,6 +42,7 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 |---|---|---|
 | 软件端 | [`ref/`](ref/) | Tauri 2 + React 桌面端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置、USB 下发和本地 bridge sidecar。 |
 | 固件端 / 设备运行时 | `esp-p4-runtime/` | ESP32-P4 固件。负责 MIPI 屏渲染、宠物动画、Session 气泡、按键与旋钮、语音采集、PetUI 组件和 USB 协议。 |
+| 兼容归档 | `legacy/board-runtime/` | 旧 Linux/Raspberry Pi 设备兼容源码，仅用于历史设备与回归测试；当前硬件不使用。 |
 | 硬件端 | [OSHWHub 硬件复刻页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) | PCB、BOM、结构/装配和硬件复刻资料。 |
 
 ## 图集

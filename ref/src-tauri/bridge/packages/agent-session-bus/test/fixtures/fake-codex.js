@@ -29,14 +29,17 @@
  *   FAKE_CODEX_REPLY      override reply text (default: "done")
  */
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
 
-if (args.length === 1 && args[0] === "--version") {
+if (rawArgs.length === 1 && rawArgs[0] === "--version") {
   const v = process.env.FAKE_CODEX_VERSION || "0.118.0";
   const stream = process.env.FAKE_CODEX_VERSION_STDERR === "1" ? process.stderr : process.stdout;
   stream.write(`codex-cli ${v}\n`);
   process.exit(0);
 }
+
+const args = rawArgs.slice();
+while (args[0] === "-c" && typeof args[1] === "string") args.splice(0, 2);
 
 if (args[0] === "app-server" && args[1] === "--listen" && args[2] === "stdio://") {
   let buffer = "";

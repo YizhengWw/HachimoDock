@@ -1,6 +1,13 @@
 "use strict";
 
-const { execSync } = require("child_process");
+/*
+ * [Input] Claude Code/Desktop transcript JSONL plus process availability.
+ * [Output] Per-session lifecycle cards with restart-safe, deduplicated cumulative token usage and latest-turn context fields.
+ * [Pos] Claude transcript monitor worker used by the managed status bridge.
+ * [Sync] If Claude transcript or token aggregation semantics change, update `ref/.folder.md`.
+ */
+
+const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -103,6 +110,7 @@ function extractTokenUsage(obj) {
   const outputTokens = readNumber(usage.output_tokens) ?? readNumber(usage.outputTokens);
   const cacheCreationInputTokens = readNumber(usage.cache_creation_input_tokens) ?? readNumber(usage.cacheCreationInputTokens);
   const cachedInputTokens = readNumber(usage.cache_read_input_tokens) ?? readNumber(usage.cached_input_tokens) ?? readNumber(usage.cachedInputTokens);
+  const reasoningOutputTokens = readNumber(usage.reasoning_output_tokens) ?? readNumber(usage.reasoningOutputTokens);
   const totalTokens = readNumber(usage.total_tokens) ?? readNumber(usage.totalTokens);
   const parts = [inputTokens, outputTokens, cachedInputTokens, cacheCreationInputTokens].filter(Number.isFinite);
   const normalized = {
@@ -110,9 +118,59 @@ function extractTokenUsage(obj) {
     outputTokens,
     cachedInputTokens,
     cacheCreationInputTokens,
+    reasoningOutputTokens,
     totalTokens: totalTokens ?? (parts.length ? parts.reduce((sum, value) => sum + value, 0) : undefined),
+    modelContextWindow: readNumber(usage.model_context_window) ?? readNumber(usage.modelContextWindow),
   };
   return Object.values(normalized).some(Number.isFinite) ? normalized : null;
+}
+
+function tokenUsageEventKey(obj) {
+  const candidates = [
+    ["message", obj?.message?.id],
+    ["request", obj?.requestId],
+    ["entry", obj?.uuid],
+  ];
+  for (const [kind, value] of candidates) {
+    if (typeof value === "string" && value.trim()) return `${kind}:${value.trim()}`;
+  }
+  return "";
+}
+
+function accumulateTokenUsage(entry, usage, obj) {
+  if (!entry || !usage) return false;
+  const eventKey = tokenUsageEventKey(obj);
+  if (eventKey && entry.tokenUsageEventIds.has(eventKey)) return false;
+  if (eventKey) entry.tokenUsageEventIds.add(eventKey);
+
+  const previous = entry.tokenUsage || {};
+  const next = { ...previous };
+  for (const field of [
+    "inputTokens",
+    "outputTokens",
+    "cachedInputTokens",
+    "cacheCreationInputTokens",
+    "reasoningOutputTokens",
+    "totalTokens",
+  ]) {
+    if (!Number.isFinite(usage[field])) continue;
+    next[field] = (Number.isFinite(previous[field]) ? previous[field] : 0) + usage[field];
+  }
+  for (const [lastField, usageField] of [
+    ["lastInputTokens", "inputTokens"],
+    ["lastOutputTokens", "outputTokens"],
+    ["lastCachedInputTokens", "cachedInputTokens"],
+    ["lastCacheCreationInputTokens", "cacheCreationInputTokens"],
+    ["lastReasoningOutputTokens", "reasoningOutputTokens"],
+    ["lastTotalTokens", "totalTokens"],
+  ]) {
+    if (Number.isFinite(usage[usageField])) next[lastField] = usage[usageField];
+  }
+  if (Number.isFinite(usage.modelContextWindow)) {
+    next.modelContextWindow = usage.modelContextWindow;
+  }
+  entry.tokenUsage = next;
+  return true;
 }
 
 function claudeProjectsRoot(env = process.env) {
@@ -128,11 +186,14 @@ class ClaudeLogMonitor {
     this.lastRunning = null;
     this.lastEmitMs = 0;
     this.tracked = new Map();
+    this.processProbeAt = 0;
+    this.processProbeInFlight = false;
   }
 
   start() {
     if (this.timer) return;
-    this.poll();
+    this.baselineExistingSessions();
+    this.pollProcessState();
     this.timer = setInterval(() => this.poll(), this.config.POLL_INTERVAL_MS);
     this.timer.unref?.();
   }
@@ -230,7 +291,7 @@ class ClaudeLogMonitor {
     };
   }
 
-  isRunningOnWindows() {
+  async isRunningOnWindows() {
     const processNames = new Set(
       (Array.isArray(this.config.PROCESS_NAMES_WIN) ? this.config.PROCESS_NAMES_WIN : [])
         .map((name) => String(name).trim().toLowerCase())
@@ -238,12 +299,11 @@ class ClaudeLogMonitor {
     );
     if (processNames.size === 0) return false;
 
-    try {
-      const output = execSync("tasklist /FO CSV /NH", {
-        encoding: "utf8",
-        timeout: 2000,
-        windowsHide: true,
-      });
+    const output = await execFileText("tasklist.exe", ["/FO", "CSV", "/NH"], {
+      timeout: 2000,
+      windowsHide: true,
+    });
+    if (output) {
       const lines = output.split(/\r?\n/);
       for (const line of lines) {
         const trimmed = line.trim();
@@ -252,12 +312,12 @@ class ClaudeLogMonitor {
         if (!match || !match[1]) continue;
         if (processNames.has(match[1].toLowerCase())) return true;
       }
-    } catch {}
+    }
 
     return false;
   }
 
-  isRunningOnUnix() {
+  async isRunningOnUnix() {
     const processNames = new Set(
       (Array.isArray(this.config.PROCESS_NAMES_UNIX) ? this.config.PROCESS_NAMES_UNIX : [])
         .map((name) => String(name).trim().toLowerCase())
@@ -265,35 +325,57 @@ class ClaudeLogMonitor {
     );
     if (processNames.size === 0) return false;
 
-    try {
-      const output = execSync("ps -A -o comm=", {
-        encoding: "utf8",
-        timeout: 2000,
-      });
+    const output = await execFileText("ps", ["-A", "-o", "comm="], { timeout: 2000 });
+    if (output) {
       const lines = output.split(/\r?\n/);
       for (const line of lines) {
         const command = path.basename(line.trim()).toLowerCase();
         if (!command) continue;
         if (processNames.has(command)) return true;
       }
-    } catch {}
+    }
 
     return false;
   }
 
-  isRunning() {
+  async isRunning() {
     if (process.platform === "win32") return this.isRunningOnWindows();
     return this.isRunningOnUnix();
   }
 
   poll() {
     this.pollSessions();
-    const running = this.isRunning();
+    this.pollProcessState();
+  }
+
+  pollProcessState() {
+    const now = Date.now();
+    const probeIntervalMs = Math.max(
+      1000,
+      Number(this.config.PROCESS_POLL_INTERVAL_MS) || 30000
+    );
+    if (this.processProbeInFlight || now - this.processProbeAt < probeIntervalMs) return;
+
+    this.processProbeAt = now;
+    this.processProbeInFlight = true;
+    Promise.resolve(this.isRunning())
+      .then((running) => this.updateRunningState(Boolean(running)))
+      .catch(() => this.updateRunningState(false))
+      .finally(() => {
+        this.processProbeInFlight = false;
+      });
+  }
+
+  updateRunningState(running) {
     const now = Date.now();
     const heartbeatMs = Math.max(1000, Number(this.config.HEARTBEAT_MS) || 30000);
     const changed = this.lastRunning === null || this.lastRunning !== running;
 
     this.lastRunning = running;
+    // Once a real transcript is known, its session-specific lifecycle must stay
+    // authoritative. A process heartbeat uses the synthetic claude:local id and
+    // would otherwise become the newest Auto target after every completed turn.
+    if (this.tracked.size > 0) return;
     if (!changed && (now - this.lastEmitMs) < heartbeatMs) return;
 
     this.lastEmitMs = now;
@@ -361,7 +443,7 @@ class ClaudeLogMonitor {
     const type = typeof obj.type === "string" ? obj.type : "";
     const role = obj.message && typeof obj.message.role === "string" ? obj.message.role : "";
     const usage = extractTokenUsage(obj);
-    if (usage) entry.tokenUsage = usage;
+    const tokenUsageChanged = accumulateTokenUsage(entry, usage, obj);
 
     if (type === "summary" && typeof obj.summary === "string" && obj.summary.trim()) {
       entry.sessionTitle = compactText(obj.summary, 120);
@@ -401,7 +483,7 @@ class ClaudeLogMonitor {
       return;
     }
 
-    if (usage) {
+    if (tokenUsageChanged) {
       this.emit(entry, entry.lastState || "done", "claude:token_count");
     }
   }
@@ -414,6 +496,7 @@ class ClaudeLogMonitor {
       sessionId: fileName.replace(/\.jsonl$/, ""),
       cwd: "",
       tokenUsage: null,
+      tokenUsageEventIds: new Set(),
       sessionTitle: "",
       firstUserMessage: "",
       lastUserMessage: "",
@@ -427,12 +510,47 @@ class ClaudeLogMonitor {
     };
   }
 
-  trackFileBaseline(filePath, fileName) {
+  seedEntryTokenUsage(filePath, entry) {
+    let contents;
+    try {
+      contents = fs.readFileSync(filePath, "utf8");
+    } catch {
+      return;
+    }
+
+    for (const rawLine of contents.split("\n")) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!obj || typeof obj !== "object") continue;
+      entry.sessionId = extractSessionId(obj, entry.sessionId);
+      accumulateTokenUsage(entry, extractTokenUsage(obj), obj);
+    }
+  }
+
+  trackFileBaseline(filePath, fileName, seedTokenUsage = false) {
     if (this.tracked.has(filePath)) return;
     try {
       const stat = fs.statSync(filePath);
-      this.tracked.set(filePath, this.createEntry(fileName, stat.size, false));
+      const entry = this.createEntry(fileName, stat.size, false);
+      if (seedTokenUsage) this.seedEntryTokenUsage(filePath, entry);
+      this.tracked.set(filePath, entry);
     } catch {}
+  }
+
+  baselineExistingSessions() {
+    const files = this.listSessionFiles();
+    const now = Date.now();
+    const maxAgeMs = Math.max(1000, Number(this.config.NEW_FILE_MAX_AGE_MS) || 120000);
+    for (const [index, file] of files.entries()) {
+      const seedTokenUsage = index === 0 || now - file.mtimeMs <= maxAgeMs;
+      this.trackFileBaseline(file.filePath, file.fileName, seedTokenUsage);
+    }
   }
 
   pollFile(filePath, fileName) {
@@ -499,6 +617,18 @@ class ClaudeLogMonitor {
       if (!fs.existsSync(filePath)) this.tracked.delete(filePath);
     }
   }
+}
+
+function execFileText(file, args, options) {
+  return new Promise((resolve) => {
+    execFile(file, args, {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      ...options,
+    }, (error, stdout) => {
+      resolve(error ? "" : String(stdout || ""));
+    });
+  });
 }
 
 module.exports = ClaudeLogMonitor;

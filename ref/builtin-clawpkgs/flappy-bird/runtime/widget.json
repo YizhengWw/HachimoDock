@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "result"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "flappy.flap",
+      "to": "playing"
+    }
+  ],
+  "tick": [],
+  "game": {
+    "type": "flappy",
+    "tick_ms": 100,
+    "playing_state": "playing",
+    "result_state": "result",
+    "score_var": "score",
+    "actions": {
+      "flap": "flappy.flap"
+    }
+  },
+  "dashboard": {
+    "title": "像素飞鸟",
+    "headline": {
+      "switch_state": {
+        "ready": "SW1 拍翅开始",
+        "playing": "穿过管道",
+        "result": "撞到了！"
+      }
+    },
+    "metricLabel": "得分",
+    "metricValue": {
+      "var": "score"
+    },
+    "footer": {
+      "switch_state": {
+        "ready": "SW1 拍翅 · 长按退出",
+        "playing": "SW1 拍翅 · 长按退出",
+        "result": "SW1 重开 · 长按退出"
+      }
+    },
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_state": {
+        "ready": "arcade",
+        "playing": "mint",
+        "result": "sunset"
+      }
+    },
+    "visualLayout": "arcade",
+    "visualSprite": {
+      "switch_state": {
+        "ready": "flappy",
+        "playing": "flappy",
+        "result": "trophy"
+      }
+    }
+  }
+}

@@ -1,9 +1,8 @@
 /**
- * [Input] An appearanceId persisted by `lib/appearance-store.js`.
- * [Output] Preview-first appearance workspace, sticky current-state controls, contextual details drawer,
+ * [Input] An appearanceId persisted by `lib/appearance-store.js` plus centralized API-settings navigation.
+ * [Output] Preview-first wide appearance workspace, unified sticky current-state inspector, full-width state rail, contextual details drawer,
  *          configurable per-family WAV cue overrides, direct per-state MP4 replacement,
- *          background single-state image+prompt regeneration that only replaces the client video
- *          before manual board downlink, inline progress, and full known-state rail.
+ *          background single-state image+prompt regeneration with read-only provider credential readiness, inline progress, cancellable exact-board USB appearance transfer, and full known-state rail.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -19,6 +18,7 @@ import {
   UploadCloud,
   Volume2,
   ImageUp,
+  X,
 } from "lucide-react";
 import {
   deleteAppearance,
@@ -42,8 +42,13 @@ import {
   loadProviderConfig,
   saveProviderConfig,
 } from "./lib/avatar-pipeline/provider-config.js";
+import {
+  API_CONFIGURATION_UPDATED_EVENT,
+  providerCredentialsConfigured,
+} from "./lib/api-configuration.js";
 import { AvatarWizardStep1, AvatarWizardStep2 } from "./CustomAvatarWizard.jsx";
-import { hasTauriRuntime } from "./lib/tauri-env.js";
+import { APPEARANCE_SYNC_CANCELLED_MESSAGE } from "./lib/desktop-pet-assignment.js";
+import Button from "./shell/Button.jsx";
 
 const AUDIO_SYNC_DIRTY_PREFIX = "pet-manager.appearance-audio-dirty.";
 
@@ -51,6 +56,10 @@ function appearanceSourceLabel(record) {
   if (record.type === "builtin") return "内置形象";
   if (record.type === "codex-import") return "codex pet";
   return "自定义形象";
+}
+
+function hasTauriRuntime() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
 function dirtyStorageKey(appearanceId) {
@@ -133,7 +142,7 @@ function singleStateProgressFromPipeline(progress, fallbackFamily) {
   return { label: "生成中", percent: 24, message, tone: "running" };
 }
 
-export default function AppearanceDetail({ appearanceId, onBack }) {
+export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onBack, onOpenApiSettings }) {
   const [record, setRecord] = useState(null);
   const [error, setError] = useState("");
   const [activeFamily, setActiveFamily] = useState("");
@@ -143,14 +152,15 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [stateVideoState, setStateVideoState] = useState("idle");
   const [stateVideoMessage, setStateVideoMessage] = useState("");
   const [audioSyncDirty, setAudioSyncDirty] = useState(() => readAudioSyncDirty(appearanceId));
-  const [audioSyncState, setAudioSyncState] = useState("idle"); // idle | syncing | success | error
+  const [audioSyncState, setAudioSyncState] = useState("idle"); // idle | syncing | success | cancelled | error
   const [audioSyncMessage, setAudioSyncMessage] = useState("");
+  const [appearanceCancelPending, setAppearanceCancelPending] = useState(false);
   const [deleteState, setDeleteState] = useState("idle"); // idle | confirm | deleting
   const [deleteError, setDeleteError] = useState("");
   const [singleStateImageFile, setSingleStateImageFile] = useState(null);
   const [singleStateImagePreview, setSingleStateImagePreview] = useState("");
   const [singleStatePrompt, setSingleStatePrompt] = useState("");
-  const [singleStateStatus, setSingleStateStatus] = useState("idle"); // idle | generating | success | error | syncing | synced
+  const [singleStateStatus, setSingleStateStatus] = useState("idle"); // idle | generating | success | error | syncing | synced | cancelled
   const [singleStateMessage, setSingleStateMessage] = useState("");
   const [singleStateProgress, setSingleStateProgress] = useState(null);
   const [singleStateDialogOpen, setSingleStateDialogOpen] = useState(false);
@@ -171,7 +181,6 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [openaiCompat, setOpenaiCompat] = useState(true);
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
-  const [testFeedback, setTestFeedback] = useState(null);
   const [removeBg, setRemoveBg] = useState(true);
   const [fastGeneration, setFastGeneration] = useState(true);
 
@@ -231,7 +240,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     }
   }, [record?.provider]);
 
-  useEffect(() => {
+  const refreshProviderConfig = useCallback(() => {
     const saved = loadProviderConfig(providerId);
     setApiKey(saved.apiKey);
     setAccessKey(saved.accessKey);
@@ -241,8 +250,18 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     setThinkingModel(saved.thinkingModel);
     setFastGeneration(saved.fastGeneration);
     setAdvanced(saved.advanced);
-    setTestFeedback(null);
   }, [providerId]);
+
+  useEffect(() => {
+    refreshProviderConfig();
+  }, [refreshProviderConfig]);
+
+  useEffect(() => {
+    window.addEventListener(API_CONFIGURATION_UPDATED_EVENT, refreshProviderConfig);
+    return () => {
+      window.removeEventListener(API_CONFIGURATION_UPDATED_EVENT, refreshProviderConfig);
+    };
+  }, [refreshProviderConfig]);
 
   useEffect(() => {
     if (!singleStateImageFile) {
@@ -454,7 +473,10 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     setAudioSyncState("syncing");
     setAudioSyncMessage("正在通过板端音效 OTA 通道下发 WAV...");
     try {
-      const result = await invoke("usb_sync_appearance", { appearanceId: record.id });
+      const result = await invoke("usb_sync_appearance", {
+        appearanceId: record.id,
+        boardDeviceId,
+      });
       if (!result?.ok) {
         throw new Error(result?.error || "设备未确认提示音下发");
       }
@@ -466,15 +488,19 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       );
     } catch (syncFailure) {
       console.error(syncFailure);
-      setAudioSyncState("error");
-      setAudioSyncMessage(syncFailure?.message || String(syncFailure));
+      const message = syncFailure?.message || String(syncFailure);
+      const cancelled = message.includes(APPEARANCE_SYNC_CANCELLED_MESSAGE);
+      setAudioSyncState(cancelled ? "cancelled" : "error");
+      setAudioSyncMessage(cancelled ? "形象素材传输已中断，设备继续保留原素材。" : message);
+    } finally {
+      setAppearanceCancelPending(false);
     }
-  }, [audioSyncState, record]);
+  }, [audioSyncState, boardDeviceId, record]);
 
   const singleStateGenerationReadyIssue = useMemo(() => {
     if (providerId === "kling") {
       if (!accessKey.trim() || !secretKey.trim()) {
-        return "请先填写 Kling Access Key 和 Secret Key。";
+        return "请先在 API 配置中保存 Kling Access Key 和 Secret Key。";
       }
       if (!baseUrl.trim() || !model.trim()) {
         return "请先填写接口地址和视频生成模型。";
@@ -483,9 +509,9 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     }
 
     if (isVolcengine && (!apiKey.trim() || !model.trim())) {
-      return "请先填写 API Key 和视频生成模型。";
+      return "请先在 API 配置中保存火山引擎 API Key，并选择视频生成模型。";
     }
-    if (!apiKey.trim()) return "请先填写 API Key。";
+    if (!apiKey.trim()) return "请先在 API 配置中保存当前服务的 API Key。";
     if (!baseUrl.trim() || !model.trim()) return "请先填写接口地址和视频生成模型。";
     return "";
   }, [providerId, accessKey, secretKey, apiKey, baseUrl, model, isVolcengine]);
@@ -502,37 +528,6 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       advanced,
     });
   }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, advanced]);
-
-  const handleSingleStateTestConnection = useCallback(() => {
-    const key = providerId === "kling" ? accessKey.trim() : apiKey.trim();
-    const normalizedBaseUrl = baseUrl.trim();
-    if (isVolcengine) {
-      if (!key) {
-        setTestFeedback({ tone: "warning", text: "请先填写 API Key。" });
-        return;
-      }
-      setTestFeedback({
-        tone: "success",
-        text: `火山 Ark 地址已固定，请求会发送到 ${VOLCENGINE_BASE_URL}`,
-      });
-      return;
-    }
-    if (!key || !normalizedBaseUrl) {
-      setTestFeedback({ tone: "warning", text: "请先填写 API Key 和 Base URL。" });
-      return;
-    }
-    try {
-      const url = new URL(
-        /^https?:\/\//i.test(normalizedBaseUrl) ? normalizedBaseUrl : `https://${normalizedBaseUrl}`,
-      );
-      setTestFeedback({
-        tone: "success",
-        text: `基础地址校验通过，请求会发送到 ${url.origin}`,
-      });
-    } catch {
-      setTestFeedback({ tone: "danger", text: "Base URL 格式不正确。" });
-    }
-  }, [providerId, apiKey, accessKey, baseUrl, isVolcengine]);
 
   const handleSingleStateFile = useCallback((file) => {
     if (!file) return;
@@ -651,7 +646,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       });
       setRecord(nextRecord);
       setSingleStateStatus("success");
-      const successMessage = `已替换 ${activeRecord.family} 状态视频文件，已保存到客户端。`;
+      const successMessage = `已替换 ${activeRecord.family} 状态素材。需要在设备生效时，点击“替换到板端”。`;
       setSingleStateMessage(successMessage);
       setSingleStateProgress({
         label: "客户端素材已替换",
@@ -701,7 +696,10 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
     setStateVideoMessage("正在通过素材 OTA 通道替换到板端…");
     setSingleStateProgress(null);
     try {
-      const result = await invoke("usb_sync_appearance", { appearanceId: record.id });
+      const result = await invoke("usb_sync_appearance", {
+        appearanceId: record.id,
+        boardDeviceId,
+      });
       if (!result?.ok) {
         throw new Error(result?.error || "设备未确认素材替换");
       }
@@ -712,13 +710,41 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
       setStateVideoMessage(message);
     } catch (syncFailure) {
       console.error(syncFailure);
-      setSingleStateStatus("error");
       const message = syncFailure?.message || String(syncFailure);
-      setSingleStateMessage(message);
-      setStateVideoState("error");
-      setStateVideoMessage(message);
+      const cancelled = message.includes(APPEARANCE_SYNC_CANCELLED_MESSAGE);
+      setSingleStateStatus(cancelled ? "cancelled" : "error");
+      setSingleStateMessage(
+        cancelled ? "形象素材传输已中断，设备继续保留原素材。" : message,
+      );
+      setStateVideoState(cancelled ? "success" : "error");
+      setStateVideoMessage(
+        cancelled ? "传输已中断；客户端素材仍已保存，可再次替换到板端。" : message,
+      );
+    } finally {
+      setAppearanceCancelPending(false);
     }
-  }, [record, singleStateStatus]);
+  }, [boardDeviceId, record, singleStateStatus]);
+
+  const handleCancelAppearanceSync = useCallback(async () => {
+    if (appearanceCancelPending) return;
+    setAppearanceCancelPending(true);
+    try {
+      const result = await invoke("usb_cancel_appearance_sync");
+      if (!result?.requested) {
+        setAppearanceCancelPending(false);
+      }
+    } catch (cancelFailure) {
+      console.error(cancelFailure);
+      setAppearanceCancelPending(false);
+      const message = cancelFailure?.message || String(cancelFailure);
+      if (audioSyncState === "syncing") {
+        setAudioSyncMessage(`无法中断传输：${message}`);
+      }
+      if (singleStateStatus === "syncing") {
+        setSingleStateMessage(`无法中断传输：${message}`);
+      }
+    }
+  }, [appearanceCancelPending, audioSyncState, singleStateStatus]);
 
   if (error) {
     return (
@@ -759,10 +785,14 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
   const audioInputId = `audio-cue-${record.id}-${activeFamily || "none"}`;
   const stateVideoInputId = `state-video-${record.id}-${activeFamily || "none"}`;
   const singleStateBusy = singleStateStatus === "generating" || singleStateStatus === "syncing";
+  const usbAppearanceSyncing =
+    audioSyncState === "syncing" || singleStateStatus === "syncing";
   const stateVideoBusy = stateVideoState === "saving";
   const canUploadStateVideo = Boolean(activeRecord) && !isBuiltin && !singleStateBusy && !stateVideoBusy;
   const canRegenerateState = activeRecord?.ok && !isBuiltin && !singleStateBusy;
-  const canSyncSingleState = !isBuiltin && (singleStateStatus === "success" || singleStateStatus === "synced");
+  const canSyncSingleState =
+    !isBuiltin &&
+    ["success", "synced", "cancelled"].includes(singleStateStatus);
   const singleStateStartIssue = !singleStateImageFile
     ? "请先上传当前状态的参考图片。"
     : !singleStatePrompt.trim()
@@ -771,53 +801,70 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
 
   return (
     <div className="page page-appearance-detail">
-      <div className="page-toolbar">
-        <button className="btn-ghost" onClick={onBack}>
-          <ArrowLeft size={16} />
-          返回宠物图册
-        </button>
-        <span className="grow" />
-        {audioSyncDirty && (
-          <button
-            className="btn-primary detail-audio-sync-btn"
-            type="button"
-            onClick={handleSyncAudioCues}
-            disabled={audioSyncState === "syncing"}
-            title="通过板端音效 OTA 通道下发当前 WAV"
-          >
-            {audioSyncState === "syncing" ? (
-              <Loader size={14} className="spin" />
-            ) : (
+      <header className="detail-page-header">
+        <div className="detail-page-header__copy">
+          <button className="btn-link detail-page-header__back" onClick={onBack}>
+            <ArrowLeft size={16} />
+            返回宠物图册
+          </button>
+          <div className="detail-page-header__title-row">
+            <h1>{record.name}</h1>
+            <span className="pill pill--accent">{appearanceSourceLabel(record)}</span>
+          </div>
+          <p>
+            管理 {stateFamilyRecords.length} 个动作状态，选择素材后可预览视频、配置提示音或替换内容。
+          </p>
+        </div>
+        <div className="detail-page-header__actions">
+          {usbAppearanceSyncing ? (
+            <Button
+              className="detail-audio-sync-btn"
+              variant="danger"
+              loading={appearanceCancelPending}
+              loadingLabel="正在中断…"
+              onClick={handleCancelAppearanceSync}
+              aria-label="中断 USB 形象传输"
+            >
+              <X size={14} />
+              中断传输
+            </Button>
+          ) : audioSyncDirty && (
+            <Button
+              className="detail-audio-sync-btn"
+              variant="primary"
+              onClick={handleSyncAudioCues}
+              title="通过板端音效 OTA 通道下发当前 WAV"
+            >
               <UploadCloud size={14} />
-            )}
-            {audioSyncState === "syncing" ? "下发中..." : "下发音效"}
-          </button>
-        )}
-        {!isBuiltin && (
-          <button
-            className="btn-ghost danger"
-            onClick={handleDelete}
-            disabled={deleteState === "deleting"}
-          >
-            {deleteState === "deleting" ? (
-              <>
-                <Loader size={14} className="spin" />
-                删除中…
-              </>
-            ) : deleteState === "confirm" ? (
-              <>
-                <Trash2 size={14} />
-                确认删除？
-              </>
-            ) : (
-              <>
-                <Trash2 size={14} />
-                删除形象
-              </>
-            )}
-          </button>
-        )}
-      </div>
+              下发音效
+            </Button>
+          )}
+          {!isBuiltin && (
+            <button
+              className="btn-ghost danger"
+              onClick={handleDelete}
+              disabled={deleteState === "deleting"}
+            >
+              {deleteState === "deleting" ? (
+                <>
+                  <Loader size={14} className="spin" />
+                  删除中…
+                </>
+              ) : deleteState === "confirm" ? (
+                <>
+                  <Trash2 size={14} />
+                  确认删除？
+                </>
+              ) : (
+                <>
+                  <Trash2 size={14} />
+                  删除形象
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </header>
 
       {deleteError && (
         <div className="message-banner message-banner--error">
@@ -836,15 +883,12 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                 playing
               />
             ) : (
-              <div
-                className="detail-media__video"
-                style={{ display: "grid", placeItems: "center", color: "#888", background: "#f4f5f7" }}
-              >
+              <div className="detail-media__video detail-media__video--empty-state">
                 {generatedFamilies.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: 16 }}>
+                  <div className="detail-media__empty-copy">
                     <AlertCircle size={28} />
-                    <div style={{ marginTop: 8 }}>暂无可用动画素材</div>
-                    <div className="muted small" style={{ marginTop: 4, maxWidth: 360 }}>
+                    <strong>暂无可用动画素材</strong>
+                    <div className="muted small">
                       这个形象没有成功生成的 family，请返回宠物图册重新创建。
                     </div>
                   </div>
@@ -1073,7 +1117,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                 </div>
                 <div className="detail-state-regenerate-entry__actions">
                   <button
-                    className="btn-ghost"
+                    className="detail-state-regenerate-entry__cta"
                     type="button"
                     onClick={handleOpenSingleStateDialog}
                     disabled={!canRegenerateState}
@@ -1126,7 +1170,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
           <h2>{record.name}</h2>
           {record.description && <div className="detail-summary-card__description">{record.description}</div>}
           <div className="detail-summary-card__meta">
-            <span className="pill" style={{ background: "var(--accent-soft)", color: "var(--accent-strong)" }}>
+            <span className="pill pill--accent">
               {appearanceSourceLabel(record)}
             </span>
             <span className="muted small">
@@ -1155,7 +1199,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                   单状态重生成
                 </h3>
                 <div className="modal-subtitle">
-                  当前状态：{activeRecord.family}。关闭弹窗不会取消生成，完成后只替换客户端视频文件；需要设备生效时，关闭弹窗后手动点击“替换到板端”。
+                  当前状态：{activeRecord.family}。关闭弹窗不会取消生成，完成后会先替换客户端素材，再由“替换到板端”下发。
                 </div>
               </div>
               <button
@@ -1216,12 +1260,12 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                 {singleStateStep === 1 && (
                   <AvatarWizardStep2
                     providerId={providerId}
-                    apiKey={apiKey}
-                    onApiKey={setApiKey}
-                    accessKey={accessKey}
-                    onAccessKey={setAccessKey}
-                    secretKey={secretKey}
-                    onSecretKey={setSecretKey}
+                    credentialConfigured={providerCredentialsConfigured(providerId, {
+                      apiKey,
+                      accessKey,
+                      secretKey,
+                    })}
+                    onOpenApiSettings={onOpenApiSettings}
                     baseUrl={baseUrl}
                     onBaseUrl={setBaseUrl}
                     model={model}
@@ -1232,9 +1276,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                     onOpenaiCompat={setOpenaiCompat}
                     advanced={advanced}
                     onAdvanced={setAdvanced}
-                    testFeedback={testFeedback}
                     onPickProvider={setProviderId}
-                    onTestConnection={handleSingleStateTestConnection}
                     canStart={!singleStateStartIssue && canRegenerateState}
                     generationReadyIssue={singleStateStartIssue}
                     submitError={singleStateStatus === "error" ? singleStateMessage : ""}
@@ -1250,7 +1292,7 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
                         : null
                     }
                     title={`第 2 步 · 生成 ${activeRecord.family}`}
-                    startLabel="生成并替换客户端视频"
+                    startLabel="生成并替换当前状态"
                   />
                 )}
 
@@ -1276,6 +1318,27 @@ export default function AppearanceDetail({ appearanceId, onBack }) {
               >
                 关闭
               </button>
+              {singleStateStatus === "syncing" ? (
+                <Button
+                  variant="danger"
+                  loading={appearanceCancelPending}
+                  loadingLabel="正在中断…"
+                  onClick={handleCancelAppearanceSync}
+                  aria-label="中断 USB 形象传输"
+                >
+                  <X size={14} />
+                  中断传输
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={handleSyncSingleStateToDevice}
+                  disabled={!canSyncSingleState || singleStateBusy}
+                >
+                  <UploadCloud size={14} />
+                  替换到板端
+                </Button>
+              )}
             </div>
           </div>
         </div>

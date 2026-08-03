@@ -1,8 +1,10 @@
 node_modules/
 dist/
 target/
+release/
 .worktrees/
 .dev-logs/
+.tooling/
 .vibe-refactor/
 *.dmg
 test-results/
@@ -15,6 +17,8 @@ pet-claw/.env
 pet-claw/claw-on-desk/
 ref/src-tauri/bundle-secrets.env
 ref/src-tauri/bridge/runtime/node.exe
+ref/src-tauri/bridge/runtime/node
+ref/src-tauri/generated-runtime/
 board-runtime/build-armhf/
 board-runtime/build-aarch64/
 board-runtime/scripts/legacy-t113/build-armhf/
@@ -28,3 +32,27 @@ output/playstyle-assets-v2/
 # Generated anchor-image metadata may contain signed remote URLs; keep out of VCS.
 pet-claw/src/assets/pets/**/generated-anchor-images/
 **/generated-anchor-images/
+
+# ESP32-P4 local build and debug artifacts
+esp-p4-runtime/.pio/
+esp-p4-runtime/build/
+esp-p4-runtime/managed_components/
+esp-p4-runtime/sdkconfig.*
+!esp-p4-runtime/sdkconfig.defaults
+esp-p4-runtime/*.map
+ref/tauri-dev.log
+ref/tmp/
+
+# Local verification output and generated caches
+artifacts/
+.pytest_tmp/
+**/__pycache__/
+esp-p4-runtime/main/pet_p4_build_info.h
+findings.md
+progress.md
+task_plan.md
+
+# Keep only the factory-pinned ready pack in source control. Older local
+# quality experiments remain reproducible from the tracked MP4/WAV sources.
+ref/public/terrier-clips/p4-ready/*
+!ref/public/terrier-clips/p4-ready/v9-640x480-15fps-225f-h264-crf27/

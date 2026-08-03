@@ -1,6 +1,6 @@
 /**
  * [Input] Return callback for the app-level community import help surface.
- * [Output] In-app standalone explanation page for community/Codex pet imports.
+ * [Output] In-app standalone explanation page for community/Codex pet imports, using user-relative platform paths.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -115,7 +115,7 @@ export default function CommunityImportHelp({ onBack }) {
       <section className="help-section">
         <h2>5. 默认目录与排查</h2>
         <p>Windows 上常见的默认目录是：</p>
-        <div className="help-code">C:\Users\&lt;你的用户名&gt;\.codex\pets</div>
+        <div className="help-code">%USERPROFILE%\.codex\pets</div>
         <p>
           如果导入不到，先确认宠物资源是否真的在这个目录下，再回到 Pet Manager 重新扫描。
         </p>

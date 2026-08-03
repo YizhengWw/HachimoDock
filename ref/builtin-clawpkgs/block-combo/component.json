@@ -1,0 +1,8 @@
+{
+  "id": "block-combo",
+  "name": "像素方块",
+  "kind": "game",
+  "version": "2.1.0",
+  "author": "openclaw",
+  "description": "会自动下落、移动、旋转、落下和消行的板端像素方块游戏。"
+}

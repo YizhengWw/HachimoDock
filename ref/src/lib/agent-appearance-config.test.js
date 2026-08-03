@@ -1,6 +1,6 @@
 /**
  * [Input] Agent-to-appearance assignment helper.
- * [Output] Node regression coverage for per-channel appearance binding plus single active desktop-channel behavior.
+ * [Output] Node regression coverage for stable ChatGPT（Codex）/Claude labels, default ordering/selection, per-channel appearance binding, and single active desktop-channel behavior.
  * [Pos] test node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -11,7 +11,9 @@ import {
   activeDesktopAssignment,
   assignAppearanceToAgent,
   assignedAgentIds,
+  DEFAULT_AGENT_ID,
   ENABLED_AGENTS_STORAGE_KEY,
+  FIXED_AGENT_OPTIONS,
   loadEnabledAgents,
   normalizeDetectedAgents,
   pickFirstDetectedAgentId,
@@ -30,6 +32,18 @@ function installStorage(initial = {}) {
   };
   return values;
 }
+
+test("the four fixed Agents put ChatGPT（Codex） first and use it as the first-run default", () => {
+  assert.equal(DEFAULT_AGENT_ID, "codex");
+  assert.deepEqual(
+    FIXED_AGENT_OPTIONS.map((agent) => agent.id),
+    ["codex", "claude-code", "openclaw", "mimocode"],
+  );
+  assert.deepEqual(
+    FIXED_AGENT_OPTIONS.slice(0, 2).map((agent) => agent.label),
+    ["ChatGPT（Codex）", "Claude"],
+  );
+});
 
 test("assignAppearanceToAgent keeps one channel bound to at most one appearance", () => {
   const next = assignAppearanceToAgent(
@@ -115,10 +129,14 @@ test("loadEnabledAgents keeps legacy values to a single active channel", () => {
 test("normalizeDetectedAgents marks unavailable channels as not bindable", () => {
   const agents = normalizeDetectedAgents([
     { id: "codex", label: "Codex", detected: true, detail: "installed" },
+    { id: "claude-code", label: "Claude Code", detected: true, detail: "installed" },
   ]);
 
   assert.equal(agents.find((agent) => agent.id === "codex")?.detected, true);
+  assert.equal(agents.find((agent) => agent.id === "codex")?.label, "ChatGPT（Codex）");
+  assert.equal(agents.find((agent) => agent.id === "claude-code")?.label, "Claude");
   assert.equal(agents.find((agent) => agent.id === "openclaw")?.detected, false);
+  assert.equal(agents.find((agent) => agent.id === "mimocode")?.detected, false);
 });
 
 test("toSingleAgentSet respects stored order without preferring any specific agent", () => {

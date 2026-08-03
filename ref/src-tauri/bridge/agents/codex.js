@@ -10,6 +10,9 @@
 const os = require("os");
 const path = require("path");
 
+const POLL_INTERVAL_MS = 1500;
+const DISCOVERY_INTERVAL_MS = process.platform === "win32" ? 30000 : POLL_INTERVAL_MS;
+
 function envPath(name) {
   const value = process.env[name];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : "";
@@ -38,12 +41,16 @@ function resolveSessionIndexPath() {
 module.exports = {
   SESSION_DIR: resolveSessionDir(),
   SESSION_INDEX_PATH: resolveSessionIndexPath(),
-  POLL_INTERVAL_MS: 1500,
+  POLL_INTERVAL_MS,
+  DISCOVERY_INTERVAL_MS,
+  FULL_TREE_DISCOVERY_INTERVAL_MS: 30000,
+  WATCHED_TREE_DISCOVERY_INTERVAL_MS: 5 * 60 * 1000,
+  WATCH_FILES: true,
   STALE_TIMEOUT_MS: 300000,
   NEW_FILE_MAX_AGE_MS: 120000,
   INITIAL_TAIL_BYTES: 1048576,
-  // Codex desktop can keep appending to an older rollout file for days.
-  // Keep a wider scan window so long-running threads are still detected.
+  // Per-day fallback watchers stay bounded; recursive root watching and the
+  // low-frequency full-tree metadata pass cover arbitrarily old resumed tasks.
   LOOKBACK_DAYS: 30,
   LOG_EVENT_MAP: {
     session_meta: "idle",

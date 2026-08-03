@@ -1,6 +1,7 @@
 /**
  * [Input] Raw provider and per-family generation errors.
- * [Output] Node regression coverage for concise, actionable avatar-generation failure messages.
+ * [Output] Node regression coverage for concise, actionable avatar-generation failure messages,
+ *          including macOS WebView background-removal model load failures.
  * [Pos] test node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -52,5 +53,17 @@ test("raw provider errors are translated into product-level guidance", () => {
   assert.match(
     normalizeGenerationErrorMessage('volcano submit HTTP 401: {"error":{"message":"invalid api key"}}'),
     /API Key 无效或已过期/,
+  );
+
+  assert.match(
+    normalizeGenerationErrorMessage("Load failed"),
+    /自动去背景模型加载失败/,
+  );
+
+  assert.match(
+    normalizeGenerationErrorMessage(
+      'Failed to create session: "Error: no available backend found. ERR: [wasm] TypeError: Importing a module script failed.".',
+    ),
+    /自动去背景模型加载失败/,
   );
 });

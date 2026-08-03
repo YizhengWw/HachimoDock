@@ -1,6 +1,6 @@
 /**
- * [Input] Current desktop-pet channel map, active appearance, selected appearance, Tauri invoke/listen adapters, device reachability, and agent labels.
- * [Output] Shared "set as desktop pet" workflow that syncs appearance assets only when the selected appearance changes, explains USB sync failures before cancelling real appearance changes, skips asset re-pushes for pure follow-channel switches, clears the previous followed source, requires USB for appearance changes, updates device follow-source binding, and keeps one active channel.
+ * [Input] Current desktop-pet channel map, active appearance, selected appearance, Tauri invoke/listen adapters, verified USB status, and agent labels.
+ * [Output] Shared "set as desktop pet" workflow that syncs appearance assets to the exact bound board only when the selected appearance changes, reports instant P4 A/B-slot cache reuse, explains USB sync failures before cancelling real appearance changes, skips asset re-pushes for pure follow-channel switches, clears the previous followed source, requires USB for every follow change, idempotently re-dispatches the requested binding over USB after any successful asset step, and keeps one active channel.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md` and UI callers that set desktop pets.
  */
@@ -17,7 +17,8 @@ export const ACTIVE_APPEARANCE_KEY = "pet-manager:active-appearance-id";
 export const APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE =
   "当前渠道配置的形象与设备端当前形象不一致，请先连接 USB 线后再切换渠道和形象。";
 export const CHANNEL_SWITCH_DEVICE_REQUIRED_MESSAGE =
-  "请先连接设备（USB 直连或设备在线）后再切换设备跟随渠道。";
+  "切换跟随需要 USB 连接，请连接设备后重试。";
+export const APPEARANCE_SYNC_CANCELLED_MESSAGE = "形象素材传输已中断";
 
 export function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -34,7 +35,6 @@ export async function applyDesktopPetAssignment({
   agentOptions,
   boardDeviceId,
   currentAppearanceId = "",
-  deviceOnline = false,
   onProgress,
 }) {
   if (!appearance?.id || !agentId) {
@@ -66,7 +66,7 @@ export async function applyDesktopPetAssignment({
     throw new Error(APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE);
   }
 
-  if (!appearanceChanged && !shouldSyncOverUsb && !deviceOnline) {
+  if (!shouldSyncOverUsb) {
     throw new Error(CHANNEL_SWITCH_DEVICE_REQUIRED_MESSAGE);
   }
 
@@ -108,13 +108,21 @@ export async function applyDesktopPetAssignment({
       })
       : () => {};
     try {
-      const result = await invoke("usb_sync_appearance", { appearanceId: appearance.id });
+      const result = await invoke("usb_sync_appearance", {
+        appearanceId: appearance.id,
+        boardDeviceId,
+      });
       if (!result?.ok) {
         throw new Error(result?.error || "同步失败");
       }
-      notice = `已将「${appearance.name}」设为 ${channelLabel} 渠道桌宠，并通过 USB 同步 ${result?.fileCount || 0} 个素材 (${formatBytes(result?.byteCount || 0)})`;
+      notice = result?.reusedSlot
+        ? `已将「${appearance.name}」设为 ${channelLabel} 渠道桌宠，并从设备缓存即时切换，无需重新传输素材。`
+        : `已将「${appearance.name}」设为 ${channelLabel} 渠道桌宠，并通过 USB 同步 ${result?.fileCount || 0} 个素材 (${formatBytes(result?.byteCount || 0)})`;
     } catch (err) {
       const detail = err?.message || String(err);
+      if (detail.includes(APPEARANCE_SYNC_CANCELLED_MESSAGE)) {
+        throw new Error(APPEARANCE_SYNC_CANCELLED_MESSAGE);
+      }
       throw new Error(`形象素材下发失败，已取消切换跟随；设备仍保持原跟随主体。原始错误：${detail}`);
     } finally {
       unlisten();
@@ -138,17 +146,19 @@ export async function applyDesktopPetAssignment({
       },
     });
     await invoke("ensure_bridge_runtime", { input: { forceRestart: true } });
-
-    await invoke("dispatch_remote_cli_binding", {
-      input: {
-        boardDeviceId: boardDeviceId || "",
-        targetDeviceId: profile.desktopDeviceId,
-        targetSource: agentId,
-        previousSource,
-        mqttNamespace: profile.mqttNamespace,
-      },
-    });
   }
+
+  // Dispatch even when the saved profile already names this Agent. Repeating
+  // the idempotent USB command makes a retry real instead of local-only.
+  await invoke("dispatch_remote_cli_binding", {
+    input: {
+      boardDeviceId: boardDeviceId || "",
+      targetDeviceId: profile.desktopDeviceId,
+      targetSource: agentId,
+      previousSource,
+      mqttNamespace: profile.mqttNamespace,
+    },
+  });
 
   saveAgentAppearanceMap(nextMap);
   saveEnabledAgents(new Set(enabledAgents));

@@ -1,6 +1,6 @@
 /**
  * [Input] Read DeviceStatusBar.jsx source.
- * [Output] Static Node coverage that the status bar reads from useDeviceContext, renders board id + separate USB/WiFi status chips, exposes manual USB serial rescan, and uses the documented class names.
+ * [Output] Static Node coverage that the P4 status bar reads from useDeviceContext, renders board id + USB state only, exposes manual USB serial rescan, and uses the documented class names.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -31,20 +31,17 @@ test("DeviceStatusBar exposes a manual USB serial rescan button", () => {
   assert.match(source, /handleRescanUsb/);
 });
 
-test("DeviceStatusBar renders USB and WiFi as independent states", () => {
-  assert.match(source, /wifiOnline/);
+test("DeviceStatusBar renders verified USB state without WiFi status", () => {
   assert.match(source, /usbChip/);
-  assert.match(source, /wifiChip/);
   assert.match(source, /USB 直连/);
-  assert.match(source, /WiFi 在线/);
-  assert.match(source, /WiFi 离线/);
   assert.match(source, /dashboard-status-bar__chips/);
-  assert.doesNotMatch(source, /else if \(deviceOnline\)/);
+  assert.doesNotMatch(source, /wifiOnline|wifiChip|WiFi 在线|WiFi 离线/);
 });
 
-test("DeviceStatusBar reads binding.boardDeviceId and binding.wifiSsid", () => {
+test("DeviceStatusBar reads the board id and tolerates the legacy USB port field", () => {
   assert.match(source, /binding\.boardDeviceId/);
   assert.match(source, /binding\.wifiSsid/);
+  assert.match(source, /legacyTransportLabel/);
 });
 
 test("DeviceStatusBar uses the documented class names", () => {

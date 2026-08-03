@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "minutes_left": { "type": "int", "init": 133 },
+    "total_minutes": { "type": "int", "init": 133 },
+    "off_hour": { "type": "int", "init": 18 }
+  },
+  "states": ["showing", "paused", "done"],
+  "initial_state": "showing",
+  "pages": [
+    { "id": "countdown" },
+    { "id": "offhour" }
+  ],
+  "initial_page": "countdown",
+  "transitions": [
+    { "from": "showing", "on": "clock.pause_resume", "to": "paused" },
+    { "from": "paused", "on": "clock.pause_resume", "to": "showing" },
+    { "from": "*", "on": "clock.switch_view", "page": "next" },
+    { "from": "*", "on": "clock.reset_countdown", "to": "showing", "set": { "minutes_left": 133 } }
+  ],
+  "tick": [
+    {
+      "every_ms": 60000,
+      "while_state": "showing",
+      "inc": { "minutes_left": -1 },
+      "when": { "var": "minutes_left", "lte": 0 },
+      "then": { "to": "done", "set": { "minutes_left": 0 } }
+    }
+  ],
+  "dashboard": {
+    "title": "摸鱼倒计时",
+    "eyebrow": { "switch_page": { "countdown": "距离今天下班", "offhour": "目标下班时间" } },
+    "headline": {
+      "switch_state": {
+        "showing": "倒计时运行中",
+        "paused": "倒计时已暂停",
+        "done": "今天收工啦"
+      }
+    },
+    "metricLabel": { "switch_page": { "countdown": "剩余", "offhour": "下班时间" } },
+    "metricValue": { "switch_page": { "countdown": { "var": "minutes_left" }, "offhour": { "var": "off_hour" } } },
+    "metricUnit": { "switch_page": { "countdown": "分钟", "offhour": ":00" } },
+    "badge": "5",
+    "note": { "switch_page": { "countdown": "本周已坚持 5 天", "offhour": "SW2 返回剩余时间" } },
+    "footer": {
+      "switch_state": {
+        "showing": "SW1暂停 · SW2切换 · SW3重置",
+        "paused": "SW1继续 · SW2切换 · SW3重置",
+        "done": "倒计时结束 · SW2切换 · SW3重置"
+      }
+    },
+    "progress": { "pct_of": "minutes_left", "of_max": "total_minutes", "label": "今日剩余" },
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_state": {
+        "showing": "candy",
+        "paused": "arcade",
+        "done": "sunset"
+      }
+    },
+    "visualLayout": "tool",
+    "visualSprite": {
+      "switch_state": {
+        "showing": "coffee",
+        "paused": "timer",
+        "done": "trophy"
+      }
+    }
+  }
+}

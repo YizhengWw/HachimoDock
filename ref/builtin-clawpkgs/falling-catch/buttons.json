@@ -1,0 +1,20 @@
+[
+  {
+    "action": "catch.left",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "向左移动"
+  },
+  {
+    "action": "catch.right",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "向右移动"
+  },
+  {
+    "action": "catch.start",
+    "control": "前方旋钮",
+    "event": "button.encoder.short_press",
+    "label": "开始或重开"
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "dashboard": {
+    "title": "像素贪吃蛇",
+    "eyebrow": "持续前进",
+    "headline": "按 SW2 开始",
+    "metricLabel": "食物",
+    "metricValue": "0",
+    "note": "READY",
+    "footer": "SW1左转 · SW2开始 · SW3右转 · SW3长按退出",
+    "visualStyle": "pixel",
+    "visualPalette": "mint",
+    "visualLayout": "arcade",
+    "visualSprite": "snake"
+  }
+}

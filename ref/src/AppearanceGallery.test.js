@@ -3,7 +3,8 @@
  * [Output] Static Node test coverage for gallery-only creation/import/detail management,
  *          the source chooser behind 新建自定义形象, direct uploaded-video appearances,
  *          filled card preview media, full Codex import previews, unobstructed gallery cards,
- *          and removal of desktop-pet assignment controls from the gallery.
+ *          first-visit onboarding, and removal of desktop-pet assignment
+ *          controls from the gallery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -53,6 +54,20 @@ test("gallery renders inside PageShell with refresh plus a four-source creation 
   assert.doesNotMatch(gallery, /split-button__/);
   assert.match(actions, /display:\s*inline-flex;/);
   assert.match(actions, /flex-wrap:\s*wrap;/);
+});
+
+test("gallery exposes a first-visit custom-appearance guide that can be reopened", () => {
+  const gallery = readSource("AppearanceGallery.jsx");
+
+  assert.match(gallery, /usePageOnboarding\(ONBOARDING_PAGE_IDS\.APPEARANCE_GALLERY\)/);
+  assert.match(gallery, /help=\{onboarding\.show\}/);
+  assert.match(gallery, /<PageOnboardingModal/);
+  assert.match(gallery, /title="创建并使用自定义形象，只要三步"/);
+  assert.match(gallery, /选择来源/);
+  assert.match(gallery, /预览并完善/);
+  assert.match(gallery, /应用到设备/);
+  assert.match(gallery, /label: "选择创建方式"/);
+  assert.match(gallery, /setCreationModalOpen\(true\)/);
 });
 
 test("gallery can create a custom appearance from an uploaded MP4 state video", () => {
@@ -213,6 +228,15 @@ test("gallery uses cached appearance and Codex scans with explicit force refresh
   assert.doesNotMatch(gallery, /invoke\("list_codex_pets"\)/);
   assert.doesNotMatch(gallery, /invoke\("install_codex_community_pet"/);
   assert.doesNotMatch(gallery, /saveAgentAppearanceMap\(nextMap\)/);
+});
+
+test("community installation immediately imports and prepares the appearance", () => {
+  const gallery = readSource("AppearanceGallery.jsx");
+  const installOffset = gallery.indexOf("await installCodexCommunityPet(parsed.petId)");
+  const importOffset = gallery.indexOf("const result = await onImport(parsed.petId)", installOffset);
+
+  assert.notEqual(installOffset, -1);
+  assert.ok(importOffset > installOffset);
 });
 
 test("running task card is wrapped in a shell Card and only rendered while a task is in flight", () => {

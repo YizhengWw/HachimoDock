@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=5.5"
+description: Local no-graphics stub used while the P4 runtime only needs Waveshare LCD bring-up.
+version: 0.0.0

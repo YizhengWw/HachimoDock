@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "title": "摸鱼倒计时",
+    "eyebrow": "距离今天下班",
+    "headline": "倒计时运行中",
+    "metricLabel": "剩余",
+    "metricValue": "133",
+    "metricUnit": "分钟",
+    "badge": "5",
+    "note": "本周已坚持 5 天",
+    "footer": "SW1暂停 · SW2切换 · SW3重置",
+    "progress": {
+      "value": 100,
+      "label": "今日剩余"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "candy",
+    "visualLayout": "tool",
+    "visualSprite": "coffee"
+  }
+}

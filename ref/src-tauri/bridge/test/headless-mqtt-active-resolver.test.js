@@ -1,6 +1,6 @@
 /*
  * [Input] Headless bridge HTTP/MQTT fixtures plus fake agent-session-bus streams.
- * [Output] Regression coverage for selected-source state, mock/board voice injection, and stale Codex metadata recovery.
+ * [Output] Regression coverage for selected-source state, token retention/context metrics, removal of MQTT follow publishing, Claude Desktop hook display metadata, mock/board voice injection, and stale Codex metadata recovery.
  * [Pos] Integration-style Node tests for the managed status bridge.
  * [Sync] If voice-injection recovery behavior changes, update `ref/.folder.md`.
  */
@@ -11,6 +11,10 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const headlessSource = fs.readFileSync(
+  path.join(__dirname, "../packages/clawd-backend-service/src/headless-mqtt.js"),
+  "utf8",
+);
 
 const {
   HookHttpServer,
@@ -19,7 +23,15 @@ const {
   mapClawdStateToStatus,
   normalizeStatus,
   resolveMockButtonInjectRequest,
+  isAgentBusyState,
+  createLatestHardwareInputQueue,
+  buildClaudeHookDisplay,
+  buildMiMoCodeHookDisplay,
 } = require("../packages/clawd-backend-service/src/headless-mqtt");
+const {
+  SessionMetricsTracker,
+  calculateContextUsagePct,
+} = require("../packages/clawd-backend-service/src/status-metrics");
 const { createAgentSessionBus, MockAdapter } = require("../packages/agent-session-bus/src/index");
 
 function postJson(port, pathname, body) {
@@ -54,6 +66,158 @@ function postJson(port, pathname, body) {
     req.end();
   });
 }
+
+test("headless bridge no longer exposes MQTT follow-binding publishing", () => {
+  assert.doesNotMatch(headlessSource, /publish-remote-binding/);
+  assert.doesNotMatch(headlessSource, /resolveRemoteBindingTargets/);
+});
+
+test("Claude hook events produce stable device card content", () => {
+  const working = buildClaudeHookDisplay({ prompt: "修复 Claude 客户端的前台语音输入" }, "working", "UserPromptSubmit");
+  assert.equal(working.title, "修复 Claude 客户端的前台语音输入");
+  assert.equal(working.content, "正在思考");
+
+  const done = buildClaudeHookDisplay({
+    last_assistant_message: "已完成会话定位和输入框提交。",
+  }, "done", "Stop");
+  assert.equal(done.content, "已完成会话定位和输入框提交。");
+});
+
+test("MiMoCode plugin events use the shared device card shape", () => {
+  const working = buildMiMoCodeHookDisplay({
+    display_title: "适配 MiMoCode",
+    display_content: "正在执行 bash",
+  }, "working", "tool.running");
+  assert.equal(working.title, "适配 MiMoCode");
+  assert.equal(working.content, "正在执行 bash");
+
+  const done = buildMiMoCodeHookDisplay({
+    session_title: "适配 MiMoCode",
+    last_assistant_message: "状态同步已经完成。",
+  }, "done", "session.post");
+  assert.equal(done.title, "适配 MiMoCode");
+  assert.equal(done.content, "状态同步已经完成。");
+});
+
+test("Claude hook-only sessions keep their first inferred navigation title", () => {
+  const tracker = new SessionMetricsTracker();
+  const now = Date.now();
+  tracker.apply({
+    source: "claude-code",
+    sessionId: "desktop-session",
+    sessionTitle: "第一条任务",
+    display: { title: "第一条任务", content: "正在思考" },
+    state: "working",
+  }, now);
+  tracker.apply({
+    source: "claude-code",
+    sessionId: "desktop-session",
+    sessionTitle: "后续追问",
+    display: { title: "后续追问", content: "正在思考" },
+    state: "working",
+  }, now + 1);
+
+  const [session] = tracker.sessionStatuses("claude-code");
+  assert.equal(session.title, "第一条任务");
+  assert.equal(session.displayTitle, "后续追问");
+});
+
+test("Claude terminal state ignores delayed trailing lifecycle events until a new prompt", () => {
+  const tracker = new SessionMetricsTracker();
+  const now = Date.now();
+  const base = {
+    source: "claude-code",
+    sessionId: "desktop-session",
+    sessionTitle: "状态回归测试",
+  };
+  tracker.apply({
+    ...base,
+    event: "UserPromptSubmit",
+    state: "working",
+    display: { title: "状态回归测试", content: "正在思考" },
+  }, now);
+  tracker.apply({
+    ...base,
+    event: "claude:assistant_message",
+    state: "done",
+    display: { title: "状态回归测试", content: "任务已经完成。" },
+  }, now + 10);
+
+  const delayedWorking = tracker.apply({
+    ...base,
+    event: "SubagentStop",
+    state: "working",
+    display: { title: "状态回归测试", content: "正在处理" },
+  }, now + 20);
+  const delayedIdle = tracker.apply({
+    ...base,
+    event: "SessionEnd",
+    state: "idle",
+  }, now + 30);
+
+  assert.equal(delayedWorking.state, "done");
+  assert.equal(delayedWorking.display.content, "任务已经完成。");
+  assert.equal(delayedIdle.state, "done");
+  const [completed] = tracker.sessionStatuses("claude-code", now + 30);
+  assert.equal(completed.state, "done");
+  assert.equal(completed.displayContent, "任务已经完成。");
+  assert.equal(completed.updatedAt, now + 10);
+
+  const nextTurn = tracker.apply({
+    ...base,
+    event: "UserPromptSubmit",
+    state: "working",
+    display: { title: "新的任务", content: "正在思考" },
+  }, now + 40);
+  assert.equal(nextTurn.state, "working");
+  const [working] = tracker.sessionStatuses("claude-code", now + 40);
+  assert.equal(working.state, "working");
+  assert.equal(working.displayContent, "正在思考");
+});
+
+test("SessionMetricsTracker retains token usage across usage-free lifecycle events", () => {
+  const tracker = new SessionMetricsTracker();
+  const first = tracker.apply({
+    source: "claude-code",
+    sessionId: "session-with-usage",
+    state: "speaking",
+    tokenUsage: {
+      totalTokens: 120,
+      inputTokens: 90,
+      outputTokens: 30,
+      lastInputTokens: 45,
+      modelContextWindow: 200,
+    },
+  }, 1000);
+  const terminal = tracker.apply({
+    source: "claude-code",
+    sessionId: "session-with-usage",
+    state: "done",
+    event: "SessionEnd",
+  }, 1100);
+  const differentSession = tracker.apply({
+    source: "claude-code",
+    sessionId: "different-session",
+    state: "working",
+  }, 1200);
+
+  assert.deepEqual(terminal.tokenUsage, first.tokenUsage);
+  assert.equal(terminal.metrics.contextUsagePct, 22.5);
+  assert.equal(differentSession.tokenUsage, undefined);
+});
+
+test("context usage prefers latest input over cumulative session totals", () => {
+  assert.equal(calculateContextUsagePct({
+    totalTokens: 637353,
+    inputTokens: 630814,
+    lastInputTokens: 93130,
+    modelContextWindow: 258400,
+  }), 36.04);
+  assert.equal(calculateContextUsagePct({
+    totalTokens: 300,
+    modelContextWindow: 200,
+  }), 100);
+});
 
 test("MqttPublisher publishes per-source topic without active aggregation", () => {
   const published = [];
@@ -90,6 +254,7 @@ test("MqttPublisher publishes per-source topic without active aggregation", () =
   assert.equal(published[0].payload.state, "done");
   assert.equal(published[0].payload.sessionId, "session-a");
   assert.equal(published[0].options.retain, true);
+  assert.equal(publisher.getSourceState("codex"), "done");
   assert.equal(
     fs.readFileSync(path.join(localStateDir, "codex.json"), "utf8").trim(),
     JSON.stringify({
@@ -99,6 +264,12 @@ test("MqttPublisher publishes per-source topic without active aggregation", () =
       event: "AssistantMessage",
       tsMs: 10000,
     }),
+  );
+  const sessionFiles = fs.readdirSync(localStateDir).filter((name) => name.startsWith("codex--session-"));
+  assert.equal(sessionFiles.length, 1);
+  assert.equal(
+    fs.readFileSync(path.join(localStateDir, sessionFiles[0]), "utf8").trim(),
+    fs.readFileSync(path.join(localStateDir, "codex.json"), "utf8").trim(),
   );
 });
 
@@ -146,7 +317,11 @@ test("MqttPublisher clears retained state for disabled sources", () => {
 
   assert.deepEqual(
     published.map((item) => item.topic).sort(),
-    ["desk/devbox/state/codex", "desk/devbox/state/openclaw"],
+    [
+      "desk/devbox/state/codex",
+      "desk/devbox/state/mimocode",
+      "desk/devbox/state/openclaw",
+    ],
   );
   assert.equal(published[0].payloadText, "");
   assert.equal(published[0].options.retain, true);
@@ -257,96 +432,6 @@ test("resolveMockButtonInjectRequest honors explicit payload overrides", () => {
   assert.equal(resolved.injectBody.metadata.buttonEvent, "button.primary.long_press");
 });
 
-test("MqttPublisher resolves wireless remote binding to an online board for the same desktop", () => {
-  const publisher = new MqttPublisher({
-    url: "mqtt://example.invalid",
-    clientId: "test",
-    qos: 1,
-    retain: true,
-    reconnectMs: 1000,
-    namespace: "desk",
-    deviceId: "devbox",
-    activeTopicSuffix: "active",
-    enableActiveTopic: false,
-  });
-
-  publisher._handleMessage(
-    "claw-pet/board/board-new/availability",
-    Buffer.from(JSON.stringify({
-      online: true,
-      boardDeviceId: "board-new",
-      localDeviceId: "board-local-new",
-      targetDeviceId: "devbox",
-      targetSource: "codex",
-      mqttNamespace: "desk",
-      ts: "2026-05-22T08:00:00.000Z",
-    })),
-  );
-  publisher._handleMessage(
-    "claw-pet/board/board-other/availability",
-    Buffer.from(JSON.stringify({
-      online: true,
-      boardDeviceId: "board-other",
-      targetDeviceId: "someone-else",
-      mqttNamespace: "desk",
-    })),
-  );
-
-  assert.deepEqual(
-    publisher.resolveRemoteBindingBoardIds({
-      boardDeviceId: "board-stale",
-      targetDeviceId: "devbox",
-      mqttNamespace: "desk",
-    }),
-    ["board-stale", "board-new"],
-  );
-  assert.deepEqual(
-    publisher.resolveRemoteBindingTargets({
-      boardDeviceId: "board-stale",
-      targetDeviceId: "devbox",
-      mqttNamespace: "desk",
-    }).map((target) => target.controlTopic),
-    [
-      "desk/board-stale/control/remote-cli-binding",
-      "desk/board-local-new/control/remote-cli-binding",
-    ],
-  );
-  assert.equal(publisher.getDeviceAvailability()["board-new"].targetDeviceId, "devbox");
-});
-
-test("MqttPublisher can fall back to the only online board when a dev binding is stale", () => {
-  const publisher = new MqttPublisher({
-    url: "mqtt://example.invalid",
-    clientId: "test",
-    qos: 1,
-    retain: true,
-    reconnectMs: 1000,
-    namespace: "desk",
-    deviceId: "devbox",
-    activeTopicSuffix: "active",
-    enableActiveTopic: false,
-  });
-
-  publisher._handleMessage(
-    "claw-pet/board/board-online/availability",
-    Buffer.from(JSON.stringify({
-      online: true,
-      boardDeviceId: "board-online",
-      targetDeviceId: "formal-desktop",
-      mqttNamespace: "desk",
-    })),
-  );
-
-  assert.deepEqual(
-    publisher.resolveRemoteBindingBoardIds({
-      boardDeviceId: "board-stale",
-      targetDeviceId: "devbox",
-      mqttNamespace: "desk",
-    }),
-    ["board-stale", "board-online"],
-  );
-});
-
 test("headless bridge normalizes legacy thinking/tool states to unified working", () => {
   assert.equal(normalizeStatus("working"), "working");
   assert.equal(normalizeStatus("thinking"), "working");
@@ -384,6 +469,121 @@ test("HookHttpServer /mock-button-inject delegates request to callback", async (
     assert.equal(response.body.echoedAgentId, "codex");
   } finally {
     server.stop();
+  }
+});
+
+test("hardware input busy states identify Agent turns that need queueing", () => {
+  assert.equal(isAgentBusyState("working"), true);
+  assert.equal(isAgentBusyState("speaking"), true);
+  assert.equal(isAgentBusyState("waiting_user"), true);
+  assert.equal(isAgentBusyState("idle"), false);
+  assert.equal(isAgentBusyState("done"), false);
+  assert.equal(isAgentBusyState("error"), false);
+});
+
+test("busy hardware voice keeps only the latest input and sends it after the turn", async (t) => {
+  let busy = true;
+  const injected = [];
+  const queue = createLatestHardwareInputQueue({
+    retryMs: 10,
+    ttlMs: 1000,
+    isBusy: () => busy,
+    inject: async (value) => injected.push(value.text),
+  });
+  t.after(() => queue.stop());
+
+  assert.deepEqual(queue.enqueue("codex", { text: "first" }), {
+    queued: true,
+    replaced: false,
+  });
+  assert.deepEqual(queue.enqueue("codex", { text: "latest" }), {
+    queued: true,
+    replaced: true,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(injected, []);
+
+  busy = false;
+  for (let attempt = 0; attempt < 20 && injected.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.deepEqual(injected, ["latest"]);
+});
+
+test("hardware voice queues when Agent Bus becomes busy during injection", async (t) => {
+  let reportedBusy = false;
+  let attempts = 0;
+  const injected = [];
+  const queue = createLatestHardwareInputQueue({
+    retryMs: 10,
+    ttlMs: 1000,
+    isBusy: () => reportedBusy,
+    inject: async (value) => {
+      attempts += 1;
+      if (attempts === 1) {
+        reportedBusy = true;
+        const error = new Error("agent codex is busy");
+        error.code = "AGENT_BUSY";
+        throw error;
+      }
+      injected.push(value.text);
+      return { done: true };
+    },
+  });
+  t.after(() => queue.stop());
+
+  assert.deepEqual(await queue.submit("codex", { text: "voice after race" }), {
+    queued: true,
+    replaced: false,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(attempts, 1);
+
+  reportedBusy = false;
+  for (let attempt = 0; attempt < 20 && injected.length === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(attempts, 2);
+  assert.deepEqual(injected, ["voice after race"]);
+});
+
+test("HookHttpServer strict port mode rejects conflicts instead of drifting", async (t) => {
+  let blocker = null;
+  let blockedPort = null;
+  for (let candidate = 23333; candidate <= 23337; candidate += 1) {
+    const attempt = http.createServer();
+    try {
+      await new Promise((resolve, reject) => {
+        attempt.once("error", reject);
+        attempt.listen(candidate, "127.0.0.1", resolve);
+      });
+      blocker = attempt;
+      blockedPort = candidate;
+      break;
+    } catch {
+      try { attempt.close(); } catch {}
+    }
+  }
+  if (!blocker) {
+    t.skip("all managed bridge ports are already occupied");
+    return;
+  }
+
+  const server = new HookHttpServer({
+    port: blockedPort,
+    strictPort: true,
+    onState() {},
+    onPermission() { return { behavior: "allow" }; },
+  });
+  try {
+    await assert.rejects(
+      server.start(),
+      new RegExp(`unable to bind http server.*${blockedPort}`),
+    );
+    assert.equal(server.port, null);
+  } finally {
+    server.stop();
+    await new Promise((resolve) => blocker.close(resolve));
   }
 });
 
@@ -455,4 +655,41 @@ test("injectViaAgentBus retries Codex metadata session failures with a fresh voi
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test("SessionMetricsTracker preserves ordered working and terminal events", () => {
+  const tracker = new SessionMetricsTracker({ sessionEventLimit: 8 });
+  const baseline = tracker.sessionEvents("codex");
+  assert.equal(baseline.cursor, 0);
+  assert.deepEqual(baseline.events, []);
+
+  tracker.apply({
+    source: "codex",
+    sessionId: "codex:fast-session",
+    event: "event_msg:task_started",
+    state: "working",
+    sessionTitle: "Fast task",
+    display: { title: "Fast task", content: "正在处理" },
+  }, 10_000);
+  tracker.apply({
+    source: "codex",
+    sessionId: "codex:fast-session",
+    event: "event_msg:task_complete",
+    state: "done",
+    sessionTitle: "Fast task",
+    display: { title: "Fast task", content: "已完成" },
+  }, 10_050);
+
+  const update = tracker.sessionEvents("codex", {
+    cursor: baseline.cursor,
+    streamId: baseline.streamId,
+  });
+  assert.deepEqual(update.events.map((event) => event.state), ["working", "done"]);
+  assert.deepEqual(
+    update.events.map((event) => event.session.statusUpdatedAt),
+    [10_000, 10_050],
+  );
+
+  const coldBootstrap = tracker.sessionEvents("codex");
+  assert.deepEqual(coldBootstrap.events, []);
 });

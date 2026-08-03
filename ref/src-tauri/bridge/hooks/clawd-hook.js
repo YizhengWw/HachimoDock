@@ -2,7 +2,8 @@
 // Clawd Desktop Pet — Claude Code Hook Script
 // Zero dependencies, fast cold start, 1s timeout
 // Usage: node clawd-hook.js <event_name>
-// Reads stdin JSON from Claude Code for session_id
+// Reads Claude Code hook JSON and forwards session/status/display metadata.
+// [Pos] Shared Claude Code CLI/Desktop observer hook for the managed bridge.
 
 const { postStateToRunningServer, readHostPrefix } = require("./server-config");
 const { resolveStableProcessContext } = require("./process-tree");
@@ -33,6 +34,13 @@ const state = EVENT_TO_STATE[event];
 if (!state) process.exit(0);
 
 let _processContext = null;
+
+function compactString(value, maxLength) {
+  if (typeof value !== "string") return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
+}
 
 function getProcessContext() {
   if (_processContext) return _processContext;
@@ -65,20 +73,21 @@ process.stdin.on("end", () => {
   let sessionId = "default";
   let cwd = "";
   let source = "";
+  let payload = {};
   try {
-    const payload = JSON.parse(Buffer.concat(chunks).toString());
+    payload = JSON.parse(Buffer.concat(chunks).toString());
     sessionId = payload.session_id || "default";
     cwd = payload.cwd || "";
     source = payload.source || payload.reason || "";
   } catch {}
-  send(sessionId, cwd, source);
+  send(sessionId, cwd, source, payload);
 });
 
 // Safety: if stdin doesn't end in 400ms, send with default session
 // (200ms was too aggressive on slow machines / AV scanning)
-setTimeout(() => send("default", ""), 400);
+setTimeout(() => send("default", "", "", {}), 400);
 
-function send(sessionId, cwd, source) {
+function send(sessionId, cwd, source, payload = {}) {
   if (sent) return;
   sent = true;
 
@@ -89,6 +98,22 @@ function send(sessionId, cwd, source) {
   const body = { state: resolvedState, session_id: sessionId, event };
   body.agent_id = "claude-code";
   if (cwd) body.cwd = cwd;
+  const transcriptPath = typeof payload.transcript_path === "string" ? payload.transcript_path.trim() : "";
+  const prompt = compactString(payload.prompt, 1200);
+  const lastAssistantMessage = compactString(payload.last_assistant_message, 2400);
+  const message = compactString(payload.message, 600);
+  const title = compactString(payload.title, 160);
+  const sessionTitle = compactString(payload.session_title, 160);
+  const toolName = compactString(payload.tool_name, 120);
+  const notificationType = compactString(payload.notification_type, 120);
+  if (transcriptPath) body.transcript_path = transcriptPath;
+  if (prompt) body.prompt = prompt;
+  if (lastAssistantMessage) body.last_assistant_message = lastAssistantMessage;
+  if (message) body.message = message;
+  if (title) body.title = title;
+  if (sessionTitle) body.session_title = sessionTitle;
+  if (toolName) body.tool_name = toolName;
+  if (notificationType) body.notification_type = notificationType;
   if (process.env.CLAWD_REMOTE) {
     body.host = readHostPrefix();
   } else {

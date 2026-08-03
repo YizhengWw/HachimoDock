@@ -1,6 +1,6 @@
 /**
  * [Input] Read DashboardActionsMenu.jsx source.
- * [Output] Static Node coverage for the 3 menu items, the danger styling on 解绑, and the expected callback prop signature.
+ * [Output] Static Node coverage for core and optional P4 menu items, the danger styling on 解绑, and the expected callback prop signature.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -43,14 +43,19 @@ test("Menu hides itself when the trigger is clicked outside / Escape pressed", (
   assert.match(source, /onMouseDown|onClick.*setOpen|backdrop/);
 });
 
-test("Menu item for 📶 通过 USB 配 WiFi renders only when onApplyWifi is provided", () => {
-  /* Source contains the conditional gating on the new prop. */
-  assert.match(source, /onApplyWifi/);
-  assert.match(source, /通过 USB 配 WiFi/);
-  /* Conditional render guard so consumers can opt out by omitting the prop. */
-  assert.match(source, /onApplyWifi\s*&&|typeof\s+onApplyWifi/);
+test("Menu does not expose unsupported P4 WiFi configuration", () => {
+  assert.doesNotMatch(source, /onApplyWifi/);
+  assert.doesNotMatch(source, /通过 USB 配 WiFi/);
 });
 
-test("Menu accepts the new onApplyWifi prop", () => {
-  assert.match(source, /\bonApplyWifi\b/);
+test("Menu exposes P4 firmware update only when its callback is provided", () => {
+  assert.match(source, /\bonUpdateFirmware\b/);
+  assert.match(source, /onUpdateFirmware\s*&&/);
+  assert.match(source, /升级 ESP32-P4 固件/);
+});
+
+test("Menu exposes P4 diagnostics only when its callback is provided", () => {
+  assert.match(source, /\bonDiagnostics\b/);
+  assert.match(source, /onDiagnostics\s*&&/);
+  assert.match(source, /ESP32-P4 设备诊断/);
 });

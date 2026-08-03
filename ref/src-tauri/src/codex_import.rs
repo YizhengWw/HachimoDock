@@ -2,13 +2,17 @@
 //!
 //! Reads a codex pet's `spritesheet.webp` (8 cols × 9 rows × 192×208), cuts
 //! each frame, writes a trimmed transparent gallery preview, and produces
-//! per-family mp4 files by driving ffmpeg concat.
+//! per-family MP4 files by writing one PNG per unique atlas cell and driving
+//! hidden FFmpeg concat processes.
 //! The list API also reports each pet's latest source-file modified time so
 //! the community-import UI can detect both newly installed and updated pets;
 //! pasted community commands are converted into a constrained `npx codex-pets`
 //! install rather than executing arbitrary shell text. Import resolution accepts
 //! pet.json ids and relative `spritesheetPath` values instead of assuming the
 //! directory name always equals the public pet id.
+//! ffmpeg discovery prefers the target-native executable bundled under the
+//! install-relative `tools/` resource directory, then delegates to the desktop
+//! host PATH resolver and current-user Windows package-manager roots.
 //! Writes a manifest.json that matches the shape produced by
 //! `ref/src/lib/appearance-store.js` so the gallery/detail UI can render it
 //! without any special-casing beyond `type === "codex-import"`.
@@ -18,6 +22,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
 
 use base64::Engine as _;
@@ -26,8 +31,9 @@ use serde::{Deserialize, Serialize};
 
 const CELL_W: u32 = 192;
 const CELL_H: u32 = 208;
-/// Device players and fb-display expect CFR; bake atlas hold times into duplicate
-/// frames at this rate so short holds (110–150 ms) do not collapse to one tick.
+/// Device players and fb-display expect CFR. Quantize atlas hold durations at
+/// this rate while concat metadata reuses each unique PNG instead of duplicating
+/// it for every output tick so short holds still map to multiple CFR ticks.
 const OUTPUT_FPS: u32 = 24;
 /// Multiplier applied to atlas hold-times before quantizing onto OUTPUT_FPS ticks.
 /// 1.0 = source-faithful; >1.0 slows playback. Source atlases (e.g. running rows
@@ -328,6 +334,35 @@ fn can_run_ffmpeg(candidate: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn bundled_ffmpeg_candidates() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+
+    if let Some(configured) = std::env::var_os("PET_MANAGER_BUNDLED_FFMPEG") {
+        out.push(PathBuf::from(configured));
+    }
+
+    let Ok(executable) = std::env::current_exe() else {
+        return out;
+    };
+
+    #[cfg(target_os = "macos")]
+    if let Some(contents_dir) = executable.parent().and_then(Path::parent) {
+        out.push(contents_dir.join("Resources").join("tools").join("ffmpeg"));
+    }
+
+    #[cfg(windows)]
+    if let Some(install_dir) = executable.parent() {
+        out.push(install_dir.join("tools").join("ffmpeg.exe"));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(binary_dir) = executable.parent() {
+        out.push(binary_dir.join("tools").join("ffmpeg"));
+    }
+
+    out
+}
+
 fn ffmpeg_candidates() -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -346,10 +381,15 @@ fn ffmpeg_candidates() -> Vec<String> {
         }
     };
 
-    push_unique("ffmpeg".to_string());
-    push_unique("/opt/homebrew/bin/ffmpeg".to_string());
-    push_unique("/usr/local/bin/ffmpeg".to_string());
-    push_unique("/usr/bin/ffmpeg".to_string());
+    for candidate in bundled_ffmpeg_candidates() {
+        if candidate.is_file() {
+            push_unique(candidate.to_string_lossy().to_string());
+        }
+    }
+
+    if let Some(candidate) = crate::find_executable("ffmpeg", &[]) {
+        push_unique(candidate);
+    }
 
     #[cfg(windows)]
     {
@@ -411,11 +451,6 @@ fn ffmpeg_candidates() -> Vec<String> {
             }
         }
 
-        let manual = PathBuf::from(r"C:\ffmpeg\bin\ffmpeg.exe");
-        if manual.is_file() {
-            push_unique(manual.to_string_lossy().to_string());
-        }
-
         if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
             let winget_packages = PathBuf::from(local_app_data)
                 .join("Microsoft")
@@ -449,14 +484,17 @@ fn ffmpeg_candidates() -> Vec<String> {
 }
 
 pub fn check_ffmpeg_available() -> bool {
-    ffmpeg_candidates()
-        .iter()
-        .any(|candidate| can_run_ffmpeg(candidate))
+    resolve_ffmpeg().is_ok()
 }
 
-fn resolve_ffmpeg() -> Result<String, String> {
+pub(crate) fn resolve_ffmpeg() -> Result<String, String> {
+    static RESOLVED_FFMPEG: OnceLock<String> = OnceLock::new();
+    if let Some(candidate) = RESOLVED_FFMPEG.get() {
+        return Ok(candidate.clone());
+    }
     for candidate in ffmpeg_candidates() {
         if can_run_ffmpeg(&candidate) {
+            let _ = RESOLVED_FFMPEG.set(candidate.clone());
             return Ok(candidate);
         }
     }
@@ -767,7 +805,7 @@ pub fn import_codex_pet(
         // played back. Mirror the reference Python pipeline: drop the fringe,
         // scrub halo pixels adjacent to transparency, then composite onto the
         // UI surface color and save RGB PNGs.
-        let mut frame_paths: Vec<PathBuf> = Vec::new();
+        let mut frame_paths: Vec<(PathBuf, u32)> = Vec::new();
         for col in 0..m.cols {
             let x = col * CELL_W;
             let y = m.row * CELL_H;
@@ -775,29 +813,27 @@ pub fn import_codex_pet(
             clean_frame_edges(&mut cell);
             let flat = flatten_to_background(&cell);
             let hold_frames = duration_to_frame_count(m.durations_ms[col as usize]);
-            for dup in 0..hold_frames {
-                let frame_path = family_tmp.join(format!("frame_{:02}_{:02}.png", col, dup));
-                flat.save(&frame_path)
-                    .map_err(|e| format!("写入 frame PNG 失败: {}", e))?;
-                frame_paths.push(frame_path);
-            }
+            let frame_path = family_tmp.join(format!("frame_{:02}.png", col));
+            flat.save(&frame_path)
+                .map_err(|e| format!("写入 frame PNG 失败: {}", e))?;
+            frame_paths.push((frame_path, hold_frames));
         }
 
-        // CFR concat: one file per 1/OUTPUT_FPS second; hold times come from the
-        // duplicated PNGs above, not from collapsed concat spacing.
-        // ffmpeg 8.x removed the implicit `-framerate` option on the concat
-        // demuxer, so encode the per-frame duration inline instead — concat
-        // demuxer natively supports a `duration` line after each `file` entry.
-        let frame_duration = format!("{:.6}", 1.0_f64 / f64::from(OUTPUT_FPS));
+        // Keep one PNG per unique atlas cell and express its quantized hold time
+        // through concat metadata. ffmpeg expands the VFR input onto the CFR
+        // output timeline, avoiding hundreds of identical PNG encodes per pet.
         let mut concat_lines = String::from("ffconcat version 1.0\n");
-        for frame_path in &frame_paths {
+        for (frame_path, hold_frames) in &frame_paths {
             let escaped = frame_path.to_string_lossy().replace('\'', "'\\''");
             concat_lines.push_str(&format!("file '{}'\n", escaped));
-            concat_lines.push_str(&format!("duration {}\n", frame_duration));
+            concat_lines.push_str(&format!(
+                "duration {:.6}\n",
+                f64::from(*hold_frames) / f64::from(OUTPUT_FPS)
+            ));
         }
         // concat demuxer requires the last file to be repeated without a
         // duration so the final frame's timestamp is computed correctly.
-        if let Some(last) = frame_paths.last() {
+        if let Some((last, _)) = frame_paths.last() {
             let escaped = last.to_string_lossy().replace('\'', "'\\''");
             concat_lines.push_str(&format!("file '{}'\n", escaped));
         }
@@ -969,6 +1005,39 @@ mod tests {
 
         assert_eq!(resolved, expected);
         let _ = fs::remove_dir_all(&pet_dir);
+    }
+
+    #[test]
+    #[ignore = "requires CODEX_PET_BENCH_ID and a locally installed Codex pet"]
+    fn codex_pet_import_prepares_the_complete_p4_pack_benchmark() {
+        let pet_id = std::env::var("CODEX_PET_BENCH_ID")
+            .expect("CODEX_PET_BENCH_ID must name an installed Codex pet");
+        let app_data =
+            std::env::temp_dir().join(format!("codex-pet-import-bench-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&app_data).unwrap();
+        let started = std::time::Instant::now();
+
+        let imported = import_codex_pet(&pet_id, &app_data).unwrap();
+        let imported_at = std::time::Instant::now();
+        let prepared = crate::usb_serial::prepare_p4_appearance(
+            Path::new(&imported.appearance_dir),
+            &app_data,
+        )
+        .unwrap();
+        let finished_at = std::time::Instant::now();
+
+        eprintln!(
+            "codex_import_benchmark pet={} import_ms={} p4_prepare_ms={} elapsed_ms={} p4_files={} p4_bytes={}",
+            pet_id,
+            imported_at.duration_since(started).as_millis(),
+            finished_at.duration_since(imported_at).as_millis(),
+            finished_at.duration_since(started).as_millis(),
+            prepared.file_count,
+            prepared.byte_count
+        );
+        assert!(prepared.file_count > 1);
+        assert!(prepared.byte_count > 0);
+        let _ = fs::remove_dir_all(&app_data);
     }
 
     #[test]

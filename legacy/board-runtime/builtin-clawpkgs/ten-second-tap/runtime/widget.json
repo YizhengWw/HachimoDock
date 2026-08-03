@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    },
+    "remaining_s": {
+      "type": "int",
+      "init": 10
+    },
+    "round_s": {
+      "type": "int",
+      "init": 10
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "result"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "ready",
+      "on": "tap.sw1_score",
+      "to": "playing",
+      "set": {
+        "score": 1,
+        "remaining_s": 10
+      }
+    },
+    {
+      "from": "playing",
+      "on": "tap.sw1_score",
+      "inc": {
+        "score": 1
+      }
+    },
+    {
+      "from": "ready",
+      "on": "tap.sw2_score",
+      "to": "playing",
+      "set": {
+        "score": 1,
+        "remaining_s": 10
+      }
+    },
+    {
+      "from": "playing",
+      "on": "tap.sw2_score",
+      "inc": {
+        "score": 1
+      }
+    },
+    {
+      "from": "ready",
+      "on": "tap.sw3_score",
+      "to": "playing",
+      "set": {
+        "score": 1,
+        "remaining_s": 10
+      }
+    },
+    {
+      "from": "playing",
+      "on": "tap.sw3_score",
+      "inc": {
+        "score": 1
+      }
+    },
+    {
+      "from": "*",
+      "on": "tap.restart",
+      "to": "ready",
+      "set": {
+        "score": 0,
+        "remaining_s": 10
+      }
+    }
+  ],
+  "tick": [
+    {
+      "every_ms": 1000,
+      "while_state": "playing",
+      "inc": {
+        "remaining_s": -1
+      },
+      "when": {
+        "var": "remaining_s",
+        "lte": 0
+      },
+      "then": {
+        "to": "result",
+        "set": {
+          "remaining_s": 0
+        }
+      }
+    }
+  ],
+  "dashboard": {
+    "title": "10秒连点",
+    "eyebrow": {
+      "switch_state": {
+        "ready": "限时 10 秒",
+        "playing": "剩余时间",
+        "result": "最终结果"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "ready": "待开始",
+        "playing": "快速连点",
+        "result": "挑战结束"
+      }
+    },
+    "metricLabel": "得分",
+    "metricValue": {
+      "var": "score"
+    },
+    "note": {
+      "fmt_mmss": "remaining_s"
+    },
+    "footer": {
+      "switch_state": {
+        "ready": "SW1/2/3开始 · SW3长按退出",
+        "playing": "SW1/2/3连按 · SW3长按退出",
+        "result": "旋钮重开 · SW3长按退出"
+      }
+    },
+    "progress": {
+      "pct_of": "remaining_s",
+      "of_max": "round_s",
+      "label": "剩余时间"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "candy",
+    "visualLayout": "arcade",
+    "visualSprite": {
+      "switch_state": {
+        "ready": "target",
+        "playing": "bolt",
+        "result": "trophy"
+      }
+    }
+  }
+}

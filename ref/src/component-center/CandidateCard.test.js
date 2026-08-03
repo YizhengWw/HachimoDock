@@ -1,8 +1,9 @@
 /**
  * [Input] Read CandidateCard.jsx source.
- * [Output] Static Node coverage: default export, prop signature, class names, badge/source
- *          variants, device-screen reuse, draft delete action, complete component copy, and adaptive
- *          card geometry CSS.
+ * [Output] Static Node coverage: default export, prop signature, explicit game/tool kind
+ *          resolution, state-driven card variants without preview status overlays,
+ *          two-state device action and dual deletion,
+ *          device-screen reuse, complete component copy, and adaptive card geometry CSS.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -29,12 +30,17 @@ test("CandidateCard has a default export function named CandidateCard", () => {
   assert.match(source, /export default function CandidateCard\s*\(/);
 });
 
-// 2. Accepts component, isDraft, onClick, onDelete props
-test("CandidateCard accepts component, isDraft, onClick, and onDelete props", () => {
+// 2. Accepts component state plus device and dual-delete callbacks
+test("CandidateCard accepts component, kind, local/installed/enabled state, and select/device/delete callbacks", () => {
   assert.match(source, /\{\s*component\b/);
-  assert.match(source, /\bisDraft\b/);
+  assert.match(source, /\bkind\b/);
+  assert.match(source, /\bisLocal\b/);
+  assert.match(source, /\bisInstalled\b/);
+  assert.match(source, /\bisEnabled\b/);
   assert.match(source, /\bonClick\b/);
+  assert.match(source, /\bonDeviceAction\b/);
   assert.match(source, /\bonDelete\b/);
+  assert.doesNotMatch(source, /\bonRemove\b/);
 });
 
 // 3. Renders candidate-card root class
@@ -42,21 +48,60 @@ test("CandidateCard renders an element with class candidate-card", () => {
   assert.match(source, /candidate-card/);
 });
 
-// 4. Badge variant switches on isDraft
-test("CandidateCard applies --custom badge when isDraft and --builtin badge otherwise", () => {
-  assert.match(source, /candidate-card__badge--\$\{isDraft \? "custom" : "builtin"\}/);
-  assert.match(source, /isDraft \? "自定义" : "内置"/);
+// 4. Badge variant switches on isLocal
+test("CandidateCard labels formal local and builtin sources", () => {
+  assert.match(source, /const sourceKind = component\.isDeviceOnly \? "device"/);
+  assert.match(source, /const sourceLabel = component\.isDeviceOnly \? "仅设备"/);
+  assert.match(source, /candidate-card__badge--\$\{sourceKind\}/);
 });
 
-test("CandidateCard tags builtin and draft cards with source modifier classes", () => {
-  assert.match(source, /candidate-card--\$\{isDraft \? "draft" : "builtin"\}/);
+test("CandidateCard tags builtin and local cards with source modifier classes", () => {
+  assert.match(source, /candidate-card--\$\{component\.isDeviceOnly \? "device" : isLocal \? "local" : "builtin"\}/);
 });
 
-test("CandidateCard renders an independent delete button only for draft components", () => {
-  assert.match(source, /isDraft && onDelete/);
+test("CandidateCard resolves explicit kind before falling back from gameType", () => {
+  const resolverStart = source.indexOf("export function resolveComponentKind");
+  const resolverEnd = source.indexOf("export function componentKindLabel", resolverStart);
+  const resolver = source.slice(resolverStart, resolverEnd);
+  assert.notEqual(resolverStart, -1);
+  assert.notEqual(resolverEnd, -1);
+  assert.ok(
+    resolver.indexOf('["game", "mini-game", "minigame", "小游戏"]') < resolver.indexOf("return gameType"),
+  );
+  assert.ok(
+    resolver.indexOf('["tool", "utility", "widget", "工具", "工具组件"]') < resolver.indexOf("return gameType"),
+  );
+  assert.match(source, /return kind === "game" \? "小游戏" : "工具组件"/);
+  assert.match(source, /resolveComponentKind\(kind, component\.gameType\)/);
+});
+
+test("CandidateCard marks the running item semantically without a preview status overlay", () => {
+  assert.match(source, /aria-current=\{isEnabled \? "true" : undefined\}/);
+  assert.match(source, /candidate-card--enabled/);
+  const enabledRule = extractCssRule(".candidate-card--enabled");
+  assert.match(enabledRule, /border-color:/);
+  assert.doesNotMatch(source, /candidate-card__enabled-badge/);
+  assert.doesNotMatch(source, />\s*当前启用\s*</);
+});
+
+test("CandidateCard exposes exactly two immediate device states and dual-delete access", () => {
+  assert.match(source, /onDeviceAction/);
+  assert.match(source, /同步到设备/);
+  assert.match(source, /已同步到设备（点击从设备删除）/);
+  assert.match(source, /candidate-card__install/);
+  assert.match(source, /isInstalled/);
+  assert.match(source, /isLocal && onDelete/);
   assert.match(source, /candidate-card__delete/);
-  assert.match(source, /aria-label=\{`删除 \$\{component\.name\}`\}/);
+  assert.match(source, /aria-label=\{`从电脑和设备删除 \$\{component\.name\}`\}/);
   assert.match(source, /onClick=\{\(event\) => \{[\s\S]*?event\.stopPropagation\(\);[\s\S]*?onDelete\(\);[\s\S]*?\}\}/);
+  assert.doesNotMatch(source, /pendingSync|待同步|DeviceComponentOverview/);
+});
+
+test("CandidateCard keeps board presence in the bottom action without a preview status overlay", () => {
+  assert.match(source, /candidate-card--installed/);
+  assert.match(source, /已同步到设备（点击从设备删除）/);
+  assert.doesNotMatch(source, /candidate-card__installed-badge/);
+  assert.doesNotMatch(source, />\s*已同步\s*</);
 });
 
 // 5. Uses DeviceScreenPreview shared helper (which renders component-device-screen internally)
@@ -66,7 +111,7 @@ test("CandidateCard imports and uses DeviceScreenPreview for the mini preview", 
   assert.match(source, /candidate-card__screen/);
 });
 
-test("CandidateCard CSS keeps builtin, draft, and create cards on one adaptive preview rhythm", () => {
+test("CandidateCard CSS keeps builtin, local, and create cards on one adaptive preview rhythm", () => {
   const cardRule = extractCssRule(".candidate-card");
   const previewRule = extractCssRule(".candidate-card__preview");
   const screenRule = extractCssRule(".candidate-card__screen");

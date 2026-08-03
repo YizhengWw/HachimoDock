@@ -16,17 +16,25 @@ const { execSync } = require("child_process");
  * Resolution order:
  *   1. Env var `OPENCLAW_RUNTIME_MODULE` pointing directly at the file.
  *   2. Env var `OPENCLAW_HOME` pointing at the package root.
- *   3. `npm root -g` + `pnpm root -g` + `yarn global dir` results.
- *   4. A fixed list of known global installation paths.
+ *   3. User- and environment-derived global installation paths.
+ *   4. On non-Windows hosts, bounded package-manager probes.
  *
  * Returns the absolute path to `agent-runtime.js`, or `null` if openclaw
  * is not installed on this machine.
  *
  * @param {object} [opts]
  * @param {NodeJS.ProcessEnv} [opts.env]
+ * @param {NodeJS.Platform} [opts.platform]
+ * @param {string} [opts.execPath]
+ * @param {(command:string, env:NodeJS.ProcessEnv) => string} [opts.commandRunner]
  * @returns {{ packageRoot: string, runtimeModule: string, packageVersion: string | null } | null}
  */
-function locateOpenClaw({ env = process.env } = {}) {
+function locateOpenClaw({
+  env = process.env,
+  platform = process.platform,
+  execPath = process.execPath,
+  commandRunner = runCmd,
+} = {}) {
   const home = env.OPENCLAW_HOME && env.OPENCLAW_HOME.trim()
     ? expandHome(env.OPENCLAW_HOME, env)
     : (env.HOME || env.USERPROFILE || os.homedir());
@@ -48,27 +56,12 @@ function locateOpenClaw({ env = process.env } = {}) {
     if (got) return got;
   }
 
-  for (const cmd of ["npm root -g", "pnpm root -g"]) {
-    const root = runCmd(cmd, env);
-    if (!root) continue;
-    const got = tryPackageRoot(path.join(root, "openclaw"));
-    if (got) return got;
-  }
-
-  const yarnDir = runCmd("yarn global dir", env);
-  if (yarnDir) {
-    const got = tryPackageRoot(path.join(yarnDir, "node_modules", "openclaw"));
-    if (got) return got;
-  }
-
   const knownPaths = [
+    ...(execPath ? [path.join(path.dirname(execPath), "node_modules", "openclaw")] : []),
     path.join(home, ".npm-global", "lib", "node_modules", "openclaw"),
     path.join(home, ".npm-global", "node_modules", "openclaw"),
     path.join(home, "Library", "pnpm", "global", "5", "node_modules", "openclaw"),
     path.join(home, ".local", "share", "pnpm", "global", "5", "node_modules", "openclaw"),
-    "/opt/homebrew/lib/node_modules/openclaw",
-    "/usr/local/lib/node_modules/openclaw",
-    "/usr/lib/node_modules/openclaw",
     path.join(home, ".nvm", "versions", "node", process.version, "lib", "node_modules", "openclaw"),
     ...(env.APPDATA ? [path.join(env.APPDATA, "npm", "node_modules", "openclaw")] : []),
     ...(env.LOCALAPPDATA ? [
@@ -78,6 +71,23 @@ function locateOpenClaw({ env = process.env } = {}) {
   ];
   for (const root of knownPaths) {
     const got = tryPackageRoot(root);
+    if (got) return got;
+  }
+
+  // npm/yarn commands are .cmd wrappers on Windows. execSync timeout does not
+  // reliably terminate their process trees and can freeze the Bridge event loop.
+  if (platform === "win32") return null;
+
+  for (const cmd of ["npm root -g", "pnpm root -g"]) {
+    const root = commandRunner(cmd, env);
+    if (!root) continue;
+    const got = tryPackageRoot(path.join(root, "openclaw"));
+    if (got) return got;
+  }
+
+  const yarnDir = commandRunner("yarn global dir", env);
+  if (yarnDir) {
+    const got = tryPackageRoot(path.join(yarnDir, "node_modules", "openclaw"));
     if (got) return got;
   }
 

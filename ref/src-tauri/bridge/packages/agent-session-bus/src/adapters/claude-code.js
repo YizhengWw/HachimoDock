@@ -63,8 +63,6 @@ class ClaudeCodeAdapter extends BaseAdapter {
     return [
       `${home}/.local/bin/claude`,
       `${home}/.claude/local/claude`,
-      "/opt/homebrew/bin/claude",
-      "/usr/local/bin/claude",
       ...windowsCliFiles(this._env, "claude"),
     ];
   }
@@ -76,8 +74,6 @@ class ClaudeCodeAdapter extends BaseAdapter {
       `${home}/.npm-global/bin`,
       `${home}/.local/bin`,
       `${home}/.claude/local`,
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
       ...windowsCliDirs(this._env),
     ];
   }
@@ -285,8 +281,6 @@ class ClaudeCodeAdapter extends BaseAdapter {
       `${home}/.npm-global/bin`,
       `${home}/.local/bin`,
       `${home}/.claude/local`,
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
       ...windowsCliDirs(this._env),
     ];
     const current = (this._env.PATH || "").split(sep).filter(Boolean);

@@ -1,0 +1,32 @@
+[
+  {
+    "action": "tap.sw1_score",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "左键得分"
+  },
+  {
+    "action": "tap.sw2_score",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "中键得分"
+  },
+  {
+    "action": "tap.sw3_score",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
+    "label": "右键得分"
+  },
+  {
+    "action": "tap.restart",
+    "control": "前方旋钮",
+    "event": "button.encoder.short_press",
+    "label": "重新开始"
+  },
+  {
+    "action": "page_main",
+    "control": "SW3",
+    "event": "button.sw3.long_press",
+    "label": "返回桌宠"
+  }
+]

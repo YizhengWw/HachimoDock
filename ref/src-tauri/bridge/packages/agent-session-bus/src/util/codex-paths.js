@@ -2,7 +2,7 @@
 
 /*
  * [Input] Codex session directory trees, metadata-bearing JSONL rows, and legacy flat session files.
- * [Output] Active-session candidates that skip metadata-less rollout files before resume selection.
+ * [Output] Bounded, incrementally cached active-session candidates that skip metadata-less rollout files before resume selection.
  * [Pos] Codex session discovery helper for agent-session-bus.
  * [Sync] If Codex session filtering changes, update `ref/.folder.md`.
  */
@@ -10,6 +10,73 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const {
+  isInternalCodexReviewText,
+  isInternalCodexSession,
+} = require("./codex-session-filter");
+
+const SESSION_FILE_CACHE_MAX_ENTRIES = 1024;
+const SESSION_IDENTITY_SCAN_MAX_CANDIDATES = 64;
+const sessionFileCache = new Map();
+const sessionIdentityCache = new Map();
+const sessionIndexCache = new Map();
+const modelsCache = new Map();
+
+function statSignature(stat) {
+  return [
+    Number(stat?.size) || 0,
+    Number(stat?.mtimeMs) || 0,
+    Number(stat?.ctimeMs) || 0,
+  ].join(":");
+}
+
+function cacheValue(cache, key, signature, value, maxEntries = 64) {
+  cache.delete(key);
+  cache.set(key, { signature, value });
+  while (cache.size > maxEntries) {
+    cache.delete(cache.keys().next().value);
+  }
+  return value;
+}
+
+function cachedValue(cache, key, signature) {
+  const entry = cache.get(key);
+  if (!entry || entry.signature !== signature) return undefined;
+  cache.delete(key);
+  cache.set(key, entry);
+  return entry.value;
+}
+
+function mergeCodexSessionRecords(existing, incoming) {
+  if (!existing) return incoming;
+  const existingModified = Number(existing.lastModified) || 0;
+  const incomingModified = Number(incoming.lastModified) || 0;
+  const primary = incomingModified >= existingModified ? incoming : existing;
+  const secondary = primary === incoming ? existing : incoming;
+  const createdAtValues = [existing.createdAt, incoming.createdAt]
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return {
+    ...secondary,
+    ...primary,
+    id: primary.id,
+    lastModified: Math.max(existingModified, incomingModified),
+    ...(createdAtValues.length > 0 ? { createdAt: Math.min(...createdAtValues) } : {}),
+    ...(primary.name || secondary.name ? { name: primary.name || secondary.name } : {}),
+    ...(primary.summary || secondary.summary
+      ? { summary: primary.summary || secondary.summary }
+      : {}),
+    ...(primary.cwd || secondary.cwd ? { cwd: primary.cwd || secondary.cwd } : {}),
+    ...(Math.max(Number(existing.clientUpdatedAt) || 0, Number(incoming.clientUpdatedAt) || 0) > 0
+      ? {
+        clientUpdatedAt: Math.max(
+          Number(existing.clientUpdatedAt) || 0,
+          Number(incoming.clientUpdatedAt) || 0,
+        ),
+      }
+      : {}),
+  };
+}
 
 /**
  * Where Codex CLI stores per-session JSONL files.
@@ -78,6 +145,10 @@ function listCodexSessions({ cwd, limit = 100, env = process.env } = {}) {
   const root = codexSessionsRoot({ env });
   const index = readSessionIndex({ env });
   const availableModels = readAvailableCodexModels({ env });
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.max(0, Math.floor(Number(limit)))
+    : 100;
+  if (safeLimit === 0) return [];
   let files;
   try {
     files = collectJsonlFiles(root, /* maxDepth */ 4);
@@ -86,28 +157,124 @@ function listCodexSessions({ cwd, limit = 100, env = process.env } = {}) {
     throw error;
   }
 
-  const results = [];
+  const candidates = [];
   for (const fullPath of files) {
     let stat;
     try { stat = fs.statSync(fullPath); } catch { continue; }
     const basename = path.basename(fullPath);
-    const meta = readSessionMeta(fullPath);
+    const fallbackId = extractUuidFromBasename(basename);
+    candidates.push({
+      fullPath,
+      stat,
+      basename,
+      fallbackId,
+      canonicalId: fallbackId,
+      indexed: index.get(fallbackId) || null,
+      identity: null,
+      createdAt: sessionCreatedAt(fullPath, stat),
+    });
+  }
+
+  // Most rollout filenames end in the canonical session id, so index matching
+  // costs no file reads. Only when a named index entry has no filename match do
+  // we inspect unmatched file heads for a differing session_meta id.
+  const matchedNamedIds = new Set(
+    candidates
+      .filter((candidate) => candidate.indexed?.name)
+      .map((candidate) => candidate.fallbackId),
+  );
+  const unmatchedNamedIds = new Set(
+    [...index.entries()]
+      .filter(([id, entry]) => entry?.name && !matchedNamedIds.has(id))
+      .map(([id]) => id),
+  );
+  if (unmatchedNamedIds.size > 0) {
+    const indexUpdatedAt = [...unmatchedNamedIds]
+      .map((id) => Number(index.get(id)?.updatedAt) || 0)
+      .filter((value) => value > 0)
+      .sort((a, b) => b - a)
+      .slice(0, SESSION_IDENTITY_SCAN_MAX_CANDIDATES);
+    const identityCandidates = candidates
+      .map((candidate) => {
+        const candidateTime = Number(candidate.stat?.mtimeMs) || candidate.createdAt || 0;
+        const indexDistance = indexUpdatedAt.reduce(
+          (closest, value) => Math.min(closest, Math.abs(value - candidateTime)),
+          Number.POSITIVE_INFINITY,
+        );
+        return { candidate, candidateTime, indexDistance };
+      })
+      .sort((a, b) => {
+        if (a.indexDistance !== b.indexDistance) return a.indexDistance - b.indexDistance;
+        return b.candidateTime - a.candidateTime;
+      })
+      .slice(0, SESSION_IDENTITY_SCAN_MAX_CANDIDATES);
+    for (const { candidate } of identityCandidates) {
+      const identity = readCachedSessionIdentity(candidate.fullPath, candidate.stat);
+      candidate.identity = identity;
+      if (!identity?.id) continue;
+      const indexed = index.get(identity.id) || null;
+      if (!indexed) continue;
+      candidate.canonicalId = identity.id;
+      candidate.indexed = indexed;
+      unmatchedNamedIds.delete(identity.id);
+      if (unmatchedNamedIds.size === 0) break;
+    }
+  }
+
+  // The endpoint asks for a small visible queue (normally 20). Rank by data
+  // available from filenames/index/stat first, then parse only enough files to
+  // fill that queue. Older implementations parsed the head and a 1 MiB tail of
+  // every rollout on every five-second poll.
+  candidates.sort((a, b) => {
+    const namedDelta = Number(Boolean(b.indexed?.name)) - Number(Boolean(a.indexed?.name));
+    if (namedDelta !== 0) return namedDelta;
+    if (a.indexed?.name && b.indexed?.name) {
+      const modifiedDelta = (b.stat.mtimeMs || 0) - (a.stat.mtimeMs || 0);
+      if (modifiedDelta !== 0) return modifiedDelta;
+      const clientDelta = (b.indexed.updatedAt || 0) - (a.indexed.updatedAt || 0);
+      if (clientDelta !== 0) return clientDelta;
+    }
+    const createdDelta = (b.createdAt || 0) - (a.createdAt || 0);
+    if (createdDelta !== 0) return createdDelta;
+    return (b.stat.mtimeMs || 0) - (a.stat.mtimeMs || 0);
+  });
+
+  const resultsById = new Map();
+  for (const candidate of candidates) {
+    const {
+      fullPath,
+      stat,
+      basename,
+      fallbackId,
+      canonicalId,
+      indexed: indexedCandidate,
+      identity,
+      createdAt,
+    } = candidate;
+    if (isRolloutBasename(basename) && identity?.stable && !identity.id) continue;
+    const { meta, model } = readCachedSessionDetails(fullPath, stat);
     // Codex Desktop's app-server rejects rollout files that do not begin with
     // session_meta. Do not treat those as resumable just because the basename
     // ends in a UUID; they are internal/non-session rollouts.
     if (isRolloutBasename(basename) && !(meta && meta.id)) continue;
     // Older flat layouts may be named directly after the session id. Keep the
     // basename fallback for those non-rollout files.
-    const fallbackId = extractUuidFromBasename(basename);
-    const id = (meta && meta.id) || fallbackId;
+    const id = (meta && meta.id) || canonicalId || fallbackId;
     if (!id) continue;
     const sessionCwd = meta && meta.cwd ? meta.cwd : "";
     if (cwd && sessionCwd && !sameCwd(cwd, sessionCwd)) continue;
-    const createdAt = sessionCreatedAt(fullPath, stat);
-    const indexed = index.get(id) || null;
-    const model = readSessionRecentModel(fullPath, stat) || (meta && meta.model) || "";
+    const indexed = index.get(id) || indexedCandidate;
+    if (meta?.internal || isInternalCodexSession({
+      model,
+      originator: meta?.originator,
+      threadSource: meta?.threadSource,
+      name: indexed?.name,
+      summary: meta?.summary,
+    })) {
+      continue;
+    }
     const modelSupport = classifyModelSupport(model, availableModels);
-    results.push({
+    const result = {
       id,
       lastModified: stat.mtimeMs,
       createdAt,
@@ -118,9 +285,12 @@ function listCodexSessions({ cwd, limit = 100, env = process.env } = {}) {
       ...(model ? { model } : {}),
       modelSupport,
       ...(modelSupport !== "unknown" ? { modelSupported: modelSupport === "supported" } : {}),
-    });
+    };
+    resultsById.set(id, mergeCodexSessionRecords(resultsById.get(id), result));
+    if (resultsById.size >= safeLimit) break;
   }
 
+  const results = [...resultsById.values()];
   results.sort((a, b) => {
     const namedDelta = Number(Boolean(b.name)) - Number(Boolean(a.name));
     if (namedDelta !== 0) return namedDelta;
@@ -134,13 +304,62 @@ function listCodexSessions({ cwd, limit = 100, env = process.env } = {}) {
     if (createdDelta !== 0) return createdDelta;
     return b.lastModified - a.lastModified;
   });
-  return results.slice(0, limit);
+  return results.slice(0, safeLimit);
+}
+
+function readCachedSessionDetails(filePath, stat) {
+  const signature = statSignature(stat);
+  const cached = cachedValue(sessionFileCache, filePath, signature);
+  if (cached !== undefined) return cached;
+
+  const meta = readSessionMeta(filePath);
+  const model = readSessionRecentModel(filePath, stat) || (meta && meta.model) || "";
+  return cacheValue(
+    sessionFileCache,
+    filePath,
+    signature,
+    { meta, model },
+    SESSION_FILE_CACHE_MAX_ENTRIES,
+  );
+}
+
+function readCachedSessionIdentity(filePath, stat) {
+  const signature = statSignature(stat);
+  const cached = sessionIdentityCache.get(filePath);
+  // A rollout's session_meta identity is immutable after its first complete
+  // write. Empty/incomplete files stay signature-bound so they are retried.
+  if (cached && (cached.signature === signature || cached.value?.stable)) {
+    sessionIdentityCache.delete(filePath);
+    sessionIdentityCache.set(filePath, cached);
+    return cached.value;
+  }
+
+  const value = readSessionIdentity(filePath);
+  return cacheValue(
+    sessionIdentityCache,
+    filePath,
+    signature,
+    value,
+    SESSION_FILE_CACHE_MAX_ENTRIES,
+  );
 }
 
 function readAvailableCodexModels({ env = process.env } = {}) {
+  const filePath = codexModelsCachePath({ env });
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    modelsCache.delete(filePath);
+    return new Set();
+  }
+  const signature = statSignature(stat);
+  const cached = cachedValue(modelsCache, filePath, signature);
+  if (cached !== undefined) return cached;
+
   let raw = "";
   try {
-    raw = fs.readFileSync(codexModelsCachePath({ env }), "utf8");
+    raw = fs.readFileSync(filePath, "utf8");
   } catch {
     return new Set();
   }
@@ -158,14 +377,26 @@ function readAvailableCodexModels({ env = process.env } = {}) {
     const slug = typeof row?.slug === "string" ? row.slug.trim() : "";
     if (slug) out.add(slug);
   }
-  return out;
+  return cacheValue(modelsCache, filePath, signature, out);
 }
 
 function readSessionIndex({ env = process.env } = {}) {
+  const filePath = codexSessionIndexPath({ env });
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    sessionIndexCache.delete(filePath);
+    return new Map();
+  }
+  const signature = statSignature(stat);
+  const cached = cachedValue(sessionIndexCache, filePath, signature);
+  if (cached !== undefined) return cached;
+
   const out = new Map();
   let raw = "";
   try {
-    raw = fs.readFileSync(codexSessionIndexPath({ env }), "utf8");
+    raw = fs.readFileSync(filePath, "utf8");
   } catch {
     return out;
   }
@@ -183,7 +414,7 @@ function readSessionIndex({ env = process.env } = {}) {
       updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0,
     });
   }
-  return out;
+  return cacheValue(sessionIndexCache, filePath, signature, out);
 }
 
 /**
@@ -221,6 +452,48 @@ function collectJsonlFiles(dir, maxDepth) {
   return out;
 }
 
+function readSessionIdentity(filePath) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const buf = Buffer.alloc(256 * 1024);
+    const bytes = fs.readSync(fd, buf, 0, buf.length, 0);
+    const text = buf.subarray(0, bytes).toString("utf8");
+    let offset = 0;
+    while (offset < text.length) {
+      const nl = text.indexOf("\n", offset);
+      const line = nl === -1 ? text.slice(offset) : text.slice(offset, nl);
+      offset = nl === -1 ? text.length : nl + 1;
+      if (!line.trim()) {
+        if (nl === -1) break;
+        continue;
+      }
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        if (nl === -1) break;
+        continue;
+      }
+      if (obj && obj.type === "session_meta" && obj.payload) {
+        return {
+          id: typeof obj.payload.id === "string" ? obj.payload.id : "",
+          cwd: typeof obj.payload.cwd === "string" ? obj.payload.cwd : "",
+          stable: true,
+        };
+      }
+      return { id: "", cwd: "", stable: true };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
 /**
  * Pull `id`, `cwd`, `model`, and a short user-facing `summary` out of a Codex
  * session jsonl. Codex's first line is a `session_meta` event whose
@@ -250,6 +523,9 @@ function readSessionMeta(filePath) {
     let cwd = "";
     let model = "";
     let summary = "";
+    let originator = "";
+    let threadSource = "";
+    let internal = false;
     let offset = 0;
     while (offset < text.length) {
       const nl = text.indexOf("\n", offset);
@@ -264,10 +540,13 @@ function readSessionMeta(filePath) {
       if (obj && obj.type === "session_meta" && obj.payload) {
         if (typeof obj.payload.id === "string") id = obj.payload.id;
         if (typeof obj.payload.cwd === "string") cwd = obj.payload.cwd;
+        if (typeof obj.payload.originator === "string") originator = obj.payload.originator;
+        if (typeof obj.payload.thread_source === "string") threadSource = obj.payload.thread_source;
       }
       const turnModel = pickTurnContextModel(obj);
       if (!model && turnModel) model = turnModel;
       if (!summary && obj && obj.type === "response_item" && obj.payload) {
+        if (pickUserTexts(obj.payload).some(isInternalCodexReviewText)) internal = true;
         const text = pickFirstUserText(obj.payload);
         if (text) summary = text.slice(0, 80);
       }
@@ -275,7 +554,7 @@ function readSessionMeta(filePath) {
       if (nl === -1) break;
     }
     if (!id && !cwd) return null;
-    return { id, cwd, model, summary };
+    return { id, cwd, model, summary, originator, threadSource, internal };
   } catch {
     return null;
   } finally {
@@ -289,6 +568,7 @@ function readSessionRecentModel(filePath, stat) {
   let fd;
   try {
     const size = Math.max(0, Number(stat && stat.size) || fs.statSync(filePath).size || 0);
+    if (size === 0) return "";
     const budget = Math.min(size, 1024 * 1024);
     const start = Math.max(0, size - budget);
     fd = fs.openSync(filePath, "r");
@@ -300,15 +580,28 @@ function readSessionRecentModel(filePath, stat) {
       text = nl === -1 ? "" : text.slice(nl + 1);
     }
 
-    let model = "";
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) continue;
+    // Search candidate rows from newest to oldest and parse only lines that
+    // mention turn_context. Splitting and JSON-parsing every row in a 1 MiB
+    // tail dominated the Bridge event loop on large Codex histories.
+    const marker = "\"turn_context\"";
+    let markerAt = text.lastIndexOf(marker);
+    while (markerAt >= 0) {
+      const lineStart = text.lastIndexOf("\n", markerAt) + 1;
+      const nextNewline = text.indexOf("\n", markerAt);
+      const lineEnd = nextNewline === -1 ? text.length : nextNewline;
+      const line = text.slice(lineStart, lineEnd).trim();
       let obj;
-      try { obj = JSON.parse(line); } catch { continue; }
+      try { obj = JSON.parse(line); } catch {
+        if (lineStart === 0) break;
+        markerAt = text.lastIndexOf(marker, lineStart - 1);
+        continue;
+      }
       const turnModel = pickTurnContextModel(obj);
-      if (turnModel) model = turnModel;
+      if (turnModel) return turnModel;
+      if (lineStart === 0) break;
+      markerAt = text.lastIndexOf(marker, lineStart - 1);
     }
-    return model;
+    return "";
   } catch {
     return "";
   } finally {
@@ -385,15 +678,23 @@ function parseRolloutTimestamp(basename) {
  * @returns {string}
  */
 function pickFirstUserText(payload) {
-  if (!payload || typeof payload !== "object") return "";
+  for (const text of pickUserTexts(payload)) {
+    const summary = summarizeUserText(text);
+    if (summary) return summary;
+  }
+  return "";
+}
+
+function pickUserTexts(payload) {
+  if (!payload || typeof payload !== "object") return [];
+  const texts = [];
   if (payload.type === "message" && payload.role === "user" && Array.isArray(payload.content)) {
     for (const c of payload.content) {
       if (!c || typeof c.text !== "string") continue;
-      const text = summarizeUserText(c.text);
-      if (text) return text;
+      texts.push(c.text);
     }
   }
-  return "";
+  return texts;
 }
 
 function summarizeUserText(value) {

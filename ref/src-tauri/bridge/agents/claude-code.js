@@ -8,6 +8,7 @@ function readPositiveNumberEnv(name, fallback) {
 module.exports = {
   PROJECTS_ROOT: process.env.CLAWD_CLAUDE_PROJECTS_ROOT || "",
   POLL_INTERVAL_MS: readPositiveNumberEnv("CLAWD_CLAUDE_POLL_INTERVAL_MS", 1000),
+  PROCESS_POLL_INTERVAL_MS: readPositiveNumberEnv("CLAWD_CLAUDE_PROCESS_POLL_INTERVAL_MS", 30000),
   HEARTBEAT_MS: 30000,
   DEFAULT_SESSION_ID: "claude:local",
   NEW_FILE_MAX_AGE_MS: 120000,

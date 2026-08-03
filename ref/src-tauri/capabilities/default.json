@@ -7,6 +7,7 @@
     "core:default",
     "core:path:default",
     "core:webview:default",
+    "dialog:allow-open",
     "fs:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
@@ -17,11 +18,14 @@
     "fs:allow-read-dir",
     "fs:allow-exists",
     "fs:allow-stat",
+    "fs:allow-watch",
     {
       "identifier": "fs:scope",
       "allow": [
         { "path": "$APPLOCALDATA" },
-        { "path": "$APPLOCALDATA/**" }
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/.claw-pet/components/library" },
+        { "path": "$HOME/.claw-pet/components/library/**" }
       ]
     },
     {

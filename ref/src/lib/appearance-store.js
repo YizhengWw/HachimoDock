@@ -1,7 +1,8 @@
 /**
  * [Input] pipeline output or direct uploaded video bytes plus per-family manifest metadata.
  * [Output] cached local filesystem persistence, synchronous cached list reads, direct uploaded-video appearances,
- *          built-in appearance fallback/override merging, source-preview/audio cue asset URLs, and blob URL readers.
+ *          built-in appearance fallback/override merging, immediate P4-ready preparation after media mutations,
+ *          source-preview/audio cue asset URLs, and blob URL readers.
  * [Pos] lib node in ref/src/lib
  * [Sync] If this file changes, update this header and any UI components that consume the appearance manifest shape.
  */
@@ -19,7 +20,7 @@ import {
 } from "@tauri-apps/plugin-fs";
 export { readFile as readAppearanceFile };
 import { appLocalDataDir, join } from "@tauri-apps/api/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { createAsyncCache } from "./client-cache.js";
 import { extensionFromMime } from "./avatar-pipeline/image.js";
 import { FAMILIES } from "./avatar-pipeline/families.js";
@@ -42,6 +43,10 @@ function uuid() {
     return crypto.randomUUID();
   }
   return `app-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function prepareP4Appearance(appearanceId) {
+  return invoke("prepare_p4_appearance", { appearanceId });
 }
 
 async function ensureRoot() {
@@ -236,6 +241,7 @@ export async function saveAppearance(input) {
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
+  await prepareP4Appearance(id);
 
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
@@ -283,6 +289,7 @@ export async function saveUploadedVideoAppearance(input) {
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
+  await prepareP4Appearance(id);
 
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
@@ -417,6 +424,7 @@ export async function replaceFamilyVideo({ appearanceId, family, videoBytes, tas
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
+  await prepareP4Appearance(appearanceId);
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
 }
@@ -429,6 +437,7 @@ export async function replaceFamilyAudioCue({ appearanceId, family, audioBytes }
     const overrides = await readBuiltinAudioOverrides();
     overrides[family] = audioRel;
     await writeBuiltinAudioOverrides(overrides);
+    await prepareP4Appearance(appearanceId);
     invalidateAppearanceCache();
     return getBuiltinTerrierAppearance();
   }
@@ -446,6 +455,7 @@ export async function replaceFamilyAudioCue({ appearanceId, family, audioBytes }
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
+  await prepareP4Appearance(appearanceId);
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
 }
@@ -458,6 +468,7 @@ export async function removeFamilyAudioCue({ appearanceId, family }) {
       delete overrides[family];
       await writeBuiltinAudioOverrides(overrides);
     }
+    await prepareP4Appearance(appearanceId);
     invalidateAppearanceCache();
     return getBuiltinTerrierAppearance();
   }
@@ -476,6 +487,7 @@ export async function removeFamilyAudioCue({ appearanceId, family }) {
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
+  await prepareP4Appearance(appearanceId);
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
 }

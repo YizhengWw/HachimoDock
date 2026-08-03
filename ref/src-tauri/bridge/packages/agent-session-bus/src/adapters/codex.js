@@ -12,11 +12,15 @@ const {
 const { listCodexSessions } = require("../util/codex-paths");
 const { parseLine, frameToEvents } = require("../util/stream-json");
 
+const DEFAULT_AVAILABILITY_CACHE_MS = process.platform === "win32" ? 30_000 : 5_000;
+
 /**
  * Codex (OpenAI Codex CLI/Desktop) adapter. New sessions still use
  * `codex exec --json`, while existing Desktop threads are continued through
  * `codex app-server --listen stdio://` so the thread keeps its Desktop-owned
  * model/account configuration instead of being reinterpreted by `exec resume`.
+ * Managed invocations apply a process-local `service_tier=fast` override so an
+ * older CLI can read config files written by a newer Codex Desktop release.
  *
  * Like ClaudeCodeAdapter this is intentionally machine-agnostic. Discovery
  * fallback paths are kept in lock-step with `lib.rs::detect_codex` so the
@@ -36,6 +40,7 @@ class CodexAdapter extends BaseAdapter {
    * @param {string} [opts.cwd]
    * @param {string[]} [opts.fallbackPaths]
    * @param {string[]} [opts.extraPathDirs]
+   * @param {number} [opts.availabilityCacheMs]
    * @param {string} [opts.sandbox]      Codex `--sandbox` policy. Default
    *   `workspace-write` matches Codex Desktop's interactive default.
    *   Voice users typically don't authenticate elevated changes, so
@@ -49,6 +54,7 @@ class CodexAdapter extends BaseAdapter {
     cwd,
     fallbackPaths,
     extraPathDirs,
+    availabilityCacheMs = DEFAULT_AVAILABILITY_CACHE_MS,
     sandbox = "workspace-write",
   } = {}) {
     super({ agentId: "codex", log });
@@ -61,6 +67,10 @@ class CodexAdapter extends BaseAdapter {
     this._cachedBin = null;
     this._cachedAvailability = null;
     this._cachedAt = 0;
+    this._availabilityCacheMs = Math.max(
+      5_000,
+      Number(availabilityCacheMs) || DEFAULT_AVAILABILITY_CACHE_MS,
+    );
   }
 
   _defaultFallbackPaths() {
@@ -68,8 +78,7 @@ class CodexAdapter extends BaseAdapter {
     // keep this list in lock-step with lib.rs::detect_codex
     return [
       `${home}/.local/bin/codex`,
-      "/opt/homebrew/bin/codex",
-      "/usr/local/bin/codex",
+      ...macosCodexDesktopFiles(this._env),
       ...windowsCliFiles(this._env, "codex"),
     ];
   }
@@ -79,8 +88,6 @@ class CodexAdapter extends BaseAdapter {
     return [
       `${home}/.npm-global/bin`,
       `${home}/.local/bin`,
-      "/opt/homebrew/bin",
-      "/usr/local/bin",
       ...windowsCliDirs(this._env),
     ];
   }
@@ -104,7 +111,7 @@ class CodexAdapter extends BaseAdapter {
 
   async isAvailable() {
     const now = Date.now();
-    if (this._cachedAvailability && now - this._cachedAt < 5000) {
+    if (this._cachedAvailability && now - this._cachedAt < this._availabilityCacheMs) {
       return this._cachedAvailability;
     }
     let value;
@@ -255,7 +262,7 @@ class CodexAdapter extends BaseAdapter {
   }
 
   _buildExecArgs({ sessionId, text }) {
-    const args = ["exec"];
+    const args = [...this._globalConfigArgs(), "exec"];
     if (sessionId) args.push("resume");
     args.push("--json", "--skip-git-repo-check");
     if (!sessionId) args.push("--sandbox", this._sandbox);
@@ -268,10 +275,19 @@ class CodexAdapter extends BaseAdapter {
     return this._env.CLAWD_CODEX_APP_SERVER !== "0";
   }
 
+  _globalConfigArgs() {
+    const serviceTier = typeof this._env.CLAWD_CODEX_SERVICE_TIER === "string"
+      ? this._env.CLAWD_CODEX_SERVICE_TIER.trim().toLowerCase()
+      : "";
+    return serviceTier === "fast" || serviceTier === "flex"
+      ? ["-c", `service_tier="${serviceTier}"`]
+      : ["-c", 'service_tier="fast"'];
+  }
+
   async *_spawnAppServerAndIterate({ bin, cwd, signal, sessionId, text }) {
     this.log("info", "spawning codex app-server", { bin, cwd, sessionId });
     const useWindowsCmdShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(bin);
-    const child = spawn(bin, ["app-server", "--listen", "stdio://"], {
+    const child = spawn(bin, [...this._globalConfigArgs(), "app-server", "--listen", "stdio://"], {
       cwd,
       env: this._spawnEnv(),
       stdio: ["pipe", "pipe", "pipe"],
@@ -540,8 +556,6 @@ class CodexAdapter extends BaseAdapter {
       : [
           `${home}/.npm-global/bin`,
           `${home}/.local/bin`,
-          "/opt/homebrew/bin",
-          "/usr/local/bin",
           ...windowsCliDirs(this._env),
         ];
     const current = (this._env.PATH || "").split(sep).filter(Boolean);
@@ -550,18 +564,28 @@ class CodexAdapter extends BaseAdapter {
   }
 }
 
+function macosCodexDesktopFiles(env) {
+  if (process.platform !== "darwin") return [];
+  const home = env.HOME || env.USERPROFILE || "~";
+  return [
+    `${home}/Applications/ChatGPT.app/Contents/Resources/codex`,
+    `${home}/Applications/Codex.app/Contents/Resources/codex`,
+  ];
+}
+
 function windowsCliDirs(env) {
   const dirs = [];
   const push = (value) => {
     if (value && !dirs.includes(value)) dirs.push(value);
   };
-  // Prefer Codex Desktop's unpacked runtime dirs first on Windows.
+  // Prefer the independently upgradeable npm CLI over stale Desktop runtime
+  // snapshots. Explicit CODEX_CLI_PATH still wins in findExecutable().
+  if (env.APPDATA) push(`${env.APPDATA}\\npm`);
   // The Microsoft Store WindowsApps shim can exist but still fail to execute
   // with "Access is denied" in sidecar contexts.
   for (const dir of windowsCodexDesktopDirs(env)) {
     push(dir);
   }
-  if (env.APPDATA) push(`${env.APPDATA}\\npm`);
   if (env.LOCALAPPDATA) {
     push(`${env.LOCALAPPDATA}\\Microsoft\\WindowsApps`);
     push(`${env.LOCALAPPDATA}\\pnpm`);

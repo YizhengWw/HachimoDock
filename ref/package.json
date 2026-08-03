@@ -2,23 +2,34 @@
   "name": "pet-manager-client",
   "private": true,
   "version": "0.1.0",
-  "author": "wangwu50",
-  "license": "GPL-3.0-only",
+  "author": "Yizheng Wang",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
+    "prepare:desktop": "node ../scripts/prepare-desktop-resources.mjs",
+    "dev": "npm run prepare:desktop && tauri dev --features devtools --config src-tauri/tauri.dev.conf.json",
     "dev:web": "vite --host 0.0.0.0 --port 4173",
-    "build": "tauri build",
-    "build:web": "vite build",
+    "build": "npm run prepare:desktop && tauri build",
+    "build:mac": "node ../scripts/prepare-desktop-resources.mjs --target macos && tauri build --bundles app,dmg --ci",
+    "build:mac:local": "node ../scripts/prepare-desktop-resources.mjs --target macos && tauri build --bundles app --ci && npm run sign:mac:local",
+    "sign:mac:local": "node ../scripts/sign-macos-local-app.mjs",
+    "build:win": "node ../scripts/prepare-desktop-resources.mjs --target windows && tauri build --target x86_64-pc-windows-msvc --bundles nsis,msi --ci",
+    "build:win:portable": "node ../scripts/prepare-desktop-resources.mjs --target windows && tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --no-bundle --ci",
+    "bundle:win:cross": "node ../scripts/build-windows-nsis-cross.mjs",
+    "build:web": "vite build && npm run check:release-csp",
+    "check:release-csp": "node ../scripts/check-release-csp.mjs",
+    "smoke:background-removal": "node ../scripts/smoke-background-removal.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "tauri": "tauri",
+    "prepare:p4-assets": "node ../scripts/prepare-p4-ready-assets.mjs",
     "pack-builtins": "node ../scripts/pack-builtin-clawpkgs.js",
-    "test": "find src -name '*.test.js' -type f -print0 | xargs -0 node --test",
-    "test:e2e": "playwright test"
+    "test": "node ../scripts/run-node-tests.mjs src",
+    "test:bridge": "node ../scripts/run-node-tests.mjs src-tauri/bridge/test src-tauri/bridge/packages/agent-session-bus/test"
   },
   "dependencies": {
     "@imgly/background-removal": "^1.5.0",
-    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/plugin-dialog": "2.7.1",
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-http": "^2",
     "lucide-react": "^0.511.0",
@@ -27,9 +38,13 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@playwright/test": "^1.59.1",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "2.10.1",
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.10"
+    "vite": "^6.4.3"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "postcss": "8.5.25",
+    "protobufjs": "7.6.5"
   }
 }

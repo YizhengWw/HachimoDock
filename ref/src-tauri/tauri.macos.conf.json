@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "-"
+    },
+    "resources": {
+      "generated-runtime/node": "bridge/runtime/node",
+      "generated-runtime/ffmpeg": "tools/ffmpeg",
+      "generated-runtime/ffmpeg.LICENSE": "tools/ffmpeg.LICENSE",
+      "generated-runtime/ffmpeg.README": "tools/ffmpeg.README",
+      "generated-runtime/ffmpeg.SOURCE.txt": "tools/ffmpeg.SOURCE.txt"
+    }
+  }
+}

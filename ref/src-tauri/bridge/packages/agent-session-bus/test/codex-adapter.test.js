@@ -159,6 +159,37 @@ test("default resolver paths include Windows app aliases and npm globals", async
     assert.ok(a._defaultFallbackPaths().includes(`${localAppData}\\OpenAI\\Codex\\bin\\codex.exe`));
     assert.ok(a._defaultExtraPathDirs().includes(`${appData}\\npm`));
     assert.ok(a._defaultExtraPathDirs().includes(`${localAppData}\\OpenAI\\Codex\\bin`));
+    assert.ok(
+      a._defaultExtraPathDirs().indexOf(`${appData}\\npm`)
+        < a._defaultExtraPathDirs().indexOf(`${localAppData}\\OpenAI\\Codex\\bin`),
+    );
+  });
+});
+
+test("default resolver paths include user-relative macOS desktop runtimes", async () => {
+  if (process.platform !== "darwin") return;
+  await withFakeHome(null, async (home) => {
+    const a = new CodexAdapter({
+      env: { HOME: home, PATH: "" },
+      cwd: home,
+    });
+    assert.ok(a._defaultFallbackPaths().includes(
+      `${home}/Applications/ChatGPT.app/Contents/Resources/codex`,
+    ));
+    assert.ok(a._defaultFallbackPaths().includes(
+      `${home}/Applications/Codex.app/Contents/Resources/codex`,
+    ));
+    assert.ok(a._defaultFallbackPaths().every((candidate) => !candidate.startsWith("/Applications/")));
+  });
+});
+
+test("availability cache keeps the established refresh cadence outside Windows", async () => {
+  await withFakeHome(null, async (home) => {
+    const adapter = makeAdapter(home);
+    assert.equal(
+      adapter._availabilityCacheMs,
+      process.platform === "win32" ? 30_000 : 5_000,
+    );
   });
 });
 
@@ -225,6 +256,46 @@ test("listSessions skips Codex bootstrap context when building summaries", async
     const a = makeAdapter(home);
     const sessions = await a.listSessions();
     assert.equal(sessions[0].summary, "请用一句中文回复：语音链路测试");
+  });
+});
+
+test("listSessions excludes internal Codex approval review rollouts", async () => {
+  const approvalPrompt = [
+    "The following is the Code under review.",
+    "Return risk_level, user_authorization, outcome, and rationale.",
+  ].join(" ");
+  await withFakeHome({
+    sessions: {
+      "2026/06/03": {
+        "rollout-2026-06-03T19-32-42-internal-review.jsonl": {
+          mtimeAgo: 100,
+          meta: { id: "internal-review", cwd: "/repo" },
+          lines: [{
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ text: approvalPrompt }],
+            },
+          }],
+        },
+        "rollout-2026-06-03T19-31-42-user-session.jsonl": {
+          mtimeAgo: 1_000,
+          meta: { id: "user-session", cwd: "/repo" },
+          lines: [{
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ text: "Implement the visible device session card" }],
+            },
+          }],
+        },
+      },
+    },
+  }, async (home) => {
+    const sessions = await makeAdapter(home).listSessions();
+    assert.deepEqual(sessions.map((session) => session.id), ["user-session"]);
   });
 });
 
@@ -307,6 +378,239 @@ test("listSessions annotates recent Codex model support", async () => {
     assert.equal(unsupported.model, "gpt-5.3-codex");
     assert.equal(unsupported.modelSupport, "unsupported");
     assert.equal(unsupported.modelSupported, false);
+  });
+});
+
+test("listSessions bounds initial parsing and reuses unchanged rollout metadata", async () => {
+  const sessions = {};
+  for (let index = 0; index < 30; index += 1) {
+    const suffix = String(index).padStart(12, "0");
+    const id = `019f0000-0000-7000-8000-${suffix}`;
+    sessions[`rollout-2026-06-03T19-${String(index).padStart(2, "0")}-00-${id}.jsonl`] = {
+      mtimeAgo: index * 1_000,
+      meta: { id, cwd: "/repo" },
+      lines: [
+        { type: "turn_context", payload: { model: "gpt-5.5" } },
+      ],
+    };
+  }
+
+  await withFakeHome({
+    modelsCache: { models: [{ slug: "gpt-5.5" }] },
+    sessions: { "2026/06/03": sessions },
+  }, async (home) => {
+    const adapter = makeAdapter(home);
+    const originalReadSync = fs.readSync;
+    let readCount = 0;
+    fs.readSync = function countedReadSync(...args) {
+      readCount += 1;
+      return originalReadSync.apply(this, args);
+    };
+    try {
+      const first = await adapter.listSessions({ limit: 5 });
+      assert.equal(first.length, 5);
+      assert.ok(readCount <= 10, `expected at most two reads per visible session, saw ${readCount}`);
+
+      const firstReadCount = readCount;
+      const second = await adapter.listSessions({ limit: 5 });
+      assert.deepEqual(second, first);
+      assert.equal(readCount, firstReadCount, "unchanged rollout files should stay parsed in memory");
+
+      const newestPath = path.join(
+        home,
+        ".codex",
+        "sessions",
+        "2026",
+        "06",
+        "03",
+        Object.keys(sessions).at(-1),
+      );
+      fs.appendFileSync(
+        newestPath,
+        `${JSON.stringify({ type: "turn_context", payload: { model: "gpt-5.5" } })}\n`,
+      );
+      const third = await adapter.listSessions({ limit: 5 });
+      assert.equal(third.length, 5);
+      assert.ok(readCount > firstReadCount, "a changed rollout should be reparsed");
+      assert.ok(
+        readCount <= firstReadCount + 2,
+        `only the changed rollout should be reparsed, saw ${readCount - firstReadCount} reads`,
+      );
+    } finally {
+      fs.readSync = originalReadSync;
+    }
+  });
+});
+
+test("listSessions ranks a named canonical id before applying the visible limit", async () => {
+  const canonicalId = "019f0000-0000-7000-8000-000000000099";
+  const fileId = "019f0000-0000-7000-8000-000000000001";
+  const recentId = "019f0000-0000-7000-8000-000000000002";
+
+  await withFakeHome({
+    sessionIndex: [
+      {
+        id: canonicalId,
+        thread_name: "Named desktop thread",
+        updated_at: new Date().toISOString(),
+      },
+    ],
+    sessions: {
+      "2026/06/03": {
+        [`rollout-2026-06-03T10-00-00-${fileId}.jsonl`]: {
+          mtimeAgo: 60_000,
+          meta: { id: canonicalId, cwd: "/repo" },
+        },
+        [`rollout-2026-06-03T11-00-00-${recentId}.jsonl`]: {
+          mtimeAgo: 0,
+          meta: { id: recentId, cwd: "/repo" },
+        },
+      },
+    },
+  }, async (home) => {
+    const adapter = makeAdapter(home);
+    const sessions = await adapter.listSessions({ limit: 1 });
+
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].id, canonicalId);
+    assert.equal(sessions[0].name, "Named desktop thread");
+  });
+});
+
+test("listSessions collapses multiple rollout files for the same Codex thread id", async () => {
+  const canonicalId = "019f0000-0000-7000-8000-000000000099";
+  const firstFileId = "019f0000-0000-7000-8000-000000000101";
+  const secondFileId = "019f0000-0000-7000-8000-000000000102";
+
+  await withFakeHome({
+    sessionIndex: [{
+      id: canonicalId,
+      thread_name: "One desktop thread",
+      updated_at: new Date().toISOString(),
+    }],
+    sessions: {
+      "2026/06/03": {
+        [`rollout-2026-06-03T10-00-00-${firstFileId}.jsonl`]: {
+          mtimeAgo: 60_000,
+          meta: { id: canonicalId, cwd: "/repo", summary: "older" },
+        },
+        [`rollout-2026-06-03T11-00-00-${secondFileId}.jsonl`]: {
+          mtimeAgo: 0,
+          meta: { id: canonicalId, cwd: "/repo", summary: "newer" },
+        },
+      },
+    },
+  }, async (home) => {
+    const adapter = makeAdapter(home);
+    const sessions = await adapter.listSessions({ limit: 20 });
+
+    assert.equal(sessions.filter((session) => session.id === canonicalId).length, 1);
+    assert.equal(sessions[0].name, "One desktop thread");
+    assert.ok(Date.now() - sessions[0].lastModified < 10_000);
+  });
+});
+
+test("listSessions permanently classifies metadata-less rollouts without rereading them", async () => {
+  const namedId = "019f0000-0000-7000-8000-000000000010";
+  const internalId = "019f0000-0000-7000-8000-000000000011";
+  const staleNamedId = "019f0000-0000-7000-8000-000000000012";
+  const internalName = `rollout-2026-06-03T12-00-00-${internalId}.jsonl`;
+
+  await withFakeHome({
+    sessionIndex: [
+      {
+        id: namedId,
+        thread_name: "Visible thread",
+        updated_at: new Date().toISOString(),
+      },
+      {
+        id: staleNamedId,
+        thread_name: "Stale named thread",
+        updated_at: new Date().toISOString(),
+      },
+    ],
+    sessions: {
+      "2026/06/03": {
+        [`rollout-2026-06-03T11-00-00-${namedId}.jsonl`]: {
+          meta: { id: namedId, cwd: "/repo" },
+        },
+        [internalName]: {
+          lines: [{ type: "event_msg", payload: { type: "task_started" } }],
+        },
+      },
+    },
+  }, async (home) => {
+    const adapter = makeAdapter(home);
+    const originalReadSync = fs.readSync;
+    let readCount = 0;
+    fs.readSync = function countedReadSync(...args) {
+      readCount += 1;
+      return originalReadSync.apply(this, args);
+    };
+    try {
+      const first = await adapter.listSessions({ limit: 1 });
+      assert.equal(first[0].id, namedId);
+      const firstReadCount = readCount;
+
+      fs.appendFileSync(
+        path.join(home, ".codex", "sessions", "2026", "06", "03", internalName),
+        `${JSON.stringify({ type: "event_msg", payload: { type: "token_count" } })}\n`,
+      );
+      const second = await adapter.listSessions({ limit: 1 });
+      assert.deepEqual(second, first);
+      assert.equal(
+        readCount,
+        firstReadCount,
+        "a rollout whose first complete record is not session_meta is permanently non-resumable",
+      );
+    } finally {
+      fs.readSync = originalReadSync;
+    }
+  });
+});
+
+test("listSessions bounds stale named-index identity scans for large histories", async () => {
+  const sessions = {};
+  for (let index = 0; index < 1100; index += 1) {
+    const suffix = String(index).padStart(12, "0");
+    const id = `019f0000-0000-7000-8000-${suffix}`;
+    sessions[`rollout-2026-06-03T12-00-${String(index % 60).padStart(2, "0")}-${id}.jsonl`] = {
+      mtimeAgo: index * 1_000,
+      meta: { id, cwd: "/repo" },
+    };
+  }
+
+  await withFakeHome({
+    sessionIndex: [{
+      id: "019f0000-0000-7000-8000-999999999999",
+      thread_name: "Deleted desktop thread",
+      updated_at: new Date().toISOString(),
+    }],
+    sessions: { "2026/06/03": sessions },
+  }, async (home) => {
+    const adapter = makeAdapter(home);
+    const originalReadSync = fs.readSync;
+    let readCount = 0;
+    fs.readSync = function countedReadSync(...args) {
+      readCount += 1;
+      return originalReadSync.apply(this, args);
+    };
+    try {
+      const first = await adapter.listSessions({ limit: 1 });
+      assert.equal(first.length, 1);
+      assert.ok(readCount <= 66, `stale index scan read ${readCount} files`);
+
+      const firstReadCount = readCount;
+      const second = await adapter.listSessions({ limit: 1 });
+      assert.deepEqual(second, first);
+      assert.equal(
+        readCount,
+        firstReadCount,
+        "bounded identity candidates should remain cached across polls",
+      );
+    } finally {
+      fs.readSync = originalReadSync;
+    }
   });
 });
 
@@ -444,6 +748,21 @@ test("inject preserves explicit sessionId via app-server resume", async () => {
     }
     const done = events[events.length - 1];
     assert.equal(done.sessionId, "my-codex-sid");
+  });
+});
+
+test("managed service tier override is placed before Codex subcommands", async () => {
+  await withFakeHome(null, async (home) => {
+    const a = makeAdapter(home, { env: { CLAWD_CODEX_SERVICE_TIER: "fast" } });
+    assert.deepEqual(
+      a._buildExecArgs({ sessionId: "", text: "ping" }).slice(0, 3),
+      ["-c", 'service_tier="fast"', "exec"],
+    );
+    const events = [];
+    for await (const evt of a.inject({ sessionId: "managed-session", text: "ping" })) {
+      events.push(evt);
+    }
+    assert.equal(events.at(-1)?.sessionId, "managed-session");
   });
 });
 

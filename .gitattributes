@@ -1,1 +1,4 @@
 ref/src-tauri/bridge/runtime/node filter=lfs diff=lfs merge=lfs -text
+ref/public/terrier-clips/p4-ready/**/*.h264 filter=lfs diff=lfs merge=lfs -text
+ref/public/terrier-clips/p4-ready/**/*.mjpg filter=lfs diff=lfs merge=lfs -text
+ref/public/terrier-clips/p4-ready/**/*.wav filter=lfs diff=lfs merge=lfs -text

@@ -1,0 +1,8 @@
+{
+  "id": "snake-turn",
+  "name": "像素贪吃蛇",
+  "kind": "game",
+  "version": "2.1.0",
+  "author": "openclaw",
+  "description": "持续移动、SW1/SW2/SW3 三键转向与重开、吃食物成长并检测碰撞的板端贪吃蛇。"
+}

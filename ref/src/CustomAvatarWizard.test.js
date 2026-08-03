@@ -1,7 +1,7 @@
 /**
  * [Input] CustomAvatarWizard generation-config source.
  * [Output] Static Node regression coverage for reusable full-generation wizard steps,
- *          shared provider-config-backed Volcano Ark API-key-only setup, 1.5-first defaults,
+ *          shared provider-config-backed Volcano Ark credential readiness, 1.5-first defaults,
  *          activation guidance, product-fit dropdown model names, inline progress support, and fixed reference upload sizing.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -42,7 +42,7 @@ test("full avatar generation exposes reusable step UI for single-state modal reg
   assert.doesNotMatch(wizard, /<Step2/);
 });
 
-test("Volcano generation setup only asks for API key plus a dropdown model name", () => {
+test("Volcano generation reads centralized credentials and keeps model selection local", () => {
   const wizard = readSource("CustomAvatarWizard.jsx");
   const providerConfig = readSource("lib/avatar-pipeline/provider-config.js");
   const volcanoProvider = readSource("lib/avatar-pipeline/providers/volcano.js");
@@ -64,7 +64,11 @@ test("Volcano generation setup only asks for API key plus a dropdown model name"
   assert.match(wizard, /自定义模型名称/);
   assert.match(wizard, /isVolcengine/);
   assert.match(wizard, /!isVolcengine && \(/);
-  assert.match(wizard, /请先填写 API Key 和视频生成模型/);
+  assert.match(wizard, /providerCredentialsConfigured/);
+  assert.match(wizard, /generation-api-status/);
+  assert.match(wizard, /打开 API 配置/);
+  assert.match(wizard, /请先在 API 配置中保存火山引擎 API Key/);
+  assert.doesNotMatch(wizard, /type="password"/);
   assert.doesNotMatch(wizard, /placeholder="输入或选择火山 Ark 视频模型名称"/);
   assert.doesNotMatch(wizard, /请先填写 Base URL 和视频生成模型/);
   assert.doesNotMatch(wizard, /Thinking 模型 endpoint/);

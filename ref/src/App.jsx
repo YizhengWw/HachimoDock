@@ -1,6 +1,6 @@
 /**
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
- * [Output] Pet Manager desktop app shell with first-level device/gallery/component-center sidebar tabs, browser-only dev direct-dashboard fallback, Tauri setup-first routing, setup header, setup-completion and avatar-generation DeviceContext refreshes, and device-scoped appearance management routing.
+ * [Output] Pet Manager desktop app shell with first-level device/gallery/component-center/API-configuration sidebar tabs, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -12,6 +12,7 @@ import {
   Loader2,
   MonitorSmartphone,
   Blocks,
+  KeyRound,
 } from "lucide-react";
 import DeviceSetup from "./DeviceSetup";
 import DeviceDashboard from "./DeviceDashboard";
@@ -19,6 +20,7 @@ import AppearanceGallery from "./AppearanceGallery";
 import CustomAvatarWizard from "./CustomAvatarWizard";
 import AppearanceDetail from "./AppearanceDetail";
 import ComponentCenter from "./ComponentCenter";
+import ApiSettings from "./ApiSettings";
 import { DeviceContextProvider, useDeviceContext } from "./shell/DeviceContext.jsx";
 import ToastStack, { ToastProvider, useToast } from "./shell/ToastStack.jsx";
 import ContextRail from "./shell/ContextRail.jsx";
@@ -27,7 +29,6 @@ import {
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
 import petManagerMark from "./assets/logo/pet-manager-mark.svg";
-import { hasTauriRuntime } from "./lib/tauri-env.js";
 
 const DEV_DIRECT_DASHBOARD_BINDING = {
   boardDeviceId: "board-dev-direct-001",
@@ -39,10 +40,15 @@ function devDirectDashboardBinding() {
   return import.meta.env.DEV && !hasTauriRuntime() ? DEV_DIRECT_DASHBOARD_BINDING : null;
 }
 
+function hasTauriRuntime() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
 export default function App() {
-  const [view, setView] = useState("loading"); // loading | dashboard | setup | gallery | wizard | detail | components
+  const [view, setView] = useState("loading"); // loading | dashboard | setup | gallery | wizard | detail | components | api
   const [binding, setBinding] = useState(null);
   const [detailAppearanceId, setDetailAppearanceId] = useState("");
+  const [apiReturnView, setApiReturnView] = useState("");
 
   const isPreviewBinding = useCallback((item) => {
     const boardId = String(item?.boardDeviceId || "").trim().toLowerCase();
@@ -74,10 +80,13 @@ export default function App() {
       .catch(() => enterBestAvailableDeviceSurface([]));
   }, [enterBestAvailableDeviceSurface]);
 
-  const handleSetupComplete = useCallback(() => {
-    invoke("load_device_bindings")
-      .then(enterBestAvailableDeviceSurface)
-      .catch(() => {});
+  const handleSetupComplete = useCallback(async () => {
+    try {
+      const bindings = await invoke("load_device_bindings");
+      enterBestAvailableDeviceSurface(bindings);
+    } catch {
+      // DeviceSetup keeps polling while a completed binding cannot be reloaded.
+    }
   }, [enterBestAvailableDeviceSurface]);
 
   const handleUnbind = useCallback(() => {
@@ -109,11 +118,31 @@ export default function App() {
     setView("gallery");
   }, []);
 
+  const handleOpenApiSettings = useCallback(() => {
+    setApiReturnView(view === "api" ? "" : view);
+    setView("api");
+  }, [view]);
+
+  const handleApiSettingsBack = useCallback(() => {
+    setView(apiReturnView && apiReturnView !== "api"
+      ? apiReturnView
+      : binding
+        ? "dashboard"
+        : "gallery");
+    setApiReturnView("");
+  }, [apiReturnView, binding]);
+
   const isDashboard = view === "dashboard";
   const isSetup = view === "setup";
   const hasBinding = Boolean(binding);
   const galleryViews = new Set(["gallery", "wizard", "detail"]);
-  const activeTab = view === "components" ? "components" : galleryViews.has(view) ? "gallery" : "device";
+  const activeTab = view === "api"
+    ? "api"
+    : view === "components"
+      ? "components"
+      : galleryViews.has(view)
+        ? "gallery"
+        : "device";
 
   if (view === "loading") {
     return (
@@ -139,6 +168,7 @@ export default function App() {
         <AppInner
           view={view}
           binding={binding}
+          apiReturnView={apiReturnView}
           activeTab={activeTab}
           isDashboard={isDashboard}
           isSetup={isSetup}
@@ -149,6 +179,8 @@ export default function App() {
           handleUnbind={handleUnbind}
           handleOpenGallery={handleOpenGallery}
           handleOpenComponents={handleOpenComponents}
+          handleOpenApiSettings={handleOpenApiSettings}
+          handleApiSettingsBack={handleApiSettingsBack}
           handleEnterWizard={handleEnterWizard}
           handleWizardExit={handleWizardExit}
           handleOpenDetail={handleOpenDetail}
@@ -163,6 +195,7 @@ export default function App() {
 function AppInner({
   view,
   binding,
+  apiReturnView,
   activeTab,
   isDashboard,
   isSetup,
@@ -173,6 +206,8 @@ function AppInner({
   handleUnbind,
   handleOpenGallery,
   handleOpenComponents,
+  handleOpenApiSettings,
+  handleApiSettingsBack,
   handleEnterWizard,
   handleWizardExit,
   handleOpenDetail,
@@ -228,8 +263,8 @@ function AppInner({
                 <img src={petManagerMark} alt="" />
               </div>
               <div className="wizard-header-copy">
-                <span className="wizard-title">绑定桌宠</span>
-                <span className="wizard-subtitle">插网线或 Wi‑Fi 绑定。</span>
+                <span className="wizard-title">连接桌宠</span>
+                <span className="wizard-subtitle">连接 USB，Pet Manager 会自动识别设备。</span>
               </div>
             </div>
           </header>
@@ -284,6 +319,15 @@ function AppInner({
               <Blocks size={16} />
               <span className="sidebar-nav-label">组件中心</span>
             </button>
+            <button
+              type="button"
+              className={`sidebar-nav__item ${activeTab === "api" ? "is-active" : ""}`}
+              onClick={handleOpenApiSettings}
+              title="API 配置"
+            >
+              <KeyRound size={16} />
+              <span className="sidebar-nav-label">API 配置</span>
+            </button>
           </nav>
           <div className="sidebar-spacer" />
           <ContextRail
@@ -295,14 +339,17 @@ function AppInner({
         </aside>
         <section className="app-main">
           <main className="app-content">
-            {isDashboard && binding && (
-              <DeviceDashboard
-                binding={binding}
-                onSwitchToSetup={() => setView("setup")}
-                onUnbind={handleUnbind}
-                onOpenGallery={handleOpenGallery}
-                onOpenDetail={handleOpenDetail}
-              />
+            {binding && (
+              <div hidden={!isDashboard}>
+                <DeviceDashboard
+                  binding={binding}
+                  onSwitchToSetup={() => setView("setup")}
+                  onUnbind={handleUnbind}
+                  onOpenGallery={handleOpenGallery}
+                  onOpenDetail={handleOpenDetail}
+                  onOpenApiSettings={handleOpenApiSettings}
+                />
+              </div>
             )}
             {view === "gallery" && (
               <AppearanceGallery
@@ -311,17 +358,30 @@ function AppInner({
                 onOpenDetail={handleOpenDetail}
               />
             )}
-            {view === "wizard" && (
-              <CustomAvatarWizard onExit={handleWizardExit} />
+            {(view === "wizard" || (view === "api" && apiReturnView === "wizard")) && (
+              <div hidden={view !== "wizard"}>
+                <CustomAvatarWizard
+                  onExit={handleWizardExit}
+                  onOpenApiSettings={handleOpenApiSettings}
+                />
+              </div>
             )}
-            {view === "detail" && detailAppearanceId && (
-              <AppearanceDetail
-                appearanceId={detailAppearanceId}
-                onBack={handleDetailBack}
-              />
+            {(view === "detail" || (view === "api" && apiReturnView === "detail"))
+              && detailAppearanceId && (
+                <div hidden={view !== "detail"}>
+                  <AppearanceDetail
+                    appearanceId={detailAppearanceId}
+                    boardDeviceId={binding?.boardDeviceId || ""}
+                    onBack={handleDetailBack}
+                    onOpenApiSettings={handleOpenApiSettings}
+                  />
+                </div>
             )}
             {view === "components" && (
               <ComponentCenter />
+            )}
+            {view === "api" && (
+              <ApiSettings onBack={handleApiSettingsBack} />
             )}
           </main>
         </section>

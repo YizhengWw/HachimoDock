@@ -1,0 +1,38 @@
+[
+  {
+    "action": "blocks.start",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
+    "label": "开始/重开"
+  },
+  {
+    "action": "blocks.left",
+    "control": "前方旋钮",
+    "event": "knob.rotate_ccw",
+    "label": "向左移动"
+  },
+  {
+    "action": "blocks.right",
+    "control": "前方旋钮",
+    "event": "knob.rotate_cw",
+    "label": "向右移动"
+  },
+  {
+    "action": "blocks.rotate",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "旋转"
+  },
+  {
+    "action": "blocks.drop",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "快速落下"
+  },
+  {
+    "action": "page_main",
+    "control": "SW3",
+    "event": "button.sw3.long_press",
+    "label": "返回桌宠"
+  }
+]

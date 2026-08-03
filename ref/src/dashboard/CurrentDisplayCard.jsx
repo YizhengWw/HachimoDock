@@ -25,7 +25,6 @@ import { useToast } from "../shell/ToastStack.jsx";
 export default function CurrentDisplayCard() {
   const {
     usb,
-    deviceOnline,
     appearances,
     agentAppearanceMap,
     agentOptions,
@@ -189,7 +188,7 @@ export default function CurrentDisplayCard() {
           </div>
           {!usb.connected && (
             <p className="dashboard-current-display__hint">
-              更换形象需要 USB 直连设备。当前{deviceOnline ? "在线（仅 WiFi）" : "离线"}。
+              更换形象需要 USB 直连设备。当前 USB 未连接。
             </p>
           )}
         </div>

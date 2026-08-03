@@ -7,9 +7,10 @@
 
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { cspSafeBackgroundRemovalPlugin } from "./csp-safe-background-removal.js";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspSafeBackgroundRemovalPlugin()],
   optimizeDeps: {
     exclude: ["@imgly/background-removal"],
   },

@@ -1,0 +1,6 @@
+[
+  { "control": "SW1", "event": "button.sw1.short_press", "action": "clock.pause_resume", "label": "暂停/继续" },
+  { "control": "SW2", "event": "button.sw2.short_press", "action": "clock.switch_view", "label": "切换显示" },
+  { "control": "SW3", "event": "button.sw3.short_press", "action": "clock.reset_countdown", "label": "重置倒计时" },
+  { "control": "前方旋钮", "event": "button.encoder.long_press", "action": "page_main", "label": "返回桌宠" }
+]

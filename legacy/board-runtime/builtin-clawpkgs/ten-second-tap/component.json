@@ -1,0 +1,8 @@
+{
+  "id": "ten-second-tap",
+  "name": "10秒连点",
+  "kind": "game",
+  "version": "1.1.0",
+  "author": "openclaw",
+  "description": "10 秒三键连点计分，SW1/SW2/SW3 都能得分，旋钮按下随时重开。"
+}

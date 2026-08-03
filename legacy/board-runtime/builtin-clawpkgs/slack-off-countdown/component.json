@@ -1,0 +1,8 @@
+{
+  "id": "slack-off-countdown",
+  "name": "摸鱼倒计时",
+  "kind": "tool",
+  "version": "1.3.0",
+  "author": "openclaw",
+  "description": "下班倒计时支持 SW1 暂停、SW2 切换剩余与目标时间、SW3 重置，归零后自动停止。"
+}

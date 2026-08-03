@@ -1,6 +1,6 @@
 /**
  * [Input] Read ChannelMatrixCard.jsx source.
- * [Output] Static Node coverage: default export, detected-agent filtering, useDeviceContext field destructuring, followed row state, per-agent appearance saving, picker-open appearance refresh, followed-agent device sync, inline USB sync progress, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
+ * [Output] Static Node coverage: default export, visible unavailable-Agent rows, global active-session visibility with automatic queue sizing, followed row state, per-agent appearance saving, picker-open appearance refresh, USB-only followed-agent gating/sync, inline USB sync progress, AgentAppearancePickerModal subcomponent and compact picker modal CSS.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "ChannelMatrixCard.jsx"), "utf8");
 const styles = readFileSync(join(here, "../styles.css"), "utf8");
+const switchSource = readFileSync(join(here, "../shell/Switch.jsx"), "utf8");
 
 function extractCssRule(css, selector) {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -25,10 +26,24 @@ test("ChannelMatrixCard has a default export", () => {
   assert.match(source, /export default function ChannelMatrixCard\s*\(/);
 });
 
-test("ChannelMatrixCard renders detected local agents only", () => {
-  assert.match(source, /installedAgents/);
-  assert.match(source, /agentOptions\.filter\(\(agent\) => agent\.detected\)/);
-  assert.match(source, /installedAgents\.map\s*\(/);
+test("ChannelMatrixCard keeps supported agents visible and marks unavailable CLIs", () => {
+  assert.match(source, /visibleAgents/);
+  assert.match(source, /agentOptions\.filter\(\(agent\) => agent\?\.id\)/);
+  assert.match(source, /visibleAgents\.map\s*\(/);
+  assert.match(source, /is-undetected/);
+  assert.match(source, /未检测到 CLI/);
+  assert.match(source, /disabled=\{syncing \|\| !isDetected\}/);
+  assert.match(source, /!isDetected \? \(/);
+  assert.match(source, /className="channel-row__unavailable"/);
+  assert.match(source, /不可用/);
+  assert.match(source, /disabled=\{syncing \|\| !usb\?\.connected\}/);
+  assert.match(source, /连接 USB 后才能切换跟随/);
+
+  const unavailableRule = extractCssRule(styles, ".channel-row.is-undetected");
+  assert.match(unavailableRule, /border-style:\s*dashed/);
+  assert.doesNotMatch(unavailableRule, /opacity:/);
+  const unavailableActionRule = extractCssRule(styles, ".channel-row__unavailable");
+  assert.match(unavailableActionRule, /background:\s*var\(--surface-muted\)/);
 });
 
 test("ChannelMatrixCard destructures multiple fields from useDeviceContext", () => {
@@ -37,7 +52,7 @@ test("ChannelMatrixCard destructures multiple fields from useDeviceContext", () 
   assert.match(source, /agentAppearanceMap/);
   assert.match(source, /agentOptions/);
   assert.match(source, /currentDisplay/);
-  assert.match(source, /deviceConnected/);
+  assert.match(source, /\busb\b/);
   assert.match(source, /applyDesktopPet/);
   assert.match(source, /saveAgentAppearance/);
   assert.match(source, /refresh/);
@@ -58,6 +73,32 @@ test("Non-followed agents show a follow button while the active one is marked fo
   assert.match(source, /requestFollow\(agent\.id\)/);
 });
 
+test("Uses the shared accessible switch without a manual session-count selector", () => {
+  assert.match(source, /showSessionDisplaySetting &&/);
+  assert.match(source, /sessionDisplayEnabled = true/);
+  assert.match(source, /import Switch from "\.\.\/shell\/Switch"/);
+  assert.match(source, /checked=\{sessionsShown\}/);
+  assert.match(source, /label="显示会话"/);
+  assert.match(source, /onCheckedChange=\{onSessionDisplayEnabledChange\}/);
+  assert.match(switchSource, /role="switch"/);
+  assert.match(source, /仅显示当前运行中的 Agent 对话，结束或出错后保留 60 秒/);
+  assert.doesNotMatch(source, /SESSION_DISPLAY_COUNT_OPTIONS/);
+  assert.doesNotMatch(source, /normalizeSessionDisplayCount/);
+  assert.doesNotMatch(source, /显示几个活跃 Session/);
+  assert.doesNotMatch(source, /sessionDisplayCount/);
+  assert.doesNotMatch(source, /onSessionDisplayCountChange/);
+
+  const settingRule = extractCssRule(styles, ".session-display-setting");
+  const primaryRule = extractCssRule(styles, ".session-display-setting__primary");
+  assert.match(settingRule, /display:\s*block/);
+  assert.match(settingRule, /border-top:/);
+  assert.doesNotMatch(settingRule, /border-radius:/);
+  assert.match(primaryRule, /display:\s*flex/);
+  assert.doesNotMatch(styles, /\.session-display-setting__count/);
+  assert.doesNotMatch(styles, /\.session-display-setting__options/);
+  assert.match(styles, /\.switch input:focus-visible \+ \.switch__track\s*\{/);
+});
+
 test("Agent appearance changes save locally unless the agent is currently followed", () => {
   assert.match(source, /BUILTIN_TERRIER_APPEARANCE_ID/);
   assert.match(source, /saveAgentAppearance\(agentId, appearance\.id\)/);
@@ -65,10 +106,11 @@ test("Agent appearance changes save locally unless the agent is currently follow
   assert.match(source, /applyDesktopPet\(agentId, appearance/);
 });
 
-test("Opening the appearance picker refreshes disk-backed appearances first", () => {
-  assert.match(source, /const\s+openPicker\s*=\s*useCallback\(\s*async\s*\(agentId\)\s*=>/);
-  assert.match(source, /await\s+refresh\(\)/);
-  assert.match(source, /finally\s*\{[\s\S]*setPickerState\(\{\s*agentId\s*\}\)/);
+test("Opening the appearance picker is immediate while disk records refresh in the background", () => {
+  assert.match(source, /const\s+openPicker\s*=\s*useCallback\(\s*\(agentId\)\s*=>/);
+  assert.match(source, /setPickerState\(\{\s*agentId\s*\}\);[\s\S]*refreshAppearances\(\)\.catch/);
+  assert.doesNotMatch(source, /await\s+refresh\(\)/);
+  assert.ok(source.indexOf("setPickerState({ agentId })") < source.indexOf("refreshAppearances().catch"));
   assert.match(source, /onClick=\{\(\)\s*=>\s+openPicker\(agent\.id\)\}/);
 });
 
@@ -90,11 +132,19 @@ test("USB appearance sync progress stays inline and survives dashboard tab unmou
   assert.match(source, /className="channel-matrix-sync"/);
   assert.match(source, /role="progressbar"/);
   assert.match(source, /aria-valuenow=\{syncProgress\.percent\}/);
+  assert.match(source, /cancelAppearanceSync/);
+  assert.match(source, /handleCancelAppearanceSync/);
+  assert.match(source, /aria-label="中断 USB 形象传输"/);
+  assert.match(source, /variant="danger"/);
+  assert.match(source, /中断传输/);
 
   const stripRule = extractCssRule(styles, ".channel-matrix-sync");
+  const cancelRule = extractCssRule(styles, ".channel-matrix-sync__cancel");
   const barRule = extractCssRule(styles, ".channel-matrix-sync__bar > span");
   assert.match(stripRule, /display:\s*grid/);
+  assert.match(stripRule, /grid-template-columns:[^;]*auto/);
   assert.doesNotMatch(stripRule, /position:\s*(fixed|absolute)/);
+  assert.match(cancelRule, /justify-self:\s*end/);
   assert.match(barRule, /width:\s*var\(--sync-progress\)/);
 });
 
@@ -118,7 +168,7 @@ test("FormosaPickerModal CSS stays compact when only a few appearances exist", (
   assert.match(pickerStageRule, /background:\s*#000/);
   assert.match(pickerMediaRule, /object-fit:\s*contain/);
   assert.match(pickerMediaRule, /object-position:\s*center\s+center/);
-  assert.match(styles, /\.channel-row__formosa\s*\{[\s\S]*grid-template-columns:\s*96px\s+minmax\(0,\s*1fr\)/);
+  assert.match(styles, /\.channel-row__formosa\s*\{[\s\S]*grid-template-columns:\s*72px\s+minmax\(0,\s*1fr\)/);
   assert.match(styles, /\.channel-row__thumb-wrap\s*\{[\s\S]*background:\s*#000/);
   assert.match(styles, /\.channel-row__thumb:is\(img,\s*video\)\s*\{[\s\S]*object-fit:\s*contain/);
   assert.match(styles, /\.modal-card--formosa-picker\s+\.modal-footer\s*\{/);

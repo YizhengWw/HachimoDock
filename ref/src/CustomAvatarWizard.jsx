@@ -1,15 +1,15 @@
 /**
- * [Input] User-uploaded image + provider config; orchestrates `lib/avatar-pipeline/run.js`.
+ * [Input] User-uploaded image + centrally managed provider config; orchestrates `lib/avatar-pipeline/run.js`.
  * [Output] On success persists via `lib/appearance-store.js`, with clear GIF first-frame copy,
- *          fixed-size reference upload preview, unified field help, shared provider-config persistence,
- *          Volcengine Ark API-key-only product-fit model dropdown with Seedance 1.5 first and 2.0 activation guidance,
+ *          fixed-size reference upload preview, unified field help, shared provider-config persistence with read-only credential readiness linked to the API configuration page,
+ *          Volcengine Ark product-fit model dropdown with Seedance 1.5 first and 2.0 activation guidance,
  *          fast low-resolution defaults, reusable step components, optional inline progress, and preflight generation requirements.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ImageUp, AlertCircle } from "lucide-react";
+import { ArrowLeft, ImageUp, AlertCircle, CheckCircle2, KeyRound } from "lucide-react";
 import {
   isGenerationRunning,
   startGenerationTask,
@@ -29,6 +29,10 @@ import {
   loadProviderConfig,
   saveProviderConfig,
 } from "./lib/avatar-pipeline/provider-config.js";
+import {
+  API_CONFIGURATION_UPDATED_EVENT,
+  providerCredentialsConfigured,
+} from "./lib/api-configuration.js";
 import HelpTooltip from "./HelpTooltip.jsx";
 
 const FAST_REFERENCE_HEIGHT = Math.round(
@@ -37,15 +41,13 @@ const FAST_REFERENCE_HEIGHT = Math.round(
 );
 
 const HELP_TEXT = {
-  apiKey:
-    "填写视频服务或聚合平台提供的 API Key。通常可以在控制台的 API Keys、密钥管理、Access Token 或应用凭证页面找到。",
   baseUrl:
     "填写接口根地址，例如平台给出的 API 域名。请保留 https://，不要把具体接口路径重复填进来。",
   model:
     "下拉只保留当前新形象流程适配过的图生视频模型。火山 Ark 可用的新模型可以通过“自定义模型名称”兜底填写。",
 };
 
-export default function CustomAvatarWizard({ onExit }) {
+export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
   const [step, setStep] = useState(0);
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -68,7 +70,6 @@ export default function CustomAvatarWizard({ onExit }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [openaiCompat, setOpenaiCompat] = useState(true);
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
-  const [testFeedback, setTestFeedback] = useState(null);
   const [removeBg, setRemoveBg] = useState(true);
   const [fastGeneration, setFastGeneration] = useState(true);
 
@@ -83,7 +84,7 @@ export default function CustomAvatarWizard({ onExit }) {
     [],
   );
 
-  useEffect(() => {
+  const refreshProviderConfig = useCallback(() => {
     const saved = loadProviderConfig(providerId);
     setApiKey(saved.apiKey);
     setAccessKey(saved.accessKey);
@@ -93,8 +94,18 @@ export default function CustomAvatarWizard({ onExit }) {
     setThinkingModel(saved.thinkingModel);
     setFastGeneration(saved.fastGeneration);
     setAdvanced(saved.advanced);
-    setTestFeedback(null);
   }, [providerId]);
+
+  useEffect(() => {
+    refreshProviderConfig();
+  }, [refreshProviderConfig]);
+
+  useEffect(() => {
+    window.addEventListener(API_CONFIGURATION_UPDATED_EVENT, refreshProviderConfig);
+    return () => {
+      window.removeEventListener(API_CONFIGURATION_UPDATED_EVENT, refreshProviderConfig);
+    };
+  }, [refreshProviderConfig]);
 
   useEffect(() => {
     if (!file) {
@@ -143,7 +154,7 @@ export default function CustomAvatarWizard({ onExit }) {
   const generationReadyIssue = useMemo(() => {
     if (providerId === "kling") {
       if (!accessKey.trim() || !secretKey.trim()) {
-        return "请先填写 Kling Access Key 和 Secret Key。";
+        return "请先在 API 配置中保存 Kling Access Key 和 Secret Key。";
       }
       if (!baseUrl.trim() || !model.trim()) {
         return "请先填写接口地址和视频生成模型。";
@@ -152,9 +163,9 @@ export default function CustomAvatarWizard({ onExit }) {
     }
 
     if (isVolcengine && (!apiKey.trim() || !model.trim())) {
-      return "请先填写 API Key 和视频生成模型。";
+      return "请先在 API 配置中保存火山引擎 API Key，并选择视频生成模型。";
     }
-    if (!apiKey.trim()) return "请先填写 API Key。";
+    if (!apiKey.trim()) return "请先在 API 配置中保存当前服务的 API Key。";
     if (!baseUrl.trim() || !model.trim()) return "请先填写接口地址和视频生成模型。";
     return "";
   }, [providerId, accessKey, secretKey, apiKey, baseUrl, model, isVolcengine]);
@@ -173,37 +184,6 @@ export default function CustomAvatarWizard({ onExit }) {
       advanced,
     });
   }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, advanced]);
-
-  const handleTestConnection = useCallback(() => {
-    const key = providerId === "kling" ? accessKey.trim() : apiKey.trim();
-    const normalizedBaseUrl = baseUrl.trim();
-    if (isVolcengine) {
-      if (!key) {
-        setTestFeedback({ tone: "warning", text: "请先填写 API Key。" });
-        return;
-      }
-      setTestFeedback({
-        tone: "success",
-        text: `火山 Ark 地址已固定，请求会发送到 ${VOLCENGINE_BASE_URL}`,
-      });
-      return;
-    }
-    if (!key || !normalizedBaseUrl) {
-      setTestFeedback({ tone: "warning", text: "请先填写 API Key 和 Base URL。" });
-      return;
-    }
-    try {
-      const url = new URL(
-        /^https?:\/\//i.test(normalizedBaseUrl) ? normalizedBaseUrl : `https://${normalizedBaseUrl}`,
-      );
-      setTestFeedback({
-        tone: "success",
-        text: `基础地址校验通过，请求会发送到 ${url.origin}`,
-      });
-    } catch {
-      setTestFeedback({ tone: "danger", text: "Base URL 格式不正确。" });
-    }
-  }, [providerId, apiKey, accessKey, baseUrl, isVolcengine]);
 
   const handleStartGenerate = useCallback(() => {
     if (!file) return;
@@ -318,12 +298,12 @@ export default function CustomAvatarWizard({ onExit }) {
         {step === 1 && (
           <AvatarWizardStep2
             providerId={providerId}
-            apiKey={apiKey}
-            onApiKey={setApiKey}
-            accessKey={accessKey}
-            onAccessKey={setAccessKey}
-            secretKey={secretKey}
-            onSecretKey={setSecretKey}
+            credentialConfigured={providerCredentialsConfigured(providerId, {
+              apiKey,
+              accessKey,
+              secretKey,
+            })}
+            onOpenApiSettings={onOpenApiSettings}
             baseUrl={baseUrl}
             onBaseUrl={setBaseUrl}
             model={model}
@@ -334,9 +314,7 @@ export default function CustomAvatarWizard({ onExit }) {
             onOpenaiCompat={setOpenaiCompat}
             advanced={advanced}
             onAdvanced={setAdvanced}
-            testFeedback={testFeedback}
             onPickProvider={setProviderId}
-            onTestConnection={handleTestConnection}
             canStart={canStartGenerate && !taskRunning}
             generationReadyIssue={generationReadyIssue}
             submitError={submitError}
@@ -448,12 +426,8 @@ export function AvatarWizardStep1({
 
 export function AvatarWizardStep2({
   providerId,
-  apiKey,
-  onApiKey,
-  accessKey,
-  onAccessKey,
-  secretKey,
-  onSecretKey,
+  credentialConfigured,
+  onOpenApiSettings,
   baseUrl,
   onBaseUrl,
   model,
@@ -464,9 +438,7 @@ export function AvatarWizardStep2({
   onOpenaiCompat,
   advanced,
   onAdvanced,
-  testFeedback,
   onPickProvider,
-  onTestConnection,
   canStart,
   generationReadyIssue,
   submitError,
@@ -507,40 +479,22 @@ export function AvatarWizardStep2({
         ))}
       </div>
 
-      {isKling ? (
-        <>
-          <div className="field">
-            <label className="field-label">Access Key</label>
-            <input
-              className="field-input"
-              type="password"
-              placeholder="Kling Access Key"
-              value={accessKey}
-              onChange={(event) => onAccessKey(event.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label className="field-label">Secret Key</label>
-            <input
-              className="field-input"
-              type="password"
-              placeholder="Kling Secret Key"
-              value={secretKey}
-              onChange={(event) => onSecretKey(event.target.value)}
-            />
-          </div>
-        </>
-      ) : (
-        <FieldWithHelp label="API Key" help={HELP_TEXT.apiKey}>
-          <input
-            className="field-input"
-            type="password"
-            placeholder="输入 API Key"
-            value={apiKey}
-            onChange={(event) => onApiKey(event.target.value)}
-          />
-        </FieldWithHelp>
-      )}
+      <div className={`generation-api-status${credentialConfigured ? " is-configured" : ""}`}>
+        <span className="generation-api-status__icon" aria-hidden="true">
+          {credentialConfigured ? <CheckCircle2 size={18} /> : <KeyRound size={18} />}
+        </span>
+        <span className="generation-api-status__copy">
+          <strong>{credentialConfigured ? "API 凭据已配置" : "API 凭据未配置"}</strong>
+          <small>
+            {credentialConfigured
+              ? `${provider.label} 凭据已从统一配置读取`
+              : `请先在 API 配置中补充${isKling ? " Access Key 和 Secret Key" : " API Key"}`}
+          </small>
+        </span>
+        <button type="button" className="btn-secondary btn-sm" onClick={onOpenApiSettings}>
+          打开 API 配置
+        </button>
+      </div>
 
       {!isVolcengine && (
         <FieldWithHelp label="Base URL" help={HELP_TEXT.baseUrl}>
@@ -656,17 +610,6 @@ export function AvatarWizardStep2({
           使用 5 秒低清视频与更快链路。
         </span>
       </label>
-
-      <div className="row" style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
-        <button className="btn-secondary btn-sm" onClick={onTestConnection}>
-          测试连接
-        </button>
-        {testFeedback && (
-          <span className={`test-feedback test-feedback--${testFeedback.tone}`}>
-            {testFeedback.text}
-          </span>
-        )}
-      </div>
 
       {submitError && (
         <div className="message-banner message-banner--error" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>

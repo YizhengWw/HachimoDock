@@ -1,5 +1,11 @@
 "use strict";
 
+/*
+ * [Input] Claude CLI transcript roots plus optional Claude Desktop session metadata.
+ * [Output] Newest Claude sessions annotated when the Desktop client can route them.
+ * [Pos] Shared Claude session discovery for Agent Session Bus adapters.
+ */
+
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -22,6 +28,59 @@ function claudeProjectsRoot({ env = process.env } = {}) {
   return path.join(home, ".claude", "projects");
 }
 
+function claudeDesktopSessionsRoot({ env = process.env, platform = process.platform } = {}) {
+  if (typeof env.CLAUDE_DESKTOP_SESSIONS_DIR === "string" && env.CLAUDE_DESKTOP_SESSIONS_DIR.trim()) {
+    return env.CLAUDE_DESKTOP_SESSIONS_DIR.trim();
+  }
+  const home = env.HOME || env.USERPROFILE || os.homedir();
+  if (platform === "darwin") {
+    return path.join(home, "Library", "Application Support", "Claude", "claude-code-sessions");
+  }
+  if (platform === "win32") {
+    const appData = env.APPDATA || path.join(home, "AppData", "Roaming");
+    return path.join(appData, "Claude", "claude-code-sessions");
+  }
+  return "";
+}
+
+function listClaudeDesktopCliSessionIds({ env = process.env, platform = process.platform } = {}) {
+  const root = claudeDesktopSessionsRoot({ env, platform });
+  if (!root) return new Set();
+
+  const ids = new Set();
+  const pending = [{ dir: root, depth: 0 }];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current.dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(current.dir, entry.name);
+      if (entry.isDirectory()) {
+        if (current.depth < 4) pending.push({ dir: full, depth: current.depth + 1 });
+        continue;
+      }
+      if (!entry.isFile() || !/^local_.+\.json$/i.test(entry.name)) continue;
+      try {
+        const metadata = JSON.parse(fs.readFileSync(full, "utf8"));
+        const cliSessionId = firstCleanString(
+          metadata?.cliSessionId,
+          metadata?.cli_session_id,
+          metadata?.sessionId?.replace(/^local_/, ""),
+          entry.name.replace(/^local_/, "").replace(/\.json$/i, ""),
+        );
+        if (cliSessionId) ids.add(cliSessionId);
+      } catch {
+        /* stale or partially written Desktop metadata — ignore it */
+      }
+    }
+  }
+  return ids;
+}
+
 /**
  * List all session JSONL refs across all projects, sorted newest-first.
  * Never throws — returns [] if the projects root doesn't exist or can't
@@ -36,6 +95,7 @@ function claudeProjectsRoot({ env = process.env } = {}) {
  */
 function listClaudeSessions({ cwd, limit = 100, env = process.env } = {}) {
   const root = claudeProjectsRoot({ env });
+  const desktopSessionIds = listClaudeDesktopCliSessionIds({ env });
   let projects;
   try {
     projects = fs.readdirSync(root, { withFileTypes: true });
@@ -79,6 +139,9 @@ function listClaudeSessions({ cwd, limit = 100, env = process.env } = {}) {
         cwd: meta.cwd || decodedCwd || undefined,
         ...(meta.name ? { name: meta.name } : {}),
         ...(meta.summary ? { summary: meta.summary } : {}),
+        ...(desktopSessionIds.has(file.name.replace(/\.jsonl$/, ""))
+          ? { surface: "desktop" }
+          : {}),
       });
     }
   }
@@ -241,6 +304,8 @@ function sameCwd(a, b) {
 
 module.exports = {
   claudeProjectsRoot,
+  claudeDesktopSessionsRoot,
+  listClaudeDesktopCliSessionIds,
   listClaudeSessions,
   decodeProjectDirName,
 };

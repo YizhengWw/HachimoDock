@@ -1,6 +1,6 @@
 /**
- * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/deviceConnected/appearanceSync/refresh/applyDesktopPet/saveAgentAppearance; useToast for notices.
- * [Output] Dashboard "Agent与形象" matrix: detected local Agents only, each with an independent appearance selection that refreshes disk-backed appearance records before opening, one currently followed Agent synced to the device, and non-blocking inline USB appearance-sync progress that survives dashboard tab unmounts.
+ * [Input] useDeviceContext for appearances/agentAppearanceMap/agentOptions/currentDisplay/verified USB status/cancellable appearanceSync/refreshAppearances/applyDesktopPet/saveAgentAppearance; useToast for notices; optional global device-session visibility props.
+ * [Output] Dashboard "Agent与形象" matrix: all supported local Agent channels with unavailable CLI rows kept visible, detected channels offering independent appearance selection and USB-only follow switching, a persisted flat global active-session switch with automatic queue sizing and 60-second terminal retention, and non-blocking inline USB appearance-sync progress with a real abort action.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -9,6 +9,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import {
   CheckCircle,
   ChevronDown,
+  Braces,
   Code,
   Loader,
   Terminal,
@@ -22,18 +23,22 @@ import {
 } from "../lib/agent-appearance-config.js";
 import { BUILTIN_TERRIER_APPEARANCE_ID } from "../lib/builtin-appearances.js";
 import {
+  APPEARANCE_SYNC_CANCELLED_MESSAGE,
   APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE,
   CHANNEL_SWITCH_DEVICE_REQUIRED_MESSAGE,
 } from "../lib/desktop-pet-assignment.js";
 import AppearancePreview from "../AppearancePreview.jsx";
 import { resolveDashboardPreviewMedia } from "../lib/appearance-preview.js";
 import { useDeviceContext } from "../shell/DeviceContext.jsx";
+import Button from "../shell/Button.jsx";
+import Switch from "../shell/Switch";
 import { useToast } from "../shell/ToastStack.jsx";
 
 const AGENT_ICONS = {
   "claude-code": Code,
   codex: Terminal,
   openclaw: Zap,
+  mimocode: Braces,
 };
 
 function appearanceKindLabel(appearance) {
@@ -61,16 +66,21 @@ function normalizeSyncProgress(progress = {}) {
   };
 }
 
-export default function ChannelMatrixCard() {
+export default function ChannelMatrixCard({
+  showSessionDisplaySetting = false,
+  sessionDisplayEnabled = true,
+  onSessionDisplayEnabledChange,
+}) {
   const {
     appearances,
     agentAppearanceMap,
     agentOptions,
     currentDisplay,
-    deviceConnected,
+    usb,
     appearanceSync,
-    refresh,
+    refreshAppearances,
     applyDesktopPet,
+    cancelAppearanceSync,
     saveAgentAppearance,
   } = useDeviceContext();
   const { push } = useToast();
@@ -82,11 +92,9 @@ export default function ChannelMatrixCard() {
     ? normalizeSyncProgress(appearanceSync.progress)
     : null;
 
-  const installedAgents = useMemo(
-    () => agentOptions.filter((agent) => agent.detected),
-    [agentOptions],
-  );
+  const visibleAgents = useMemo(() => agentOptions.filter((agent) => agent?.id), [agentOptions]);
   const activeAgentId = currentDisplay.agentId;
+  const sessionsShown = sessionDisplayEnabled !== false;
 
   const appearanceForAgent = useCallback(
     (agentId) => {
@@ -98,13 +106,12 @@ export default function ChannelMatrixCard() {
 
   const closePicker = useCallback(() => setPickerState(null), []);
 
-  const openPicker = useCallback(async (agentId) => {
-    try {
-      await refresh();
-    } finally {
-      setPickerState({ agentId });
-    }
-  }, [refresh]);
+  const openPicker = useCallback((agentId) => {
+    setPickerState({ agentId });
+    refreshAppearances().catch((error) => {
+      console.warn("[ChannelMatrixCard] appearance refresh failed", error);
+    });
+  }, [refreshAppearances]);
 
   const handleConfirmAppearance = useCallback(async (agentId, appearance) => {
     if (!agentId || !appearance?.id) return;
@@ -130,8 +137,14 @@ export default function ChannelMatrixCard() {
       push({ tone: "success", title: notice || `已同步「${appearance.name}」到设备端` });
     } catch (err) {
       const msg = err?.message || String(err);
-      const tone = msg === APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE ? "warning" : "error";
-      push({ tone, title: "更换形象失败", message: msg });
+      const cancelled = msg === APPEARANCE_SYNC_CANCELLED_MESSAGE;
+      const tone =
+        cancelled || msg === APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE ? "warning" : "error";
+      push({
+        tone,
+        title: cancelled ? "形象传输已中断" : "更换形象失败",
+        message: cancelled ? "设备继续保留原形象。" : msg,
+      });
     }
   }, [activeAgentId, agentOptions, applyDesktopPet, closePicker, push, saveAgentAppearance]);
 
@@ -155,20 +168,62 @@ export default function ChannelMatrixCard() {
       push({ tone: "success", title: notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}` });
     } catch (err) {
       const msg = err?.message || String(err);
+      const cancelled = msg === APPEARANCE_SYNC_CANCELLED_MESSAGE;
       const tone =
+        cancelled ||
         msg === APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE ||
         msg === CHANNEL_SWITCH_DEVICE_REQUIRED_MESSAGE
           ? "warning"
           : "error";
-      push({ tone, title: "切换跟随失败", message: msg });
+      push({
+        tone,
+        title: cancelled ? "形象传输已中断" : "切换跟随失败",
+        message: cancelled ? "设备继续保留原形象和跟随主体。" : msg,
+      });
     }
   }, [agentOptions, applyDesktopPet, pendingFollow, push]);
+
+  const handleCancelAppearanceSync = useCallback(async () => {
+    try {
+      await cancelAppearanceSync();
+    } catch (error) {
+      push({
+        tone: "error",
+        title: "无法中断形象传输",
+        message: error?.message || String(error),
+      });
+    }
+  }, [cancelAppearanceSync, push]);
 
   return (
     <div className="channel-matrix">
       <p className="channel-matrix__intro">
         选择设备端需要展示实时状态的Agent，每个Agent可分别设置自己的形象；
       </p>
+
+      {showSessionDisplaySetting && (
+        <section
+          className={`session-display-setting${sessionsShown ? " is-enabled" : " is-disabled"}`}
+          aria-labelledby="session-display-title"
+        >
+          <header className="session-display-setting__primary">
+            <div className="session-display-setting__copy">
+              <strong id="session-display-title">活跃会话</strong>
+              <span id="session-display-description">
+                仅显示当前运行中的 Agent 对话，结束或出错后保留 60 秒
+              </span>
+            </div>
+            <Switch
+              className="session-display-setting__switch"
+              checked={sessionsShown}
+              label="显示会话"
+              ariaLabel="显示活跃会话"
+              aria-describedby="session-display-description"
+              onCheckedChange={onSessionDisplayEnabledChange}
+            />
+          </header>
+        </section>
+      )}
 
       {syncProgress && (
         <div className="channel-matrix-sync" aria-live="polite">
@@ -192,27 +247,43 @@ export default function ChannelMatrixCard() {
               <span style={{ "--sync-progress": `${syncProgress.percent}%` }} />
             </div>
           </div>
+          <Button
+            className="channel-matrix-sync__cancel"
+            variant="danger"
+            size="small"
+            loading={appearanceSync?.cancelling === true}
+            loadingLabel="正在中断…"
+            onClick={handleCancelAppearanceSync}
+            aria-label="中断 USB 形象传输"
+          >
+            <X size={14} />
+            中断传输
+          </Button>
         </div>
       )}
 
-      {installedAgents.length === 0 ? (
-        <div className="channel-matrix__empty">未扫描到本机已安装的 Agent。</div>
+      {visibleAgents.length === 0 ? (
+        <div className="channel-matrix__empty">暂时无法读取本机 Agent 列表。</div>
       ) : (
         <div className="channel-matrix__rows">
-          {installedAgents.map((agent) => {
+          {visibleAgents.map((agent) => {
             const Icon = AGENT_ICONS[agent.id] || Code;
             const appearance = appearanceForAgent(agent.id);
             const isFollowed = activeAgentId === agent.id;
+            const isDetected = agent.detected === true;
             return (
               <article
                 key={agent.id}
-                className={`channel-row${isFollowed ? " is-active" : ""}`}
+                className={`channel-row${isFollowed ? " is-active" : ""}${isDetected ? "" : " is-undetected"}`}
                 aria-current={isFollowed ? "true" : undefined}
               >
                 <div className="channel-row__channel">
                   <span className="channel-row__icon"><Icon size={16} /></span>
                   <div className="channel-row__label">
                     <strong>{agent.label}</strong>
+                    <span className="channel-row__status" title={agent.detail || undefined}>
+                      {isDetected ? "已检测" : "未检测到 CLI"}
+                    </span>
                   </div>
                 </div>
 
@@ -232,7 +303,8 @@ export default function ChannelMatrixCard() {
                         type="button"
                         className="btn-secondary btn-sm channel-row__change-inline"
                         onClick={() => openPicker(agent.id)}
-                        disabled={syncing}
+                        disabled={syncing || !isDetected}
+                        title={!isDetected ? "安装对应 CLI 后重新扫描" : ""}
                       >
                         <ChevronDown size={14} /> 更换形象
                       </button>
@@ -244,13 +316,20 @@ export default function ChannelMatrixCard() {
                 <div className="channel-row__follow">
                   {isFollowed ? (
                     <span className="channel-row__follow-current">已跟随</span>
+                  ) : !isDetected ? (
+                    <span
+                      className="channel-row__unavailable"
+                      title="安装对应 CLI 后重新扫描"
+                    >
+                      不可用
+                    </span>
                   ) : (
                     <button
                       type="button"
                       className="btn-primary btn-sm channel-row__follow-button"
                       onClick={() => requestFollow(agent.id)}
-                      disabled={syncing || !deviceConnected}
-                      title={!deviceConnected ? "设备离线，无法切换跟随" : ""}
+                      disabled={syncing || !usb?.connected}
+                      title={!usb?.connected ? "连接 USB 后才能切换跟随" : ""}
                     >
                       跟随
                     </button>
