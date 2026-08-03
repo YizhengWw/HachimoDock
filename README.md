@@ -72,6 +72,37 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 | USB 直连 | PC 与 ESP32-P4 通过 USB 串行协议同步状态、按钮配置、形象和组件，无需设备加入局域网。 |
 | 语音与实体交互 | 三个按键的短按/长按、旋钮左旋/右旋/短按均可配置；长按语音键可把 ASR 文本发送到当前 Agent Session。 |
 
+## 桌面软件
+
+桌面端不是一个简单的串口烧录工具，而是 HachimoDock 的管理与 Agent 路由中心。当前版本基于 Tauri 2 + React，支持 Windows 与 macOS，仓库提供源码和构建脚本，不提供预编译安装包。
+
+| 页面 / 模块 | 当前能力 |
+|---|---|
+| 设备首页 | 自动发现并识别 ESP32-P4，不依赖固定 COM 端口；显示连接、固件、Flash/PSRAM、资源与传输状态，并提供重连、诊断和固件维护入口。 |
+| Agent 跟随 | 跟随 ChatGPT（Codex）或 Claude；自动读取正在工作的 Session，并将标题、摘要和 working/done/error 状态同步为设备气泡。 |
+| Session 切换 | 旋钮切换设备气泡时，桌面端同步把对应 Agent 和 Session 拉到前台；已显示任务完成或报错后保留 60 秒再消失。 |
+| 形象管理 | 内置西高地形象；支持 AI 生成、Codex 社区形象导入和本地视频导入；在传输前完成面向 P4 的裁切、转码和资源校验。 |
+| 形象同步 | 设备保留一个固定西高地槽和一个可替换形象槽；下发保持原始宽高比，避免拉伸，并显示传输进度与失败原因。 |
+| PetUI 组件中心 | 统一管理 PC 与设备组件，卡片直接显示“同步到设备”或“已同步到设备”；支持安装、移除、预览和容量校验。 |
+| PetUI Skill | 用户在 Agent 中调用 `petui` Skill 生成游戏或工具，经过结构、字节预算和设备能力校验后原子发布到组件库。 |
+| 按键与旋钮 | SW1/SW2/SW3 的短按、长按，以及旋钮左旋、右旋、短按均可绑定动作；配置通过 USB 下发并持久化。 |
+| 语音输入 | 长按语音键录音，桌面端调用 ASR；有气泡时输入对应 Session，无气泡时唤起当前跟随的 Agent 并输入当前会话。 |
+| API 设置 | 集中配置语音识别和形象生成服务的凭据；密钥只保存在本机应用配置中，不写入固件和仓库。 |
+
+### Session 气泡规则
+
+- 扫描时处于 working/thinking/tool-running 等活跃状态的 Session 才会新增到设备。
+- 已经显示在设备上的活跃 Session 会持续接收后续状态变化，不会因一次扫描遗漏而立即消失。
+- Session 进入 done 或 error 后保留 60 秒；idle、历史完成任务和 Agent 内部会话不会作为新气泡下发。
+- 气泡数量由 Agent 当前活跃 Session 自动决定，不需要用户手动配置。
+
+### PetUI 组件工作流
+
+1. 在 ChatGPT（Codex）或 Claude 中调用 `petui` Skill，并描述希望生成的小游戏或工具。
+2. Skill 按 480×640 屏幕、三个按键和旋钮的设备能力生成组件，不套用固定游戏外壳。
+3. 校验脚本检查 manifest、状态机、按钮映射、资源路径和设备字节限制，再原子发布到统一组件库。
+4. 桌面端自动读取组件库，用户在组件卡片上直接同步到设备或从 PC/设备双端删除。
+
 ### 状态跟随与互动
 
 <table>
@@ -177,11 +208,27 @@ flowchart LR
 
 ### 启动桌面端
 
+桌面端以源码形式发布。请安装 Node.js、Rust 和对应平台的 Tauri 2 系统依赖，再从仓库构建；项目不在 GitHub Release 中提供 Windows 或 macOS 安装包。
+
 ```sh
 git clone https://github.com/YizhengWw/HachimoDock.git
 cd HachimoDock/ref
 npm install
 npm run dev
+```
+
+Windows 构建：
+
+```powershell
+cd ref
+npm run build:win
+```
+
+macOS 构建：
+
+```sh
+cd ref
+npm run build:mac
 ```
 
 只调试前端页面时：
