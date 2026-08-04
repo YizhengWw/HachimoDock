@@ -65,7 +65,7 @@ const ACCESSIBILITY_SETTINGS_URL: &str =
     "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 const ACCESSIBILITY_SETTINGS_WATCH_TIMEOUT: Duration = Duration::from_secs(300);
 const ACCESSIBILITY_SETTINGS_WATCH_INTERVAL: Duration = Duration::from_millis(100);
-const ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_millis(1_200);
+const ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_secs(4);
 const MAC_KEYCODE_V: u16 = 9;
 
 #[derive(Clone)]
@@ -230,9 +230,10 @@ fn arm_accessibility_settings_redirect() {
             }
             if activation_gate.update(system_settings_is_active()) {
                 // Apple's consent button activates System Settings asynchronously.
-                // Wait until its own navigation has settled, then route once to the
-                // exact Accessibility pane. Opening both destinations in parallel is
-                // what previously caused a correct pane to flash back to Account.
+                // A cold Privacy & Security extension can rebuild its navigation
+                // stack for roughly two seconds after activation. Route only after
+                // that initialization settles; otherwise the correct Accessibility
+                // pane flashes briefly and the extension replaces it with its root.
                 thread::sleep(ACCESSIBILITY_SETTINGS_ROUTE_DELAY);
                 if !accessibility_permission_granted() && !open_accessibility_settings_pane() {
                     eprintln!("[accessibility] failed to route System Settings to Accessibility");

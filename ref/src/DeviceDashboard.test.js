@@ -718,7 +718,10 @@ test("macOS Codex conversation switching uses native accessibility foreground de
   assert.doesNotMatch(macComposer, /com\.apple\.preference\.security/);
   assert.match(macComposer, /SettingsActivationGate::new\(system_settings_is_active\(\)\)/);
   assert.match(macComposer, /activation_gate\.update\(system_settings_is_active\(\)\)/);
-  assert.match(macComposer, /ACCESSIBILITY_SETTINGS_ROUTE_DELAY/);
+  assert.match(
+    macComposer,
+    /ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_secs\(4\)/,
+  );
   assert.match(macComposer, /WATCHER_ACTIVE/);
   assert.match(app, /hasTauriRuntime\(\)[\s\S]*?invoke\("request_codex_accessibility_permission"\)/);
   assert.doesNotMatch(dashboard, /需要辅助功能权限/);
