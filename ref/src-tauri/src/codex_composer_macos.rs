@@ -1,7 +1,7 @@
 /*
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
- * [Output] Activation-gated Chromium AX priming, stable/rebindable visible-composer submission with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
- * [Pos] macOS foreground-input backend for codex_composer.rs; requires Pet Manager Accessibility permission and requests the native system consent alert when an operation still lacks trust.
+ * [Output] Native consent with activation-ordered Accessibility-pane routing, activation-gated Chromium AX priming, stable/rebindable visible-composer submission with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
+ * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
  */
 
@@ -38,7 +38,10 @@ use std::{
     ffi::c_void,
     fs,
     path::PathBuf,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -58,6 +61,11 @@ const AGENT_LAUNCH_WINDOW_TIMEOUT: Duration = Duration::from_millis(4_500);
 const AGENT_FRONTMOST_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_STABILITY_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_STABILITY_DELAY: Duration = Duration::from_millis(120);
+const ACCESSIBILITY_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+const ACCESSIBILITY_SETTINGS_WATCH_TIMEOUT: Duration = Duration::from_secs(300);
+const ACCESSIBILITY_SETTINGS_WATCH_INTERVAL: Duration = Duration::from_millis(100);
+const ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_millis(1_200);
 const MAC_KEYCODE_V: u16 = 9;
 
 #[derive(Clone)]
@@ -168,6 +176,75 @@ pub(super) fn accessibility_permission_granted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
+#[derive(Debug)]
+struct SettingsActivationGate {
+    observed_inactive: bool,
+}
+
+impl SettingsActivationGate {
+    fn new(is_active: bool) -> Self {
+        Self {
+            observed_inactive: !is_active,
+        }
+    }
+
+    fn update(&mut self, is_active: bool) -> bool {
+        if !is_active {
+            self.observed_inactive = true;
+            return false;
+        }
+        self.observed_inactive
+    }
+}
+
+fn system_settings_is_active() -> bool {
+    NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str(
+        "com.apple.systempreferences",
+    ))
+    .iter()
+    .any(|application| application.isActive())
+}
+
+fn open_accessibility_settings_pane() -> bool {
+    crate::command_for_host("open")
+        .arg(ACCESSIBILITY_SETTINGS_URL)
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+fn arm_accessibility_settings_redirect() {
+    static WATCHER_ACTIVE: AtomicBool = AtomicBool::new(false);
+    if WATCHER_ACTIVE
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    thread::spawn(|| {
+        let deadline = Instant::now() + ACCESSIBILITY_SETTINGS_WATCH_TIMEOUT;
+        let mut activation_gate = SettingsActivationGate::new(system_settings_is_active());
+        loop {
+            if accessibility_permission_granted() || Instant::now() >= deadline {
+                break;
+            }
+            if activation_gate.update(system_settings_is_active()) {
+                // Apple's consent button activates System Settings asynchronously.
+                // Wait until its own navigation has settled, then route once to the
+                // exact Accessibility pane. Opening both destinations in parallel is
+                // what previously caused a correct pane to flash back to Account.
+                thread::sleep(ACCESSIBILITY_SETTINGS_ROUTE_DELAY);
+                if !accessibility_permission_granted() && !open_accessibility_settings_pane() {
+                    eprintln!("[accessibility] failed to route System Settings to Accessibility");
+                }
+                break;
+            }
+            thread::sleep(ACCESSIBILITY_SETTINGS_WATCH_INTERVAL);
+        }
+        WATCHER_ACTIVE.store(false, Ordering::SeqCst);
+    });
+}
+
 pub(super) fn request_accessibility_permission() -> bool {
     if accessibility_permission_granted() {
         return true;
@@ -175,7 +252,11 @@ pub(super) fn request_accessibility_permission() -> bool {
 
     let prompt_key = unsafe { CFString::wrap_under_get_rule(kAXTrustedCheckOptionPrompt) };
     let options = CFDictionary::from_CFType_pairs(&[(prompt_key, CFBoolean::true_value())]);
-    unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) }
+    let trusted = unsafe { AXIsProcessTrustedWithOptions(options.as_concrete_TypeRef()) };
+    if !trusted {
+        arm_accessibility_settings_redirect();
+    }
+    trusted
 }
 
 fn ensure_accessibility_permission() -> Result<(), String> {
@@ -1982,6 +2063,18 @@ mod tests {
         assert!(mark_agent_accessibility_primed(&mut primed_pids, 101));
         assert!(!mark_agent_accessibility_primed(&mut primed_pids, 101));
         assert!(mark_agent_accessibility_primed(&mut primed_pids, 202));
+    }
+
+    #[test]
+    fn accessibility_settings_redirect_waits_for_an_activation_edge() {
+        let mut initially_inactive = SettingsActivationGate::new(false);
+        assert!(!initially_inactive.update(false));
+        assert!(initially_inactive.update(true));
+
+        let mut initially_active = SettingsActivationGate::new(true);
+        assert!(!initially_active.update(true));
+        assert!(!initially_active.update(false));
+        assert!(initially_active.update(true));
     }
 
     #[test]
