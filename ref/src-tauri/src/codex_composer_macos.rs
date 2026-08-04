@@ -62,7 +62,7 @@ const AGENT_FRONTMOST_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_STABILITY_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_STABILITY_DELAY: Duration = Duration::from_millis(120);
 const ACCESSIBILITY_SETTINGS_URL: &str =
-    "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+    "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility";
 const ACCESSIBILITY_SETTINGS_WATCH_TIMEOUT: Duration = Duration::from_secs(300);
 const ACCESSIBILITY_SETTINGS_WATCH_INTERVAL: Duration = Duration::from_millis(100);
 const ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_millis(1_200);
