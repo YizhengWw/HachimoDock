@@ -1,0 +1,15 @@
+{
+  "dashboard": {
+    "title": "双键接球",
+    "eyebrow": "经典电子乒乓",
+    "headline": "短按旋钮键开始",
+    "metricLabel": "连续接球",
+    "metricValue": "0",
+    "metricUnit": "次",
+    "footer": "短按旋钮键开始",
+    "visualStyle": "pixel",
+    "visualPalette": "mono",
+    "visualLayout": "scoreboard",
+    "visualSprite": "trophy"
+  }
+}

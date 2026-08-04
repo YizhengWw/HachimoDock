@@ -1,8 +1,0 @@
-{
-  "id": "falling-catch",
-  "name": "接住星星",
-  "kind": "game",
-  "version": "1.1.0",
-  "author": "Pet Manager",
-  "description": "用 SW1 和 SW2 移动接盘，接住自动下落的星星并在 30 秒内取得高分。"
-}

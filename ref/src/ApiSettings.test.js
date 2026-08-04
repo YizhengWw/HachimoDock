@@ -1,6 +1,6 @@
 /**
  * [Input] ApiSettings page, App routing, feature pages, and shared stylesheet source.
- * [Output] Static regression coverage for centralized API-key ownership, prompt-free macOS private-file disclosure, sidebar routing, feature-page status links, and responsive settings layout.
+ * [Output] Static regression coverage for centralized API-key ownership, immediate saved-ASR broadcasts, prompt-free macOS private-file disclosure, sidebar routing, feature-page status links, and responsive settings layout.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -30,6 +30,22 @@ test("API settings owns voice and generation credential inputs", () => {
   assert.match(source, /macOS 不使用钥匙串/);
   assert.match(source, /仅由当前用户读取，不额外加密/);
 });
+
+test("saved ASR credentials are broadcast before the optional cloud probe", () => {
+  const source = readSource("ApiSettings.jsx");
+  const saveAndTest = source.match(/const saveAndTestAsr = async \(\) => \{[\s\S]*?\n  \};/);
+  assert.ok(saveAndTest, "expected saveAndTestAsr");
+
+  const saveIndex = saveAndTest[0].indexOf('invoke("save_device_asr_settings"');
+  const broadcastIndex = saveAndTest[0].indexOf("emitApiConfigurationUpdated({");
+  const probeIndex = saveAndTest[0].indexOf('invoke("test_device_asr_settings"');
+  assert.ok(saveIndex !== -1 && broadcastIndex !== -1 && probeIndex !== -1);
+  assert.ok(saveIndex < broadcastIndex, "persist credentials before broadcasting");
+  assert.ok(broadcastIndex < probeIndex, "broadcast must not wait for the probe");
+  assert.match(saveAndTest[0], /providerId: "volcengine-asr"/);
+  assert.match(saveAndTest[0], /configured: saved\?\.configured === true/);
+});
+
 test("app exposes API configuration as a first-level sidebar page", () => {
   const app = readSource("App.jsx");
 

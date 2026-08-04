@@ -16,7 +16,7 @@
   "components": {
     "packagesDir": "../ref/builtin-clawpkgs",
     "ids": [
-      "falling-catch",
+      "two-key-pong",
       "flappy-bird",
       "block-combo",
       "snake-turn",

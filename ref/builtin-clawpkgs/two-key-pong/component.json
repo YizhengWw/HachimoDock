@@ -1,0 +1,8 @@
+{
+  "id": "two-key-pong",
+  "name": "双键接球",
+  "version": "1.1.1",
+  "description": "经典单人挡板接球：左右双键移动挡板，接球得分，漏球结算。",
+  "kind": "game",
+  "engine": "p4-bounded-runtime-v3"
+}

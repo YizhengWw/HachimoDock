@@ -201,8 +201,15 @@ macOS 构建：
 
 ```sh
 cd ref
-npm run build:mac
+npm run build:mac:local
 ```
+
+> **重要：本机安装、辅助功能授权和日常测试必须使用
+> `npm run build:mac:local`。**该流程会在生成 DMG 前应用并再次验证稳定的
+> `com.petmanager.desktop` 本地指定要求，避免每次重建都产生新的 CDHash
+> 身份，导致 macOS 的“辅助功能”开关看似开启却对新包失效。
+> `npm run build:mac` 仅用于配置了稳定 Developer ID 证书的正式发布构建；
+> 不要把它生成的临时签名包用于本机权限测试。
 
 只调试前端页面时：
 

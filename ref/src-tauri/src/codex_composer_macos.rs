@@ -1,7 +1,7 @@
 /*
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
- * [Output] Stable Chromium AX priming, pinned visible-composer submission, and clipboard-preserving current-caret insertion plus Return.
- * [Pos] macOS foreground-input backend for codex_composer.rs; requires Pet Manager Accessibility permission.
+ * [Output] Activation-gated Chromium AX priming, stable/rebindable visible-composer submission with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
+ * [Pos] macOS foreground-input backend for codex_composer.rs; requires Pet Manager Accessibility permission and requests the native system consent alert when an operation still lacks trust.
  * [Sync] If this file changes, update ref/.folder.md.
  */
 
@@ -29,8 +29,8 @@ use core_graphics::{
 use dispatch2::run_on_main;
 use objc2::runtime::ProtocolObject;
 use objc2_app_kit::{
-    NSPasteboard, NSPasteboardItem, NSPasteboardTypeString, NSPasteboardWriting,
-    NSRunningApplication,
+    NSApplicationActivationOptions, NSPasteboard, NSPasteboardItem, NSPasteboardTypeString,
+    NSPasteboardWriting, NSRunningApplication,
 };
 use objc2_foundation::{NSArray, NSData, NSString};
 use std::{
@@ -55,6 +55,9 @@ const KEYBOARD_READBACK_DELAY: Duration = Duration::from_millis(80);
 const ACCESSIBILITY_TREE_READY_TIMEOUT: Duration = Duration::from_millis(750);
 const ACCESSIBILITY_TREE_RETRY_DELAY: Duration = Duration::from_millis(25);
 const AGENT_LAUNCH_WINDOW_TIMEOUT: Duration = Duration::from_millis(4_500);
+const AGENT_FRONTMOST_TIMEOUT: Duration = Duration::from_millis(2_500);
+const COMPOSER_STABILITY_TIMEOUT: Duration = Duration::from_millis(2_500);
+const COMPOSER_STABILITY_DELAY: Duration = Duration::from_millis(120);
 const MAC_KEYCODE_V: u16 = 9;
 
 #[derive(Clone)]
@@ -176,14 +179,10 @@ pub(super) fn request_accessibility_permission() -> bool {
 }
 
 fn ensure_accessibility_permission() -> Result<(), String> {
-    // Ask macOS to show its native Accessibility consent alert on the first
-    // app-side permission check or explicit task/composer action. The call
-    // returns the current trust state, so access still fails closed until the
-    // user grants it and retries.
     if request_accessibility_permission() {
         Ok(())
     } else {
-        Err("Pet Manager 需要 macOS 辅助功能权限才能切换 ChatGPT（Codex）/Claude 会话或向 MiMoCode 当前光标输入语音；请在 系统设置 > 隐私与安全性 > 辅助功能 中允许 Pet Manager，然后重试".to_string())
+        Err("Pet Manager 需要 macOS 辅助功能权限；请在系统授权弹窗中点击“打开系统设置”，打开 Pet Manager 开关后再重试".to_string())
     }
 }
 
@@ -695,8 +694,17 @@ fn focused_composer_value(agent: MacosAgent) -> Result<Option<String>, String> {
 }
 
 fn verify_empty_composer_probe(agent: MacosAgent, probe: &str) -> Result<bool, String> {
-    if focused_composer_value(agent)?.as_deref() != Some("") {
-        return Ok(false);
+    match focused_composer_value(agent)? {
+        None => return Ok(false),
+        Some(value) if !value.is_empty() => {
+            post_command_key(0)?;
+            post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
+            thread::sleep(KEYBOARD_READBACK_DELAY);
+            if focused_composer_value(agent)?.as_deref() != Some("") {
+                return Err(format!("{} macOS 输入框草稿无法覆盖", agent.label()));
+            }
+        }
+        Some(_) => {}
     }
     paste_focused_text(probe)?;
     if focused_composer_value(agent)?.as_deref() != Some(probe) {
@@ -735,10 +743,7 @@ fn verify_empty_focused_composer(
                 return Ok(());
             }
         }
-        Err(format!(
-            "{} macOS 输入焦点无法确认，或输入框已有用户草稿；已拒绝覆盖",
-            agent.label()
-        ))
+        Err(format!("{} macOS 输入焦点无法确认", agent.label()))
     })();
     snapshot.restore();
     result
@@ -753,20 +758,22 @@ fn focus_empty_focused_composer(
     for attempt in 0..3 {
         match focused_composer_value(agent)? {
             Some(value) if value.is_empty() => return Ok(()),
-            Some(_) => {
-                return Err(format!(
-                    "{} macOS 输入框已有用户草稿，已拒绝覆盖",
-                    agent.label()
-                ));
+            Some(_) if attempt < 2 => {
+                post_command_key(0)?;
+                post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
+                thread::sleep(KEYBOARD_READBACK_DELAY);
             }
             None if attempt < 2 => {
                 post_keyboard_event(KeyCode::ESCAPE, CGEventFlags::CGEventFlagNull)?;
                 thread::sleep(COMPOSER_FOCUS_DELAY);
             }
-            None => break,
+            Some(_) | None => break,
         }
     }
-    Err(format!("{} macOS 输入焦点无法确认", agent.label()))
+    Err(format!(
+        "{} macOS 输入焦点无法确认，或输入框草稿无法覆盖",
+        agent.label()
+    ))
 }
 
 fn type_and_submit_focused_composer(
@@ -1248,12 +1255,49 @@ fn focus_window(target: &CodexWindow) -> Result<(), String> {
     let _ = target
         .window
         .set_attribute(&minimized, CFBoolean::false_value().into_CFType());
+    let mut pid = 0;
+    let pid_result = unsafe { AXUIElementGetPid(target.app.as_concrete_TypeRef(), &mut pid) };
+    let running_application = (pid_result == kAXErrorSuccess && pid > 0)
+        .then(|| NSRunningApplication::runningApplicationWithProcessIdentifier(pid))
+        .flatten();
+    if let Some(application) = running_application.as_ref() {
+        if application.isHidden() {
+            let _ = application.unhide();
+        }
+        let _ = application.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+    }
     target
         .app
         .set_frontmost(CFBoolean::true_value())
         .map_err(|error| format!("Agent macOS 应用无法切到前台: {error}"))?;
     let _ = target.window.raise();
-    Ok(())
+    let deadline = Instant::now() + AGENT_FRONTMOST_TIMEOUT;
+    loop {
+        let ax_frontmost =
+            ax_element_attribute(&AXUIElement::system_wide(), "AXFocusedApplication")
+                .is_some_and(|application| application == target.app);
+        let appkit_frontmost = running_application
+            .as_ref()
+            .is_some_and(|application| application.isActive());
+        if ax_frontmost || appkit_frontmost {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{} macOS 应用已启动，但无法确认已切到前台",
+                cf_string(target.window.title())
+                    .filter(|title| !title.trim().is_empty())
+                    .unwrap_or_else(|| "Agent".to_string())
+            ));
+        }
+        if let Some(application) = running_application.as_ref() {
+            let _ =
+                application.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+        }
+        let _ = target.app.set_frontmost(CFBoolean::true_value());
+        let _ = target.window.raise();
+        thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+    }
 }
 
 fn show_sidebar(target: &CodexWindow) {
@@ -1451,51 +1495,29 @@ fn composer_value(element: &AXUIElement) -> String {
     }
 }
 
-fn allowed_composer_value(value: &str, allowed_values: &[String]) -> bool {
-    allowed_values
-        .iter()
-        .any(|allowed| normalize_text(allowed) == normalize_text(value))
-}
-
-fn find_composer(
-    agent: MacosAgent,
-    window: &CodexWindow,
-    allowed_values: &[String],
-) -> Result<(AXUIElement, String), String> {
-    let mut allowed = Vec::new();
-    let mut unexpected = Vec::new();
+fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement, String), String> {
+    let mut composers = Vec::new();
     for composer in walk_elements(&window.window, is_composer_element) {
         if !element_is_enabled(&composer) {
             continue;
         }
         let value = composer_value(&composer);
-        if allowed_composer_value(&value, allowed_values) {
-            allowed.push((composer, value));
-        } else {
-            unexpected.push(value);
-        }
+        composers.push((composer, value));
     }
-    if !unexpected.is_empty() {
-        return Err(format!(
-            "{} macOS 输入框已有用户草稿，已拒绝覆盖",
-            agent.label()
-        ));
-    }
-    if allowed.len() != 1 {
+    if composers.len() != 1 {
         return Err(format!(
             "需要唯一的 {} macOS 输入框，实际找到 {} 个",
             agent.label(),
-            allowed.len()
+            composers.len()
         ));
     }
-    Ok(allowed.remove(0))
+    Ok(composers.remove(0))
 }
 
 fn find_target(
     agent: MacosAgent,
     session_id: &str,
     session_title: &str,
-    allowed_values: &[String],
 ) -> Result<ComposerTarget, String> {
     if agent == MacosAgent::Claude && !claude_session_is_latest_focused(session_id) {
         return Err("Claude macOS 当前会话与设备选中的会话不一致".to_string());
@@ -1507,7 +1529,7 @@ fn find_target(
             continue;
         }
         matched_title = true;
-        match find_composer(agent, &target, allowed_values) {
+        match find_composer(agent, &target) {
             Ok((composer, value)) => {
                 return Ok(ComposerTarget {
                     agent,
@@ -1534,50 +1556,79 @@ fn find_target(
     }
 }
 
-fn find_current_visible_target(
-    agent: MacosAgent,
-    allowed_values: &[String],
-) -> Result<ComposerTarget, String> {
-    let target = primary_or_launch_agent_window(agent)?;
-    focus_window(&target)?;
-    thread::sleep(Duration::from_millis(120));
-    let (composer, value) = find_composer(agent, &target, allowed_values)?;
-    Ok(ComposerTarget {
-        agent,
-        app: target.app,
-        window: target.window,
-        composer,
-        value,
-    })
+fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, String> {
+    let mut target = primary_or_launch_agent_window(agent)?;
+    let deadline = Instant::now() + COMPOSER_STABILITY_TIMEOUT;
+    loop {
+        if let Ok(current) = primary_agent_window(agent) {
+            target = current;
+        }
+        let result = (|| {
+            focus_window(&target)?;
+            let (composer, value) = find_composer(agent, &target)?;
+            let candidate = ComposerTarget {
+                agent,
+                app: target.app.clone(),
+                window: target.window.clone(),
+                composer: composer.clone(),
+                value,
+            };
+            focus_composer(&candidate)?;
+            thread::sleep(COMPOSER_STABILITY_DELAY);
+            let refreshed = primary_agent_window(agent)?;
+            if refreshed.window != target.window {
+                return Err(format!("{} macOS 主窗口仍在恢复", agent.label()));
+            }
+            let (refreshed_composer, refreshed_value) = find_composer(agent, &refreshed)?;
+            if refreshed_composer != composer {
+                return Err(format!("{} macOS 输入框仍在恢复", agent.label()));
+            }
+            Ok(ComposerTarget {
+                agent,
+                app: refreshed.app,
+                window: refreshed.window,
+                composer: refreshed_composer,
+                value: refreshed_value,
+            })
+        })();
+        let last_error = match result {
+            Ok(target) => return Ok(target),
+            Err(error) => error,
+        };
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "{} macOS 应用已置前，但输入框未稳定: {last_error}",
+                agent.label()
+            ));
+        }
+        thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+    }
 }
 
-fn find_voice_target(
-    state: &MacosComposerState,
-    allowed_values: &[String],
-) -> Result<ComposerTarget, String> {
+fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, String> {
     let Some(pinned) = state.current_visible_target.as_ref() else {
-        return find_target(
-            state.agent,
-            &state.session_id,
-            &state.session_title,
-            allowed_values,
-        );
+        return find_target(state.agent, &state.session_id, &state.session_title);
     };
+    let pinned_window = pinned.window.clone();
+    let pinned_composer = pinned.composer.clone();
     let Some(window) = agent_windows(state.agent)?
         .into_iter()
-        .find(|candidate| candidate.window == pinned.window)
+        .find(|candidate| candidate.window == pinned_window)
     else {
         return Err(format!(
             "{} macOS 当前窗口在语音输入期间发生变化",
             state.agent.label()
         ));
     };
-    let (composer, value) = find_composer(state.agent, &window, allowed_values)?;
-    if composer != pinned.composer {
-        return Err(format!(
-            "{} macOS 当前会话或输入框在语音输入期间发生变化",
-            state.agent.label()
-        ));
+    focus_window(&window)?;
+    let (composer, value) = find_composer(state.agent, &window)?;
+    if composer != pinned_composer {
+        if let Some(pinned) = state.current_visible_target.as_mut() {
+            pinned.app = window.app.clone();
+            pinned.window = window.window.clone();
+            pinned.composer = composer.clone();
+            pinned.value = value.clone();
+        }
     }
     Ok(ComposerTarget {
         agent: state.agent,
@@ -1628,7 +1679,7 @@ pub(super) fn begin_voice(
 ) -> Result<MacosComposerState, String> {
     focus_session(agent, deep_link, session_id, session_title, workspace_label)?;
     let session_title = normalize_text(session_title);
-    match find_target(agent, session_id, &session_title, &[String::new()]) {
+    match find_target(agent, session_id, &session_title) {
         Ok(target) => {
             focus_composer(&target)?;
             Ok(MacosComposerState {
@@ -1658,7 +1709,7 @@ pub(super) fn begin_voice(
 }
 
 pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerState, String> {
-    let target = find_current_visible_target(agent, &[String::new()])?;
+    let target = find_current_visible_target(agent)?;
     focus_composer(&target)?;
     Ok(MacosComposerState {
         agent,
@@ -1682,8 +1733,7 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
     }
     let mut last_error = String::new();
     for _ in 0..2 {
-        let allowed = vec![state.last_value.clone(), text.clone()];
-        match find_voice_target(state, &allowed).and_then(|target| {
+        match find_voice_target(state).and_then(|target| {
             if target.value == text {
                 Ok(())
             } else {
@@ -1749,6 +1799,7 @@ fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
 }
 
 fn submit_target(target: &ComposerTarget) -> Result<(), String> {
+    focus_composer(target)?;
     let mut buttons = walk_elements(&target.window, |element| {
         element_role(element) == "AXButton"
             && element_is_enabled(element)
@@ -1789,11 +1840,11 @@ pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result
         return Ok(String::new());
     }
     thread::sleep(Duration::from_millis(80));
-    let target = find_voice_target(state, &[text.clone()])?;
+    let target = find_voice_target(state)?;
     submit_target(&target)?;
     let deadline = Instant::now() + SUBMIT_CONFIRM_TIMEOUT;
     while Instant::now() < deadline {
-        if let Ok(target) = find_voice_target(state, &[text.clone(), String::new()]) {
+        if let Ok(target) = find_voice_target(state) {
             if target.value.is_empty() {
                 state.last_value.clear();
                 return Ok(String::new());
@@ -1801,8 +1852,7 @@ pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result
         }
         thread::sleep(Duration::from_millis(40));
     }
-    let cleanup = find_voice_target(state, &[text.clone(), String::new()])
-        .and_then(|target| replace_composer_text(&target, ""));
+    let cleanup = find_voice_target(state).and_then(|target| replace_composer_text(&target, ""));
     state.last_value.clear();
     if let Err(error) = cleanup {
         return Err(format!(
@@ -1823,8 +1873,7 @@ pub(super) fn cancel_voice(state: &mut MacosComposerState) {
     if state.last_value.is_empty() {
         return;
     }
-    let allowed = vec![state.last_value.clone(), String::new()];
-    if let Ok(target) = find_voice_target(state, &allowed) {
+    if let Ok(target) = find_voice_target(state) {
         if target.value == state.last_value {
             let _ = replace_composer_text(&target, "");
         }

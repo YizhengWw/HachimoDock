@@ -10,8 +10,8 @@
  *          appearance default/override WAV cue sync plus P4 cached-slot reuse
  *          results and serialized, exact-board native-only appearance attempts,
  *          USB desktop identity propagation,
- *          generated component-draft listing/deletion with game/tool kind
- *          and manifest descriptions for component-center card summaries,
+ *          formal local component latest-version listing/deletion with game/tool kind
+ *          and manifest descriptions for component-center card summaries, without a manual import command,
  *          .clawpkg USB/SSH installs with per-component button-function
  *          overrides plus explicit target-bound transactional removal and
  *          live USB/SSH installed-component inventory,
@@ -29,9 +29,9 @@
  *          Agent/Session routing, utterance-correlated delivery events,
  *          single-claim final submission, cloud speech recognition, and
  *          prompt-free owner-only macOS ASR credential-file initialization,
- *          recoverable live/final Codex/Claude visible-composer synchronization
+ *          activation-gated, draft-replacing, AX-node-rebindable live/final Codex/Claude visible-composer synchronization
  *          plus macOS MiMoCode current-caret voice insertion and Return without session switching,
- *          with non-prompting macOS Accessibility diagnostics and direct settings recovery,
+ *          with non-prompting macOS Accessibility diagnostics and native system-consent requests at startup and protected operations,
  *          without background fallback, managed bridge-only non-visible-agent voice injection, stale
  *          LaunchAgent/legacy bridge cleanup with install-relative Node resources
  *          and user PATH propagation for CLI shims, environment-relative coding-agent
@@ -614,23 +614,6 @@ fn request_codex_accessibility_permission() -> serde_json::Value {
         },
         "trusted": trusted,
     })
-}
-
-#[tauri::command]
-fn open_macos_accessibility_settings() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let target =
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
-        return match command_for_host("open").arg(target).status() {
-            Ok(status) if status.success() => Ok(()),
-            Ok(status) => Err(format!("打开 macOS 辅助功能设置失败: {status}")),
-            Err(error) => Err(format!("无法打开 macOS 辅助功能设置: {error}")),
-        };
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    Err("辅助功能设置入口仅适用于 macOS".to_string())
 }
 
 struct PcAudioRecognitionJob {
@@ -7910,16 +7893,6 @@ async fn list_component_library() -> Result<component_library::ComponentLibraryS
         .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-async fn import_component_to_library(
-    input: component_library::ImportComponentInput,
-) -> Result<component_library::ComponentLibraryEntry, String> {
-    let home = get_home_dir()?;
-    tauri::async_runtime::spawn_blocking(move || component_library::import(&home, input))
-        .await
-        .map_err(|error| error.to_string())?
-}
-
 /// Inspect an arbitrary package for sync preflight without publishing it.
 #[tauri::command]
 async fn inspect_clawpkg(path: String) -> Result<component_library::ComponentLibraryEntry, String> {
@@ -9339,7 +9312,6 @@ pub fn run() {
             button_config_signal,
             check_codex_accessibility_permission,
             request_codex_accessibility_permission,
-            open_macos_accessibility_settings,
             set_p4_session_binding,
             check_device_availability,
             send_test_message,
@@ -9390,7 +9362,6 @@ pub fn run() {
             remove_widget_from_device,
             install_widget_skill,
             list_component_library,
-            import_component_to_library,
             inspect_clawpkg,
             delete_component_from_library,
             prepare_clawpkg_for_sync,
@@ -11763,6 +11734,20 @@ mod tests {
         assert!(startup_thread < recognizer_start);
         assert!(source.contains("wait_for_visible_composer_startup(&context)"));
         assert!(source.contains("composer_startup_ready: Condvar"));
+    }
+
+    #[test]
+    fn macos_current_voice_activates_stabilizes_and_rebinds_the_composer() {
+        let source = include_str!("codex_composer_macos.rs");
+        assert!(source.contains("NSApplicationActivationOptions::ActivateAllWindows"));
+        assert!(source.contains("AGENT_FRONTMOST_TIMEOUT"));
+        assert!(source.contains("COMPOSER_STABILITY_TIMEOUT"));
+        assert!(source.contains("COMPOSER_STABILITY_DELAY"));
+        assert!(source.contains("application == target.app"));
+        assert!(source.contains("pinned.composer = composer.clone()"));
+        assert!(source.contains("输入框草稿无法覆盖"));
+        assert!(!source.contains("输入框已有用户草稿，已拒绝覆盖"));
+        assert!(!source.contains("当前会话或输入框在语音输入期间发生变化"));
     }
 
     #[test]

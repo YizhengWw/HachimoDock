@@ -247,5 +247,7 @@ screen.region.long_press
 
 - `.staging` 只用于事务，不是“草稿库”。
 - `<version-hash>` 是包内容的 SHA-256 短哈希，同样内容重复发布会复用同一正式版本。
+- `component.json.id` 是组件的升级身份。优化或修复既有组件必须保留原 ID；显示名称相同但 ID 不同仍是两个组件。相同 ID 的新内容进入同一版本链，并由 Pet Manager 选取最新版本展示。
 - 发布器先复制到 `.staging/<job-id>/package`、重新校验，再以同盘 rename 原子进入 `library`。
 - Pet Manager 只扫描 `library`；“正式本地组件”和“设备已安装组件”是两个独立状态。
+- 发布新版本只更新正式本地组件库，不会隐式写设备。用户需要在组件中心刷新后，打开同一组件卡片并执行“保存并同步”，才能覆盖设备上的旧版本。

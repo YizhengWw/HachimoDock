@@ -1,5 +1,5 @@
 /*
- * [Input] Validated .clawpkg directories/zips plus ~/.claw-pet legacy draft roots.
+ * [Input] Content-addressed petui publications plus ~/.claw-pet legacy draft roots.
  * [Output] Content-addressed formal local component library with one-time lossless
  *          legacy migration, atomic staging/publish, latest-version discovery,
  *          strict deletion guards, and preview metadata for Component Center.
@@ -65,12 +65,6 @@ pub struct ComponentLibrarySnapshot {
     pub components: Vec<ComponentLibraryEntry>,
     pub library_path: String,
     pub migration: LegacyMigrationSummary,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportComponentInput {
-    pub path: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -590,11 +584,6 @@ pub fn list(home: &Path) -> Result<ComponentLibrarySnapshot, String> {
     })
 }
 
-pub fn import(home: &Path, input: ImportComponentInput) -> Result<ComponentLibraryEntry, String> {
-    let source = PathBuf::from(input.path);
-    publish_source(home, &source)
-}
-
 pub fn inspect(path: &Path) -> Result<ComponentLibraryEntry, String> {
     if path.is_dir() {
         return entry_from_directory(path);
@@ -683,13 +672,7 @@ mod tests {
         let source = temp.path().join("source");
         write_package(&source, "timer");
 
-        let published = import(
-            &home,
-            ImportComponentInput {
-                path: source.display().to_string(),
-            },
-        )
-        .unwrap();
+        let published = publish_source(&home, &source).unwrap();
         assert_eq!(published.version_hash.len(), 16);
         assert!(published.path.contains("components"));
         assert!(published.path.contains("library"));
@@ -753,20 +736,14 @@ mod tests {
     }
 
     #[test]
-    fn import_rejects_executable_or_script_payloads() {
+    fn publication_rejects_executable_or_script_payloads() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
         let source = temp.path().join("source");
         write_package(&source, "unsafe-widget");
         fs::write(source.join("assets/behavior.js"), "alert('no')").unwrap();
 
-        let error = import(
-            &home,
-            ImportComponentInput {
-                path: source.display().to_string(),
-            },
-        )
-        .unwrap_err();
+        let error = publish_source(&home, &source).unwrap_err();
         assert!(error.contains("不允许可执行或脚本文件"));
         assert!(list(&home).unwrap().components.is_empty());
     }

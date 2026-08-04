@@ -1,0 +1,5 @@
+[
+  {"action":"shift_left","control":"SW1","event":"button.sw1.short_press","label":"挡板左移"},
+  {"action":"shift_right","control":"SW2","event":"button.sw2.short_press","label":"挡板右移"},
+  {"action":"start","control":"前方旋钮","event":"button.encoder.short_press","label":"开始或重开"}
+]

@@ -1,6 +1,6 @@
 /**
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
- * [Output] Pet Manager desktop app shell with first-level device/gallery/component-center/API-configuration sidebar tabs, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
+ * [Output] Pet Manager desktop app shell with a native macOS Accessibility consent request at startup, first-level device/gallery/component-center/API-configuration sidebar tabs, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -49,6 +49,13 @@ export default function App() {
   const [binding, setBinding] = useState(null);
   const [detailAppearanceId, setDetailAppearanceId] = useState("");
   const [apiReturnView, setApiReturnView] = useState("");
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) return;
+    invoke("request_codex_accessibility_permission").catch((error) => {
+      console.warn("[app] failed to request native macOS Accessibility consent", error);
+    });
+  }, []);
 
   const isPreviewBinding = useCallback((item) => {
     const boardId = String(item?.boardDeviceId || "").trim().toLowerCase();

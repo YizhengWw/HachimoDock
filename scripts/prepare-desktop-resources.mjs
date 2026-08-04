@@ -1,5 +1,5 @@
 /**
- * [Input] Target desktop platform, target-compatible Node/FFmpeg executables, bridge runtime lock, and built-in pet media.
+ * [Input] Target desktop platform, relocatable target-compatible Node/FFmpeg executables, bridge runtime lock, and built-in pet media.
  * [Output] Install-relative Node/FFmpeg/bridge resources plus a validated, preconverted built-in P4 ready pack.
  * [Pos] Desktop packaging preflight shared by local builds and CI.
  * [Sync] If this file changes, update `scripts/.folder.md`.
@@ -142,6 +142,37 @@ function executableFormat(bytes) {
   return { isPe, isElf, isMachO };
 }
 
+function assertMacosRuntimeIsRelocatable(runtimePath) {
+  const result = spawnSync("/usr/bin/otool", ["-L", runtimePath], {
+    encoding: "utf8",
+    timeout: 10_000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `无法检查 ${basename(runtimePath)} 的 macOS 动态库依赖：${result.error?.message || result.stderr}`,
+    );
+  }
+
+  const externalDependencies = result.stdout
+    .split(/\r?\n/)
+    .slice(1)
+    .map((line) => line.trim().split(/\s+\(compatibility version/)[0])
+    .filter(Boolean)
+    .filter((dependency) => (
+      !dependency.startsWith("/System/Library/")
+      && !dependency.startsWith("/usr/lib/")
+    ));
+  if (externalDependencies.length === 0) return;
+
+  const overrideName = basename(runtimePath).startsWith("ffmpeg")
+    ? "PET_MANAGER_FFMPEG_BIN"
+    : "PET_MANAGER_NODE_BIN";
+  throw new Error(
+    `${basename(runtimePath)} 依赖未随应用打包的动态库，不能作为可分发的 macOS 运行时：${externalDependencies.join(", ")}。`
+      + `请设置 ${overrideName} 指向只依赖 /System/Library 或 /usr/lib 的独立二进制`,
+  );
+}
+
 function assertRuntimeMatchesTarget(runtimePath, target, arch) {
   const bytes = readFileSync(runtimePath);
   const prefix = bytes.subarray(0, 160).toString("utf8");
@@ -174,6 +205,10 @@ function assertRuntimeMatchesTarget(runtimePath, target, arch) {
         throw new Error(`${basename(runtimePath)} 不是 macOS ${arch} 可执行文件`);
       }
     }
+    if (process.platform !== "darwin") {
+      throw new Error("macOS 运行时依赖校验必须在 macOS 主机上执行");
+    }
+    assertMacosRuntimeIsRelocatable(runtimePath);
   }
 }
 
@@ -384,9 +419,26 @@ function ensureBridgeDependencies() {
 
 const target = requestedTarget(process.argv.slice(2), process.platform);
 const targetArch = requestedArch(target, process.platform, process.arch);
-const sourceRuntime = process.env.PET_MANAGER_NODE_BIN
+const runtimeName = target === "windows" ? "node.exe" : "node";
+const targetRuntime = join(generatedRuntime, runtimeName);
+let sourceRuntime = process.env.PET_MANAGER_NODE_BIN
   ? resolve(process.env.PET_MANAGER_NODE_BIN)
   : process.execPath;
+
+// Once a relocatable runtime has passed preflight, keep reusing that exact
+// staged binary for later local rebuilds. This prevents a Homebrew/npm PATH
+// change from silently changing or breaking the packaged runtime. A clean
+// checkout still fails closed unless the active Node is relocatable or the
+// caller supplies PET_MANAGER_NODE_BIN.
+if (!process.env.PET_MANAGER_NODE_BIN && existsSync(targetRuntime)) {
+  try {
+    assertRuntimeMatchesTarget(targetRuntime, target, targetArch);
+    sourceRuntime = targetRuntime;
+    console.log(`reusing validated staged Node runtime: ${targetRuntime}`);
+  } catch {
+    // Preserve the detailed validation error for the active runtime below.
+  }
+}
 
 if (!process.env.PET_MANAGER_NODE_BIN && target !== hostTarget(process.platform)) {
   throw new Error(
@@ -401,9 +453,9 @@ assertRuntimeMatchesTarget(sourceRuntime, target, targetArch);
 ensureBridgeDependencies();
 mkdirSync(generatedRuntime, { recursive: true });
 
-const runtimeName = target === "windows" ? "node.exe" : "node";
-const targetRuntime = join(generatedRuntime, runtimeName);
-copyFileSync(sourceRuntime, targetRuntime);
+if (resolve(sourceRuntime) !== resolve(targetRuntime)) {
+  copyFileSync(sourceRuntime, targetRuntime);
+}
 if (target !== "windows") chmodSync(targetRuntime, 0o755);
 
 const ffmpegRuntimeName = await ensureBundledFfmpeg(target, targetArch);

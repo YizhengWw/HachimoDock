@@ -1,6 +1,6 @@
 /**
  * [Input] Read VoiceAssistantPanel.jsx source.
- * [Output] Static coverage for compact voice controls, ChatGPT（Codex）/Claude-visible and MiMoCode-caret labels, macOS/Windows recovery paths, trust checks, diagnostics, and summaries.
+ * [Output] Static coverage for compact voice controls, immediate ASR-change rearming, ChatGPT（Codex）/Claude-visible and MiMoCode-caret labels, macOS/Windows recovery paths, trust checks, diagnostics, and summaries.
  * [Pos] test node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -45,6 +45,15 @@ test("Reads Volcengine ASR readiness and delegates credential editing to API set
   assert.doesNotMatch(source, /type="password"/);
   assert.doesNotMatch(source, /save_device_asr_settings|test_device_asr_settings/);
   assert.doesNotMatch(source, /status\?\.apiKey/);
+});
+
+test("Rearms device voice only after a saved Volcengine ASR update", () => {
+  assert.match(source, /const loadAsrState = \(\{ resume = false \} = \{\}\) =>/);
+  assert.match(source, /if \(resume && status\?\.configured === true\)/);
+  assert.match(source, /event\?\.detail\?\.providerId && event\.detail\.providerId !== "volcengine-asr"/);
+  assert.match(source, /loadAsrState\(\{ resume: true \}\)/);
+  assert.match(source, /addEventListener\(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated\)/);
+  assert.match(source, /removeEventListener\(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated\)/);
 });
 
 
@@ -95,24 +104,37 @@ test("Guides ChatGPT（Codex） and Claude foreground failures with macOS and Wi
   assert.match(source, /export function needsVisibleComposerGuidance/);
   assert.match(source, /export function detectDesktopPlatform/);
   assert.match(source, /系统设置 → 隐私与安全性 → 辅助功能/);
-  assert.match(source, /打开辅助功能设置/);
+  assert.match(source, /请求系统授权/);
+  assert.match(source, /macOS 弹窗中点击“打开系统设置”/);
   assert.match(source, /重新检查/);
   assert.match(source, /ref\/src-tauri\/target\/debug\/pet-manager-tauri/);
   assert.match(source, /ref\\src-tauri\\target\\debug\\pet-manager-tauri\.exe/);
   assert.match(source, /Windows 不需要把 Pet Manager 添加到“辅助功能”列表/);
   assert.match(source, /相同权限级别/);
   assert.match(source, /⌘⇧G/);
-  assert.match(source, /invoke\("open_macos_accessibility_settings"\)/);
   assert.match(source, /invoke\("check_codex_accessibility_permission"\)/);
   assert.match(source, /invoke\("request_codex_accessibility_permission"\)/);
+  const requestAccessibility = source.match(
+    /const requestAccessibilityPermission[\s\S]*?const recheckAccessibilityPermission/,
+  );
+  assert.ok(requestAccessibility, "expected explicit native Accessibility authorization action");
+  assert.match(requestAccessibility[0], /invoke\("request_codex_accessibility_permission"\)/);
+  assert.doesNotMatch(requestAccessibility[0], /open_macos_accessibility_settings/);
+  const recheckAccessibility = source.match(
+    /const recheckAccessibilityPermission[\s\S]*?\n  };/,
+  );
+  assert.ok(recheckAccessibility, "expected non-prompting Accessibility status retry action");
+  assert.match(recheckAccessibility[0], /invoke\("check_codex_accessibility_permission"\)/);
+  assert.doesNotMatch(recheckAccessibility[0], /request_codex_accessibility_permission/);
   assert.match(source, /请不要再次添加权限或重复输入系统密码/);
   assert.match(css, /\.voice-panel__accessibility-guide\s*\{/);
   assert.match(css, /\.voice-panel__accessibility-guide\.is-trusted\s*\{/);
-  assert.match(tauri, /fn open_macos_accessibility_settings\(\)/);
   assert.match(tauri, /fn check_codex_accessibility_permission\(\)/);
-  assert.match(tauri, /Privacy_Accessibility/);
+  assert.match(tauri, /fn request_codex_accessibility_permission\(\)/);
+  assert.doesNotMatch(tauri, /fn open_macos_accessibility_settings\(\)/);
+  assert.doesNotMatch(tauri, /Privacy_Accessibility/);
   assert.match(tauri, /check_codex_accessibility_permission,/);
-  assert.match(tauri, /open_macos_accessibility_settings,/);
+  assert.match(tauri, /request_codex_accessibility_permission,/);
 });
 
 test("Uses shared form controls instead of one-off native-looking fields", () => {

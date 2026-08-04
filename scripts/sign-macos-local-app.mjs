@@ -1,6 +1,6 @@
 /**
- * [Input] A locally bundled macOS Pet Manager.app, optionally supplied as argv[2].
- * [Output] An ad-hoc signed app with a stable bundle-id designated requirement for persistent local TCC grants.
+ * [Input] A locally bundled macOS Pet Manager.app, optionally supplied as a positional argument, plus optional --verify-only.
+ * [Output] An ad-hoc signed app whose exact stable bundle-id designated requirement is verified for persistent local TCC grants.
  * [Pos] Local macOS packaging helper; production Developer ID signing remains a separate release concern.
  * [Sync] If this file changes, update `scripts/.folder.md`.
  */
@@ -17,8 +17,11 @@ if (process.platform !== "darwin") {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "..");
+const args = process.argv.slice(2);
+const verifyOnly = args.includes("--verify-only");
+const requestedAppPath = args.find((arg) => !arg.startsWith("--"));
 const appPath = resolve(
-  process.argv[2]
+  requestedAppPath
     || resolve(
       repositoryRoot,
       "ref",
@@ -37,22 +40,24 @@ if (!existsSync(appPath)) {
 
 const designatedRequirement =
   '=designated => identifier "com.petmanager.desktop"';
-const signed = spawnSync(
-  "codesign",
-  [
-    "--force",
-    "--options",
-    "runtime",
-    "--sign",
-    "-",
-    "--requirements",
-    designatedRequirement,
-    appPath,
-  ],
-  { stdio: "inherit" },
-);
-if (signed.status !== 0) {
-  process.exit(signed.status || 1);
+if (!verifyOnly) {
+  const signed = spawnSync(
+    "codesign",
+    [
+      "--force",
+      "--options",
+      "runtime",
+      "--sign",
+      "-",
+      "--requirements",
+      designatedRequirement,
+      appPath,
+    ],
+    { stdio: "inherit" },
+  );
+  if (signed.status !== 0) {
+    process.exit(signed.status || 1);
+  }
 }
 
 const verified = spawnSync(
@@ -64,4 +69,18 @@ if (verified.status !== 0) {
   process.exit(verified.status || 1);
 }
 
-console.log(`stable local macOS signature applied: ${appPath}`);
+const inspected = spawnSync(
+  "codesign",
+  ["--display", "--requirements", "-", appPath],
+  { encoding: "utf8" },
+);
+const inspectionOutput = `${inspected.stdout || ""}\n${inspected.stderr || ""}`;
+if (
+  inspected.status !== 0
+  || !inspectionOutput.includes('designated => identifier "com.petmanager.desktop"')
+) {
+  console.error(`stable local designated requirement is missing: ${appPath}`);
+  process.exit(inspected.status || 1);
+}
+
+console.log(`${verifyOnly ? "verified" : "applied"} stable local macOS signature: ${appPath}`);

@@ -160,7 +160,7 @@ def test_factory_reuses_the_desktop_bundled_p4_ready_pack(tmp_path):
 def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_path):
     config = json.loads((RUNTIME / "factory-config.json").read_text(encoding="utf-8"))
     expected_ids = [
-        "falling-catch",
+        "two-key-pong",
         "flappy-bird",
         "block-combo",
         "snake-turn",
@@ -169,6 +169,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
         "token-usage",
     ]
     assert config["components"]["ids"] == expected_ids
+    assert "falling-catch" not in config["components"]["ids"]
     assert "slack-off-countdown" not in config["components"]["ids"]
     assert "ten-second-tap" not in config["components"]["ids"]
 
@@ -200,8 +201,28 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
             f"{factory.fnv1a32_bytes((spiffs_tree / f'p4b{slot:02d}.json').read_bytes()):08x}"
         )
     assert all(item["title"] for item in catalog["items"])
-    assert all((spiffs_tree / f"p4w{slot:02d}.json").is_file() for slot in range(7))
-    assert all((spiffs_tree / f"p4b{slot:02d}.json").is_file() for slot in range(7))
+    assert all(
+        (spiffs_tree / f"p4w{slot:02d}.json").is_file()
+        for slot in range(len(expected_ids))
+    )
+    assert all(
+        (spiffs_tree / f"p4b{slot:02d}.json").is_file()
+        for slot in range(len(expected_ids))
+    )
+
+    two_key_widget = json.loads(
+        (spiffs_tree / "p4w00.json").read_text(encoding="utf-8")
+    )
+    two_key_buttons = json.loads(
+        (spiffs_tree / "p4b00.json").read_text(encoding="utf-8")
+    )
+    assert two_key_widget["engine"] == "p4-bounded-runtime-v3"
+    assert two_key_widget["scene"]["grid"] == {"width": 16, "height": 16}
+    assert [binding["action"] for binding in two_key_buttons] == [
+        "shift_left",
+        "shift_right",
+        "start",
+    ]
 
     token_widget = json.loads(
         (spiffs_tree / "p4w06.json").read_text(encoding="utf-8")

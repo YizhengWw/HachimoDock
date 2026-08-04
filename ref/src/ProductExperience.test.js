@@ -3,7 +3,7 @@
  * [Output] Static Node regression coverage for top-level shell routing including a mounted-while-bound dashboard service lifecycle, centralized API configuration, Tauri-first setup routing, component center routing, flattened
  *          desktop HTTP bridge calls, fixed-height desktop sidebar, unified pet album naming, USB-only single desktop-pet assignment,
  *          dashboard guide entry, faster previews, shared-provider wizard help affordances, target-specific install-relative Tauri resources,
- *          stable local macOS Accessibility signing, binding-scoped appearance detail, Tauri local-media playback, and the narrowly scoped IMG.LY model-download CSP needed by avatar background removal.
+ *          stable local macOS Accessibility signing, relocatable bundled runtime enforcement, source-matched P4 ready-cache reuse, binding-scoped appearance detail, Tauri local-media playback, and the narrowly scoped IMG.LY model-download CSP needed by avatar background removal.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -118,7 +118,9 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   const windowsConfig = JSON.parse(readSource("src-tauri/tauri.windows.conf.json"));
   const packageJson = JSON.parse(readSource("package.json"));
   const prepareScript = readSource("../scripts/prepare-desktop-resources.mjs");
+  const p4ReadyScript = readSource("../scripts/prepare-p4-ready-assets.mjs");
   const localMacSigner = readSource("../scripts/sign-macos-local-app.mjs");
+  const localMacDmgBundler = readSource("../scripts/bundle-macos-local-dmg.mjs");
   const crossInstaller = readSource("../scripts/build-windows-nsis-cross.mjs");
   const tauri = readSource("src-tauri/src/lib.rs");
   const ffmpeg = readSource("src-tauri/src/codex_import.rs");
@@ -173,9 +175,19 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   );
   assert.equal(macosConfig.bundle.macOS.signingIdentity, "-");
   assert.match(packageJson.scripts["build:mac:local"], /sign:mac:local/);
+  assert.match(packageJson.scripts["build:mac:local"], /tauri build --bundles app,dmg --ci/);
+  assert.match(packageJson.scripts["build:mac:local"], /bundle:mac:local/);
+  assert.match(packageJson.scripts["build:mac:local"], /verify:mac:local/);
   assert.match(packageJson.scripts["sign:mac:local"], /sign-macos-local-app\.mjs/);
+  assert.match(packageJson.scripts["bundle:mac:local"], /bundle-macos-local-dmg\.mjs/);
+  assert.match(packageJson.scripts["verify:mac:local"], /--verify-only/);
   assert.match(localMacSigner, /designated => identifier "com\.petmanager\.desktop"/);
   assert.match(localMacSigner, /--verify/);
+  assert.match(localMacSigner, /stable local designated requirement is missing/);
+  assert.match(localMacDmgBundler, /verifyStableApp\(appPath\)/);
+  assert.match(localMacDmgBundler, /verifyStableApp\(join\(mountRoot, "Pet Manager\.app"\)\)/);
+  assert.match(localMacDmgBundler, /hdiutil/);
+  assert.match(localMacDmgBundler, /--skip-jenkins/);
   assertResource(
     windowsConfig.bundle.resources,
     "generated-runtime/node.exe",
@@ -251,6 +263,14 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assert.match(prepareScript, /依法不可随安装包分发/);
   assert.match(prepareScript, /Git LFS 指针/);
   assert.match(prepareScript, /assertRuntimeMatchesTarget/);
+  assert.match(prepareScript, /\/usr\/bin\/otool/);
+  assert.match(prepareScript, /依赖未随应用打包的动态库/);
+  assert.match(prepareScript, /reusing validated staged Node runtime/);
+  assert.match(prepareScript, /existsSync\(targetRuntime\)/);
+  assert.match(p4ReadyScript, /copyValidCachedAudio/);
+  assert.match(p4ReadyScript, /cachedAudioHashes\.get\(family\) === audioHash/);
+  assert.match(p4ReadyScript, /Git LFS 指针/);
+  assert.match(p4ReadyScript, /git lfs pull/);
   assert.match(prepareScript, /npmArgs = \["ci", "--omit=dev"/);
   assert.match(ffmpeg, /bundled_ffmpeg_candidates/);
   assert.match(ffmpeg, /join\("Resources"\)\.join\("tools"\)\.join\("ffmpeg"\)/);

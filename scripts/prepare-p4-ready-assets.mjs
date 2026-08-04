@@ -1,6 +1,6 @@
 /**
- * [Input] Built-in Terrier MP4/WAV sources, the shared P4 H.264 appearance profile, and a host FFmpeg binary.
- * [Output] A deterministic, SPS-compatible p4-ready pack bundled with Pet Manager and reusable by factory images.
+ * [Input] Built-in Terrier MP4/WAV sources, the source-matched pinned ready cache, the shared P4 H.264 appearance profile, and a host FFmpeg binary.
+ * [Output] A deterministic, SPS-compatible p4-ready pack that reuses validated source-matched video/audio and is shared by Pet Manager and factory images.
  * [Pos] Desktop/factory asset prebuild shared by local packaging and CI.
  * [Sync] If this file changes, update `scripts/.folder.md`.
  */
@@ -36,6 +36,12 @@ const metadataName = "ready-meta.json";
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function assertNotGitLfsPointer(bytes, assetPath) {
+  if (bytes.subarray(0, 160).toString("utf8").startsWith("version https://git-lfs.github.com/spec/v1")) {
+    throw new Error(`${assetPath} 是 Git LFS 指针；请先安装 Git LFS 并运行 git lfs pull`);
+  }
 }
 
 function u64le(value) {
@@ -343,13 +349,32 @@ function copyValidCachedVideo(devicePath, outputPath, maxFrames) {
   const cached = join(profileRoot, devicePath);
   if (!existsSync(cached)) return null;
   try {
-    const parsed = parseH264Stream(readFileSync(cached));
+    const bytes = readFileSync(cached);
+    assertNotGitLfsPointer(bytes, cached);
+    const parsed = parseH264Stream(bytes);
     if (parsed.frames === 0 || parsed.frames > maxFrames) return null;
     mkdirSync(dirname(outputPath), { recursive: true });
     copyFileSync(cached, outputPath);
     return parsed;
-  } catch {
+  } catch (error) {
+    if (String(error?.message || error).includes("Git LFS 指针")) throw error;
     return null;
+  }
+}
+
+function copyValidCachedAudio(devicePath, outputPath, sampleRate) {
+  const cached = join(profileRoot, devicePath);
+  if (!existsSync(cached)) return false;
+  try {
+    const bytes = readFileSync(cached);
+    assertNotGitLfsPointer(bytes, cached);
+    if (!wavMatchesDeviceContract(bytes, sampleRate)) return false;
+    mkdirSync(dirname(outputPath), { recursive: true });
+    copyFileSync(cached, outputPath);
+    return true;
+  } catch (error) {
+    if (String(error?.message || error).includes("Git LFS 指针")) throw error;
+    return false;
   }
 }
 
@@ -373,11 +398,15 @@ export function prepareBuiltInP4Ready({ ffmpegPath = "", allowTranscode = true }
 
   mkdirSync(readyBase, { recursive: true });
   const cachedSourceDurations = new Map();
+  const cachedAudioHashes = new Map();
   try {
     const cachedMetadata = JSON.parse(readFileSync(join(profileRoot, metadataName), "utf8"));
     for (const source of cachedMetadata.sourceAssets || []) {
       if (source.videoSha256 && Number.isFinite(source.durationMs) && source.durationMs > 0) {
         cachedSourceDurations.set(source.videoSha256, source.durationMs);
+      }
+      if (source.family && source.audioSha256) {
+        cachedAudioHashes.set(source.family, source.audioSha256);
       }
     }
   } catch {
@@ -470,36 +499,44 @@ export function prepareBuiltInP4Ready({ ffmpegPath = "", allowTranscode = true }
         const audioHash = sha256(audioBytes);
         const audioDevicePath = `p4/audio/${family}.wav`;
         const audioOutput = join(stagingRoot, audioDevicePath);
-        mkdirSync(dirname(audioOutput), { recursive: true });
-        if (wavMatchesDeviceContract(audioBytes, appearance.audioSampleRate)) {
-          copyFileSync(audioSource, audioOutput);
-        } else {
-          if (!allowTranscode) {
-            throw new Error(`P4 ready audio is missing or stale: ${family}.wav`);
-          }
-          runFfmpeg(
-            ffmpegPath,
-            [
-              "-y",
-              "-v",
-              "error",
-              "-i",
-              audioSource,
-              "-map",
-              "0:a:0",
-              "-vn",
-              "-ac",
-              "1",
-              "-ar",
-              String(appearance.audioSampleRate),
-              "-c:a",
-              "pcm_s16le",
-              "-f",
-              "wav",
-              audioOutput,
-            ],
-            `${family}.wav`,
+        const copiedCachedAudio = cachedAudioHashes.get(family) === audioHash
+          && copyValidCachedAudio(
+            audioDevicePath,
+            audioOutput,
+            appearance.audioSampleRate,
           );
+        if (!copiedCachedAudio) {
+          mkdirSync(dirname(audioOutput), { recursive: true });
+          if (wavMatchesDeviceContract(audioBytes, appearance.audioSampleRate)) {
+            copyFileSync(audioSource, audioOutput);
+          } else {
+            if (!allowTranscode) {
+              throw new Error(`P4 ready audio is missing or stale: ${family}.wav`);
+            }
+            runFfmpeg(
+              ffmpegPath,
+              [
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                audioSource,
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                String(appearance.audioSampleRate),
+                "-c:a",
+                "pcm_s16le",
+                "-f",
+                "wav",
+                audioOutput,
+              ],
+              `${family}.wav`,
+            );
+          }
         }
         if (!wavMatchesDeviceContract(readFileSync(audioOutput), appearance.audioSampleRate)) {
           throw new Error(`normalized P4 audio is invalid: ${family}.wav`);

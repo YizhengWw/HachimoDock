@@ -4,7 +4,7 @@
  * strict active-only P4 conversation sizing with 60-second terminal retention,
  * exact visible-card encoder routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
  * MiMoCode current-caret voice delivery, ACK-gated board configuration, and
- * stale bridge/USB guards and exact-board appearance recovery.
+ * stale bridge/USB guards, immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -696,14 +696,30 @@ test("macOS Codex conversation switching uses native accessibility foreground de
   const composer = readRepoFile("src-tauri", "src", "codex_composer.rs");
   const macComposer = readRepoFile("src-tauri", "src", "codex_composer_macos.rs");
   const cargo = readRepoFile("src-tauri", "Cargo.toml");
+  const dashboard = readSource("DeviceDashboard.jsx");
+  const app = readSource("App.jsx");
 
   assert.match(composer, /#\[cfg\(target_os = "macos"\)\][\s\S]*mod macos;/);
   assert.match(composer, /#\[cfg\(target_os = "macos"\)\][\s\S]*impl CodexComposerBridge/);
   assert.match(cargo, /cfg\(target_os = "macos"\)/);
   assert.match(cargo, /accessibility = "0\.2"/);
+  assert.match(macComposer, /AXIsProcessTrusted/);
   assert.match(macComposer, /AXIsProcessTrustedWithOptions/);
   assert.match(macComposer, /kAXTrustedCheckOptionPrompt/);
-  assert.match(readSource("DeviceDashboard.jsx"), /invoke\("request_codex_accessibility_permission"\)/);
+  const permissionRequest = macComposer.match(
+    /pub\(super\) fn request_accessibility_permission\(\)[\s\S]*?\n}/,
+  );
+  assert.ok(permissionRequest, "expected native Accessibility consent request");
+  assert.match(permissionRequest[0], /if accessibility_permission_granted\(\)[\s\S]*?return true/);
+  assert.match(permissionRequest[0], /AXIsProcessTrustedWithOptions/);
+  assert.match(app, /hasTauriRuntime\(\)[\s\S]*?invoke\("request_codex_accessibility_permission"\)/);
+  assert.doesNotMatch(dashboard, /需要辅助功能权限/);
+  assert.doesNotMatch(dashboard, /macosAccessibilityNoticeShown/);
+  const permissionGuard = macComposer.match(
+    /fn ensure_accessibility_permission\(\)[\s\S]*?\n}/,
+  );
+  assert.ok(permissionGuard, "expected macOS Accessibility enforcement block");
+  assert.match(permissionGuard[0], /request_accessibility_permission\(\)/);
   assert.match(macComposer, /AXUIElementPostKeyboardEvent/);
   assert.match(macComposer, /pub\(super\) fn focus_session/);
   assert.match(macComposer, /pub\(super\) fn begin_voice/);
@@ -953,7 +969,7 @@ test("manual P4 appearance recovery carries the exact board identity", () => {
 
 // ---- NEW: 4-section IA tests (added in Step 1) ----
 
-test("dashboard prioritizes button configuration directly after device status", () => {
+test("dashboard places Agent and appearance before button configuration", () => {
   const source = readSource("DeviceDashboard.jsx");
 
   // Imports shell + dashboard children.
@@ -968,16 +984,16 @@ test("dashboard prioritizes button configuration directly after device status", 
   assert.match(source, /VoiceAssistantPanel/);
   assert.match(source, /DashboardActionsMenu/);
 
-  // The high-frequency physical control task comes before the lower-frequency
-  // Agent/appearance matrix, while voice remains the final collapsible region.
+  // Agent/appearance comes directly after device status, followed by physical
+  // button configuration, while voice remains the final collapsible region.
   const idxStatusBar = source.indexOf("<DeviceStatusBar");
   const idxCurrent = source.indexOf("<ChannelMatrixCard");
   const idxButtons = source.indexOf("<BoardButtonPanel");
   const idxVoice = source.indexOf("<VoiceAssistantPanel");
   assert.ok(idxStatusBar !== -1 && idxCurrent !== -1 && idxButtons !== -1 && idxVoice !== -1);
-  assert.ok(idxStatusBar < idxButtons, "device status before button config");
-  assert.ok(idxButtons < idxCurrent, "button config before Agent/appearance");
-  assert.ok(idxCurrent < idxVoice, "Agent/appearance before voice");
+  assert.ok(idxStatusBar < idxCurrent, "device status before Agent/appearance");
+  assert.ok(idxCurrent < idxButtons, "Agent/appearance before button config");
+  assert.ok(idxButtons < idxVoice, "button config before voice");
 });
 
 test("dashboard pulls device state from useDeviceContext (no local polling)", () => {
@@ -1037,6 +1053,20 @@ test("dashboard keeps buttons always visible and opens the collapsible voice ass
   const collapsibleBeforeVoice = source.lastIndexOf("<Card.Collapsible", voiceIdx);
   assert.ok(collapsibleBeforeVoice !== -1 && collapsibleBeforeVoice < voiceIdx, "VoiceAssistantPanel must live in Card.Collapsible");
   assert.match(source.slice(collapsibleBeforeVoice, voiceIdx), /defaultOpen/);
+});
+
+test("saved ASR changes rearm an eligible connected P4 listener without a restart", () => {
+  const source = readSource("DeviceDashboard.jsx");
+  const callback = source.match(
+    /const resumeDeviceVoiceAfterCredentialAccess = useCallback\(\(\) => \{[\s\S]*?\n  \}\, \[[\s\S]*?\n  \]\);/,
+  );
+  assert.ok(callback, "expected ASR credential-ready callback");
+  assert.match(callback[0], /!isP4Runtime/);
+  assert.match(callback[0], /!runtimeVoiceEnabled/);
+  assert.match(callback[0], /!usb\.connected/);
+  assert.match(callback[0], /!p4TargetBoardDeviceId/);
+  assert.match(callback[0], /toggleAudioBridge\("start"\)/);
+  assert.doesNotMatch(callback[0], /audioBridgeDeferred/);
 });
 
 test("DeviceDashboard does not expose the unsupported P4 WiFi flow", () => {

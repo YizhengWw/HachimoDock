@@ -18,9 +18,10 @@
  *          exact visible-card encoder selection isolated from background routing,
  *          manual and focus-refreshed local Agent discovery with visible scan feedback,
  *          a default-open status-first voice console,
+ *          immediate P4 voice rearming after saved ASR configuration changes,
  *          explicit-only Codex/Claude Desktop task navigation for selected P4 conversations,
  *          MiMoCode-only macOS final-text delivery plus Return at the captured current caret,
- *          one-shot app-process macOS Accessibility consent requests,
+ *          app-shell/native-operation-owned macOS Accessibility consent,
  *          shared first-visit onboarding state with a reopenable page guide,
  *          and an ESP32-P4 A/B firmware update entry.
  * [Pos] component node in ref/src
@@ -642,7 +643,6 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
   const [firmwareTargetBoardDeviceId, setFirmwareTargetBoardDeviceId] = useState("");
   const [diagnosticsTargetBoardDeviceId, setDiagnosticsTargetBoardDeviceId] = useState("");
   const [dismissedP4Sessions, setDismissedP4Sessions] = useState({});
-  const accessibilityPromptRequestedRef = useRef(false);
   const buttonConfigRevisionRef = useRef(0);
   const buttonConfigQueryTokenRef = useRef(0);
   const isP4Runtime = String(usb.runtime || "").toLowerCase() === P4_RUNTIME_ID;
@@ -819,19 +819,6 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
   const selectedAgentBusSessions = sessionFeed.sessions;
   const selectedAgentRoutingSessions = sessionFeed.routingSessions;
   const selectedAgentSessionsLoaded = sessionFeed.loaded;
-
-  useEffect(() => {
-    if (
-      accessibilityPromptRequestedRef.current
-      || !isP4Runtime
-      || !p4TargetBoardDeviceId
-      || selectedAgentId !== "codex"
-    ) return;
-    accessibilityPromptRequestedRef.current = true;
-    invoke("request_codex_accessibility_permission").catch((error) => {
-      console.warn("[p4] failed to request Codex Accessibility permission", error);
-    });
-  }, [isP4Runtime, p4TargetBoardDeviceId, selectedAgentId]);
 
   const onSessionDisplayEnabledChange = useCallback((value) => {
     setSessionDisplayEnabled(saveSessionDisplayEnabled(value));
@@ -1152,9 +1139,17 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
   }, [activeVoiceTriggerId, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, usb.boardDeviceId]);
 
   const resumeDeviceVoiceAfterCredentialAccess = useCallback(() => {
-    if (!voiceState.audioBridgeDeferred) return undefined;
+    if (!isP4Runtime || !runtimeVoiceEnabled || !usb.connected || !p4TargetBoardDeviceId) {
+      return undefined;
+    }
     return toggleAudioBridge("start");
-  }, [toggleAudioBridge, voiceState.audioBridgeDeferred]);
+  }, [
+    isP4Runtime,
+    p4TargetBoardDeviceId,
+    runtimeVoiceEnabled,
+    toggleAudioBridge,
+    usb.connected,
+  ]);
 
   const sendMockButtonInject = useCallback(() => {
     const text = (voiceState.mockInjectInput || "").trim();
@@ -1287,22 +1282,6 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
         <DeviceStatusBar />
       </Card>
 
-      <Card>
-        <BoardButtonPanel
-          voiceConfig={runtimeVoiceConfig}
-          buttonActions={voiceConfig.buttonActions}
-          buttonValues={voiceConfig.buttonValues}
-          buttonLabels={voiceConfig.buttonLabels}
-          runtime={usb.runtime}
-          voiceConfigDirty={voiceConfigDirty}
-          voiceConfigOtaState={voiceConfigOtaState}
-          usbConnected={Boolean(usb.connected)}
-          selectedTrigger={selectedVoiceTrigger}
-          onVoiceConfigChange={updateVoiceConfig}
-          onApplyVoiceConfig={applyVoiceConfigOverUsb}
-        />
-      </Card>
-
       <Card
         title="Agent与形象"
         subtitle={agentScanSummary}
@@ -1324,6 +1303,22 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
           showSessionDisplaySetting={isP4Runtime}
           sessionDisplayEnabled={sessionDisplayEnabled}
           onSessionDisplayEnabledChange={onSessionDisplayEnabledChange}
+        />
+      </Card>
+
+      <Card>
+        <BoardButtonPanel
+          voiceConfig={runtimeVoiceConfig}
+          buttonActions={voiceConfig.buttonActions}
+          buttonValues={voiceConfig.buttonValues}
+          buttonLabels={voiceConfig.buttonLabels}
+          runtime={usb.runtime}
+          voiceConfigDirty={voiceConfigDirty}
+          voiceConfigOtaState={voiceConfigOtaState}
+          usbConnected={Boolean(usb.connected)}
+          selectedTrigger={selectedVoiceTrigger}
+          onVoiceConfigChange={updateVoiceConfig}
+          onApplyVoiceConfig={applyVoiceConfigOverUsb}
         />
       </Card>
 

@@ -1,6 +1,6 @@
 /**
  * [Input] state (busStatus/busSessions/busSessionId/voiceRuntime/audioBridge{*}/mockInject/deviceVoiceFlow/selectedAgentId/deviceOnline) + dispatch + toggleAudioBridge/sendMockButtonInject + voiceConfig + selectedTrigger + onVoiceConfigChange/onVoiceEnabledChange + API-settings navigation.
- * [Output] Region 4: a compact voice console with ChatGPT（Codex）/Claude-visible and MiMoCode-caret delivery labels, macOS trust diagnosis, and foreground recovery tips.
+ * [Output] Region 4: a compact voice console with immediate saved-ASR runtime rearming, ChatGPT（Codex）/Claude-visible and MiMoCode-caret delivery labels, non-prompting macOS trust checks, native system-consent retry, and foreground recovery tips.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -176,7 +176,7 @@ export default function VoiceAssistantPanel({
 
   useEffect(() => {
     let cancelled = false;
-    const loadAsrState = () => {
+    const loadAsrState = ({ resume = false } = {}) => {
       invoke("load_device_asr_settings")
         .then((status) => {
           if (cancelled) return;
@@ -193,7 +193,7 @@ export default function VoiceAssistantPanel({
             tone: status?.configured ? "success" : "muted",
             message: status?.message || "请前往 API 配置补充语音识别凭据",
           });
-          if (status?.configured === true) {
+          if (resume && status?.configured === true) {
             onCredentialReady?.();
           }
         })
@@ -208,10 +208,14 @@ export default function VoiceAssistantPanel({
         });
     };
     loadAsrState();
-    window.addEventListener(API_CONFIGURATION_UPDATED_EVENT, loadAsrState);
+    const handleApiConfigurationUpdated = (event) => {
+      if (event?.detail?.providerId && event.detail.providerId !== "volcengine-asr") return;
+      loadAsrState({ resume: true });
+    };
+    window.addEventListener(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener(API_CONFIGURATION_UPDATED_EVENT, loadAsrState);
+      window.removeEventListener(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated);
     };
   }, [dispatch, onCredentialReady]);
 
@@ -296,24 +300,32 @@ export default function VoiceAssistantPanel({
     state.deviceVoiceFlow?.updatedAt,
   ]);
 
-  const openAccessibilitySettings = async () => {
+  const requestAccessibilityPermission = async () => {
     setAccessibilityAction({
-      pending: "open",
+      pending: "request",
       tone: "",
       message: "",
     });
     try {
-      await invoke("open_macos_accessibility_settings");
+      const result = await invoke("request_codex_accessibility_permission");
+      const trusted = result?.trusted === true;
+      setAccessibilityPermission({
+        loading: false,
+        trusted,
+        error: "",
+      });
       setAccessibilityAction({
         pending: "",
-        tone: "muted",
-        message: "已打开辅助功能设置。请在列表中允许 Pet Manager，然后返回这里重新检查。",
+        tone: trusted ? "success" : "muted",
+        message: trusted
+          ? "辅助功能权限已确认，无需再次授权。"
+          : "已请求系统授权。请在 macOS 弹窗中点击“打开系统设置”，打开 Pet Manager 开关后返回。",
       });
     } catch (error) {
       setAccessibilityAction({
         pending: "",
         tone: "error",
-        message: `无法打开辅助功能设置：${formatVoiceUserMessage(String(error))}`,
+        message: `无法请求系统授权：${formatVoiceUserMessage(String(error))}`,
       });
     }
   };
@@ -325,7 +337,7 @@ export default function VoiceAssistantPanel({
       message: "",
     });
     try {
-      const result = await invoke("request_codex_accessibility_permission");
+      const result = await invoke("check_codex_accessibility_permission");
       const trusted = result?.trusted === true;
       setAccessibilityPermission({
         loading: false,
@@ -626,15 +638,15 @@ export default function VoiceAssistantPanel({
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
-                    onClick={openAccessibilitySettings}
+                    onClick={requestAccessibilityPermission}
                     disabled={Boolean(accessibilityAction.pending)}
                   >
-                    {accessibilityAction.pending === "open" ? (
+                    {accessibilityAction.pending === "request" ? (
                       <Loader size={14} className="spin" aria-hidden="true" />
                     ) : (
                       <ExternalLink size={14} aria-hidden="true" />
                     )}
-                    打开辅助功能设置
+                    请求系统授权
                   </button>
                   <button
                     type="button"

@@ -1,7 +1,8 @@
 //! Codex pet importer and controlled community installer (M13.1/M13.2).
 //!
-//! Reads a codex pet's `spritesheet.webp` (8 cols × 9 rows × 192×208), cuts
-//! each frame, writes a trimmed transparent gallery preview, and produces
+//! Reads a Codex pet's v1 `spritesheet.webp` (8 cols × 9 rows × 192×208) or
+//! v2 sheet (8 cols × 11 rows × 192×208), cuts the shared first nine animation
+//! rows, writes a trimmed transparent gallery preview, and produces
 //! per-family MP4 files by writing one PNG per unique atlas cell and driving
 //! hidden FFmpeg concat processes.
 //! The list API also reports each pet's latest source-file modified time so
@@ -40,9 +41,11 @@ const OUTPUT_FPS: u32 = 24;
 /// at 120 ms/frame) felt rushed on-device, so default to 2.0× for a calmer pace.
 const PLAYBACK_SLOWDOWN: f64 = 2.0;
 const ATLAS_COLS: u32 = 8;
-const ATLAS_ROWS: u32 = 9;
+const V1_ATLAS_ROWS: u32 = 9;
+const V2_ATLAS_ROWS: u32 = 11;
 const EXPECTED_W: u32 = CELL_W * ATLAS_COLS; // 1536
-const EXPECTED_H: u32 = CELL_H * ATLAS_ROWS; // 1872
+const V1_EXPECTED_H: u32 = CELL_H * V1_ATLAS_ROWS; // 1872
+const V2_EXPECTED_H: u32 = CELL_H * V2_ATLAS_ROWS; // 2288
 
 /// Solid background used when flattening alpha before H.264 encoding.
 /// Black matches the dark UI surface and device LCD background.
@@ -62,6 +65,9 @@ const PREVIEW_PADDING: u32 = 4;
 const HALO_RADIUS: i32 = 2;
 
 /// Codex row → (pet-manager family, used columns count, per-frame durations in ms).
+/// v1 and v2 share these first nine animation rows. v2 rows 9 and 10 contain
+/// 16 directional look frames, which Pet Manager's appearance-family contract
+/// does not consume and therefore intentionally leaves untouched.
 /// Source: ~/.codex/skills/hatch-pet/references/animation-rows.md + mapping image.
 struct RowMap {
     row: u32,
@@ -155,6 +161,45 @@ struct CodexPetJson {
     description: Option<String>,
     #[serde(rename = "spritesheetPath")]
     spritesheet_path: Option<String>,
+    #[serde(rename = "spriteVersionNumber")]
+    sprite_version_number: Option<u32>,
+}
+
+fn resolve_codex_atlas_version(
+    pet_json: &CodexPetJson,
+    width: u32,
+    height: u32,
+) -> Result<u32, String> {
+    if width != EXPECTED_W {
+        return Err(format!(
+            "spritesheet 宽度 {} 不符合预期 {}（每行 {} 格）",
+            width, EXPECTED_W, ATLAS_COLS
+        ));
+    }
+
+    let size_version = match height {
+        V1_EXPECTED_H => 1,
+        V2_EXPECTED_H => 2,
+        _ => {
+            return Err(format!(
+                "spritesheet 高度 {} 不符合 Codex v1/v2 规格（v1: {}，v2: {}）",
+                height, V1_EXPECTED_H, V2_EXPECTED_H
+            ));
+        }
+    };
+
+    match pet_json.sprite_version_number {
+        None => Ok(size_version),
+        Some(version @ 1..=2) if version == size_version => Ok(size_version),
+        Some(version @ 1..=2) => Err(format!(
+            "pet.json 声明 spriteVersionNumber={}，但 spritesheet 尺寸 {}×{} 对应 v{}",
+            version, width, height, size_version
+        )),
+        Some(version) => Err(format!(
+            "暂不支持 spriteVersionNumber={}；当前支持 Codex v1 和 v2",
+            version
+        )),
+    }
 }
 
 fn codex_pets_root() -> Result<PathBuf, String> {
@@ -747,12 +792,7 @@ pub fn import_codex_pet(
     let img =
         image::open(&spritesheet_path).map_err(|e| format!("解码 spritesheet.webp 失败: {}", e))?;
     let (w, h) = img.dimensions();
-    if w != EXPECTED_W || h != EXPECTED_H {
-        return Err(format!(
-            "spritesheet 尺寸 {}×{} 不符合预期 {}×{}",
-            w, h, EXPECTED_W, EXPECTED_H
-        ));
-    }
+    resolve_codex_atlas_version(&pet_json, w, h)?;
     let rgba: RgbaImage = img.to_rgba8();
     let source_preview = codex_source_preview_from_sheet(&img)
         .ok_or_else(|| "提取 Codex 源预览图失败".to_string())?;
@@ -999,12 +1039,83 @@ mod tests {
             display_name: None,
             description: None,
             spritesheet_path: Some("assets/sheet.webp".to_string()),
+            sprite_version_number: None,
         };
 
         let resolved = resolve_spritesheet_path(&pet_dir, &pet_json).unwrap();
 
         assert_eq!(resolved, expected);
         let _ = fs::remove_dir_all(&pet_dir);
+    }
+
+    #[test]
+    fn codex_atlas_accepts_v1_v2_and_legacy_inference() {
+        let legacy = CodexPetJson {
+            id: Some("legacy".to_string()),
+            display_name: None,
+            description: None,
+            spritesheet_path: None,
+            sprite_version_number: None,
+        };
+        let v1 = CodexPetJson {
+            sprite_version_number: Some(1),
+            ..legacy.clone()
+        };
+        let v2 = CodexPetJson {
+            sprite_version_number: Some(2),
+            ..legacy.clone()
+        };
+
+        assert_eq!(
+            resolve_codex_atlas_version(&legacy, EXPECTED_W, V1_EXPECTED_H),
+            Ok(1)
+        );
+        assert_eq!(
+            resolve_codex_atlas_version(&legacy, EXPECTED_W, V2_EXPECTED_H),
+            Ok(2)
+        );
+        assert_eq!(
+            resolve_codex_atlas_version(&v1, EXPECTED_W, V1_EXPECTED_H),
+            Ok(1)
+        );
+        assert_eq!(
+            resolve_codex_atlas_version(&v2, EXPECTED_W, V2_EXPECTED_H),
+            Ok(2)
+        );
+    }
+
+    #[test]
+    fn codex_atlas_rejects_version_size_mismatches_and_unknown_layouts() {
+        let v2 = CodexPetJson {
+            id: Some("v2".to_string()),
+            display_name: None,
+            description: None,
+            spritesheet_path: None,
+            sprite_version_number: Some(2),
+        };
+        let future = CodexPetJson {
+            sprite_version_number: Some(3),
+            ..v2.clone()
+        };
+
+        assert!(resolve_codex_atlas_version(&v2, EXPECTED_W, V1_EXPECTED_H)
+            .unwrap_err()
+            .contains("对应 v1"));
+        assert!(
+            resolve_codex_atlas_version(&future, EXPECTED_W, V2_EXPECTED_H)
+                .unwrap_err()
+                .contains("当前支持 Codex v1 和 v2")
+        );
+        assert!(
+            resolve_codex_atlas_version(&v2, EXPECTED_W + 1, V2_EXPECTED_H)
+                .unwrap_err()
+                .contains("宽度")
+        );
+        assert!(
+            resolve_codex_atlas_version(&v2, EXPECTED_W, V2_EXPECTED_H + CELL_H)
+                .unwrap_err()
+                .contains("v1/v2 规格")
+        );
     }
 
     #[test]

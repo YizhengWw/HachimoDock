@@ -13,35 +13,43 @@ description: Generate, validate, and publish petui desktop-pet components for th
 2. 判断需求属于 `game` 还是 `tool`：
    - 有目标、玩家输入、即时反馈、局面变化和回合结算时，使用 `game`。
    - 以计时、提醒、追踪、展示、查询或控制为主要价值时，使用 `tool`。
-3. 仅在缺失信息会改变状态机、数据来源或按键语义时追问。不要为了填满模板而追问。
-4. 在创建文件前，先写一份只针对当前需求的机制清单：
+3. 先判断这是新建组件还是优化/修复现有组件：
+   - 新建组件才创建新的 `component.json.id`。
+   - 优化、修复或继续迭代现有组件时，先读取用户指定的那个组件，并原样保留它的 `component.json.id`；除非用户明确要求另存为新组件，否则禁止生成新 ID。显示名称相同不能代替 ID 相同。
+   - 优化现有组件时默认同时保留原 `component.json.name`，避免组件中心出现两个看似相同的条目；只有用户明确要求改名时才改显示名称，但 ID 仍保持不变。
+4. 仅在缺失信息会改变状态机、数据来源、按键语义或无法确认要覆盖的现有组件时追问。不要为了填满模板而追问。
+5. 在创建文件前，先写一份只针对当前需求的机制清单：
    - 用户目标与一局/一次使用的完整闭环。
    - 画面中的实体或数据，以及它们如何变化。
    - 每个可用输入产生的即时、可见结果。
    - 开始、进行、成功/失败、重开或复位条件。
    - 每一项需求分别由哪个 runtime 原语实现。
-5. 读取 [references/patterns.md](references/patterns.md) 检查机制是否完整。该文件只有抽象检查项，不是组件模板。
-6. 从空目录创建独立工作包，不要直接写入 `~/.claw-pet/components/library`，也不要复制或改名任何既有组件。
-7. 执行校验：
+6. 读取 [references/patterns.md](references/patterns.md) 检查机制是否完整。该文件只有抽象检查项，不是组件模板。
+7. 在正式组件库之外准备独立工作包：
+   - 新建组件必须从空目录开始，不要复制或改名任何既有组件。
+   - 优化/修复现有组件时，只把用户指定的那一个组件复制到独立工作目录中修改，并保持原组件 ID；不得直接写入 `~/.claw-pet/components/library`。
+8. 执行校验：
 
    ```bash
    python <skill-dir>/scripts/validate_generated_widget.py <component-dir>
    ```
 
-8. 修复全部校验错误。只有校验退出码为 `0` 时才允许发布。
-9. 原子发布到正式本地组件库：
+9. 修复全部校验错误。只有校验退出码为 `0` 时才允许发布。
+10. 原子发布到正式本地组件库：
 
    ```bash
    python <skill-dir>/scripts/publish_generated_widget.py <component-dir> --source-agent <agent-id>
    ```
 
-10. 向用户报告 `jobId`、组件 ID、内容版本哈希和正式目录。Pet Manager 会自动发现正式目录中的组件。
+11. 向用户报告 `jobId`、组件 ID、内容版本哈希和正式目录。Pet Manager 会自动发现正式目录中的组件。
+12. 如果本次是优化/修复现有组件，必须明确告诉用户：在 Pet Manager 组件中心刷新组件库，打开同一个组件卡片并点击“保存并同步”，用同一组件 ID 的新包覆盖设备上的旧包；只发布到本地组件库不会自动替换设备内容。
 
 ## 路由原则
 
 - 先实现用户真正要求的玩法或工具，不得把不支持的游戏静默替换成 Flappy Bird、贪吃蛇或其他示例。
 - 如果 P4 当前契约无法表达需求，明确指出具体限制，并询问用户是简化玩法还是等待运行时能力；不要生成一个名字相似但玩法不同的包。
 - 新建组件时，禁止读取或搜索 `ref/builtin-clawpkgs`、`references/examples`、`~/.claw-pet/components`、历史生成目录或其他完整 `.clawpkg`。只有用户明确要求修复某个现有组件时，才读取该组件本身。
+- `component.json.id` 是版本升级和设备覆盖的唯一组件身份。优化/修复现有组件时必须复用原 ID，不能通过加后缀、时间戳或重新起包名创建另一条组件记录；显示名称相同但 ID 不同仍会被视为两个组件。
 - 不存在“选一个最接近的游戏再改名”的步骤。必须从当前需求的机制清单推导状态、实体、规则、参数和文案。
 - 禁止复制后改名、替换文案、微调速度/数量或换色来冒充新组件。若状态结构、实体布局和规则组合没有来自用户需求的理由，视为未完成。
 - `component.json.kind` 必须明确为 `game` 或 `tool`。
@@ -58,6 +66,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
 
 - `.staging` 是发布器使用的短暂事务目录，不是用户组件库，也不在 Pet Manager 中展示。
 - 正式组件只存在于 `~/.claw-pet/components/library/<component-id>/<version-hash>/`。
+- 同一 `<component-id>` 下的新内容哈希是该组件的新版本；Pet Manager 展示最新版本。旧内容可以保留用于内容寻址，但设备仍需从组件中心对同一卡片执行“保存并同步”才会被新版本覆盖。
 - 不手动复制到正式目录；始终使用 `publish_generated_widget.py`，确保校验、内容寻址和原子替换一致。
 - 发布失败时保留失败 job 的 staging 目录与 `~/.claw-pet/logs/component-generation/<job-id>.json`，便于修复；成功后清理 staging，只保留日志。
 - 不启动 Pet Manager、Agent CLI 或额外终端。生成交互始终留在用户当前 Agent 会话中。
@@ -71,3 +80,4 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - 无触控设备不含触屏事件；需要移动/碰撞时只使用能力清单声明的通用 scene 原语。
 - 没有虚构数据、未声明的数据源或示例残留。
 - 校验和发布命令均成功，最终路径位于正式 `library`，而不是工作目录或 `.staging`。
+- 优化/修复任务保留了原 `component.json.id`，交付说明包含组件中心刷新与“保存并同步”的设备覆盖步骤。

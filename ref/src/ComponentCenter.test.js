@@ -2,10 +2,9 @@
  * [Input] ComponentCenter.jsx, App.jsx, and fixtures.js component-center source.
  * [Output] Static Node coverage for the type-filtered library + modal layout.
  *          Tests assert CandidateCard / ComponentPreviewModal wiring,
- *          session-scoped device-inventory caching, formal-library file watching plus
- *          publish-first manual import, while verifying
+ *          session-scoped device-inventory caching and formal-library file watching, while verifying
  *          first-visit component onboarding,
- *          fixed builtin ordering plus newest-first custom ordering, complete built-in Flappy package wiring,
+ *          the featured 双键接球 builtin first, newest-first user components next, complete built-in Flappy package wiring,
  *          per-component buttons.json, editable component bindings, explicit component-scope guidance,
  *          P4 button-map downlink, semantic enabled state, card-owned device sync/removal,
  *          device-first dual deletion, exact target identity, focus-safe confirmation,
@@ -218,17 +217,18 @@ test("USB preflight trusts the shared DeviceContext USB state", () => {
   assert.match(component, /if \(!status\?\.connected && !deviceConnected\)/);
 });
 
-test("Library keeps every local component while live board inventory drives installed/enabled state", () => {
+test("Library leads with the featured builtin, then local components, while live board inventory drives state", () => {
   const component = readSource("ComponentCenter.jsx");
   const catalogBody = component.slice(
     component.indexOf("const catalogItems = useMemo"),
     component.indexOf("const libraryItems = useMemo"),
   );
+  assert.match(catalogBody, /FEATURED_BUILTIN_COMPONENT_ID/);
+  assert.match(catalogBody, /FEATURED_BUILTIN_VERSION_HASH/);
   assert.match(
     catalogBody,
-    /return \[\.\.\.builtins, \.\.\.sortComponentsByCreatedAt\(publishedItems\)\]/,
+    /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/,
   );
-  assert.doesNotMatch(catalogBody, /\.filter\(/);
   assert.match(
     component,
     /deviceInventory\.activeWidgetId === item\.id[\s\S]*componentSourceKey\(item\) === enabledComponentSourceKey/,
@@ -502,13 +502,30 @@ test("formal library refresh ignores stale overlapping responses", () => {
   assert.match(component, /setInterval\(refreshComponentLibrary, 30000\)/);
 });
 
-test("component library keeps product-defined builtins first and custom records newest first", () => {
+test("component library pins 双键接球 first and keeps other user components newest-first", () => {
   const component = readSource("ComponentCenter.jsx");
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
-  assert.match(component, /return \[\.\.\.builtins, \.\.\.sortComponentsByCreatedAt\(publishedItems\)\]/);
+  assert.match(component, /const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong"/);
+  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "cdf23dfa806eeaad"/);
+  assert.match(component, /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
+});
+
+test("builtin catalog starts with the validated 双键接球 package", () => {
+  const fixtures = readSource("fixtures.js");
+  const packageRoot = join(srcDir, "../builtin-clawpkgs/two-key-pong");
+  const componentManifest = JSON.parse(readFileSync(join(packageRoot, "component.json"), "utf8"));
+  const widget = JSON.parse(readFileSync(join(packageRoot, "runtime/widget.json"), "utf8"));
+  const buttons = JSON.parse(readFileSync(join(packageRoot, "buttons.json"), "utf8"));
+
+  assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
+  assert.equal(componentManifest.id, "two-key-pong");
+  assert.equal(componentManifest.version, "1.1.1");
+  assert.equal(widget.engine, "p4-bounded-runtime-v3");
+  assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
+  assert.deepEqual(buttons.map((binding) => binding.action), ["shift_left", "shift_right", "start"]);
 });
 
 test("a live USB handshake wins over a remembered SSH target during install", () => {
@@ -597,6 +614,8 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(widgetSkill, /不得把不支持的游戏静默替换成 Flappy Bird/);
   assert.match(widgetSkill, /validate_generated_widget\.py/);
   assert.match(widgetSkill, /publish_generated_widget\.py/);
+  assert.match(widgetSkill, /优化、修复或继续迭代现有组件时[\s\S]*?保留它的 `component\.json\.id`/);
+  assert.match(widgetSkill, /打开同一个组件卡片并点击“保存并同步”/);
   assert.match(contract, /`buttons\.json` 最多 8 条/);
   assert.match(contract, /button\.sw1\.short_press/);
   assert.match(contract, /knob\.rotate_cw/);
@@ -612,12 +631,10 @@ test("component center preserves CreateComponentDrawer with all 3 STEP cards", (
   assert.match(component, /Escape/);
   assert.match(component, /STEP 1.*Skill/);
   assert.match(component, /STEP 2.*生成/);
-  assert.match(component, /STEP 3.*正式本地组件/);
+  assert.match(component, /STEP 3.*刷新组件库/);
   assert.match(component, /component-tool-card--skill/);
   assert.match(component, /component-tool-card--generate/);
-  assert.match(component, /component-tool-card--clawpkg/);
-  assert.match(component, /component-clawpkg-dropzone/);
-  assert.match(component, /handleClawpkgDrop/);
+  assert.match(component, /component-tool-card--refresh/);
   assert.match(component, /handleInstallSkill/);
   assert.match(component, /skillInstallResult\.installed/);
   assert.match(component, /skillInstallResult\.skipped/);
@@ -626,15 +643,15 @@ test("component center preserves CreateComponentDrawer with all 3 STEP cards", (
   assert.match(component, /复制下方示例文案到Agent界面，与Agent对话生成你想要在设备上使用的小组件或小游戏/);
 });
 
-test("create drawer explains formal publication and exposes a manual import fallback", () => {
+test("create drawer reduces step 3 to one refresh action", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /STEP 3.*正式本地组件/);
+  assert.match(component, /STEP 3.*刷新组件库/);
   assert.match(component, /请使用 \$petui/);
-  assert.match(component, /petui 发布成功后会自动刷新/);
-  assert.match(component, /选择并导入正式组件库/);
-  assert.match(component, /component-clawpkg-fallback-button/);
-  assert.match(component, /不会直接下发/);
-  assert.match(component, /import_component_to_library/);
+  assert.match(component, /Agent制作完成后，刷新组件库/);
+  assert.match(component, /刷新后新组件会出现在组件中心/);
+  assert.doesNotMatch(component, /选择并导入正式组件库|拖拽 \.clawpkg|component-clawpkg-dropzone/);
+  assert.doesNotMatch(component, /importClawpkgToLibrary|handleClawpkgDrop|handleClawpkgFilePick/);
+  assert.doesNotMatch(component, /invoke\("import_component_to_library"/);
 });
 
 test("component center CSS has new library rules and no old layout rules", () => {
@@ -659,7 +676,7 @@ test("component center CSS has new library rules and no old layout rules", () =>
   // Current formal-library controls stay styled; obsolete draft hooks stay gone.
   assert.match(styles, /\.candidate-card__actions/);
   assert.match(styles, /\.candidate-card__delete/);
-  assert.match(styles, /\.component-library-location/);
+  assert.doesNotMatch(styles, /\.component-library-location|\.component-clawpkg-dropzone/);
   assert.doesNotMatch(styles, /\.component-drafts__refresh/);
   assert.doesNotMatch(styles, /\.component-store-card--draft/);
 });
@@ -678,11 +695,11 @@ test("CreateNewCard calls setCreateDrawerOpen when clicked", () => {
   assert.match(component, /CreateNewCard[\s\S]*?onClick.*setCreateDrawerOpen\(true\)/);
 });
 
-test("fixtures expose the ordered four games and three tools requested for the default library", () => {
+test("fixtures expose 双键接球 first, three remaining games, and three tools", () => {
   const data = readSource("fixtures.js");
   assert.match(data, /export const BUILTIN_COMPONENT_CENTER/);
   const orderedIds = [
-    "falling-catch",
+    "two-key-pong",
     "flappy-bird",
     "block-combo",
     "snake-turn",
@@ -696,7 +713,7 @@ test("fixtures expose the ordered four games and three tools requested for the d
     assert.ok(currentIndex > previousIndex, `${id} must keep the requested default order`);
     previousIndex = currentIndex;
   }
-  assert.match(data, /falling-catch/);
+  assert.match(data, /two-key-pong/);
   assert.match(data, /block-combo/);
   assert.match(data, /snake-turn/);
   assert.match(data, /flappy-bird/);
@@ -706,7 +723,8 @@ test("fixtures expose the ordered four games and three tools requested for the d
   assert.match(data, /像素方块/);
   assert.match(data, /像素贪吃蛇/);
   assert.match(data, /Flappy Bird/);
-  assert.match(data, /接住星星/);
+  assert.match(data, /双键接球/);
+  assert.doesNotMatch(data, /falling-catch|接住星星|catch\.left|catch\.right|catch\.start/);
   assert.doesNotMatch(data, /ten-second-tap|5秒连点|10秒连点/);
   assert.equal((data.match(/createdAt:/g) || []).length, 7);
   assert.match(data, /gameType: "blocks"/);
@@ -724,9 +742,8 @@ test("fixtures expose the ordered four games and three tools requested for the d
   assert.match(data, /button\.sw1\.short_press/);
   assert.match(data, /button\.sw2\.short_press/);
   assert.match(data, /button\.encoder\.short_press/);
-  assert.match(data, /catch\.left/);
-  assert.match(data, /catch\.right/);
-  assert.match(data, /catch\.start/);
+  assert.match(data, /shift_left/);
+  assert.match(data, /shift_right/);
   assert.match(data, /flappy\.flap/);
   assert.match(data, /tomato\.start_pause/);
   assert.match(data, /reminder\.acknowledge/);
@@ -734,25 +751,6 @@ test("fixtures expose the ordered four games and three tools requested for the d
   assert.match(data, /knob\.rotate_ccw/);
   assert.match(data, /P4 通用组件运行时/);
   assert.doesNotMatch(data, /promptBuilder|componentGenerator|replacementPreview/);
-});
-
-test("Catch the Star uses SW1 left, SW2 right, encoder press restart, and no component exit key", () => {
-  const packageRoot = join(srcDir, "../builtin-clawpkgs/falling-catch");
-  const buttons = JSON.parse(readFileSync(join(packageRoot, "buttons.json"), "utf8"));
-  const runtime = JSON.parse(readFileSync(join(packageRoot, "runtime/widget.json"), "utf8"));
-
-  assert.deepEqual(
-    buttons.map(({ event, action }) => ({ event, action })),
-    [
-      { event: "button.sw1.short_press", action: "catch.left" },
-      { event: "button.sw2.short_press", action: "catch.right" },
-      { event: "button.encoder.short_press", action: "catch.start" },
-    ],
-  );
-  assert.doesNotMatch(JSON.stringify(buttons), /page_main|button\.sw3/);
-  assert.equal(runtime.engine, "p4-bounded-runtime-v3");
-  assert.equal(runtime.scene.entities.find((entity) => entity.id === "star").vy, 1);
-  assert.ok(runtime.scene.rules.some((rule) => rule.on === "collision"));
 });
 
 test("Flappy Bird is shipped as a complete installable builtin template", () => {
@@ -798,14 +796,14 @@ test("tauri formal-library listing exposes preview and source metadata", () => {
   assert.match(library, /pub library_path:\s*String/);
 });
 
-test("manual clawpkg import publishes first, then opens the normal preview confirmation", () => {
+test("component center omits the manual formal-library import flow", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /function importClawpkgToLibrary/);
-  assert.match(component, /invoke\("import_component_to_library"/);
-  assert.match(component, /await refreshComponentLibrary\(\)/);
-  assert.match(component, /setPreviewComponent\(component\)/);
-  assert.match(component, /await importClawpkgToLibrary\(localPath\)/);
-  assert.doesNotMatch(component, /installClawpkgFromPath\(localPath\)/);
+  const tauri = readFileSync(join(srcDir, "../src-tauri/src/lib.rs"), "utf8");
+  assert.doesNotMatch(component, /function importClawpkgToLibrary/);
+  assert.doesNotMatch(component, /invoke\("import_component_to_library"/);
+  assert.doesNotMatch(component, /openDialog|handleClawpkgDrop|handleClawpkgFilePick/);
+  assert.doesNotMatch(tauri, /import_component_to_library/);
+  assert.match(component, /async function installClawpkgFromPath/);
 });
 
 test("component install keeps its button map package-owned without replacing device navigation", () => {

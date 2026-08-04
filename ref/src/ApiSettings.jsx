@@ -1,6 +1,6 @@
 /**
  * [Input] Shared avatar provider configs, platform-specific native Volcengine ASR credential commands, and optional return navigation.
- * [Output] Dedicated API configuration page that owns every user-entered API/Access/Secret key field and explains macOS private-file versus Windows credential storage.
+ * [Output] Dedicated API configuration page that owns every user-entered API/Access/Secret key field, immediately broadcasts saved ASR changes, and explains macOS private-file versus Windows credential storage.
  * [Pos] top-level page node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -172,6 +172,10 @@ export default function ApiSettings({ onBack }) {
           resourceId: asrResourceId,
         },
       });
+      emitApiConfigurationUpdated({
+        providerId: "volcengine-asr",
+        configured: saved?.configured === true,
+      });
       const probe = await invoke("test_device_asr_settings");
       setAsrApiKey("");
       setAsrState({
@@ -181,7 +185,6 @@ export default function ApiSettings({ onBack }) {
         tone: "success",
         message: `${probe?.message || "火山引擎云端 ASR 已就绪"}（${probe?.latencyMs ?? 0} ms）`,
       });
-      emitApiConfigurationUpdated({ providerId: "volcengine-asr" });
     } catch (error) {
       setAsrState((current) => ({
         ...current,

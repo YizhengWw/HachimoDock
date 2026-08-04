@@ -7,8 +7,8 @@
  *            • `AGENT_DISCOVERY_FIXTURES` — scenarios for the agent-detection
  *              flow, consumed by `agent-discovery-contract.js`.
  *            • `BUILTIN_COMPONENT_CENTER` — the actual builtin negative-screen
- *              widget catalog (four creation-dated games, including native
- *              Flappy Bird and the five-second tap challenge, plus tomato-clock /
+ *              widget catalog (led by the promoted two-key catch package, then
+ *              the remaining creation-dated games, including native Flappy Bird, plus tomato-clock /
  *              drink-reminder / token-usage tools) and the
  *              component-generator prompt + replacement preview metadata,
  *              consumed by `ComponentCenter.jsx`.
@@ -108,47 +108,59 @@ export const AGENT_DISCOVERY_FIXTURES = {
 export const BUILTIN_COMPONENT_CENTER = {
   components: [
     {
-      id: "falling-catch",
-      name: "接住星星",
-      createdAt: "2026-08-03T12:00:00+08:00",
+      id: "two-key-pong",
+      name: "双键接球",
+      version: "1.1.1",
+      versionHash: "cdf23dfa806eeaad",
+      createdAt: "2026-08-03T22:57:40+08:00",
       kind: "game",
       category: "内置小游戏",
       source: "P4 通用场景运行时",
       status: "available",
-      accent: "yellow",
+      accent: "blue",
       runtimeEngine: "p4-bounded-runtime-v3",
       sceneEngine: "p4-grid-scene-v1",
-      goal: "30 秒内用 SW1 向左、SW2 向右移动接盘，接住下落星星得分，漏接扣分；短按旋钮开始或重新开始。",
-      sharePayload: "分享的是接住星星小游戏，包含接盘移动、星星自动下落、碰撞得分、漏接扣分和限时结算。",
+      goal: "短按旋钮开始，SW1 向左、SW2 向右移动挡板；接球得分，漏球后结算，再次短按旋钮即可重开。",
+      sharePayload: "分享的是双键接球小游戏，包含左右挡板移动、球体自动反弹、接球计分、漏球结算与旋钮重开。",
       capabilities: ["scene.grid", "scene.collision", "input.sw1_sw2_encoder", "display.pixel_grid"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
       dashboard: {
-        title: "接住星星",
-        eyebrow: "限时 30 秒",
-        headline: "按旋钮开始",
-        metricLabel: "得分",
+        title: "双键接球",
+        eyebrow: "经典电子乒乓",
+        headline: "短按旋钮键开始",
+        metricLabel: "连续接球",
         metricValue: "0",
-        note: "SW1 左移 · SW2 右移",
-        footer: "SW1左移 · SW2右移 · 旋钮开始",
-        progress: { value: 100, label: "剩余时间" },
+        metricUnit: "次",
+        footer: "短按旋钮键开始",
         visualStyle: "pixel",
-        visualPalette: "arcade",
-        visualLayout: "arcade",
-        visualSprite: "star",
+        visualPalette: "mono",
+        visualLayout: "scoreboard",
+        visualSprite: "trophy",
+      },
+      scene: {
+        tick_ms: 170,
+        active_state: "playing",
+        result_state: "result",
+        score_var: "score",
+        grid: { width: 16, height: 16 },
+        entities: [
+          { id: "bat", x: 6, y: 13, width: 4, height: 1, shape: "paddle", tone: 2, bounds: "clamp", collidable: true },
+          { id: "orb", x: 4, y: 3, width: 2, height: 2, shape: "ball", tone: 4, vx: 1, vy: 1, bounds: "clamp", collidable: true },
+        ],
       },
       defaultBindings: [
-        { control: "SW1", event: "button.sw1.short_press", action: "catch.left", label: "向左移动" },
-        { control: "SW2", event: "button.sw2.short_press", action: "catch.right", label: "向右移动" },
-        { control: "前方旋钮", event: "button.encoder.short_press", action: "catch.start", label: "开始或重开" },
+        { control: "SW1", event: "button.sw1.short_press", action: "shift_left", label: "挡板左移" },
+        { control: "SW2", event: "button.sw2.short_press", action: "shift_right", label: "挡板右移" },
+        { control: "前方旋钮", event: "button.encoder.short_press", action: "start", label: "开始或重开" },
       ],
       screens: [
         {
-          name: "接住星星",
-          purpose: "显示实时下落的星星、接盘位置、剩余时间和当前得分。",
+          name: "双键接球",
+          purpose: "显示自动反弹的球、左右可移动挡板和连续接球得分。",
           regions: [
-            { name: "向左移动", action: "catch.left" },
-            { name: "向右移动", action: "catch.right" },
-            { name: "开始或重开", action: "catch.start" },
+            { name: "挡板左移", action: "shift_left" },
+            { name: "挡板右移", action: "shift_right" },
+            { name: "开始或重开", action: "start" },
           ],
         },
       ],

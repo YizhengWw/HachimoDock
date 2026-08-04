@@ -12,11 +12,14 @@
  *          returning to Component Center does not re-query the board while a full App restart does.
  *          Formal local deletion is a device-first transaction when the package is installed,
  *          so a failed board ACK never destroys the only local source. Builtins keep their
- *          product-defined order; formal local packages follow newest-first with stable ties.
+ *          promoted 双键接球 builtin leads the grid, followed by generated formal-local packages
+ *          newest-first and the remaining builtins in product-defined order. Its exact promoted
+ *          formal-local source is suppressed so the same version is never shown twice.
  *          A first-visit quick-start modal explains browse/create and direct card sync, and
  *          remains reopenable from the page help action. Component generation stays
  *          in the user's current Agent conversation: petui validates and atomically publishes
- *          to the formal local library, which this page watches and refreshes without launching CLIs.
+ *          to the formal local library, which this page watches and refreshes without launching CLIs
+ *          or exposing a separate manual package-import flow.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -36,7 +39,6 @@ import {
   X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { watch } from "@tauri-apps/plugin-fs";
 import { BUILTIN_COMPONENT_CENTER } from "./fixtures";
 import {
@@ -64,6 +66,8 @@ import {
 } from "./component-center/button-config.js";
 
 const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-overrides:v1";
+const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong";
+const FEATURED_BUILTIN_VERSION_HASH = "cdf23dfa806eeaad";
 const EMPTY_DEVICE_INVENTORY = Object.freeze({
   freshness: "idle",
   runtime: "",
@@ -398,12 +402,8 @@ export default function ComponentCenter() {
   const [bindingOverrides, setBindingOverrides] = useState(loadComponentButtonOverrides);
   const [skillInstalling, setSkillInstalling] = useState(false);
   const [skillInstallResult, setSkillInstallResult] = useState(null);
-  const [clawpkgDragOver, setClawpkgDragOver] = useState(false);
-  const [clawpkgImporting, setClawpkgImporting] = useState(false);
-  const [clawpkgImportResult, setClawpkgImportResult] = useState(null);
   const [localComponents, setLocalComponents] = useState([]);
   const [componentLibraryPath, setComponentLibraryPath] = useState("");
-  const [componentLibraryMigration, setComponentLibraryMigration] = useState(null);
   const [componentLibraryLoading, setComponentLibraryLoading] = useState(false);
   const [pendingComponentAction, setPendingComponentAction] = useState(null);
   const [componentActionPending, setComponentActionPending] = useState(false);
@@ -439,7 +439,6 @@ export default function ComponentCenter() {
       if (requestId === libraryRefreshRequestRef.current) {
         setLocalComponents(Array.isArray(snapshot?.components) ? snapshot.components : []);
         setComponentLibraryPath(String(snapshot?.libraryPath || ""));
-        setComponentLibraryMigration(snapshot?.migration || null);
       }
     } catch (err) {
       console.warn("[ComponentCenter] list_component_library failed", err);
@@ -621,15 +620,28 @@ export default function ComponentCenter() {
     ? activeRecordSourceKey(activeComponentRecord)
     : "";
 
-  /** Builtins keep the product-defined order; generated packages stay newest-first. */
+  /** The promoted game is always first. Other generated packages remain newest-first,
+   *  followed by the remaining builtins. Hide only the exact local source that was
+   *  promoted, so a future same-id revision can still surface for review. */
   const catalogItems = useMemo(() => {
     const builtins = BUILTIN_COMPONENT_CENTER.components.map((item) => ({
       ...item,
       kind: resolveComponentKind(item.kind, item.gameType),
       isLocal: false,
     }));
-    const publishedItems = localComponents.map((entry) => buildLibraryComponent(entry));
-    return [...builtins, ...sortComponentsByCreatedAt(publishedItems)];
+    const featuredBuiltins = builtins.filter((item) => item.id === FEATURED_BUILTIN_COMPONENT_ID);
+    const remainingBuiltins = builtins.filter((item) => item.id !== FEATURED_BUILTIN_COMPONENT_ID);
+    const publishedItems = localComponents
+      .filter((entry) => !(
+        entry.id === FEATURED_BUILTIN_COMPONENT_ID
+        && entry.versionHash === FEATURED_BUILTIN_VERSION_HASH
+      ))
+      .map((entry) => buildLibraryComponent(entry));
+    return [
+      ...featuredBuiltins,
+      ...sortComponentsByCreatedAt(publishedItems),
+      ...remainingBuiltins,
+    ];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localComponents]);
 
@@ -1293,7 +1305,6 @@ export default function ComponentCenter() {
   }
 
   async function installClawpkgFromPath(clawpkgPath, options = {}) {
-    setClawpkgImporting(true);
     try {
       const localMatch = localComponents.find((component) => matchesLibraryPath(component, clawpkgPath));
       const builtinMatch = BUILTIN_COMPONENT_CENTER.components.find((c) => clawpkgPath.includes(c.id));
@@ -1311,66 +1322,6 @@ export default function ComponentCenter() {
       const msg = typeof err === "string" ? err : String(err);
       push({ tone: "error", title: "安装 .clawpkg 失败", message: msg });
       return false;
-    } finally {
-      setClawpkgImporting(false);
-    }
-  }
-
-  async function importClawpkgToLibrary(clawpkgPath) {
-    setClawpkgImporting(true);
-    try {
-      const published = await invoke("import_component_to_library", {
-        input: { path: clawpkgPath },
-      });
-      const component = buildLibraryComponent(published);
-      setClawpkgImportResult({
-        manifest: { name: component.name },
-        publishedPath: component.libraryPath,
-      });
-      await refreshComponentLibrary();
-      setCreateDrawerOpen(false);
-      setPreviewComponent(component);
-    } catch (err) {
-      const msg = typeof err === "string" ? err : String(err);
-      push({ tone: "error", title: "导入正式组件库失败", message: msg });
-    } finally {
-      setClawpkgImporting(false);
-    }
-  }
-
-  async function handleClawpkgDrop(event) {
-    event.preventDefault();
-    setClawpkgDragOver(false);
-    const file = event.dataTransfer.files && event.dataTransfer.files[0];
-    if (!file) { push({ tone: "error", title: "没有读到文件" }); return; }
-    const localPath = file.path || file.webkitRelativePath;
-    if (!localPath) {
-      push({
-        tone: "error",
-        title: "无法获取本地路径",
-        message: "浏览器模式下拖拽不支持获取真实路径,请用 Tauri 桌面模式或'选择文件'按钮。",
-      });
-      return;
-    }
-    await importClawpkgToLibrary(localPath);
-  }
-
-  async function handleClawpkgFilePick() {
-    try {
-      const selectedPath = await openDialog({
-        multiple: false,
-        directory: false,
-        filters: [{ name: "petui 组件", extensions: ["clawpkg", "zip"] }],
-      });
-      if (typeof selectedPath === "string" && selectedPath) {
-        await importClawpkgToLibrary(selectedPath);
-      }
-    } catch (error) {
-      push({
-        tone: "error",
-        title: "选择组件包失败",
-        message: typeof error === "string" ? error : String(error),
-      });
     }
   }
 
@@ -1765,16 +1716,7 @@ export default function ComponentCenter() {
           handleInstallSkill={handleInstallSkill}
           skillInstalling={skillInstalling}
           skillInstallResult={skillInstallResult}
-          clawpkgDragOver={clawpkgDragOver}
-          setClawpkgDragOver={setClawpkgDragOver}
-          handleClawpkgDrop={handleClawpkgDrop}
-          handleClawpkgFilePick={handleClawpkgFilePick}
-          clawpkgImporting={clawpkgImporting}
-          clawpkgImportResult={clawpkgImportResult}
-          componentLibraryPath={componentLibraryPath}
-          componentLibraryCount={localComponents.length}
           componentLibraryLoading={componentLibraryLoading}
-          componentLibraryMigration={componentLibraryMigration}
           refreshComponentLibrary={refreshComponentLibrary}
         />
       )}
@@ -1808,16 +1750,7 @@ function CreateComponentDrawer({
   handleInstallSkill,
   skillInstalling,
   skillInstallResult,
-  clawpkgDragOver,
-  setClawpkgDragOver,
-  handleClawpkgDrop,
-  handleClawpkgFilePick,
-  clawpkgImporting,
-  clawpkgImportResult,
-  componentLibraryPath,
-  componentLibraryCount,
   componentLibraryLoading,
-  componentLibraryMigration,
   refreshComponentLibrary,
 }) {
   const [invocationCopied, setInvocationCopied] = useState(false);
@@ -1930,19 +1863,12 @@ function CreateComponentDrawer({
           </button>
         </article>
 
-        <article className="component-tool-card component-tool-card--clawpkg">
+        <article className="component-tool-card component-tool-card--refresh">
           <header>
-            <span className="component-tool-eyebrow">STEP 3 · 正式本地组件</span>
-            <h3>发布后自动进入组件库</h3>
-            <p>petui 发布成功后会自动刷新。也可以手动导入已有的 <code>.clawpkg</code> 或 zip；导入会先校验并发布，不会直接下发到设备。</p>
+            <span className="component-tool-eyebrow">STEP 3 · 刷新组件库</span>
+            <h3>Agent制作完成后，刷新组件库</h3>
+            <p>刷新后新组件会出现在组件中心</p>
           </header>
-          <div className="component-library-location" role="status">
-            <span>正式本地组件 {componentLibraryCount} 个</span>
-            <code>{componentLibraryPath || "~/.claw-pet/components/library"}</code>
-            {componentLibraryMigration?.migratedCount > 0 && (
-              <small>已从旧目录保留并迁移 {componentLibraryMigration.migratedCount} 个组件</small>
-            )}
-          </div>
           <button
             type="button"
             className="btn-secondary"
@@ -1950,31 +1876,8 @@ function CreateComponentDrawer({
             disabled={componentLibraryLoading}
           >
             <RefreshCw size={15} />
-            {componentLibraryLoading ? "刷新中…" : "刷新正式组件库"}
+            {componentLibraryLoading ? "刷新中…" : "刷新组件库"}
           </button>
-          <div
-            className={`component-clawpkg-dropzone ${clawpkgDragOver ? "is-dragover" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setClawpkgDragOver(true); }}
-            onDragLeave={() => setClawpkgDragOver(false)}
-            onDrop={handleClawpkgDrop}
-          >
-            <Clipboard size={20} />
-            <span>{clawpkgImporting ? "正在校验并发布…" : "拖拽 .clawpkg 目录 / zip 到这里"}</span>
-          </div>
-          <button
-            type="button"
-            className="btn-secondary component-clawpkg-pick-button component-clawpkg-fallback-button"
-            onClick={handleClawpkgFilePick}
-            disabled={clawpkgImporting}
-          >
-            <Clipboard size={15} />
-            选择并导入正式组件库
-          </button>
-          {clawpkgImportResult && (
-            <p className="component-tool-result__inline">
-              已发布: <strong>{clawpkgImportResult.manifest.name}</strong>，请在预览页核对按钮配置
-            </p>
-          )}
         </article>
       </aside>
     </div>
