@@ -2,7 +2,7 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
-visual-preset parity, including the built-in five-second tap round.
+visual-preset parity, including the built-in two-key catch game.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
 Also locks completed conversation visibility to 60 seconds before returning idle.
@@ -429,7 +429,7 @@ def test_builtin_tool_widgets_use_three_keys_and_fit_p4_limits():
         ],
     }
     kinds = {
-        "falling-catch": "game",
+        "two-key-pong": "game",
         "flappy-bird": "game",
         "block-combo": "game",
         "snake-turn": "game",
@@ -698,9 +698,9 @@ def test_generic_scene_runtime_is_shared_by_games_and_tools():
     game = read_required("main/pet_p4_game.c")
     header = read_required("main/pet_p4_game.h")
     protocol = read_required("main/pet_p4_protocol.c")
-    catch = json.loads(
+    two_key_pong = json.loads(
         read_workspace(
-            "ref/builtin-clawpkgs/falling-catch/runtime/widget.json"
+            "ref/builtin-clawpkgs/two-key-pong/runtime/widget.json"
         )
     )
     tomato = json.loads(
@@ -709,9 +709,9 @@ def test_generic_scene_runtime_is_shared_by_games_and_tools():
         )
     )
 
-    assert catch["engine"] == "p4-bounded-runtime-v3"
-    assert catch["scene"]["grid"] == {"width": 12, "height": 8}
-    assert catch.get("game") is None
+    assert two_key_pong["engine"] == "p4-bounded-runtime-v3"
+    assert two_key_pong["scene"]["grid"] == {"width": 16, "height": 16}
+    assert two_key_pong.get("game") is None
     assert tomato["engine"] == "p4-bounded-runtime-v3"
     assert tomato.get("scene") is None
     assert '"engine", "scene"' in miniapp

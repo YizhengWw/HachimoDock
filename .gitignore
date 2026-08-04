@@ -47,7 +47,6 @@ ref/tmp/
 artifacts/
 .pytest_tmp/
 **/__pycache__/
-esp-p4-runtime/main/pet_p4_build_info.h
 findings.md
 progress.md
 task_plan.md

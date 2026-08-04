@@ -3,7 +3,7 @@
  * [Output] Static Node regression coverage for top-level shell routing including a mounted-while-bound dashboard service lifecycle, centralized API configuration, Tauri-first setup routing, component center routing, flattened
  *          desktop HTTP bridge calls, fixed-height desktop sidebar, unified pet album naming, USB-only single desktop-pet assignment,
  *          dashboard guide entry, faster previews, shared-provider wizard help affordances, target-specific install-relative Tauri resources,
- *          stable local macOS Accessibility signing, relocatable bundled runtime enforcement, source-matched P4 ready-cache reuse, binding-scoped appearance detail, Tauri local-media playback, and the narrowly scoped IMG.LY model-download CSP needed by avatar background removal.
+ *          stable and config-versioned local macOS Accessibility packaging, relocatable bundled runtime enforcement, source-matched P4 ready-cache reuse, binding-scoped appearance detail, Tauri local-media playback, and the narrowly scoped IMG.LY model-download CSP needed by avatar background removal.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -117,6 +117,8 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   const macosConfig = JSON.parse(readSource("src-tauri/tauri.macos.conf.json"));
   const windowsConfig = JSON.parse(readSource("src-tauri/tauri.windows.conf.json"));
   const packageJson = JSON.parse(readSource("package.json"));
+  const packageLock = JSON.parse(readSource("package-lock.json"));
+  const cargoManifest = readSource("src-tauri/Cargo.toml");
   const prepareScript = readSource("../scripts/prepare-desktop-resources.mjs");
   const p4ReadyScript = readSource("../scripts/prepare-p4-ready-assets.mjs");
   const localMacSigner = readSource("../scripts/sign-macos-local-app.mjs");
@@ -125,6 +127,11 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   const tauri = readSource("src-tauri/src/lib.rs");
   const ffmpeg = readSource("src-tauri/src/codex_import.rs");
   const resources = config.bundle.resources;
+
+  assert.equal(config.version, packageJson.version);
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[""].version, packageJson.version);
+  assert.match(cargoManifest, new RegExp(`^version = "${packageJson.version.replaceAll(".", "\\.")}"$`, "m"));
 
   assertResource(resources, "../dist/terrier-clips", "terrier-clips");
   assertResource(resources, "../builtin-clawpkgs", "builtin-clawpkgs");
@@ -185,7 +192,10 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assert.match(localMacSigner, /--verify/);
   assert.match(localMacSigner, /stable local designated requirement is missing/);
   assert.match(localMacDmgBundler, /verifyStableApp\(appPath\)/);
-  assert.match(localMacDmgBundler, /verifyStableApp\(join\(mountRoot, "Pet Manager\.app"\)\)/);
+  assert.match(localMacDmgBundler, /readFileSync\(tauriConfigPath, "utf8"\)/);
+  assert.match(localMacDmgBundler, /\$\{productName\}_\$\{appVersion\}_\$\{dmgArchitecture\}\.dmg/);
+  assert.match(localMacDmgBundler, /verifyStableApp\(join\(mountRoot, appBundleName\)\)/);
+  assert.doesNotMatch(localMacDmgBundler, /Pet Manager_0\.1\.0/);
   assert.match(localMacDmgBundler, /hdiutil/);
   assert.match(localMacDmgBundler, /--skip-jenkins/);
   assertResource(

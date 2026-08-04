@@ -1,6 +1,6 @@
 /**
- * [Input] A Tauri-generated macOS app/DMG helper plus a stable-local-signed Pet Manager.app.
- * [Output] A replacement local DMG built from that exact app and verified again after read-only mounting.
+ * [Input] Tauri product/version configuration, the native macOS architecture, a generated DMG helper, and a stable-local-signed app.
+ * [Output] A config-versioned replacement local DMG built from that exact app and verified again after read-only mounting.
  * [Pos] Local macOS packaging helper that prevents Tauri's bundle step from replacing the stable TCC signature.
  * [Sync] If this file changes, update `scripts/.folder.md`.
  */
@@ -9,6 +9,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,6 +24,23 @@ if (process.platform !== "darwin") {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "..");
+const tauriConfigPath = resolve(repositoryRoot, "ref", "src-tauri", "tauri.conf.json");
+const tauriConfig = JSON.parse(readFileSync(tauriConfigPath, "utf8"));
+const productName = String(tauriConfig.productName || "").trim();
+const appVersion = String(tauriConfig.version || "").trim();
+const dmgArchitecture = process.arch === "arm64"
+  ? "aarch64"
+  : process.arch === "x64"
+    ? "x64"
+    : "";
+if (!productName || !/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(appVersion)) {
+  console.error(`invalid Tauri product/version configuration: ${tauriConfigPath}`);
+  process.exit(1);
+}
+if (!dmgArchitecture) {
+  console.error(`unsupported macOS packaging architecture: ${process.arch}`);
+  process.exit(1);
+}
 const bundleRoot = resolve(
   repositoryRoot,
   "ref",
@@ -31,9 +49,10 @@ const bundleRoot = resolve(
   "release",
   "bundle",
 );
-const appPath = join(bundleRoot, "macos", "Pet Manager.app");
+const appBundleName = `${productName}.app`;
+const appPath = join(bundleRoot, "macos", appBundleName);
 const dmgDirectory = join(bundleRoot, "dmg");
-const dmgPath = join(dmgDirectory, "Pet Manager_0.1.0_aarch64.dmg");
+const dmgPath = join(dmgDirectory, `${productName}_${appVersion}_${dmgArchitecture}.dmg`);
 const dmgHelper = join(dmgDirectory, "bundle_dmg.sh");
 const signer = join(scriptDir, "sign-macos-local-app.mjs");
 
@@ -72,18 +91,18 @@ try {
     dmgHelper,
     [
       "--volname",
-      "Pet Manager",
+      productName,
       "--window-size",
       "500",
       "350",
       "--icon-size",
       "128",
       "--icon",
-      "Pet Manager.app",
+      appBundleName,
       "150",
       "170",
       "--hide-extension",
-      "Pet Manager.app",
+      appBundleName,
       "--app-drop-link",
       "350",
       "170",
@@ -101,7 +120,7 @@ try {
     "mounting final local DMG",
   );
   mounted = true;
-  verifyStableApp(join(mountRoot, "Pet Manager.app"));
+  verifyStableApp(join(mountRoot, appBundleName));
 } finally {
   if (mounted) {
     spawnSync("/usr/bin/hdiutil", ["detach", mountRoot], { stdio: "inherit" });

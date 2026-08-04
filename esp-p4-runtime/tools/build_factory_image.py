@@ -275,6 +275,18 @@ def resolve_spiffsgen(explicit: str | None) -> Path:
         candidates.append(Path(configured).expanduser())
     if str(idf_path):
         candidates.append(idf_path / "components" / "spiffs" / "spiffsgen.py")
+    for variable in ("PLATFORMIO_CORE_DIR", "HACHIMO_PLATFORMIO_CORE_DIR"):
+        configured_core = os.environ.get(variable, "").strip()
+        if not configured_core:
+            continue
+        candidates.append(
+            Path(configured_core).expanduser()
+            / "packages"
+            / "framework-espidf"
+            / "components"
+            / "spiffs"
+            / "spiffsgen.py"
+        )
     candidates.append(
         home
         / ".platformio"

@@ -303,6 +303,15 @@ npm test
 npm run build
 ```
 
+Windows 设备端使用统一的 UTF-8/短路径工具入口完成检查、构建和明确确认的出厂恢复：
+
+```powershell
+cd esp-p4-runtime
+.\tools\p4.ps1 build
+.\tools\p4.ps1 flash -Port COM5
+.\tools\p4.ps1 factory-flash -Port COM5 -FactoryReset
+```
+
 设备端应完成 ESP-IDF 构建测试、协议测试，并在真实 ESP32-P4 上验证启动、动画、Session 气泡、全部实体输入、语音、形象同步和 PetUI 组件。完整发布镜像还应执行一次整片擦除后的冷启动验证。
 
 ## 致谢 / Acknowledgements

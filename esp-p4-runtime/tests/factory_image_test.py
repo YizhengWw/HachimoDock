@@ -267,3 +267,23 @@ def test_factory_esptool_prefers_the_active_platformio_core(tmp_path, monkeypatc
     monkeypatch.setenv("PLATFORMIO_CORE_DIR", str(core))
 
     assert factory.resolve_esptool(None) == esptool
+
+
+def test_factory_spiffsgen_prefers_the_active_platformio_core(tmp_path, monkeypatch):
+    core = tmp_path / "pio-core"
+    spiffsgen = (
+        core
+        / "packages"
+        / "framework-espidf"
+        / "components"
+        / "spiffs"
+        / "spiffsgen.py"
+    )
+    spiffsgen.parent.mkdir(parents=True)
+    spiffsgen.write_text("# factory fixture\n", encoding="utf-8")
+    monkeypatch.delenv("SPIFFSGEN", raising=False)
+    monkeypatch.delenv("IDF_PATH", raising=False)
+    monkeypatch.delenv("HACHIMO_PLATFORMIO_CORE_DIR", raising=False)
+    monkeypatch.setenv("PLATFORMIO_CORE_DIR", str(core))
+
+    assert factory.resolve_spiffsgen(None) == spiffsgen

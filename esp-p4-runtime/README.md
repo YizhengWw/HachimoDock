@@ -144,7 +144,8 @@ cd esp-p4-runtime
 `doctor` refuses non-ASCII repository, Python, PlatformIO, or temporary paths
 before CMake can generate a corrupted GCC response file. `build` runs the P4
 protocol contract suite before compiling. On macOS/Linux, use the underlying
-PlatformIO command directly:
+PlatformIO command directly. Factory tooling follows the active
+`PLATFORMIO_CORE_DIR` when resolving both ESP-IDF `spiffsgen.py` and esptool:
 
 ```sh
 cd esp-p4-runtime
@@ -181,10 +182,11 @@ cd esp-p4-runtime
 .\tools\p4.ps1 factory-flash -Port COM5 -FactoryReset
 ```
 
-The preloaded component catalog contains Flappy Bird, Blocks, Snake, the
-five-second tap game, Tomato Clock, Drink Reminder, and Token Usage. The
-firmware starts on the normal pet page; Flappy Bird is the initial component
-selected inside Component Center.
+The preloaded component catalog contains Two-key Pong first, followed by Flappy
+Bird, Blocks, Snake, Tomato Clock, Drink Reminder, and Token Usage. The removed
+Falling Catch package is not provisioned. The firmware starts on the normal pet
+page; Flappy Bird remains the initial component selected inside Component
+Center.
 
 `factory_upload` is intentionally destructive: because the merged image starts
 at `0x0`, it resets NVS, the inactive OTA slot, previous components, and both
