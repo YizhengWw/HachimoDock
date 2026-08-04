@@ -8,6 +8,7 @@ on:
     paths:
       - "ref/**"
       - "scripts/prepare-desktop-resources.mjs"
+      - "scripts/prepare-p4-ready-assets.mjs"
       - "skills/petui/**"
       - ".github/workflows/pet-manager-desktop-build.yml"
 
@@ -23,6 +24,8 @@ jobs:
         working-directory: ref
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -46,6 +49,8 @@ jobs:
         working-directory: ref
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
