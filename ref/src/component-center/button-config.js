@@ -1,6 +1,6 @@
 /**
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
- * [Output] Shared screen/SW1-SW3/encoder option catalog, label resolution,
+ * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
  *          button-config model versioning, and compatibility-only complete-map
  *          and snapshot helpers. Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
@@ -33,39 +33,53 @@ export const COMPONENT_CONTROL_OPTIONS = [
     };
   }),
   {
-    label: "旋钮短按",
-    shortLabel: "旋钮按下",
-    control: "前方旋钮",
+    label: "摇杆中按短按",
+    shortLabel: "中按",
+    control: "前方摇杆",
     event: "button.encoder.short_press",
-    help: "短按前方旋钮后触发这个组件动作。",
+    help: "短按摇杆中键后触发这个组件动作；旧旋钮组件包继续兼容。",
   },
   {
-    label: "旋钮长按",
-    shortLabel: "旋钮长按",
-    control: "前方旋钮",
+    label: "摇杆中按长按",
+    shortLabel: "中按长按",
+    control: "前方摇杆",
     event: "button.encoder.long_press",
-    help: "长按前方旋钮后触发这个组件动作。",
+    help: "长按摇杆中键后触发这个组件动作；旧旋钮组件包继续兼容。",
   },
   {
-    label: "旋钮顺时针",
-    shortLabel: "右旋",
-    control: "前方旋钮",
+    label: "摇杆向上",
+    shortLabel: "向上",
+    control: "前方摇杆",
+    event: "joystick.up",
+    help: "向上推动摇杆后触发这个组件动作。",
+  },
+  {
+    label: "摇杆向下",
+    shortLabel: "向下",
+    control: "前方摇杆",
+    event: "joystick.down",
+    help: "向下推动摇杆后触发这个组件动作。",
+  },
+  {
+    label: "摇杆向右",
+    shortLabel: "向右",
+    control: "前方摇杆",
     event: "knob.rotate_cw",
-    help: "顺时针旋转前方旋钮后触发这个组件动作。",
+    help: "向右推动摇杆后触发这个组件动作；旧包中的顺时针事件继续兼容。",
   },
   {
-    label: "旋钮逆时针",
-    shortLabel: "左旋",
-    control: "前方旋钮",
+    label: "摇杆向左",
+    shortLabel: "向左",
+    control: "前方摇杆",
     event: "knob.rotate_ccw",
-    help: "逆时针旋转前方旋钮后触发这个组件动作。",
+    help: "向左推动摇杆后触发这个组件动作；旧包中的逆时针事件继续兼容。",
   },
   {
-    label: "旋钮双向旋转",
-    shortLabel: "旋转",
-    control: "前方旋钮",
+    label: "摇杆左右方向",
+    shortLabel: "左右",
+    control: "前方摇杆",
     event: "knob.rotate_cw / knob.rotate_ccw",
-    help: "向任意方向旋转前方旋钮都触发同一个组件动作。",
+    help: "向左或向右推动摇杆都触发同一个组件动作；旧旋钮包继续兼容。",
   },
 ];
 
@@ -77,10 +91,12 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
   "button.encoder.long_press",
   "knob.rotate_cw",
   "knob.rotate_ccw",
+  "joystick.up",
+  "joystick.down",
 ];
 
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
-export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 4;
+export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 5;
 export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
 
 const P4_COMPONENT_DOWNLINK_EVENTS = [
@@ -98,6 +114,8 @@ const P4_COMPONENT_DOWNLINK_EVENTS = [
   "button.encoder.hold",
   "knob.rotate_cw",
   "knob.rotate_ccw",
+  "joystick.up",
+  "joystick.down",
 ];
 
 const P4_COMPONENT_EVENT_ROW_IDS = {
@@ -108,6 +126,8 @@ const P4_COMPONENT_EVENT_ROW_IDS = {
   "button.encoder.long_press": "p4_encoder_long",
   "knob.rotate_cw": "p4_encoder_cw",
   "knob.rotate_ccw": "p4_encoder_ccw",
+  "joystick.up": "p4_joystick_up",
+  "joystick.down": "p4_joystick_down",
 };
 
 export function defaultControlLabelForBinding(binding = {}) {

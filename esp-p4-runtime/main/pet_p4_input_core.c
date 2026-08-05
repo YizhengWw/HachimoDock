@@ -1,3 +1,13 @@
+/*
+ * [Input] Debounced button levels, rotary quadrature states, and calibrated
+ *         two-axis joystick ADC samples.
+ * [Output] Heap-free logical button, legacy rotary, and four-direction
+ *          joystick events with hysteresis and held-direction repeat.
+ * [Pos] Platform-independent physical-input decoder core.
+ * [Sync] If this file changes, update `pet_p4_input_core.h`, host tests, and
+ *        `esp-p4-runtime/.folder.md`.
+ */
+
 #include "pet_p4_input_core.h"
 
 #include <stdlib.h>
@@ -136,4 +146,94 @@ pet_p4_rotary_direction_t pet_p4_rotary_decoder_update(
     return PET_P4_ROTARY_COUNTER_CLOCKWISE;
   }
   return PET_P4_ROTARY_NONE;
+}
+
+static pet_p4_joystick_direction_t joystick_direction_for_sample(
+  const pet_p4_joystick_decoder_t *decoder,
+  int x,
+  int y,
+  int threshold
+) {
+  const int dx = x - decoder->center_x;
+  const int dy = y - decoder->center_y;
+  const int abs_x = abs(dx);
+  const int abs_y = abs(dy);
+  if (abs_x < threshold && abs_y < threshold) return PET_P4_JOYSTICK_CENTER;
+  if (abs_x >= abs_y) {
+    return dx < 0 ? PET_P4_JOYSTICK_LEFT : PET_P4_JOYSTICK_RIGHT;
+  }
+  // The board's joystick is mounted with the positive Y rail facing upward.
+  return dy < 0 ? PET_P4_JOYSTICK_DOWN : PET_P4_JOYSTICK_UP;
+}
+
+void pet_p4_joystick_decoder_init(
+  pet_p4_joystick_decoder_t *decoder,
+  int center_x,
+  int center_y,
+  int activation_delta,
+  int release_delta,
+  uint32_t repeat_delay_ms,
+  uint32_t repeat_interval_ms
+) {
+  if (!decoder) return;
+  memset(decoder, 0, sizeof(*decoder));
+  decoder->center_x = center_x;
+  decoder->center_y = center_y;
+  decoder->activation_delta = activation_delta > 0 ? activation_delta : 900;
+  decoder->release_delta = release_delta > 0 ? release_delta : 500;
+  if (decoder->release_delta >= decoder->activation_delta) {
+    decoder->release_delta = decoder->activation_delta / 2;
+  }
+  decoder->repeat_delay_ms = repeat_delay_ms > 0 ? repeat_delay_ms : 350;
+  decoder->repeat_interval_ms = repeat_interval_ms > 0 ? repeat_interval_ms : 140;
+  decoder->direction = PET_P4_JOYSTICK_CENTER;
+}
+
+pet_p4_joystick_direction_t pet_p4_joystick_decoder_update(
+  pet_p4_joystick_decoder_t *decoder,
+  int x,
+  int y,
+  uint32_t elapsed_ms
+) {
+  pet_p4_joystick_direction_t candidate;
+  if (!decoder || elapsed_ms == 0) return PET_P4_JOYSTICK_CENTER;
+
+  if (decoder->direction == PET_P4_JOYSTICK_CENTER) {
+    candidate = joystick_direction_for_sample(decoder, x, y, decoder->activation_delta);
+    if (candidate == PET_P4_JOYSTICK_CENTER) return PET_P4_JOYSTICK_CENTER;
+    decoder->direction = candidate;
+    decoder->held_ms = 0;
+    decoder->next_repeat_ms = decoder->repeat_delay_ms;
+    return candidate;
+  }
+
+  candidate = joystick_direction_for_sample(decoder, x, y, decoder->release_delta);
+  if (candidate == PET_P4_JOYSTICK_CENTER) {
+    decoder->direction = PET_P4_JOYSTICK_CENTER;
+    decoder->held_ms = 0;
+    decoder->next_repeat_ms = 0;
+    return PET_P4_JOYSTICK_CENTER;
+  }
+  if (candidate != decoder->direction) {
+    const pet_p4_joystick_direction_t activated = joystick_direction_for_sample(
+      decoder,
+      x,
+      y,
+      decoder->activation_delta
+    );
+    if (activated != PET_P4_JOYSTICK_CENTER && activated != decoder->direction) {
+      decoder->direction = activated;
+      decoder->held_ms = 0;
+      decoder->next_repeat_ms = decoder->repeat_delay_ms;
+      return activated;
+    }
+  }
+
+  decoder->held_ms = saturating_add_u32(decoder->held_ms, elapsed_ms);
+  if (decoder->held_ms < decoder->next_repeat_ms) return PET_P4_JOYSTICK_CENTER;
+  decoder->next_repeat_ms = saturating_add_u32(
+    decoder->next_repeat_ms,
+    decoder->repeat_interval_ms
+  );
+  return decoder->direction;
 }

@@ -12102,6 +12102,11 @@ select:focus-visible {
   fill: #fff9f3;
 }
 
+.board-button-control-glyph.is-joystick .board-button-control-glyph__arrow {
+  stroke: #81796c;
+  stroke-width: 2.2;
+}
+
 .board-button-control-glyph.is-active .board-button-control-glyph__key,
 .board-button-control-glyph.is-active .board-button-control-glyph__encoder {
   stroke: var(--accent);

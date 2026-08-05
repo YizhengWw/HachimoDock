@@ -45,6 +45,8 @@ ALLOWED_EVENTS = {
     "button.encoder.long_press",
     "knob.rotate_cw",
     "knob.rotate_ccw",
+    "joystick.up",
+    "joystick.down",
     "screen.region.tap",
     "screen.region.long_press",
 }

@@ -73,6 +73,8 @@ const COMPONENT_BUTTON_EVENTS: &[&str] = &[
     "button.encoder.long_press",
     "knob.rotate_cw",
     "knob.rotate_ccw",
+    "joystick.up",
+    "joystick.down",
     /* Backward-compatible alias used by older packages. New packages should
     declare the two directions separately so each action stays editable. */
     "knob.rotate_cw / knob.rotate_ccw",
@@ -1931,6 +1933,26 @@ mod tests {
             .iter()
             .any(|error| error.contains("与已有绑定冲突")));
         assert!(result.errors.iter().any(|error| error.contains("未知事件")));
+    }
+
+    #[test]
+    fn accepts_four_direction_joystick_component_events() {
+        let mut files_owned = valid_files();
+        let buttons = br#"[
+          {"action":"game.up","control":"joystick","event":"joystick.up","label":"up"},
+          {"action":"game.down","control":"joystick","event":"joystick.down","label":"down"},
+          {"action":"game.left","control":"joystick","event":"knob.rotate_ccw","label":"left"},
+          {"action":"game.right","control":"joystick","event":"knob.rotate_cw","label":"right"}
+        ]"#;
+        files_owned.retain(|(name, _)| *name != "buttons.json");
+        files_owned.push(("buttons.json", buttons.to_vec()));
+        let files = files_owned
+            .iter()
+            .map(|(name, data)| (*name, data.as_slice()))
+            .collect::<Vec<_>>();
+
+        let result = validate_clawpkg_bytes(&make_zip(&files)).unwrap();
+        assert!(result.ok, "unexpected errors: {:?}", result.errors);
     }
 
     #[test]

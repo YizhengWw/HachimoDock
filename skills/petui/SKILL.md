@@ -76,7 +76,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - `game/tool` 路由符合用户目标。
 - 逐项对照生成前的机制清单；用户要求的每个核心行为都能在 runtime 中找到对应实现，且没有无来源的模板机制。
 - 默认画面无需操作也有明确含义，且与 runtime 初始 state/page/vars 一致。
-- 每个普通 action 同时存在于 `buttons.json` 和 runtime transition。SW3 短按由设备全局执行返回，不写入组件包；旋钮长按默认不绑定。历史包中的 `page_main` 只做兼容读取。
+- 每个普通 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。SW3 短按由设备全局执行返回，不写入组件包；摇杆中键长按默认不绑定。历史包中的 `page_main` 只做兼容读取。
 - 无触控设备不含触屏事件；需要移动/碰撞时只使用能力清单声明的通用 scene 原语。
 - 没有虚构数据、未声明的数据源或示例残留。
 - 校验和发布命令均成功，最终路径位于正式 `library`，而不是工作目录或 `.staging`。

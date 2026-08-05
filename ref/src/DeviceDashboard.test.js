@@ -246,7 +246,7 @@ test("front encoder rotation is fixed to volume adjustment in the device UI", ()
   assert.match(dashboard, /const action = row\.actionOptions\.includes\(normalizedButtonActions\[row\.id\]\)/);
 });
 
-test("ESP32-P4 exposes short and long press for every button plus encoder rotation", () => {
+test("ESP32-P4 exposes button presses plus all four joystick directions", () => {
   const dashboard = readSource("DeviceDashboard.jsx");
   const panel = readSource("dashboard/BoardButtonPanel.jsx");
   const rows = dashboard.match(/export const P4_BUTTON_CONTROL_ROWS = \[([\s\S]*?)\];/);
@@ -266,6 +266,8 @@ test("ESP32-P4 exposes short and long press for every button plus encoder rotati
   assert.match(dashboard, /p4_encoder_long:\s*"disabled"/);
   assert.match(dashboard, /p4_encoder_cw:\s*"session_next"/);
   assert.match(dashboard, /p4_encoder_ccw:\s*"session_previous"/);
+  assert.match(dashboard, /p4_joystick_up:\s*"disabled"/);
+  assert.match(dashboard, /p4_joystick_down:\s*"disabled"/);
   assert.match(dashboard, /event:\s*"button\.sw1\.short_press"/);
   assert.match(dashboard, /event:\s*"button\.sw1\.long_press"/);
   assert.match(dashboard, /holdEvent:\s*"button\.sw1\.hold"/);
@@ -280,6 +282,8 @@ test("ESP32-P4 exposes short and long press for every button plus encoder rotati
   assert.match(dashboard, /holdEvent:\s*"button\.encoder\.hold"/);
   assert.match(dashboard, /event:\s*"knob\.rotate_cw"/);
   assert.match(dashboard, /event:\s*"knob\.rotate_ccw"/);
+  assert.match(dashboard, /event:\s*"joystick\.up"/);
+  assert.match(dashboard, /event:\s*"joystick\.down"/);
   assert.match(visibleOptions[1], /id: "agent_prompt", label: "发送自定义指令"[\s\S]*id: "voice_ptt", label: "语音输入"/);
   assert.match(visibleOptions[1], /id: "session_previous", label: "上一个"/);
   assert.match(visibleOptions[1], /id: "session_next", label: "下一个"/);
@@ -294,6 +298,7 @@ test("ESP32-P4 exposes short and long press for every button plus encoder rotati
   assert.match(dashboard, /LEGACY_P4_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V2_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V3_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /P4_V4_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /action === "agent_prompt" \|\| action === "miniapp_action"/);
   assert.match(dashboard, /buttonLabels/);
   assert.doesNotMatch(dashboard, /label: "返回首页"/);
@@ -793,7 +798,7 @@ test("channel switching is exact-board USB-only with no Bridge MQTT fallback", (
 
 // ---- PORTED: JS-side in orchestrator; panel-side in BoardButtonPanel; Rust stays ----
 
-test("board button config sends ten visible gestures as fourteen internal bindings", () => {
+test("board button config sends twelve visible gestures as sixteen internal bindings", () => {
   const source = readSource("DeviceDashboard.jsx");
   const rust = readRepoFile("src-tauri", "src", "lib.rs");
 
@@ -833,7 +838,7 @@ test("board button config sends ten visible gestures as fourteen internal bindin
 
   const panelSource = readSource("dashboard/BoardButtonPanel.jsx");
   assert.match(panelSource, /个手势/);
-  assert.match(panelSource, /10 GESTURES/);
+  assert.match(panelSource, /12 GESTURES/);
   assert.match(panelSource, /已同步/);
   assert.match(panelSource, /同步到设备/);
 

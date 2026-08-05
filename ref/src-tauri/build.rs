@@ -1,3 +1,10 @@
+/*
+ * [Input] Cargo/Tauri environment, optional internal bundle secrets, and Git state.
+ * [Output] Compile-time desktop build identity with the cross-end protocol schema.
+ * [Pos] Tauri build-script boundary for release metadata and bundled resources.
+ * [Sync] If the protocol schema changes, update the P4 CMake contract and tests.
+ */
+
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -10,7 +17,7 @@ const BUNDLE_SECRET_KEYS: [&str; 3] = [
     "PET_MANAGER_BUNDLED_MQTT_USERNAME",
     "PET_MANAGER_BUNDLED_MQTT_PASSWORD",
 ];
-const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 4;
+const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 5;
 
 fn git_output(repo_root: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("git")

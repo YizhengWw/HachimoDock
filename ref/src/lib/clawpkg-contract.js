@@ -1,7 +1,7 @@
 /**
  * [Input] 设备端 fb_speech_overlay.c 的 STATS_DASHBOARD_V1 版式与 br_stats_dashboard_model 字节上限。
  * [Output] .clawpkg 包结构常量、game/tool 类型、可选 COMPONENT_DASHBOARD_V1 内容与视觉槽位、
- *          每组件按钮数量/事件/标签尺寸、P4 vars 对象与单条规则 effect 约束，以及清单校验函数。
+ *          每组件按钮数量/事件/标签尺寸（含四向摇杆和旧旋钮别名）、P4 vars 对象与单条规则 effect 约束，以及清单校验函数。
  * [Pos] lib node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -82,6 +82,8 @@ export const COMPONENT_BUTTON_EVENTS = [
   "button.encoder.long_press",
   "knob.rotate_cw",
   "knob.rotate_ccw",
+  "joystick.up",
+  "joystick.down",
   "knob.rotate_cw / knob.rotate_ccw",
 ];
 

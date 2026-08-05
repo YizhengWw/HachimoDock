@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-set(PROJECT_VER "0.7.25-p4")
-set(PET_P4_PROTOCOL_SCHEMA 4)
+set(PROJECT_VER "0.7.26-p4")
+set(PET_P4_PROTOCOL_SCHEMA 5)
 set(PET_P4_GIT_SHA "unknown")
 set(PET_P4_BUILD_DIRTY 0)
 find_program(PET_P4_GIT_EXECUTABLE git)

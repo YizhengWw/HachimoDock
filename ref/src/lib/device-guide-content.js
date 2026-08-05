@@ -2,11 +2,11 @@
  * [Input] Static device-control guide content for the first-launch + re-openable
  *         modal in DeviceDashboard.
  * [Output] Card data + storage key + canonical labels used by DeviceGuideModal,
- *          including compact screen/physical-control labels, all ten P4
+ *          including compact screen/physical-control labels, all twelve P4
  *          gestures, and install-time widget button functions.
  * [Pos] lib helper for ref/src/DeviceGuideModal.jsx
- * [Sync] If buttons map on the device (board_rotary_input.c / board_touch_input.c)
- *        changes meaning, update CARDS here. No hardcoded copy in the JSX.
+ * [Sync] If `esp-p4-runtime/main/pet_p4_input.c` or legacy device input maps
+ *        change meaning, update CARDS here. No hardcoded copy in the JSX.
  */
 
 import {
@@ -23,7 +23,7 @@ export const DEVICE_GUIDE_SEEN_KEY = onboardingStorageKey(ONBOARDING_PAGE_IDS.DE
 export const CONTROLS = {
   encoder: { emoji: "旋", shortLabel: "旋钮", name: "屏幕前编码旋钮" },
   touch: { emoji: "屏", shortLabel: "屏幕", name: "触摸屏" },
-  p4Encoder: { emoji: "旋", shortLabel: "旋钮", name: "ESP32-P4 旋钮" },
+  p4Joystick: { emoji: "杆", shortLabel: "摇杆", name: "ESP32-P4 四向摇杆" },
   sw1: { emoji: "1", shortLabel: "SW1", name: "SW1" },
   sw2: { emoji: "2", shortLabel: "SW2", name: "SW2" },
   sw3: { emoji: "3", shortLabel: "SW3", name: "SW3" },
@@ -105,23 +105,26 @@ export const CARDS = [
 export const P4_CARDS = [
   {
     id: "screen-switch",
-    title: "用旋钮完成板端导航",
-    shortTitle: "旋钮导航",
-    headline: "转动选择，短按进入；旋钮长按默认不绑定。",
+    title: "用四向摇杆完成板端导航",
+    shortTitle: "摇杆导航",
+    headline: "左右切换，中按进入；上下方向可独立配置。",
     screenIds: ["main", "components"],
-    canonicalControl: "p4Encoder",
-    canonicalActionText: "默认短按确认，左右旋选择上一个或下一个会话；返回（取消）由 SW3 短按完成。",
+    canonicalControl: "p4Joystick",
+    canonicalActionText: "默认中按确认，向左或向右选择上一个或下一个会话；返回（取消）由 SW3 短按完成。",
     otherWays: [
-      { control: "p4Encoder", text: "右旋默认：下一个" },
-      { control: "p4Encoder", text: "左旋默认：上一个" },
-      { control: "p4Encoder", text: "短按默认：确认" },
-      { control: "p4Encoder", text: "长按默认：暂不绑定" },
+      { control: "p4Joystick", text: "向右默认：下一个" },
+      { control: "p4Joystick", text: "向左默认：上一个" },
+      { control: "p4Joystick", text: "向上 / 向下默认：暂不绑定，可单独配置" },
+      { control: "p4Joystick", text: "中按短按默认：确认" },
+      { control: "p4Joystick", text: "中按长按默认：暂不绑定" },
     ],
     gestures: [
-      { gesture: "左旋", action: "上一个" },
-      { gesture: "右旋", action: "下一个" },
-      { gesture: "短按", action: "确认 / 进入" },
-      { gesture: "长按", action: "暂不绑定" },
+      { gesture: "向上", action: "可独立配置" },
+      { gesture: "向下", action: "可独立配置" },
+      { gesture: "向左", action: "上一个" },
+      { gesture: "向右", action: "下一个" },
+      { gesture: "中按短按", action: "确认 / 进入" },
+      { gesture: "中按长按", action: "暂不绑定" },
     ],
     supportingText: "这些默认动作可以在 PC 端独立调整；SW3 短按默认承担清晰的返回路径。",
   },
@@ -156,7 +159,7 @@ export const P4_CARDS = [
   },
   {
     id: "widget-takeover",
-    title: "把 10 个手势调成你的习惯",
+    title: "把 12 个手势调成你的习惯",
     shortTitle: "个性配置",
     headline: "设备导航与组件动作分层保存，修改一个组件不会打乱全局操作。",
     example: {
@@ -165,12 +168,12 @@ export const P4_CARDS = [
         { control: "sw1", gesture: "长按", action: "语音输入" },
         { control: "sw2", gesture: "短按", action: "打开组件中心" },
         { control: "sw3", gesture: "短按", action: "返回 / 取消" },
-        { control: "p4Encoder", gesture: "短按", action: "确认 / 进入" },
-        { control: "p4Encoder", gesture: "左旋 / 右旋", action: "上一个 / 下一个" },
+        { control: "p4Joystick", gesture: "中按短按", action: "确认 / 进入" },
+        { control: "p4Joystick", gesture: "向左 / 向右", action: "上一个 / 下一个" },
       ],
     },
     footnotes: [
-      "SW1/SW2/SW3 的短按和长按，加上旋钮的四种手势，共 10 个独立入口。",
+      "SW1/SW2/SW3 的短按和长按，加上摇杆的六种手势，共 12 个独立入口。",
       "组件按键只在该组件打开时生效，不覆盖设备页面的默认导航。",
     ],
   },

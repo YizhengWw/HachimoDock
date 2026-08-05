@@ -98,7 +98,7 @@ export default function DeviceDiagnosticsModal({
     setNotice("");
     try {
       const result = await invoke("usb_reset_input_config", { expectedBoardDeviceId });
-      setNotice(result?.message || "按键和旋钮已恢复默认映射，形象素材未改动。");
+      setNotice(result?.message || "按键和摇杆已恢复默认映射，形象素材未改动。");
       setConfirmAction("");
       await onInputConfigReset?.();
       await loadDiagnostics();

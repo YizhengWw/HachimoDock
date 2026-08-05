@@ -5081,6 +5081,14 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
         "SW1 短按" => ("SW1", "button.sw1.short_press"),
         "SW2 短按" => ("SW2", "button.sw2.short_press"),
         "SW3 短按" => ("SW3", "button.sw3.short_press"),
+        "摇杆中按短按" => ("前方摇杆", "button.encoder.short_press"),
+        "摇杆中按长按" => ("前方摇杆", "button.encoder.long_press"),
+        "摇杆向上" => ("前方摇杆", "joystick.up"),
+        "摇杆向下" => ("前方摇杆", "joystick.down"),
+        "摇杆向左" => ("前方摇杆", "knob.rotate_ccw"),
+        "摇杆向右" => ("前方摇杆", "knob.rotate_cw"),
+        "摇杆左右方向" => ("前方摇杆", "knob.rotate_cw / knob.rotate_ccw"),
+        // Backward-compatible labels and event names from encoder hardware.
         "旋钮短按" => ("前方旋钮", "button.encoder.short_press"),
         "旋钮长按" => ("前方旋钮", "button.encoder.long_press"),
         "旋钮顺时针" => ("前方旋钮", "knob.rotate_cw"),
@@ -5119,6 +5127,10 @@ mod tests {
         assert_eq!(
             canonical_binding_for_control("旋钮双向旋转"),
             Some(("前方旋钮", "knob.rotate_cw / knob.rotate_ccw"))
+        );
+        assert_eq!(
+            canonical_binding_for_control("摇杆向下"),
+            Some(("前方摇杆", "joystick.down"))
         );
     }
 

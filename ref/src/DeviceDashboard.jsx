@@ -1,8 +1,8 @@
 /**
  * [Input] Bound device, useDeviceContext for state, Tauri voice/USB events, API-settings navigation, and useToast for notices.
  * [Output] Priority-ordered four-region device dashboard with runtime-aware Linux/P4 control maps,
- *          ten exposed P4 button/encoder gestures (SW1-SW3 short/long plus
- *          encoder short/long/left/right), an internal hold transport for PTT,
+ *          twelve exposed P4 button/joystick gestures (SW1-SW3 short/long plus
+ *          joystick center short/long and four directions), an internal hold transport for PTT,
  *          shared voice enablement across button and assistant surfaces,
  *          configurable enter/back navigation,
  *          bounded Agent prompt/session-switch bindings, ACK-gated USB config,
@@ -104,13 +104,15 @@ export const DEFAULT_BUTTON_ACTIONS = {
   p4_encoder_long: "disabled",
   p4_encoder_cw: "session_next",
   p4_encoder_ccw: "session_previous",
+  p4_joystick_up: "disabled",
+  p4_joystick_down: "disabled",
 };
 
 export const P4_VOICE_BUTTON_OPTIONS = [
   { id: P4_DEFAULT_VOICE_TRIGGER, rowId: "p4_sw1_long", label: "SW1 长按", detail: "按住 SW1 开始录音，松开后提交。", event: "button.sw1.hold" },
   { id: "sw2.hold", rowId: "p4_sw2_long", label: "SW2 长按", detail: "按住 SW2 开始录音，松开后提交。", event: "button.sw2.hold" },
   { id: "sw3.hold", rowId: "p4_sw3_long", label: "SW3 长按", detail: "按住 SW3 开始录音，松开后提交。", event: "button.sw3.hold" },
-  { id: "encoder_button.hold", rowId: "p4_encoder_long", label: "旋钮长按", detail: "按住旋钮开始录音，松开后提交。", event: "button.encoder.hold" },
+  { id: "encoder_button.hold", rowId: "p4_encoder_long", label: "摇杆中按长按", detail: "按住摇杆中键开始录音，松开后提交。", event: "button.encoder.hold" },
 ];
 export const VOICE_BUTTON_OPTIONS = P4_VOICE_BUTTON_OPTIONS;
 
@@ -120,7 +122,7 @@ export const BUTTON_FUNCTION_OPTIONS = [
   { id: "session_previous", label: "上一个", detail: "切换到当前 Agent 的上一个可用会话，并让状态和语音输入跟随它。" },
   { id: "session_next", label: "下一个", detail: "切换到当前 Agent 的下一个可用会话，并让状态和语音输入跟随它。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },
-  { id: "component_center", label: "组件中心", detail: "进入板端组件目录，用旋钮选择并打开已安装组件。" },
+  { id: "component_center", label: "组件中心", detail: "进入板端组件目录，用摇杆选择并打开已安装组件。" },
   { id: "page_enter", label: "确认", detail: "从桌宠首页进入当前组件；组件已打开时优先执行组件自己的按键映射。" },
   { id: "page_back", label: "返回（取消）", detail: "取消当前选择，或从当前组件返回上一级。" },
   { id: "disabled", label: "不绑定", detail: "下发 disabled，让新版板端忽略该输入；不会继续触发系统切页或负一屏操作。" },
@@ -164,10 +166,12 @@ export const P4_BUTTON_CONTROL_ROWS = [
   { id: "p4_sw2_long", controlId: "p4_sw2", label: "SW2 长按", event: "button.sw2.long_press", holdEvent: "button.sw2.hold", voiceTriggerId: "sw2.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_sw3_short", controlId: "p4_sw3", label: "SW3 短按", event: "button.sw3.short_press", defaultAction: "page_back", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw3_long", controlId: "p4_sw3", label: "SW3 长按", event: "button.sw3.long_press", holdEvent: "button.sw3.hold", voiceTriggerId: "sw3.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
-  { id: "p4_encoder_press", controlId: "p4_encoder", label: "旋钮短按", event: "button.encoder.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
-  { id: "p4_encoder_long", controlId: "p4_encoder", label: "旋钮长按", event: "button.encoder.long_press", holdEvent: "button.encoder.hold", voiceTriggerId: "encoder_button.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
-  { id: "p4_encoder_ccw", controlId: "p4_encoder", label: "旋钮左旋", event: "knob.rotate_ccw", defaultAction: "session_previous", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
-  { id: "p4_encoder_cw", controlId: "p4_encoder", label: "旋钮右旋", event: "knob.rotate_cw", defaultAction: "session_next", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_joystick_up", controlId: "p4_joystick", label: "摇杆向上", event: "joystick.up", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_joystick_down", controlId: "p4_joystick", label: "摇杆向下", event: "joystick.down", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_encoder_ccw", controlId: "p4_joystick", label: "摇杆向左", event: "knob.rotate_ccw", defaultAction: "session_previous", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_encoder_cw", controlId: "p4_joystick", label: "摇杆向右", event: "knob.rotate_cw", defaultAction: "session_next", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_encoder_press", controlId: "p4_joystick", label: "摇杆中按短按", event: "button.encoder.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_encoder_long", controlId: "p4_joystick", label: "摇杆中按长按", event: "button.encoder.long_press", holdEvent: "button.encoder.hold", voiceTriggerId: "encoder_button.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
 ];
 
 const LEGACY_P4_DEFAULT_BUTTON_ACTIONS = {
@@ -202,6 +206,19 @@ const P4_V3_DEFAULT_BUTTON_ACTIONS = {
   p4_sw3_long: "disabled",
   p4_encoder_press: "page_enter",
   p4_encoder_long: "page_back",
+  p4_encoder_cw: "session_next",
+  p4_encoder_ccw: "session_previous",
+};
+
+const P4_V4_DEFAULT_BUTTON_ACTIONS = {
+  p4_sw1_short: "disabled",
+  p4_sw1_long: "voice_ptt",
+  p4_sw2_short: "component_center",
+  p4_sw2_long: "disabled",
+  p4_sw3_short: "page_back",
+  p4_sw3_long: "disabled",
+  p4_encoder_press: "page_enter",
+  p4_encoder_long: "disabled",
   p4_encoder_cw: "session_next",
   p4_encoder_ccw: "session_previous",
 };
@@ -270,7 +287,9 @@ function normalizeVoiceConfig(value = {}) {
   const storedButtonModelVersion = Number(value.buttonModelVersion || 0);
   const migrateLegacyP4Defaults = storedButtonModelVersion !== DEVICE_BUTTON_CONFIG_MODEL_VERSION
     && Object.keys(incoming).some((key) => key.startsWith("p4_"));
-  const previousP4Defaults = storedButtonModelVersion === 3
+  const previousP4Defaults = storedButtonModelVersion === 4
+    ? P4_V4_DEFAULT_BUTTON_ACTIONS
+    : storedButtonModelVersion === 3
     ? P4_V3_DEFAULT_BUTTON_ACTIONS
     : storedButtonModelVersion === 2
       ? P4_V2_DEFAULT_BUTTON_ACTIONS

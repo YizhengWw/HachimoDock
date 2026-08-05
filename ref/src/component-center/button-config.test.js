@@ -18,11 +18,11 @@ import {
   defaultControlLabelForBinding,
 } from "./button-config.js";
 
-test("device button config model advances for the revised navigation defaults", () => {
-  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 4);
+test("device button config model advances for four-direction joystick support", () => {
+  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 5);
 });
 
-test("component controls expose screen, switches, and encoder events without duplicates", () => {
+test("component controls expose screen, switches, and joystick events without duplicates", () => {
   const events = COMPONENT_CONTROL_OPTIONS.map((option) => option.event);
   assert.equal(new Set(events).size, events.length);
   assert.ok(events.includes("screen.region.tap"));
@@ -32,6 +32,8 @@ test("component controls expose screen, switches, and encoder events without dup
   assert.ok(events.includes("knob.rotate_cw"));
   assert.ok(events.includes("knob.rotate_ccw"));
   assert.ok(events.includes("knob.rotate_cw / knob.rotate_ccw"));
+  assert.ok(events.includes("joystick.up"));
+  assert.ok(events.includes("joystick.down"));
 });
 
 test("legacy P4 component map helper remains deterministic for compatibility callers", () => {
@@ -40,8 +42,8 @@ test("legacy P4 component map helper remains deterministic for compatibility cal
     { action: "game.choose_next", event: "knob.rotate_cw" },
     { action: COMPONENT_SYSTEM_ACTION_PAGE_MAIN, event: "button.encoder.long_press" },
   ]);
-  assert.equal(P4_COMPONENT_BUTTON_EVENTS.length, 7);
-  assert.equal(bindings.length, 14);
+  assert.equal(P4_COMPONENT_BUTTON_EVENTS.length, 9);
+  assert.equal(bindings.length, 16);
   assert.deepEqual(
     bindings.find((binding) => binding.event === "button.sw1.short_press"),
     { event: "button.sw1.short_press", action: "miniapp_action", value: "game.score" },
@@ -60,7 +62,7 @@ test("legacy P4 component map helper remains deterministic for compatibility cal
   );
 });
 
-test("package bindings resolve to the seven-gesture component-center labels", () => {
+test("package bindings resolve to the joystick-aware component-center labels", () => {
   assert.equal(
     defaultControlLabelForBinding({ control: "SW2", event: "button.sw2.short_press" }),
     "SW2 短按",
@@ -74,7 +76,11 @@ test("package bindings resolve to the seven-gesture component-center labels", ()
       control: "前方旋钮",
       event: "knob.rotate_cw / knob.rotate_ccw",
     }),
-    "旋钮双向旋转",
+    "摇杆左右方向",
+  );
+  assert.equal(
+    defaultControlLabelForBinding({ control: "前方摇杆", event: "joystick.up" }),
+    "摇杆向上",
   );
   assert.deepEqual(
     componentInputEventSlots("knob.rotate_cw / knob.rotate_ccw"),
@@ -130,5 +136,7 @@ test("ACKed component bindings replace the dashboard snapshot with the same mini
   assert.equal(snapshot.buttonActions.p4_encoder_long, "page_main");
   assert.equal(snapshot.buttonValues.p4_encoder_long, undefined);
   assert.equal(snapshot.buttonActions.p4_encoder_cw, "disabled");
-  assert.equal(snapshot.buttonModelVersion, 4);
+  assert.equal(snapshot.buttonActions.p4_joystick_up, "disabled");
+  assert.equal(snapshot.buttonActions.p4_joystick_down, "disabled");
+  assert.equal(snapshot.buttonModelVersion, 5);
 });

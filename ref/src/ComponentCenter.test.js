@@ -207,7 +207,7 @@ test("component button editor only offers screen gestures to a touch-ready devic
   assert.match(component, /function deviceTouchReady\(usb\)/);
   assert.match(component, /option\.event\.startsWith\("screen\."\)/);
   assert.match(component, /当前设备未报告触屏可用/);
-  assert.match(component, /请改为 SW1\/SW2\/SW3 或旋钮/);
+  assert.match(component, /请改为 SW1\/SW2\/SW3 或摇杆/);
 });
 
 test("USB preflight trusts the shared DeviceContext USB state", () => {

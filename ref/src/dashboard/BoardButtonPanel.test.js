@@ -115,7 +115,7 @@ test("The editable rows come from the connected runtime and keep the shared acti
   assert.match(source, /voice-button-action-select/);
 });
 
-test("Every physical control and all ten gestures stay visible at once", () => {
+test("Every physical control and all twelve gestures stay visible at once", () => {
   assert.match(source, /controlGroups\.map/);
   assert.match(source, /group\.rows\.map/);
   assert.match(source, /<fieldset/);
@@ -162,7 +162,7 @@ test("An unverified runtime does not fall back to the Linux hardware illustratio
   assert.match(source, /board-button-panel__unverified/);
 });
 
-test("P4 map shows three hardware keys plus the encoder and every short/long row", () => {
+test("P4 map shows three hardware keys plus the joystick and every gesture row", () => {
   const css = readFileSync(join(here, "..", "styles.css"), "utf8");
   const dashboard = readFileSync(join(here, "..", "DeviceDashboard.jsx"), "utf8");
   assert.match(source, /p4_sw1_short/);
@@ -171,11 +171,13 @@ test("P4 map shows three hardware keys plus the encoder and every short/long row
   assert.match(dashboard, /p4_sw1_long/);
   assert.match(dashboard, /p4_sw2_long/);
   assert.match(dashboard, /p4_sw3_long/);
-  assert.match(source, /p4_encoder/);
+  assert.match(source, /p4_joystick/);
   assert.match(dashboard, /p4_encoder_press/);
   assert.match(dashboard, /p4_encoder_long/);
   assert.match(dashboard, /p4_encoder_ccw/);
   assert.match(dashboard, /p4_encoder_cw/);
+  assert.match(dashboard, /p4_joystick_up/);
+  assert.match(dashboard, /p4_joystick_down/);
   assert.match(source, /voice-button-action-value/);
   assert.match(css, /\.board-button-map__hardware-key\s*\{/);
   assert.match(css, /\.voice-button-action-value\s*\{/);
@@ -227,7 +229,7 @@ test("Component-owned actions are not rendered as global hardware actions", () =
   assert.doesNotMatch(source, /voice-button-action-value--readonly/);
 });
 
-test("P4 map matches the physical left-to-right SW1, SW2, SW3, encoder layout", () => {
+test("P4 map matches the physical left-to-right SW1, SW2, SW3, joystick layout", () => {
   assert.match(source, /board-button-map__body--p4/);
   assert.match(source, /board-button-map__control-deck/);
   assert.match(source, /\["p4_sw1", "p4_sw1_short", 84, "SW1"\]/);
@@ -236,6 +238,7 @@ test("P4 map matches the physical left-to-right SW1, SW2, SW3, encoder layout", 
   assert.match(source, /board-button-map__encoder--p4[\s\S]*cx="328" cy="242"/);
   assert.match(source, /x=\{x\} y="218" width="48" height="48" rx="12"/);
   assert.match(source, /board-button-map__encoder-label/);
+  assert.match(source, /p4_joystick/);
   assert.match(source, /!isP4Runtime && controlRows\.map/);
   assert.match(source, /row\.controlId && hoveredButtonId === row\.controlId/);
 });

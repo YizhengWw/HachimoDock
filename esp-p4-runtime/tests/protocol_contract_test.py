@@ -3,6 +3,7 @@
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
 visual-preset parity, including the built-in two-key catch game.
+Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
 Also locks completed conversation visibility to 60 seconds before returning idle.
@@ -1437,7 +1438,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.25-p4")' in project
+    assert 'set(PROJECT_VER "0.7.26-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1513,7 +1514,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/FirmwareUpdateModal.jsx")
 
-    assert 'set(PROJECT_VER "0.7.25-p4")' in project
+    assert 'set(PROJECT_VER "0.7.26-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1576,7 +1577,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/DeviceDiagnosticsModal.jsx")
 
-    assert "set(PET_P4_PROTOCOL_SCHEMA 4)" in project
+    assert "set(PET_P4_PROTOCOL_SCHEMA 5)" in project
     assert "rev-parse --short=12 HEAD" in project
     assert 'PET_P4_BUILD_ID="${PET_P4_BUILD_ID}"' in main_cmake
     assert "PET_P4_PROTOCOL_SCHEMA=${PET_P4_PROTOCOL_SCHEMA}" in main_cmake
@@ -1587,7 +1588,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
         assert f'"{field}"' in protocol
         assert f'"{field}"' in diagnostics
 
-    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 4" in desktop_build
+    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 5" in desktop_build
     assert '"rev-parse", "--short=12", "HEAD"' in desktop_build
     assert "PET_MANAGER_BUILD_ID" in desktop_build
     assert "pub build_id: String" in desktop_serial
@@ -1865,6 +1866,11 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "PET_P4_INPUT_ENCODER_PRESS_GPIO GPIO_NUM_4" in input_source
     assert "PET_P4_INPUT_ENCODER_B_GPIO GPIO_NUM_3" in input_source
     assert "PET_P4_INPUT_ENCODER_A_GPIO GPIO_NUM_2" in input_source
+    assert "PET_P4_INPUT_JOYSTICK_X_GPIO GPIO_NUM_21" in input_source
+    assert "PET_P4_INPUT_JOYSTICK_Y_GPIO GPIO_NUM_20" in input_source
+    assert "PET_P4_INPUT_JOYSTICK_X_CHANNEL ADC1_GPIO21_CHANNEL" in input_source
+    assert "PET_P4_INPUT_JOYSTICK_Y_CHANNEL ADC1_GPIO20_CHANNEL" in input_source
+    assert '"esp_adc"' in cmake or "esp_adc" in cmake
     assert "PET_P4_INPUT_SAMPLE_MS 5" in input_source
     assert "PET_P4_INPUT_DEBOUNCE_MS 25" in input_source
     assert "PET_P4_INPUT_LONG_PRESS_MS 700" in input_source
@@ -1885,6 +1891,8 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert '"button.encoder.hold", "disabled"' in input_source
     assert '"knob.rotate_cw", "session_next"' in input_source
     assert '"knob.rotate_ccw", "session_previous"' in input_source
+    assert '"joystick.up", "disabled"' in input_source
+    assert '"joystick.down", "disabled"' in input_source
     assert 'strcmp(binding->action, "session_next") == 0' in input_source
     assert 'strcmp(binding->action, "session_previous") == 0' in input_source
     assert "state->current_session_index = selected + 1" in input_source
@@ -1892,8 +1900,9 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert 'cJSON_AddNumberToObject(payload, "sessionCount", state->session_queue_count)' in input_source
     assert "migrate_v2_config" in input_source
     assert "migrate_v3_config" in input_source
+    assert "migrate_v4_config" in input_source
     assert "migrate_input_config" in input_source
-    assert "PET_P4_INPUT_CONFIG_VERSION 4" in read_required("main/pet_p4_input.h")
+    assert "PET_P4_INPUT_CONFIG_VERSION 5" in read_required("main/pet_p4_input.h")
     assert "center_binding" not in input_source
     assert '"page_toggle"' in input_source
     assert '"page_enter"' in input_source
@@ -1903,6 +1912,10 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert 'strcmp(binding->action, "page_back") == 0' in input_source
     assert 'strcmp(state->screen_page, "components") == 0' in input_source
     assert "PET_P4_INPUT_GESTURE_ROTATE, (int) direction" in input_source
+    assert "PET_P4_INPUT_GESTURE_DIRECTION" in input_source
+    assert "pet_p4_joystick_decoder_update" in input_source
+    assert 'event_name = "joystick.up"' in input_source
+    assert 'event_name = "joystick.down"' in input_source
     assert "-(int) direction" not in input_source
     assert "pet_p4_miniapp_catalog_move(event.delta)" in input_source
     assert "pet_p4_miniapp_catalog_move(-event.delta)" not in input_source
@@ -1912,7 +1925,7 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"旋转选择 · 短按进入 · SW3返回"' in renderer
+    assert '"摇杆左右选择 · 中按进入 · SW3返回"' in renderer
     assert '"SW3短按返回"' in renderer
     assert "dispatch_component_binding_event" in input_source
     assert "pet_p4_miniapp_resolve_input" in input_source

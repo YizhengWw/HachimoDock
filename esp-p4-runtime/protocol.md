@@ -23,11 +23,11 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.25-p4",
-    "buildId": "0.7.25-p4+290f402abcd1",
+    "fw": "0.7.26-p4",
+    "buildId": "0.7.26-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
-    "protocolSchema": 4,
+    "protocolSchema": 5,
     "wireProtocol": "pet-usb-jsonl-v3",
     "hardware": {
       "soc": "ESP32-P4 RISC-V Dual-Core",
@@ -181,7 +181,8 @@ path can initialize.
 `fw` comes from the ESP-IDF application descriptor. `buildId` combines that
 version with the 12-character Git commit and appends `-dirty` for a build made
 from modified sources. `protocolSchema` is the PC/P4 compatibility contract;
-schema `4` adds explicit build identity and the current revisioned Session,
+schema `5` adds the ESP32-P4 four-direction joystick events while retaining
+the legacy encoder event aliases, explicit build identity, revisioned Session,
 transactional component-catalog, and A/B firmware contracts. Older firmware
 may omit these fields, in which case Pet Manager reports an unknown build
 instead of guessing from the semantic version alone.
@@ -229,8 +230,8 @@ Kinds:
     "protocol": "pet-usb-native-v1",
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
-    "protocolSchema": 4,
-    "buildId": "0.7.25-p4+0123456789ab"
+    "protocolSchema": 5,
+    "buildId": "0.7.26-p4+0123456789ab"
   }
 }
 ```
@@ -519,9 +520,13 @@ cannot accidentally starve the health window or mark a bad image healthy.
 ## Hardware Input Configuration
 
 Inputs are sampled every 5ms. Buttons are active-low with internal pull-ups,
-25ms debounce and a 700ms long-press threshold. The EC11 decoder requires a
-complete four-transition detent. Firmware queues input events outside GPIO and
-render callbacks, and stores accepted mappings in NVS.
+25ms debounce and a 700ms long-press threshold. On current hardware the
+joystick X/Y axes use ADC1 GPIO21/GPIO20. The runtime calibrates their neutral
+center at boot, applies activation/release hysteresis, resolves diagonals to
+the dominant axis, and repeats a held direction after a bounded delay. The
+legacy EC11 decoder on GPIO2/GPIO3 remains active, so the same firmware also
+supports the previous board revision. Firmware queues input events outside
+GPIO and render callbacks, and stores accepted mappings in NVS.
 
 PC to board:
 
@@ -530,22 +535,24 @@ PC to board:
   "topic": "input/config",
   "payload": {
     "requestId": "input-42",
-    "version": 3,
+    "version": 5,
     "bindings": [
       {"event":"button.sw1.short_press","action":"disabled","value":""},
       {"event":"button.sw1.long_press","action":"disabled","value":""},
       {"event":"button.sw1.hold","action":"voice_ptt","value":""},
-      {"event":"button.sw2.short_press","action":"disabled","value":""},
+      {"event":"button.sw2.short_press","action":"component_center","value":""},
       {"event":"button.sw2.long_press","action":"disabled","value":""},
       {"event":"button.sw2.hold","action":"disabled","value":""},
-      {"event":"button.sw3.short_press","action":"component_center","value":""},
+      {"event":"button.sw3.short_press","action":"page_back","value":""},
       {"event":"button.sw3.long_press","action":"disabled","value":""},
       {"event":"button.sw3.hold","action":"disabled","value":""},
       {"event":"button.encoder.short_press","action":"page_enter","value":""},
-      {"event":"button.encoder.long_press","action":"page_back","value":""},
+      {"event":"button.encoder.long_press","action":"disabled","value":""},
       {"event":"button.encoder.hold","action":"disabled","value":""},
       {"event":"knob.rotate_ccw","action":"session_previous","value":""},
-      {"event":"knob.rotate_cw","action":"session_next","value":""}
+      {"event":"knob.rotate_cw","action":"session_next","value":""},
+      {"event":"joystick.up","action":"disabled","value":""},
+      {"event":"joystick.down","action":"disabled","value":""}
     ]
   }
 }
@@ -560,15 +567,17 @@ Pet Manager's P4 button menu exposes only custom prompt, voice input,
 previous/next session, clear sessions, component center, confirm, back/cancel,
 and unbound.
 
-Encoder short press defaults to `page_enter`: from `main` it opens
+Joystick center short press defaults to `page_enter`: from `main` it opens
 `components`, and from `components` it activates the selection and opens
-`app`. Encoder long press defaults to `page_back`: from `app` it returns to
-`components`, and from `components` it returns to `main`. Both remain editable
-and are persisted with the rest of the input map. Outside `app`, SW3 short
-press opens the component center. All other SW short/long gestures default to
-`disabled`, except SW1 long press, whose hidden `.hold` transport defaults to
-`voice_ptt`. Inside the catalog, encoder rotation changes the selection;
-otherwise it routes to the previous or next session.
+`app`. Center long press and the new up/down directions default to `disabled`;
+all remain editable and are persisted with the rest of the input map. SW2 short
+press opens the component center, while SW3 short press is the global back
+path. All other SW short/long gestures default to `disabled`, except SW1 long
+press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
+and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
+so old component packages continue to work without conversion. Inside the
+catalog, left/right changes the selection; otherwise they route to the previous
+or next session. New packages may bind `joystick.up` and `joystick.down`.
 
 `page_toggle` switches between `main` and
 the active `app`; `page_main` and `page_app` remain accepted for older configs

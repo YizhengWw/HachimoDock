@@ -5,7 +5,7 @@
  *          per-component sync/removal. The manager chrome stays product-native while every widget
  *          preview and generated package uses the bounded pixel visual contract. Formal local
  *          buttons.json is preserved per component, editable across screen/SW1-SW3/
- *          encoder inputs, conflict-checked, persisted by component/action, and stored
+ *          four-direction joystick inputs, conflict-checked, persisted by component/action, and stored
  *          inside the installed P4 component without overwriting device navigation.
  *          Live inventory, not localStorage, is authoritative for what is on the board. The
  *          latest result is retained only in module memory for the current App session, so
@@ -1041,7 +1041,7 @@ export default function ComponentCenter() {
     const seen = new Map();
     for (const binding of resolveComponentBindings(component)) {
       if (binding.event.startsWith("screen.") && !deviceTouchReady(usb)) {
-        return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为 SW1/SW2/SW3 或旋钮`;
+        return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为 SW1/SW2/SW3 或摇杆`;
       }
       for (const eventSlot of componentInputEventSlots(binding.event)) {
         if (seen.has(eventSlot)) {

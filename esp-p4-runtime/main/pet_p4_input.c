@@ -1,7 +1,9 @@
 /*
- * [Input] Debounced SW1-SW3/encoder GPIO events and validated desktop bindings.
- * [Output] Persisted configurable input actions, configurable encoder
- *          enter/back navigation, immediate visible-session queue selection
+ * [Input] Debounced SW1-SW3/shared center-key/legacy encoder GPIO events,
+ *         calibrated four-direction joystick ADC samples, and validated
+ *         desktop bindings.
+ * [Output] Persisted configurable input actions, configurable joystick
+ *          navigation with legacy encoder-event aliases, immediate visible-session queue selection
  *          with exact selected-session event metadata, and component-local
  *          button routing that is active only while the component page is
  *          open, plus correlated snapshots of the authoritative NVS-backed
@@ -18,6 +20,7 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_adc/adc_oneshot.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -25,6 +28,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "soc/adc_channel.h"
 
 #include "pet_p4_audio.h"
 #include "pet_p4_input_core.h"
@@ -36,10 +40,22 @@
 #define PET_P4_INPUT_ENCODER_PRESS_GPIO GPIO_NUM_4
 #define PET_P4_INPUT_ENCODER_B_GPIO GPIO_NUM_3
 #define PET_P4_INPUT_ENCODER_A_GPIO GPIO_NUM_2
+#define PET_P4_INPUT_JOYSTICK_X_GPIO GPIO_NUM_21
+#define PET_P4_INPUT_JOYSTICK_Y_GPIO GPIO_NUM_20
+#define PET_P4_INPUT_JOYSTICK_X_CHANNEL ADC1_GPIO21_CHANNEL
+#define PET_P4_INPUT_JOYSTICK_Y_CHANNEL ADC1_GPIO20_CHANNEL
 
 #define PET_P4_INPUT_SAMPLE_MS 5
 #define PET_P4_INPUT_DEBOUNCE_MS 25
 #define PET_P4_INPUT_LONG_PRESS_MS 700
+#define PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT 2048
+#define PET_P4_INPUT_JOYSTICK_CENTER_MIN 1200
+#define PET_P4_INPUT_JOYSTICK_CENTER_MAX 2900
+#define PET_P4_INPUT_JOYSTICK_CALIBRATION_SAMPLES 32
+#define PET_P4_INPUT_JOYSTICK_ACTIVATION_DELTA 900
+#define PET_P4_INPUT_JOYSTICK_RELEASE_DELTA 500
+#define PET_P4_INPUT_JOYSTICK_REPEAT_DELAY_MS 350
+#define PET_P4_INPUT_JOYSTICK_REPEAT_INTERVAL_MS 140
 #define PET_P4_INPUT_QUEUE_LENGTH 32
 #define PET_P4_INPUT_NVS_NAMESPACE "pet_input"
 #define PET_P4_INPUT_NVS_KEY "config"
@@ -62,6 +78,7 @@ typedef enum {
   PET_P4_INPUT_CONTROL_SW3,
   PET_P4_INPUT_CONTROL_ENCODER_PRESS,
   PET_P4_INPUT_CONTROL_ENCODER,
+  PET_P4_INPUT_CONTROL_JOYSTICK,
 } pet_p4_input_control_t;
 
 typedef enum {
@@ -72,6 +89,7 @@ typedef enum {
   PET_P4_INPUT_GESTURE_HOLD_START,
   PET_P4_INPUT_GESTURE_HOLD_END,
   PET_P4_INPUT_GESTURE_ROTATE,
+  PET_P4_INPUT_GESTURE_DIRECTION,
 } pet_p4_input_gesture_t;
 
 typedef struct {
@@ -92,6 +110,7 @@ static QueueHandle_t g_event_queue;
 static pet_p4_input_config_t g_config;
 static atomic_uint g_dropped_events;
 static unsigned int g_event_sequence;
+static adc_oneshot_unit_handle_t g_joystick_adc;
 
 static void copy_text(char *dest, size_t dest_size, const char *src) {
   if (!dest || dest_size == 0) return;
@@ -119,6 +138,8 @@ static bool event_is_allowed(const char *event) {
     "button.encoder.hold",
     "knob.rotate_cw",
     "knob.rotate_ccw",
+    "joystick.up",
+    "joystick.down",
   };
   for (size_t i = 0; i < sizeof(allowed) / sizeof(allowed[0]); i += 1) {
     if (strcmp(event, allowed[i]) == 0) return true;
@@ -193,6 +214,8 @@ static void load_default_config(pet_p4_input_config_t *config) {
   add_default_binding(config, "button.encoder.hold", "disabled", "");
   add_default_binding(config, "knob.rotate_cw", "session_next", "");
   add_default_binding(config, "knob.rotate_ccw", "session_previous", "");
+  add_default_binding(config, "joystick.up", "disabled", "");
+  add_default_binding(config, "joystick.down", "disabled", "");
 }
 
 static bool config_bindings_are_valid(const pet_p4_input_config_t *config) {
@@ -293,6 +316,17 @@ static bool migrate_v3_config(pet_p4_input_config_t *config) {
     "disabled",
     ""
   );
+  config->version = 4;
+  return true;
+}
+
+static bool migrate_v4_config(pet_p4_input_config_t *config) {
+  if (!config || config->version != 4 || !config_bindings_are_valid(config)) return false;
+
+  // Version 5 adds the two directions that did not exist on the encoder.
+  // Old left/right/press bindings keep their event names and user actions.
+  add_default_binding(config, "joystick.up", "disabled", "");
+  add_default_binding(config, "joystick.down", "disabled", "");
   config->version = PET_P4_INPUT_CONFIG_VERSION;
   return true;
 }
@@ -300,7 +334,8 @@ static bool migrate_v3_config(pet_p4_input_config_t *config) {
 static bool migrate_input_config(pet_p4_input_config_t *config) {
   if (!config) return false;
   if (config->version == 2 && !migrate_v2_config(config)) return false;
-  return config->version == 3 && migrate_v3_config(config);
+  if (config->version == 3 && !migrate_v3_config(config)) return false;
+  return config->version == 4 && migrate_v4_config(config);
 }
 
 static esp_err_t persist_config(const pet_p4_input_config_t *config) {
@@ -561,6 +596,7 @@ static const char *control_name(pet_p4_input_control_t control) {
     case PET_P4_INPUT_CONTROL_SW3: return "key.3";
     case PET_P4_INPUT_CONTROL_ENCODER_PRESS: return "encoder.press";
     case PET_P4_INPUT_CONTROL_ENCODER: return "encoder";
+    case PET_P4_INPUT_CONTROL_JOYSTICK: return "joystick";
     default: return "unknown";
   }
 }
@@ -602,6 +638,39 @@ static void queue_button_flags(pet_p4_input_control_t control, uint8_t flags) {
   }
 }
 
+static bool read_joystick_axes(int *x, int *y) {
+  if (!g_joystick_adc || !x || !y) return false;
+  return adc_oneshot_read(g_joystick_adc, PET_P4_INPUT_JOYSTICK_X_CHANNEL, x) == ESP_OK
+    && adc_oneshot_read(g_joystick_adc, PET_P4_INPUT_JOYSTICK_Y_CHANNEL, y) == ESP_OK;
+}
+
+static void calibrate_joystick_center(int *center_x, int *center_y) {
+  long long sum_x = 0;
+  long long sum_y = 0;
+  int samples = 0;
+  for (int i = 0; i < PET_P4_INPUT_JOYSTICK_CALIBRATION_SAMPLES; i += 1) {
+    int x;
+    int y;
+    if (read_joystick_axes(&x, &y)) {
+      sum_x += x;
+      sum_y += y;
+      samples += 1;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+  }
+  *center_x = samples > 0 ? (int) (sum_x / samples) : PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
+  *center_y = samples > 0 ? (int) (sum_y / samples) : PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
+  if (*center_x < PET_P4_INPUT_JOYSTICK_CENTER_MIN
+      || *center_x > PET_P4_INPUT_JOYSTICK_CENTER_MAX) {
+    *center_x = PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
+  }
+  if (*center_y < PET_P4_INPUT_JOYSTICK_CENTER_MIN
+      || *center_y > PET_P4_INPUT_JOYSTICK_CENTER_MAX) {
+    *center_y = PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
+  }
+  ESP_LOGI(TAG, "joystick center calibrated x=%d y=%d samples=%d", *center_x, *center_y, samples);
+}
+
 static void input_task(void *arg) {
   (void) arg;
   pet_p4_input_button_t buttons[] = {
@@ -611,7 +680,10 @@ static void input_task(void *arg) {
     {.gpio = PET_P4_INPUT_ENCODER_PRESS_GPIO, .control = PET_P4_INPUT_CONTROL_ENCODER_PRESS},
   };
   pet_p4_rotary_decoder_t rotary;
-  TickType_t last_wake = xTaskGetTickCount();
+  pet_p4_joystick_decoder_t joystick;
+  int joystick_center_x;
+  int joystick_center_y;
+  TickType_t last_wake;
 
   for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i += 1) {
     pet_p4_button_decoder_init(
@@ -627,6 +699,17 @@ static void input_task(void *arg) {
     gpio_get_level(PET_P4_INPUT_ENCODER_B_GPIO),
     4
   );
+  calibrate_joystick_center(&joystick_center_x, &joystick_center_y);
+  pet_p4_joystick_decoder_init(
+    &joystick,
+    joystick_center_x,
+    joystick_center_y,
+    PET_P4_INPUT_JOYSTICK_ACTIVATION_DELTA,
+    PET_P4_INPUT_JOYSTICK_RELEASE_DELTA,
+    PET_P4_INPUT_JOYSTICK_REPEAT_DELAY_MS,
+    PET_P4_INPUT_JOYSTICK_REPEAT_INTERVAL_MS
+  );
+  last_wake = xTaskGetTickCount();
 
   while (true) {
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i += 1) {
@@ -646,6 +729,23 @@ static void input_task(void *arg) {
     if (direction != PET_P4_ROTARY_NONE) {
       queue_event(PET_P4_INPUT_CONTROL_ENCODER, PET_P4_INPUT_GESTURE_ROTATE, (int) direction);
     }
+    int joystick_x;
+    int joystick_y;
+    if (read_joystick_axes(&joystick_x, &joystick_y)) {
+      pet_p4_joystick_direction_t joystick_direction = pet_p4_joystick_decoder_update(
+        &joystick,
+        joystick_x,
+        joystick_y,
+        PET_P4_INPUT_SAMPLE_MS
+      );
+      if (joystick_direction != PET_P4_JOYSTICK_CENTER) {
+        queue_event(
+          PET_P4_INPUT_CONTROL_JOYSTICK,
+          PET_P4_INPUT_GESTURE_DIRECTION,
+          (int) joystick_direction
+        );
+      }
+    }
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PET_P4_INPUT_SAMPLE_MS));
   }
 }
@@ -663,26 +763,60 @@ esp_err_t pet_p4_input_init(void) {
     .pull_down_en = GPIO_PULLDOWN_DISABLE,
     .intr_type = GPIO_INTR_DISABLE,
   };
-  esp_err_t err = gpio_config(&config);
+  adc_oneshot_unit_init_cfg_t adc_unit_config = {
+    .unit_id = ADC_UNIT_1,
+    .ulp_mode = ADC_ULP_MODE_DISABLE,
+  };
+  adc_oneshot_chan_cfg_t adc_channel_config = {
+    .atten = ADC_ATTEN_DB_12,
+    .bitwidth = ADC_BITWIDTH_DEFAULT,
+  };
+  esp_err_t err = adc_oneshot_new_unit(&adc_unit_config, &g_joystick_adc);
   if (err != ESP_OK) return err;
+  err = adc_oneshot_config_channel(
+    g_joystick_adc,
+    PET_P4_INPUT_JOYSTICK_X_CHANNEL,
+    &adc_channel_config
+  );
+  if (err == ESP_OK) {
+    err = adc_oneshot_config_channel(
+      g_joystick_adc,
+      PET_P4_INPUT_JOYSTICK_Y_CHANNEL,
+      &adc_channel_config
+    );
+  }
+  if (err == ESP_OK) err = gpio_config(&config);
+  if (err != ESP_OK) {
+    adc_oneshot_del_unit(g_joystick_adc);
+    g_joystick_adc = NULL;
+    return err;
+  }
 
   load_persisted_config();
   g_event_queue = xQueueCreate(PET_P4_INPUT_QUEUE_LENGTH, sizeof(pet_p4_input_event_t));
-  if (!g_event_queue) return ESP_ERR_NO_MEM;
+  if (!g_event_queue) {
+    adc_oneshot_del_unit(g_joystick_adc);
+    g_joystick_adc = NULL;
+    return ESP_ERR_NO_MEM;
+  }
   if (xTaskCreate(input_task, "pet_p4_input", 4096, NULL, 9, NULL) != pdPASS) {
     vQueueDelete(g_event_queue);
     g_event_queue = NULL;
+    adc_oneshot_del_unit(g_joystick_adc);
+    g_joystick_adc = NULL;
     return ESP_ERR_NO_MEM;
   }
   ESP_LOGI(
     TAG,
-    "inputs ready sw1=%d sw2=%d sw3=%d enc_press=%d enc_b=%d enc_a=%d",
+    "inputs ready sw1=%d sw2=%d sw3=%d center_key=%d enc_b=%d enc_a=%d joy_x=%d joy_y=%d",
     PET_P4_INPUT_SW1_GPIO,
     PET_P4_INPUT_SW2_GPIO,
     PET_P4_INPUT_SW3_GPIO,
     PET_P4_INPUT_ENCODER_PRESS_GPIO,
     PET_P4_INPUT_ENCODER_B_GPIO,
-    PET_P4_INPUT_ENCODER_A_GPIO
+    PET_P4_INPUT_ENCODER_A_GPIO,
+    PET_P4_INPUT_JOYSTICK_X_GPIO,
+    PET_P4_INPUT_JOYSTICK_Y_GPIO
   );
   return ESP_OK;
 }
@@ -1037,7 +1171,77 @@ void pet_p4_input_process(
   pet_p4_input_event_t event;
   if (!g_event_queue) return;
   while (xQueueReceive(g_event_queue, &event, 0) == pdTRUE) {
-    if (event.control == PET_P4_INPUT_CONTROL_ENCODER
+    if (event.control == PET_P4_INPUT_CONTROL_JOYSTICK
+        && event.gesture == PET_P4_INPUT_GESTURE_DIRECTION) {
+      const char *event_name = "";
+      const char *gesture = "";
+      switch ((pet_p4_joystick_direction_t) event.delta) {
+        case PET_P4_JOYSTICK_UP:
+          event_name = "joystick.up";
+          gesture = "up";
+          event.delta = 0;
+          break;
+        case PET_P4_JOYSTICK_DOWN:
+          event_name = "joystick.down";
+          gesture = "down";
+          event.delta = 0;
+          break;
+        case PET_P4_JOYSTICK_LEFT:
+          event_name = "knob.rotate_ccw";
+          gesture = "left";
+          event.delta = -1;
+          break;
+        case PET_P4_JOYSTICK_RIGHT:
+          event_name = "knob.rotate_cw";
+          gesture = "right";
+          event.delta = 1;
+          break;
+        default:
+          break;
+      }
+      if (!event_name[0]) continue;
+      if (state && strcmp(state->screen_page, "components") == 0 && event.delta != 0) {
+        static const pet_p4_input_binding_t select_binding = {
+          .event = "knob.rotate_cw",
+          .action = "component_select",
+          .value = "",
+        };
+        (void) pet_p4_miniapp_catalog_move(event.delta);
+        state->last_update_ms = event.ts_ms;
+        send_input_event(
+          state,
+          send_line,
+          ctx,
+          &event,
+          event_name,
+          gesture,
+          &select_binding,
+          "component_select",
+          true
+        );
+        continue;
+      }
+      if (state
+          && strcmp(state->screen_page, "app") == 0
+          && !pet_p4_miniapp_has_input(event_name)) {
+        pet_p4_input_binding_t ignored_binding = {0};
+        copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
+        copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
+        send_input_event(
+          state,
+          send_line,
+          ctx,
+          &event,
+          event_name,
+          gesture,
+          &ignored_binding,
+          "",
+          true
+        );
+        continue;
+      }
+      dispatch_binding_event(state, send_line, ctx, &event, event_name, gesture);
+    } else if (event.control == PET_P4_INPUT_CONTROL_ENCODER
         && event.gesture == PET_P4_INPUT_GESTURE_ROTATE) {
       const char *event_name = event.delta > 0 ? "knob.rotate_cw" : "knob.rotate_ccw";
       if (state && strcmp(state->screen_page, "components") == 0) {

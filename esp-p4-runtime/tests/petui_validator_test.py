@@ -23,7 +23,7 @@ SPEC.loader.exec_module(VALIDATOR)
 def shooter_fixture() -> dict[str, object]:
     dashboard = {
         "title": "校验战机",
-        "headline": "按旋钮开始",
+        "headline": "按摇杆中键开始",
         "visualStyle": "clean",
         "visualPalette": "ocean",
         "visualLayout": "arcade",
@@ -53,7 +53,7 @@ def shooter_fixture() -> dict[str, object]:
             },
             {
                 "action": "play.start",
-                "control": "前方旋钮",
+                "control": "前方摇杆",
                 "event": "button.encoder.short_press",
                 "label": "开始或重开",
             },
@@ -186,6 +186,16 @@ class ClaimedMechanicsTests(unittest.TestCase):
 
     def test_shooter_fixture_has_real_mechanics(self) -> None:
         self.assertEqual(self.validate_values(self.values), [])
+
+    def test_four_direction_joystick_events_are_supported(self) -> None:
+        values = copy.deepcopy(self.values)
+        buttons = values["buttons.json"]
+        assert isinstance(buttons, list)
+        buttons[0]["control"] = "前方摇杆"
+        buttons[0]["event"] = "joystick.up"
+        buttons[1]["control"] = "前方摇杆"
+        buttons[1]["event"] = "joystick.down"
+        self.assertEqual(self.validate_values(values), [])
 
     def test_text_only_shooter_is_rejected(self) -> None:
         values = copy.deepcopy(self.values)

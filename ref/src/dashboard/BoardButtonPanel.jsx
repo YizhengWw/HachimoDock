@@ -1,7 +1,7 @@
 /**
  * [Input] Connected runtime plus persisted button actions/values, OTA state, and update/apply callbacks.
  * [Output] Runtime-aware hardware-control workspace with the device map above
- *          physical-order SVG control cards, inline short/long gesture editors,
+ *          physical-order SVG control cards, inline button/joystick gesture editors,
  *          per-gesture Code Agent prompts, voice-input row hints, and USB sync feedback.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
@@ -23,7 +23,7 @@ const CONTROL_GROUP_META = {
   p4_sw1: { label: "SW1", detail: "左侧按键" },
   p4_sw2: { label: "SW2", detail: "中间按键" },
   p4_sw3: { label: "SW3", detail: "右侧按键" },
-  p4_encoder: { label: "旋钮", detail: "前方旋钮" },
+  p4_joystick: { label: "摇杆", detail: "四向与中按" },
   legacy_encoder: { label: "前方旋钮", detail: "旋转与按压" },
 };
 
@@ -85,20 +85,32 @@ function gestureLabel(row, group) {
   return row.label
     .replace(new RegExp(`^${group.label}\\s*`), "")
     .replace(/^前方旋钮\s*/, "")
+    .replace(/^摇杆\s*/, "")
     || row.label;
 }
 
 function ControlGlyph({ controlId, label, active = false }) {
-  const isEncoder = controlId === "p4_encoder" || controlId === "legacy_encoder";
+  const isJoystick = controlId === "p4_joystick";
+  const isEncoder = controlId === "legacy_encoder";
   return (
     <svg
-      className={`board-button-control-glyph${isEncoder ? " is-encoder" : " is-key"}${active ? " is-active" : ""}`}
+      className={`board-button-control-glyph${isEncoder || isJoystick ? " is-encoder" : " is-key"}${isJoystick ? " is-joystick" : ""}${active ? " is-active" : ""}`}
       viewBox="0 0 120 92"
       role="img"
       aria-label={`${label} 实体控件示意`}
     >
       <rect className="board-button-control-glyph__deck" x="5" y="5" width="110" height="82" rx="22" />
-      {isEncoder ? (
+      {isJoystick ? (
+        <>
+          <circle className="board-button-control-glyph__encoder-shadow" cx="60" cy="49" r="27" />
+          <circle className="board-button-control-glyph__encoder" cx="60" cy="45" r="25" />
+          <circle className="board-button-control-glyph__encoder-cap" cx="60" cy="45" r="15" />
+          <path className="board-button-control-glyph__arrow" d="M60 12 V25 M55 18 L60 12 L65 18" />
+          <path className="board-button-control-glyph__arrow" d="M60 78 V65 M55 72 L60 78 L65 72" />
+          <path className="board-button-control-glyph__arrow" d="M22 45 H36 M28 40 L22 45 L28 50" />
+          <path className="board-button-control-glyph__arrow" d="M98 45 H84 M92 40 L98 45 L92 50" />
+        </>
+      ) : isEncoder ? (
         <>
           <path className="board-button-control-glyph__rotation" d="M28 53 A34 34 0 0 1 92 53" />
           <path className="board-button-control-glyph__arrow" d="M28 53 L25 43 M28 53 L38 50" />
@@ -115,7 +127,7 @@ function ControlGlyph({ controlId, label, active = false }) {
           <path className="board-button-control-glyph__press-mark" d="M49 14 H71 M54 9 L49 14 L54 19 M66 9 L71 14 L66 19" />
         </>
       )}
-      <text className="board-button-control-glyph__label" x="60" y={isEncoder ? "47" : "52"} textAnchor="middle">
+      <text className="board-button-control-glyph__label" x="60" y={isEncoder || isJoystick ? "49" : "52"} textAnchor="middle">
         {label}
       </text>
     </svg>
@@ -240,10 +252,10 @@ export default function BoardButtonPanel({
                   <circle className="board-button-map__screen-status" cx="108" cy="82" r="4" />
                   <text className="board-button-map__screen-kicker" x="120" y="86">HARDWARE INPUT</text>
                   <text className="board-button-map__screen-title" x="108" y="128">
-                    10 GESTURES
+                    12 GESTURES
                   </text>
                   <text className="board-button-map__screen-copy" x="108" y="153">
-                    SW1 · SW2 · SW3 · ENCODER
+                    SW1 · SW2 · SW3 · JOYSTICK
                   </text>
                   <rect className="board-button-map__control-deck" x="66" y="206" width="324" height="76" rx="22" />
                   {[
@@ -280,13 +292,13 @@ export default function BoardButtonPanel({
                       "board-button-map__encoder--p4",
                     ].filter(Boolean).join(" ")}
                     cx="328" cy="242" r="32"
-                    onMouseEnter={() => setHoveredButton("p4_encoder")}
+                    onMouseEnter={() => setHoveredButton("p4_joystick")}
                     onMouseLeave={() => setHoveredButton("")}
-                    data-button-id="p4_encoder"
+                    data-button-id="p4_joystick"
                   />
                   <circle className="board-button-map__encoder-cap" cx="328" cy="242" r="24" />
                   <text className="board-button-map__encoder-label" x="328" y="246" textAnchor="middle">
-                    旋钮
+                    摇杆
                   </text>
                 </>
               ) : (
@@ -340,8 +352,8 @@ export default function BoardButtonPanel({
                   <span>
                     <strong>{group.label}</strong>
                     <small>
-                      {group.id === "p4_encoder"
-                        ? "按压与旋转分别配置"
+                      {group.id === "p4_joystick"
+                        ? "上、下、左、右与中按分别配置"
                         : "短按、长按分别配置"}
                     </small>
                   </span>

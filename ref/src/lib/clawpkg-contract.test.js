@@ -258,6 +258,8 @@ test("组件按钮契约限制 8 个动作、唯一事件/action 与 30 字节�
   assert.equal(COMPONENT_BUTTON_EVENTS.includes("button.sw3.long_press"), false);
   assert.ok(COMPONENT_BUTTON_EVENTS.includes("button.encoder.long_press"));
   assert.ok(COMPONENT_BUTTON_EVENTS.includes("knob.rotate_ccw"));
+  assert.ok(COMPONENT_BUTTON_EVENTS.includes("joystick.up"));
+  assert.ok(COMPONENT_BUTTON_EVENTS.includes("joystick.down"));
 
   const base = {
     "component.json": { id: "game", name: "小游戏", version: "1.0.0" },

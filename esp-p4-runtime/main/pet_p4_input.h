@@ -1,3 +1,10 @@
+/*
+ * [Input] Physical-input runtime lifecycle and desktop input-config commands.
+ * [Output] Versioned P4 input configuration API with 16 persisted bindings.
+ * [Pos] Public interface for the ESP32-P4 input runtime.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
+ */
+
 #pragma once
 
 #include <stdbool.h>
@@ -10,7 +17,7 @@
 extern "C" {
 #endif
 
-#define PET_P4_INPUT_CONFIG_VERSION 4
+#define PET_P4_INPUT_CONFIG_VERSION 5
 #define PET_P4_INPUT_MAX_BINDINGS 16
 #define PET_P4_INPUT_EVENT_MAX 40
 #define PET_P4_INPUT_ACTION_MAX 24

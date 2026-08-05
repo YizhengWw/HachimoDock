@@ -1,3 +1,12 @@
+/*
+ * [Input] Raw physical samples and elapsed sampling time.
+ * [Output] Public state and APIs for button, legacy rotary, and four-direction
+ *          joystick decoding without ESP-IDF dependencies.
+ * [Pos] Testable input-decoder contract shared by firmware and host tests.
+ * [Sync] If this file changes, update `pet_p4_input_core.c`, host tests, and
+ *        `esp-p4-runtime/.folder.md`.
+ */
+
 #pragma once
 
 #include <stdbool.h>
@@ -38,6 +47,26 @@ typedef struct {
   int trigger_steps;
 } pet_p4_rotary_decoder_t;
 
+typedef enum {
+  PET_P4_JOYSTICK_CENTER = 0,
+  PET_P4_JOYSTICK_UP,
+  PET_P4_JOYSTICK_DOWN,
+  PET_P4_JOYSTICK_LEFT,
+  PET_P4_JOYSTICK_RIGHT,
+} pet_p4_joystick_direction_t;
+
+typedef struct {
+  int center_x;
+  int center_y;
+  int activation_delta;
+  int release_delta;
+  uint32_t repeat_delay_ms;
+  uint32_t repeat_interval_ms;
+  uint32_t held_ms;
+  uint32_t next_repeat_ms;
+  pet_p4_joystick_direction_t direction;
+} pet_p4_joystick_decoder_t;
+
 void pet_p4_button_decoder_init(
   pet_p4_button_decoder_t *decoder,
   bool pressed,
@@ -59,6 +88,21 @@ pet_p4_rotary_direction_t pet_p4_rotary_decoder_update(
   pet_p4_rotary_decoder_t *decoder,
   int a_level,
   int b_level
+);
+void pet_p4_joystick_decoder_init(
+  pet_p4_joystick_decoder_t *decoder,
+  int center_x,
+  int center_y,
+  int activation_delta,
+  int release_delta,
+  uint32_t repeat_delay_ms,
+  uint32_t repeat_interval_ms
+);
+pet_p4_joystick_direction_t pet_p4_joystick_decoder_update(
+  pet_p4_joystick_decoder_t *decoder,
+  int x,
+  int y,
+  uint32_t elapsed_ms
 );
 
 #ifdef __cplusplus

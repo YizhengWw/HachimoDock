@@ -108,6 +108,8 @@ button.encoder.short_press
 button.encoder.long_press
 knob.rotate_cw
 knob.rotate_ccw
+joystick.up
+joystick.down
 screen.region.tap
 screen.region.long_press
 ```
@@ -117,8 +119,9 @@ screen.region.long_press
 - `buttons.json` 最多 8 条；每条必须有非空 `action`、`control`、`event`、`label`。
 - `action` 唯一；物理事件槽位唯一；label 不超过 30 UTF-8 字节。
 - 每个普通 action 必须出现在 `runtime/widget.json.transitions[*].on`，反向也必须成立。
-- 旋钮左右方向语义不同时使用两个独立 action。
-- SW3 短按保留给设备全局返回，生成组件不得占用；旋钮长按默认不绑定。
+- 新硬件的摇杆上、下分别使用 `joystick.up`、`joystick.down`；左、右为兼容历史组件继续使用 `knob.rotate_ccw`、`knob.rotate_cw`，中键继续使用 `button.encoder.*`。
+- 四个方向语义不同时使用独立 action，`control` 写作“前方摇杆”。
+- SW3 短按保留给设备全局返回，生成组件不得占用；摇杆中键长按默认不绑定。
 - 历史包可能包含下面的兼容返回动作，新组件不要再生成：
 
 ```json
@@ -130,7 +133,7 @@ screen.region.long_press
 }
 ```
 
-兼容 `page_main` 不写 runtime transition，且最多一条。组件按钮只在组件打开时生效，不覆盖设备页面导航。
+兼容 `page_main` 保留旧“前方旋钮”文案、不写 runtime transition，且最多一条。组件按钮只在组件打开时生效，不覆盖设备页面导航。
 
 ## 5. Runtime 结构
 

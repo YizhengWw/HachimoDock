@@ -1,7 +1,7 @@
 /**
  * [Input] DeviceGuideModal.jsx, lib/device-guide-content.js, and styles.css source.
  * [Output] Static Node coverage for the compact three-step guide, accessible shared
- *          controls, all ten P4 gestures, and responsive hardware-shaped layout.
+ *          controls, all twelve P4 gestures, and responsive hardware-shaped layout.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -18,18 +18,20 @@ function readSource(fileName) {
   return readFileSync(join(srcDir, fileName), "utf8");
 }
 
-test("device guide documents P4 navigation and all ten configurable gestures", () => {
+test("device guide documents P4 navigation and all twelve configurable gestures", () => {
   const content = readSource("lib/device-guide-content.js");
   const modal = readSource("DeviceGuideModal.jsx");
 
   assert.match(content, /screenIds: \["main", "components"\]/);
-  assert.match(content, /转动选择，短按进入；旋钮长按默认不绑定/);
-  assert.match(content, /\{ gesture: "左旋", action: "上一个" \}/);
-  assert.match(content, /\{ gesture: "右旋", action: "下一个" \}/);
-  assert.match(content, /\{ gesture: "短按", action: "确认 \/ 进入" \}/);
-  assert.match(content, /\{ gesture: "长按", action: "暂不绑定" \}/);
+  assert.match(content, /左右切换，中按进入；上下方向可独立配置/);
+  assert.match(content, /\{ gesture: "向上", action: "可独立配置" \}/);
+  assert.match(content, /\{ gesture: "向下", action: "可独立配置" \}/);
+  assert.match(content, /\{ gesture: "向左", action: "上一个" \}/);
+  assert.match(content, /\{ gesture: "向右", action: "下一个" \}/);
+  assert.match(content, /\{ gesture: "中按短按", action: "确认 \/ 进入" \}/);
+  assert.match(content, /\{ gesture: "中按长按", action: "暂不绑定" \}/);
   assert.match(content, /export const P4_CARDS/);
-  assert.match(content, /共 10 个独立入口/);
+  assert.match(content, /共 12 个独立入口/);
   assert.match(content, /组件按键只在该组件打开时生效/);
   assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "暂不绑定/);
   assert.match(content, /control: "sw2"[\s\S]{0,160}短按", action: "组件中心/);
