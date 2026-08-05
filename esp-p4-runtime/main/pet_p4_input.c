@@ -2,8 +2,8 @@
  * [Input] Debounced SW1-SW3/shared center-key/legacy encoder GPIO events,
  *         calibrated four-direction joystick ADC samples, and validated
  *         desktop bindings.
- * [Output] Persisted configurable input actions, configurable joystick
- *          navigation with legacy encoder-event aliases, immediate visible-session queue selection
+ * [Output] Persisted configurable input actions, four-way catalog navigation,
+ *          center-aware joystick decoding and ADC diagnostics with legacy encoder-event aliases, immediate visible-session queue selection
  *          with exact selected-session event metadata, and component-local
  *          button routing that is active only while the component page is
  *          open, plus correlated snapshots of the authoritative NVS-backed
@@ -111,6 +111,48 @@ static pet_p4_input_config_t g_config;
 static atomic_uint g_dropped_events;
 static unsigned int g_event_sequence;
 static adc_oneshot_unit_handle_t g_joystick_adc;
+static atomic_bool g_joystick_ready;
+static atomic_int g_joystick_center_x;
+static atomic_int g_joystick_center_y;
+static atomic_int g_joystick_current_x;
+static atomic_int g_joystick_current_y;
+static atomic_int g_joystick_minimum_x;
+static atomic_int g_joystick_maximum_x;
+static atomic_int g_joystick_minimum_y;
+static atomic_int g_joystick_maximum_y;
+
+static void update_atomic_minimum(atomic_int *value, int sample) {
+  int current = atomic_load_explicit(value, memory_order_relaxed);
+  while (sample < current
+      && !atomic_compare_exchange_weak_explicit(
+        value,
+        &current,
+        sample,
+        memory_order_relaxed,
+        memory_order_relaxed
+      )) {}
+}
+
+static void update_atomic_maximum(atomic_int *value, int sample) {
+  int current = atomic_load_explicit(value, memory_order_relaxed);
+  while (sample > current
+      && !atomic_compare_exchange_weak_explicit(
+        value,
+        &current,
+        sample,
+        memory_order_relaxed,
+        memory_order_relaxed
+      )) {}
+}
+
+static void record_joystick_sample(int x, int y) {
+  atomic_store_explicit(&g_joystick_current_x, x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_current_y, y, memory_order_relaxed);
+  update_atomic_minimum(&g_joystick_minimum_x, x);
+  update_atomic_maximum(&g_joystick_maximum_x, x);
+  update_atomic_minimum(&g_joystick_minimum_y, y);
+  update_atomic_maximum(&g_joystick_maximum_y, y);
+}
 
 static void copy_text(char *dest, size_t dest_size, const char *src) {
   if (!dest || dest_size == 0) return;
@@ -700,6 +742,15 @@ static void input_task(void *arg) {
     4
   );
   calibrate_joystick_center(&joystick_center_x, &joystick_center_y);
+  atomic_store_explicit(&g_joystick_center_x, joystick_center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_center_y, joystick_center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_current_x, joystick_center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_current_y, joystick_center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_minimum_x, joystick_center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_maximum_x, joystick_center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_minimum_y, joystick_center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_maximum_y, joystick_center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_ready, true, memory_order_release);
   pet_p4_joystick_decoder_init(
     &joystick,
     joystick_center_x,
@@ -732,6 +783,7 @@ static void input_task(void *arg) {
     int joystick_x;
     int joystick_y;
     if (read_joystick_axes(&joystick_x, &joystick_y)) {
+      record_joystick_sample(joystick_x, joystick_y);
       pet_p4_joystick_direction_t joystick_direction = pet_p4_joystick_decoder_update(
         &joystick,
         joystick_x,
@@ -1175,38 +1227,43 @@ void pet_p4_input_process(
         && event.gesture == PET_P4_INPUT_GESTURE_DIRECTION) {
       const char *event_name = "";
       const char *gesture = "";
+      int catalog_delta = 0;
       switch ((pet_p4_joystick_direction_t) event.delta) {
         case PET_P4_JOYSTICK_UP:
           event_name = "joystick.up";
           gesture = "up";
+          catalog_delta = -1;
           event.delta = 0;
           break;
         case PET_P4_JOYSTICK_DOWN:
           event_name = "joystick.down";
           gesture = "down";
+          catalog_delta = 1;
           event.delta = 0;
           break;
         case PET_P4_JOYSTICK_LEFT:
           event_name = "knob.rotate_ccw";
           gesture = "left";
+          catalog_delta = -1;
           event.delta = -1;
           break;
         case PET_P4_JOYSTICK_RIGHT:
           event_name = "knob.rotate_cw";
           gesture = "right";
+          catalog_delta = 1;
           event.delta = 1;
           break;
         default:
           break;
       }
       if (!event_name[0]) continue;
-      if (state && strcmp(state->screen_page, "components") == 0 && event.delta != 0) {
+      if (state && strcmp(state->screen_page, "components") == 0 && catalog_delta != 0) {
         static const pet_p4_input_binding_t select_binding = {
           .event = "knob.rotate_cw",
           .action = "component_select",
           .value = "",
         };
-        (void) pet_p4_miniapp_catalog_move(event.delta);
+        (void) pet_p4_miniapp_catalog_move(catalog_delta);
         state->last_update_ms = event.ts_ms;
         send_input_event(
           state,
@@ -1300,4 +1357,17 @@ void pet_p4_input_process(
 
 unsigned int pet_p4_input_dropped_events(void) {
   return atomic_load_explicit(&g_dropped_events, memory_order_relaxed);
+}
+
+void pet_p4_input_get_joystick_snapshot(pet_p4_input_joystick_snapshot_t *snapshot) {
+  if (!snapshot) return;
+  snapshot->ready = atomic_load_explicit(&g_joystick_ready, memory_order_acquire);
+  snapshot->center_x = atomic_load_explicit(&g_joystick_center_x, memory_order_relaxed);
+  snapshot->center_y = atomic_load_explicit(&g_joystick_center_y, memory_order_relaxed);
+  snapshot->current_x = atomic_load_explicit(&g_joystick_current_x, memory_order_relaxed);
+  snapshot->current_y = atomic_load_explicit(&g_joystick_current_y, memory_order_relaxed);
+  snapshot->minimum_x = atomic_load_explicit(&g_joystick_minimum_x, memory_order_relaxed);
+  snapshot->maximum_x = atomic_load_explicit(&g_joystick_maximum_x, memory_order_relaxed);
+  snapshot->minimum_y = atomic_load_explicit(&g_joystick_minimum_y, memory_order_relaxed);
+  snapshot->maximum_y = atomic_load_explicit(&g_joystick_maximum_y, memory_order_relaxed);
 }

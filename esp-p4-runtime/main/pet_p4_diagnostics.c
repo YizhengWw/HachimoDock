@@ -1,7 +1,7 @@
 /*
  * [Input] diagnostics/recovery topics, runtime state, and persistent boot data.
  * [Output] bounded health/session-retention snapshots including stable queue
- *          IDs, plus transfer-safe delayed reboot actions.
+ *          IDs and joystick ADC travel, plus transfer-safe delayed reboot actions.
  * [Pos] ESP32-P4 diagnostics and recovery node in esp-p4-runtime/main.
  * [Sync] If this file changes, update esp-p4-runtime/protocol.md and .folder.md.
  */
@@ -185,6 +185,21 @@ static void send_status(
   );
   cJSON_AddNumberToObject(runtime, "taskCount", uxTaskGetNumberOfTasks());
   cJSON_AddNumberToObject(runtime, "inputDroppedEvents", pet_p4_input_dropped_events());
+  pet_p4_input_joystick_snapshot_t joystick_snapshot = {0};
+  pet_p4_input_get_joystick_snapshot(&joystick_snapshot);
+  cJSON *joystick = cJSON_CreateObject();
+  if (joystick) {
+    cJSON_AddBoolToObject(joystick, "ready", joystick_snapshot.ready);
+    cJSON_AddNumberToObject(joystick, "centerX", joystick_snapshot.center_x);
+    cJSON_AddNumberToObject(joystick, "centerY", joystick_snapshot.center_y);
+    cJSON_AddNumberToObject(joystick, "currentX", joystick_snapshot.current_x);
+    cJSON_AddNumberToObject(joystick, "currentY", joystick_snapshot.current_y);
+    cJSON_AddNumberToObject(joystick, "minimumX", joystick_snapshot.minimum_x);
+    cJSON_AddNumberToObject(joystick, "maximumX", joystick_snapshot.maximum_x);
+    cJSON_AddNumberToObject(joystick, "minimumY", joystick_snapshot.minimum_y);
+    cJSON_AddNumberToObject(joystick, "maximumY", joystick_snapshot.maximum_y);
+    cJSON_AddItemToObject(runtime, "joystick", joystick);
+  }
   cJSON_AddBoolToObject(runtime, "touchReady", pet_p4_touch_ready());
   cJSON_AddNumberToObject(runtime, "touchDroppedEvents", pet_p4_touch_dropped_events());
   cJSON_AddStringToObject(runtime, "screenPage", state ? state->screen_page : "");

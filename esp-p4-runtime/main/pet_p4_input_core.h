@@ -1,7 +1,8 @@
 /*
  * [Input] Raw physical samples and elapsed sampling time.
  * [Output] Public state and APIs for button, legacy rotary, and four-direction
- *          joystick decoding without ESP-IDF dependencies.
+ *          joystick decoding with center-aware directional thresholds and no
+ *          ESP-IDF dependencies.
  * [Pos] Testable input-decoder contract shared by firmware and host tests.
  * [Sync] If this file changes, update `pet_p4_input_core.c`, host tests, and
  *        `esp-p4-runtime/.folder.md`.
@@ -58,8 +59,14 @@ typedef enum {
 typedef struct {
   int center_x;
   int center_y;
-  int activation_delta;
-  int release_delta;
+  int activation_left;
+  int activation_right;
+  int activation_up;
+  int activation_down;
+  int release_left;
+  int release_right;
+  int release_up;
+  int release_down;
   uint32_t repeat_delay_ms;
   uint32_t repeat_interval_ms;
   uint32_t held_ms;

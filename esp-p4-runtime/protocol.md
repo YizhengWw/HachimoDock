@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.26-p4",
-    "buildId": "0.7.26-p4+290f402abcd1",
+    "fw": "0.7.27-p4",
+    "buildId": "0.7.27-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 5,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 5,
-    "buildId": "0.7.26-p4+0123456789ab"
+    "buildId": "0.7.27-p4+0123456789ab"
   }
 }
 ```
@@ -428,7 +428,8 @@ PC to board:
 - `firmware/query`: returns running, boot, and next partition metadata on
   `firmware/status`.
 - `diagnostics/query`: returns boot/reset history, heap and PSRAM low-water
-  marks, SPIFFS usage, task/GPIO/touch/audio health, current page,
+  marks, SPIFFS usage, task/GPIO/touch/audio health, joystick
+  center/current/minimum/maximum ADC samples, current page,
   `sessionQueueCount`, ordered `sessionQueueIds`, `currentSessionId`,
   `retainedSessionCount`, firmware, `buildId`, `gitSha`, `buildDirty`,
   `protocolSchema`, and running partition on
@@ -522,8 +523,10 @@ cannot accidentally starve the health window or mark a bad image healthy.
 Inputs are sampled every 5ms. Buttons are active-low with internal pull-ups,
 25ms debounce and a 700ms long-press threshold. On current hardware the
 joystick X/Y axes use ADC1 GPIO21/GPIO20. The runtime calibrates their neutral
-center at boot, applies activation/release hysteresis, resolves diagonals to
-the dominant axis, and repeats a held direction after a bounded delay. The
+center at boot, derives activation/release hysteresis independently from the
+available travel in each direction, resolves diagonals by normalized dominant
+axis, and repeats a held direction after a bounded delay. This accepts
+limited-travel joystick batches without weakening the neutral dead zone. The
 legacy EC11 decoder on GPIO2/GPIO3 remains active, so the same firmware also
 supports the previous board revision. Firmware queues input events outside
 GPIO and render callbacks, and stores accepted mappings in NVS.
@@ -576,8 +579,9 @@ path. All other SW short/long gestures default to `disabled`, except SW1 long
 press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
 and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
 so old component packages continue to work without conversion. Inside the
-catalog, left/right changes the selection; otherwise they route to the previous
-or next session. New packages may bind `joystick.up` and `joystick.down`.
+catalog, left/up selects the previous entry and right/down selects the next;
+outside the catalog, left/right retain their previous/next-session defaults.
+New packages may bind `joystick.up` and `joystick.down`.
 
 `page_toggle` switches between `main` and
 the active `app`; `page_main` and `page_app` remain accepted for older configs

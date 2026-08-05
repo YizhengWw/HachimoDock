@@ -1,6 +1,7 @@
 /*
  * [Input] Physical-input runtime lifecycle and desktop input-config commands.
- * [Output] Versioned P4 input configuration API with 16 persisted bindings.
+ * [Output] Versioned P4 input configuration API with 16 persisted bindings
+ *          plus a lock-free joystick ADC diagnostic snapshot.
  * [Pos] Public interface for the ESP32-P4 input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -23,6 +24,18 @@ extern "C" {
 #define PET_P4_INPUT_ACTION_MAX 24
 #define PET_P4_INPUT_VALUE_MAX 160
 
+typedef struct {
+  bool ready;
+  int center_x;
+  int center_y;
+  int current_x;
+  int current_y;
+  int minimum_x;
+  int maximum_x;
+  int minimum_y;
+  int maximum_y;
+} pet_p4_input_joystick_snapshot_t;
+
 esp_err_t pet_p4_input_init(void);
 esp_err_t pet_p4_input_reset_config(void);
 void pet_p4_input_process(
@@ -43,6 +56,7 @@ bool pet_p4_input_send_config_state(
   void *ctx
 );
 unsigned int pet_p4_input_dropped_events(void);
+void pet_p4_input_get_joystick_snapshot(pet_p4_input_joystick_snapshot_t *snapshot);
 
 #ifdef __cplusplus
 }

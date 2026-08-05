@@ -786,6 +786,11 @@ def test_p4_diagnostics_are_persisted_and_asset_safe():
     assert "esp_reset_reason()" in source
     assert "fault_reset_count" in source
     assert 'strcmp(topic, "diagnostics/query") == 0' in source
+    assert "pet_p4_input_get_joystick_snapshot" in source
+    assert '"centerX"' in source
+    assert '"maximumX"' in source
+    assert '"centerY"' in source
+    assert '"maximumY"' in source
     assert 'strcmp(topic, "system/reset-inputs") == 0' in source
     assert 'strcmp(topic, "system/reboot") == 0' in source
     assert '"preservedAppearanceAssets"' in source
@@ -1438,7 +1443,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.26-p4")' in project
+    assert 'set(PROJECT_VER "0.7.27-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1514,7 +1519,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/FirmwareUpdateModal.jsx")
 
-    assert 'set(PROJECT_VER "0.7.26-p4")' in project
+    assert 'set(PROJECT_VER "0.7.27-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1914,8 +1919,16 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "PET_P4_INPUT_GESTURE_ROTATE, (int) direction" in input_source
     assert "PET_P4_INPUT_GESTURE_DIRECTION" in input_source
     assert "pet_p4_joystick_decoder_update" in input_source
+    assert "bounded_direction_threshold" in core
+    assert "activation_left" in core_header
+    assert "activation_right" in core_header
+    assert "activation_up" in core_header
+    assert "activation_down" in core_header
     assert 'event_name = "joystick.up"' in input_source
     assert 'event_name = "joystick.down"' in input_source
+    assert "catalog_delta = -1" in input_source
+    assert "catalog_delta = 1" in input_source
+    assert "pet_p4_miniapp_catalog_move(catalog_delta)" in input_source
     assert "-(int) direction" not in input_source
     assert "pet_p4_miniapp_catalog_move(event.delta)" in input_source
     assert "pet_p4_miniapp_catalog_move(-event.delta)" not in input_source
@@ -1925,7 +1938,7 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"摇杆左右选择 · 中按进入 · SW3返回"' in renderer
+    assert '"摇杆四向选择 · 中按进入 · SW3返回"' in renderer
     assert '"SW3短按返回"' in renderer
     assert "dispatch_component_binding_event" in input_source
     assert "pet_p4_miniapp_resolve_input" in input_source

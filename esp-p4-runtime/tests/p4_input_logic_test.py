@@ -1,7 +1,7 @@
 """Compile and run the heap-free P4 button/rotary/joystick decoders on the host.
 
 Input: the platform-independent decoder C source and its assertion executable.
-Output: a host-compiler regression check for the four-direction joystick contract.
+Output: a host-compiler regression check for adaptive four-direction joystick decoding.
 Position: pytest wrapper for P4 physical-input logic.
 Sync: update with pet_p4_input_core.c/.h and p4_input_logic_test.c.
 """
