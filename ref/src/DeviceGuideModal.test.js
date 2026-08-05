@@ -33,7 +33,7 @@ test("device guide documents P4 navigation and all twelve configurable gestures"
   assert.match(content, /export const P4_CARDS/);
   assert.match(content, /共 12 个独立入口/);
   assert.match(content, /组件按键只在该组件打开时生效/);
-  assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "暂不绑定/);
+  assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "确认 \/ 进入/);
   assert.match(content, /control: "sw2"[\s\S]{0,160}短按", action: "组件中心/);
   assert.match(content, /control: "sw3"[\s\S]{0,160}短按", action: "返回（取消）/);
   assert.match(content, /control: "sw1"[\s\S]{0,200}gesture: "长按"[\s\S]{0,100}按住说话/);

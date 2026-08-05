@@ -259,7 +259,7 @@ power input.
 See [protocol.md](protocol.md). Runtime messages use JSON Lines:
 
 ```json
-{"topic":"hello","payload":{"boardDeviceId":"p4-a1b2c3d4e5f6","runtime":"esp-p4","fw":"0.7.27-p4","buildId":"0.7.27-p4+290f402abcd1","gitSha":"290f402abcd1","buildDirty":false,"protocolSchema":5}}
+{"topic":"hello","payload":{"boardDeviceId":"p4-a1b2c3d4e5f6","runtime":"esp-p4","fw":"0.7.28-p4","buildId":"0.7.28-p4+290f402abcd1","gitSha":"290f402abcd1","buildDirty":false,"protocolSchema":5}}
 ```
 
 The firmware version comes from the ESP-IDF image descriptor. Every build also

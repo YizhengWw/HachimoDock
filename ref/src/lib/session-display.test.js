@@ -1,7 +1,7 @@
 /**
  * [Input] Global session visibility helpers plus ordered Agent lifecycle events and periodic snapshots.
  * [Output] Regression coverage for persistence/migration plus adjacent-snapshot
- *          active admission and 60-second done/error retention.
+ *          active admission, transient visual-identity dedupe, and 60-second done/error retention.
  * [Pos] test node in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -369,6 +369,79 @@ test("active sessions take every available slot before retained terminal cards",
     next.map((session) => session.id),
     incoming.slice(2).map((session) => session.id),
   );
+});
+
+test("collapses transient duplicate identities from event and snapshot feeds", () => {
+  const nowMs = 7_500_000;
+  const previous = reconcileDeviceSessionQueue(
+    [],
+    [
+      {
+        id: "snapshot-id",
+        state: "working",
+        name: "同一个任务",
+        displayContent: "正在执行",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs,
+      },
+      {
+        id: "event-id",
+        state: "working",
+        displayTitle: "同一个任务",
+        displayContent: "正在执行",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs + 1,
+      },
+    ],
+    nowMs + 1,
+  );
+
+  assert.equal(previous.length, 1);
+  assert.equal(previous[0].id, "event-id");
+
+  const terminal = reconcileDeviceSessionQueue(
+    [
+      {
+        id: "snapshot-id",
+        state: "working",
+        name: "同一个任务",
+        displayContent: "已完成",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs,
+      },
+      {
+        id: "event-id",
+        state: "working",
+        displayTitle: "同一个任务",
+        displayContent: "已完成",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs,
+      },
+    ],
+    [
+      {
+        id: "snapshot-id",
+        state: "working",
+        name: "同一个任务",
+        displayContent: "已完成",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs,
+      },
+      {
+        id: "event-id",
+        state: "done",
+        displayTitle: "同一个任务",
+        displayContent: "已完成",
+        cwd: "/tmp/project",
+        statusUpdatedAt: nowMs + 2,
+      },
+    ],
+    nowMs + 2,
+  );
+
+  assert.equal(terminal.length, 1);
+  assert.equal(terminal[0].id, "event-id");
+  assert.equal(terminal[0].state, "done");
 });
 
 test("falls back safely when browser storage is unavailable", () => {

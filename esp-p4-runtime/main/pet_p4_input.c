@@ -242,7 +242,7 @@ static void add_default_binding(
 static void load_default_config(pet_p4_input_config_t *config) {
   memset(config, 0, sizeof(*config));
   config->version = PET_P4_INPUT_CONFIG_VERSION;
-  add_default_binding(config, "button.sw1.short_press", "disabled", "");
+  add_default_binding(config, "button.sw1.short_press", "page_enter", "");
   add_default_binding(config, "button.sw1.long_press", "disabled", "");
   add_default_binding(config, "button.sw1.hold", "voice_ptt", "");
   add_default_binding(config, "button.sw2.short_press", "component_center", "");
@@ -369,6 +369,23 @@ static bool migrate_v4_config(pet_p4_input_config_t *config) {
   // Old left/right/press bindings keep their event names and user actions.
   add_default_binding(config, "joystick.up", "disabled", "");
   add_default_binding(config, "joystick.down", "disabled", "");
+  config->version = 5;
+  return true;
+}
+
+static bool migrate_v5_config(pet_p4_input_config_t *config) {
+  if (!config || config->version != 5 || !config_bindings_are_valid(config)) return false;
+
+  // Version 6 promotes the unchanged SW1 short-press default to Confirm.
+  // Rewrite only the former default so explicit user mappings remain intact.
+  migrate_default_binding(
+    config,
+    "button.sw1.short_press",
+    "disabled",
+    "",
+    "page_enter",
+    ""
+  );
   config->version = PET_P4_INPUT_CONFIG_VERSION;
   return true;
 }
@@ -377,7 +394,8 @@ static bool migrate_input_config(pet_p4_input_config_t *config) {
   if (!config) return false;
   if (config->version == 2 && !migrate_v2_config(config)) return false;
   if (config->version == 3 && !migrate_v3_config(config)) return false;
-  return config->version == 4 && migrate_v4_config(config);
+  if (config->version == 4 && !migrate_v4_config(config)) return false;
+  return config->version == 5 && migrate_v5_config(config);
 }
 
 static esp_err_t persist_config(const pet_p4_input_config_t *config) {

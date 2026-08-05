@@ -96,7 +96,7 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
 ];
 
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
-export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 5;
+export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 6;
 export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
 
 const P4_COMPONENT_DOWNLINK_EVENTS = [

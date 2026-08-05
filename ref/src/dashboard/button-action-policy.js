@@ -1,11 +1,11 @@
 /**
  * [Input] Runtime-specific button rows and their selected action map.
- * [Output] Duplicate-action ownership lookup and deterministic unique-action normalization.
+ * [Output] Duplicate-action ownership lookup and deterministic normalization, with repeatable disabled/confirm navigation.
  * [Pos] Pure button-policy helper shared by DeviceDashboard and BoardButtonPanel.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
 
-const REPEATABLE_ACTIONS = new Set(["disabled"]);
+const REPEATABLE_ACTIONS = new Set(["disabled", "page_enter"]);
 
 function selectedActionForRow(row, buttonActions = {}) {
   const selected = buttonActions[row.id];

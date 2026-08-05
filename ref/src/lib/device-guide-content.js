@@ -137,7 +137,7 @@ export const P4_CARDS = [
       {
         control: "sw1",
         rows: [
-          { gesture: "短按", action: "暂不绑定" },
+          { gesture: "短按", action: "确认 / 进入" },
           { gesture: "长按", action: "按住说话" },
         ],
       },
@@ -165,6 +165,7 @@ export const P4_CARDS = [
     example: {
       name: "推荐起点",
       rows: [
+        { control: "sw1", gesture: "短按", action: "确认 / 进入" },
         { control: "sw1", gesture: "长按", action: "语音输入" },
         { control: "sw2", gesture: "短按", action: "打开组件中心" },
         { control: "sw3", gesture: "短按", action: "返回 / 取消" },

@@ -3506,6 +3506,8 @@ fn is_allowed_button_config_event(event: &str) -> bool {
             | "button.encoder.hold"
             | "knob.rotate_cw"
             | "knob.rotate_ccw"
+            | "joystick.up"
+            | "joystick.down"
     )
 }
 
@@ -12068,7 +12070,9 @@ mod tests {
     }
 
     #[test]
-    fn button_config_allows_session_and_miniapp_proxy_actions() {
+    fn button_config_allows_joystick_session_and_miniapp_proxy_actions() {
+        assert!(is_allowed_button_config_event("joystick.up"));
+        assert!(is_allowed_button_config_event("joystick.down"));
         assert!(is_allowed_button_config_action("session_next"));
         assert!(is_allowed_button_config_action("session_previous"));
         assert!(is_allowed_button_config_action("session_clear"));

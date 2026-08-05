@@ -18,8 +18,8 @@ import {
   defaultControlLabelForBinding,
 } from "./button-config.js";
 
-test("device button config model advances for four-direction joystick support", () => {
-  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 5);
+test("device button config model advances for the SW1 confirm default", () => {
+  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 6);
 });
 
 test("component controls expose screen, switches, and joystick events without duplicates", () => {
@@ -138,5 +138,5 @@ test("ACKed component bindings replace the dashboard snapshot with the same mini
   assert.equal(snapshot.buttonActions.p4_encoder_cw, "disabled");
   assert.equal(snapshot.buttonActions.p4_joystick_up, "disabled");
   assert.equal(snapshot.buttonActions.p4_joystick_down, "disabled");
-  assert.equal(snapshot.buttonModelVersion, 5);
+  assert.equal(snapshot.buttonModelVersion, 6);
 });

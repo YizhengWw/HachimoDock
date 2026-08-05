@@ -1,6 +1,6 @@
 /**
  * [Input] Persisted global visibility, ordered Agent lifecycle events plus periodic snapshots, and an optional storage adapter.
- * [Output] Cross-Agent show/hide plus explicit-transition active/terminal device-card visibility that tolerates incomplete snapshots.
+ * [Output] Cross-Agent show/hide plus explicit-transition active/terminal device-card visibility that tolerates incomplete snapshots and transient duplicate identities.
  * [Pos] shared dashboard configuration helper in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -30,6 +30,10 @@ const IMPLICIT_TERMINAL_DEVICE_SESSION_STATE_SET = new Set(["idle", "sleeping"])
 
 const normalizedSessionState = (session) => typeof session?.state === "string"
   ? session.state.trim().toLowerCase()
+  : "";
+
+const normalizedSessionText = (value) => typeof value === "string"
+  ? value.replace(/\s+/g, " ").trim()
   : "";
 
 export function normalizeSessionDisplayEnabled(value) {
@@ -62,6 +66,61 @@ function isImplicitTerminalDeviceSession(session) {
 
 function normalizedSessionId(session) {
   return typeof session?.id === "string" ? session.id.trim() : "";
+}
+
+function deviceSessionVisualIdentity(session) {
+  const title = [session?.name, session?.displayTitle, session?.summary]
+    .map(normalizedSessionText)
+    .find((value) => value && !value.startsWith("<recommended_plugins>")) || "";
+  const summary = normalizedSessionText(session?.summary);
+  const content = normalizedSessionText(session?.displayContent)
+    || (summary && summary !== title && !summary.startsWith("<recommended_plugins>")
+      ? summary
+      : "");
+  if (!title || !content) return "";
+  return JSON.stringify([
+    normalizedSessionText(session?.transcriptPath),
+    normalizedSessionText(session?.cwd),
+    title,
+    content,
+  ]);
+}
+
+function deviceSessionSourceFreshness(session) {
+  return Math.max(
+    Number(session?.statusUpdatedAt || 0),
+    Number(session?.lastModified || 0),
+  );
+}
+
+function dedupeVisuallyIdenticalSessions(sessions) {
+  const output = [];
+  const identityIndexes = new Map();
+  for (const session of sessions) {
+    const identity = deviceSessionVisualIdentity(session);
+    if (!identity || !identityIndexes.has(identity)) {
+      if (identity) identityIndexes.set(identity, output.length);
+      output.push(session);
+      continue;
+    }
+    const index = identityIndexes.get(identity);
+    const existing = output[index];
+    const incomingFreshness = deviceSessionSourceFreshness(session);
+    const existingFreshness = deviceSessionSourceFreshness(existing);
+    const incomingTransition = deviceSessionTransitionRevision(session);
+    const existingTransition = deviceSessionTransitionRevision(existing);
+    if (
+      incomingFreshness > existingFreshness
+      || (incomingFreshness === existingFreshness && incomingTransition > existingTransition)
+      || (incomingFreshness === existingFreshness
+        && incomingTransition === existingTransition
+        && isTerminalDeviceSession(session)
+        && !isTerminalDeviceSession(existing))
+    ) {
+      output[index] = session;
+    }
+  }
+  return output;
 }
 
 function normalizedTransitionRevision(value) {
@@ -251,18 +310,19 @@ export function reconcileDeviceSessionQueue(
     }
   }
 
-  if (candidates.length <= queueLimit) return candidates;
+  const dedupedCandidates = dedupeVisuallyIdenticalSessions(candidates);
+  if (dedupedCandidates.length <= queueLimit) return dedupedCandidates;
   const selectedIds = new Set(
-    candidates
+    dedupedCandidates
       .filter(isActiveDeviceSession)
       .slice(0, queueLimit)
       .map(normalizedSessionId),
   );
-  for (const session of candidates) {
+  for (const session of dedupedCandidates) {
     if (selectedIds.size >= queueLimit) break;
     selectedIds.add(normalizedSessionId(session));
   }
-  return candidates.filter((session) => selectedIds.has(normalizedSessionId(session)));
+  return dedupedCandidates.filter((session) => selectedIds.has(normalizedSessionId(session)));
 }
 
 function loadStoredValue(storage, key, legacyKey) {

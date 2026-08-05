@@ -1,6 +1,6 @@
 /**
  * [Input] Pure button action policy helpers.
- * [Output] Regression coverage for unique non-disabled actions and duplicate ownership.
+ * [Output] Regression coverage for unique custom actions, repeatable confirm navigation, and duplicate ownership.
  * [Pos] Test node in ref/src/dashboard.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -45,6 +45,30 @@ test("non-disabled actions have one owner while disabled remains repeatable", ()
       sw2_short: "disabled",
       encoder_short: "page_enter",
     },
+  );
+});
+
+test("confirm navigation may be shared by SW1 and joystick center short press", () => {
+  assert.deepEqual(
+    enforceUniqueButtonActions(rows, {
+      sw1_short: "page_enter",
+      sw2_short: "disabled",
+      encoder_short: "page_enter",
+    }),
+    {
+      sw1_short: "page_enter",
+      sw2_short: "disabled",
+      encoder_short: "page_enter",
+    },
+  );
+  assert.equal(
+    findButtonActionOwner(
+      rows,
+      { sw1_short: "page_enter", encoder_short: "page_enter" },
+      "sw1_short",
+      "page_enter",
+    ),
+    null,
   );
 });
 
