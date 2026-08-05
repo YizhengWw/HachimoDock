@@ -16,6 +16,8 @@ codex-session-*-chat.md
 pet-claw/.env
 pet-claw/claw-on-desk/
 ref/src-tauri/bundle-secrets.env
+ref/.internal-build-secrets.json
+ref/.internal-build-state.json
 ref/src-tauri/bridge/runtime/node.exe
 ref/src-tauri/bridge/runtime/node
 ref/src-tauri/generated-runtime/
