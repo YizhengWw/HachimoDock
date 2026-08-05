@@ -5,6 +5,7 @@
  *          session-scoped device-inventory caching and formal-library file watching, while verifying
  *          first-visit component onboarding,
  *          the featured 双键接球 builtin first, newest-first user components next, complete built-in Flappy package wiring,
+ *          standardized SW1/SW3/joystick mappings across every builtin,
  *          per-component buttons.json, editable component bindings, explicit component-scope guidance,
  *          P4 button-map downlink, semantic enabled state, card-owned device sync/removal,
  *          device-first dual deletion, exact target identity, focus-safe confirmation,
@@ -507,7 +508,7 @@ test("component library pins 双键接球 first and keeps other user components 
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
   assert.match(component, /const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong"/);
-  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "cdf23dfa806eeaad"/);
+  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "f9a6379e140aa854"/);
   assert.match(component, /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
@@ -522,10 +523,69 @@ test("builtin catalog starts with the validated 双键接球 package", () => {
 
   assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
   assert.equal(componentManifest.id, "two-key-pong");
-  assert.equal(componentManifest.version, "1.1.1");
+  assert.equal(componentManifest.version, "1.1.2");
   assert.equal(widget.engine, "p4-bounded-runtime-v3");
   assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
-  assert.deepEqual(buttons.map((binding) => binding.action), ["shift_left", "shift_right", "start"]);
+  assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right", "page_main"]);
+});
+
+test("all builtin components reserve SW3 for exit and games use the joystick", () => {
+  const packageRoot = join(srcDir, "../builtin-clawpkgs");
+  const packageIds = [
+    "two-key-pong",
+    "flappy-bird",
+    "block-combo",
+    "snake-turn",
+    "tomato-clock",
+    "drink-reminder",
+    "token-usage",
+  ];
+  const gameStartActions = {
+    "two-key-pong": "start",
+    "flappy-bird": "flappy.flap",
+    "block-combo": "blocks.start",
+    "snake-turn": "snake.start",
+  };
+
+  for (const packageId of packageIds) {
+    const buttons = JSON.parse(
+      readFileSync(join(packageRoot, packageId, "buttons.json"), "utf8"),
+    );
+    assert.deepEqual(
+      buttons.find((binding) => binding.action === "page_main"),
+      {
+        action: "page_main",
+        control: "SW3",
+        event: "button.sw3.short_press",
+        label: packageId === "two-key-pong" ? "退出游戏" : "返回桌宠",
+      },
+    );
+    assert.equal(
+      buttons.filter((binding) => binding.event === "button.sw3.short_press").length,
+      1,
+    );
+    if (gameStartActions[packageId]) {
+      assert.equal(
+        buttons.find((binding) => binding.action === gameStartActions[packageId])?.event,
+        "button.sw1.short_press",
+      );
+    }
+  }
+
+  const blocks = JSON.parse(
+    readFileSync(join(packageRoot, "block-combo", "buttons.json"), "utf8"),
+  );
+  assert.deepEqual(
+    Object.fromEntries(blocks.map((binding) => [binding.action, binding.event])),
+    {
+      "blocks.start": "button.sw1.short_press",
+      "blocks.left": "knob.rotate_ccw",
+      "blocks.right": "knob.rotate_cw",
+      "blocks.rotate": "joystick.up",
+      "blocks.drop": "joystick.down",
+      page_main: "button.sw3.short_press",
+    },
+  );
 });
 
 test("a live USB handshake wins over a remembered SSH target during install", () => {
@@ -583,15 +643,24 @@ test("tauri no longer exposes a component-generation terminal launcher", () => {
   assert.match(tauri, /install_widget_skill/);
 });
 
-test("petui installer uses the bundled skill and removes legacy skill directories", () => {
+test("petui installer updates every supported Agent from one bundled skill", () => {
   const tauri = readFileSync(join(srcDir, "../src-tauri/src/lib.rs"), "utf8");
   assert.match(tauri, /const SKILL_NAME: &str = "petui"/);
   assert.match(tauri, /const LEGACY_SKILL_NAMES/);
   assert.match(tauri, /"petAgent-ui-generator"/);
   assert.match(tauri, /"petui-agent"/);
+  assert.match(tauri, /agent: "ChatGPT（Codex）"/);
+  assert.match(tauri, /agent: "Claude"/);
   assert.match(tauri, /agent: "OpenClaw"/);
   assert.match(tauri, /agent: "MiMoCode \/ Agent Skills"/);
+  assert.match(tauri, /agent: "Gemini CLI"/);
+  assert.match(tauri, /agent: "Cursor"/);
+  assert.match(tauri, /home_dir: "\.codex"/);
+  assert.match(tauri, /home_dir: "\.claude"/);
+  assert.match(tauri, /home_dir: "\.openclaw"/);
   assert.match(tauri, /home_dir: "\.agents"/);
+  assert.match(tauri, /home_dir: "\.gemini"/);
+  assert.match(tauri, /home_dir: "\.cursor"/);
   assert.match(tauri, /skills_root\.join\(SKILL_NAME\)/);
 });
 
@@ -618,6 +687,12 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(widgetSkill, /打开同一个组件卡片并点击“保存并同步”/);
   assert.match(contract, /`buttons\.json` 最多 8 条/);
   assert.match(contract, /button\.sw1\.short_press/);
+  assert.match(contract, /joystick\.up/);
+  assert.match(contract, /joystick\.down/);
+  assert.match(contract, /左.*`knob\.rotate_ccw`/);
+  assert.match(contract, /右.*`knob\.rotate_cw`/);
+  assert.match(contract, /"event": "button\.sw3\.short_press"/);
+  assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
   assert.match(contract, /knob\.rotate_cw/);
   assert.match(contract, /\.staging.*不是“草稿库”/);
   assert.match(publisher, /os\.replace\(staged_package, destination\)/);
@@ -741,7 +816,9 @@ test("fixtures expose 双键接球 first, three remaining games, and three tools
   assert.equal((data.match(/visualLayout: "tool"/g) || []).length, 3);
   assert.match(data, /button\.sw1\.short_press/);
   assert.match(data, /button\.sw2\.short_press/);
-  assert.match(data, /button\.encoder\.short_press/);
+  assert.match(data, /button\.sw3\.short_press/);
+  assert.match(data, /joystick\.up/);
+  assert.match(data, /joystick\.down/);
   assert.match(data, /shift_left/);
   assert.match(data, /shift_right/);
   assert.match(data, /flappy\.flap/);

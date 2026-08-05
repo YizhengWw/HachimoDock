@@ -119,10 +119,34 @@ screen.region.long_press
 - `buttons.json` 最多 8 条；每条必须有非空 `action`、`control`、`event`、`label`。
 - `action` 唯一；物理事件槽位唯一；label 不超过 30 UTF-8 字节。
 - 每个普通 action 必须出现在 `runtime/widget.json.transitions[*].on`，反向也必须成立。
-- 新硬件的摇杆上、下分别使用 `joystick.up`、`joystick.down`；左、右为兼容历史组件继续使用 `knob.rotate_ccw`、`knob.rotate_cw`，中键继续使用 `button.encoder.*`。
-- 四个方向语义不同时使用独立 action，`control` 写作“前方摇杆”。
-- SW3 短按保留给设备全局返回，生成组件不得占用；摇杆中键长按默认不绑定。
-- 历史包可能包含下面的兼容返回动作，新组件不要再生成：
+- 摇杆事件使用下面的兼容事件名；`control` 统一写作“前方摇杆”：
+
+| 实体输入 | `event` | 建议用途 |
+|---|---|---|
+| 上 | `joystick.up` | 上移、旋转、增加或上一项 |
+| 下 | `joystick.down` | 下移、下落、减少或下一项 |
+| 左 | `knob.rotate_ccw` | 左移、向左选择或上一页 |
+| 右 | `knob.rotate_cw` | 右移、向右选择或下一页 |
+| 中键短按 | `button.encoder.short_press` | 确认或不适合 SW1/SW2 的辅助动作 |
+| 中键长按 | `button.encoder.long_press` | 只在用户明确要求时使用 |
+
+- 四个方向语义不同时使用独立 action。只使用玩法真正需要的方向，不为填满输入而制造无效动作。
+- 游戏默认把方向动作放到摇杆，把 SW1 映射为开始/重新开始；SW2 可按玩法定义为射击、技能、暂停等次要动作，也可以不用。
+- 工具默认用 SW1 执行主操作、SW2 执行次操作；摇杆方向可用于切页、选择或数值调节。
+- 生成或更新的组件必须包含下面的 SW3 退出动作。`page_main` 不写 runtime transition：
+
+```json
+{
+  "action": "page_main",
+  "control": "SW3",
+  "event": "button.sw3.short_press",
+  "label": "退出组件"
+}
+```
+
+退出 label 可按组件类型写成“退出组件”或“退出游戏”，但 action、control 和 event 必须保持一致。
+
+- 历史包可能包含下面的兼容返回动作；读取旧包时可识别，生成或更新时应迁移为上面的 SW3 映射：
 
 ```json
 {
@@ -133,7 +157,7 @@ screen.region.long_press
 }
 ```
 
-兼容 `page_main` 保留旧“前方旋钮”文案、不写 runtime transition，且最多一条。组件按钮只在组件打开时生效，不覆盖设备页面导航。
+`page_main` 不写 runtime transition，且最多一条。组件按钮只在组件打开时生效，不覆盖设备页面导航。
 
 ## 5. Runtime 结构
 

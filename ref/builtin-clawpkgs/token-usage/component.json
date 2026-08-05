@@ -1,1 +1,1 @@
-{"id":"token-usage","name":"Token 仪表盘","kind":"tool","version":"2.2.0","author":"openclaw","description":"实时展示当前 coding agent 的 Token 总量，并用 SW1/SW2/SW3 切换总量、输入与输出视图"}
+{"id":"token-usage","name":"Token 仪表盘","kind":"tool","version":"2.2.1","author":"openclaw","description":"实时展示当前 coding agent 的 Token，总量/输入/输出分别由 SW1、SW2、摇杆右切换，SW3 退出"}

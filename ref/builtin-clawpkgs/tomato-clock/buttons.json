@@ -12,14 +12,14 @@
     "label": "跳过阶段"
   },
   {
-    "control": "SW3",
-    "event": "button.sw3.short_press",
+    "control": "前方摇杆",
+    "event": "joystick.down",
     "action": "tomato.reset_phase",
     "label": "重置本轮"
   },
   {
-    "control": "前方旋钮",
-    "event": "button.encoder.long_press",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
     "action": "page_main",
     "label": "返回桌宠"
   }

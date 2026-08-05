@@ -98,9 +98,9 @@
     },
     "footer": {
       "switch_state": {
-        "counting": "SW1我喝了 · SW2暂停 · SW3切换",
-        "paused": "SW1我喝了 · SW2恢复 · SW3切换",
-        "due": "SW1我喝了 · SW2暂停 · SW3切换"
+        "counting": "SW1我喝了 · SW2暂停 · 摇杆右切换 · SW3退出",
+        "paused": "SW1我喝了 · SW2恢复 · 摇杆右切换 · SW3退出",
+        "due": "SW1我喝了 · SW2暂停 · 摇杆右切换 · SW3退出"
       }
     },
     "progress": {

@@ -7,7 +7,8 @@
  *            • `AGENT_DISCOVERY_FIXTURES` — scenarios for the agent-detection
  *              flow, consumed by `agent-discovery-contract.js`.
  *            • `BUILTIN_COMPONENT_CENTER` — the actual builtin negative-screen
- *              widget catalog (led by the promoted two-key catch package, then
+ *              widget catalog (led by the promoted two-key catch package and
+ *              its standardized SW1 start / SW3 exit / joystick directions, then
  *              the remaining creation-dated games, including native Flappy Bird, plus tomato-clock /
  *              drink-reminder / token-usage tools) and the
  *              component-generator prompt + replacement preview metadata,
@@ -110,8 +111,8 @@ export const BUILTIN_COMPONENT_CENTER = {
     {
       id: "two-key-pong",
       name: "双键接球",
-      version: "1.1.1",
-      versionHash: "cdf23dfa806eeaad",
+      version: "1.1.2",
+      versionHash: "f9a6379e140aa854",
       createdAt: "2026-08-03T22:57:40+08:00",
       kind: "game",
       category: "内置小游戏",
@@ -120,18 +121,18 @@ export const BUILTIN_COMPONENT_CENTER = {
       accent: "blue",
       runtimeEngine: "p4-bounded-runtime-v3",
       sceneEngine: "p4-grid-scene-v1",
-      goal: "短按旋钮开始，SW1 向左、SW2 向右移动挡板；接球得分，漏球后结算，再次短按旋钮即可重开。",
-      sharePayload: "分享的是双键接球小游戏，包含左右挡板移动、球体自动反弹、接球计分、漏球结算与旋钮重开。",
-      capabilities: ["scene.grid", "scene.collision", "input.sw1_sw2_encoder", "display.pixel_grid"],
+      goal: "SW1 开始或重开，摇杆左右移动挡板，SW3 退出；接球得分，漏球后结算。",
+      sharePayload: "分享的是双键接球小游戏，包含摇杆左右挡板移动、球体自动反弹、接球计分、漏球结算与 SW1 重开。",
+      capabilities: ["scene.grid", "scene.collision", "input.joystick_sw1_sw3", "display.pixel_grid"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
       dashboard: {
         title: "双键接球",
         eyebrow: "经典电子乒乓",
-        headline: "短按旋钮键开始",
+        headline: "按 SW1 开始",
         metricLabel: "连续接球",
         metricValue: "0",
         metricUnit: "次",
-        footer: "短按旋钮键开始",
+        footer: "SW1开始 · 摇杆左右移动 · SW3退出",
         visualStyle: "pixel",
         visualPalette: "mono",
         visualLayout: "scoreboard",
@@ -149,9 +150,10 @@ export const BUILTIN_COMPONENT_CENTER = {
         ],
       },
       defaultBindings: [
-        { control: "SW1", event: "button.sw1.short_press", action: "shift_left", label: "挡板左移" },
-        { control: "SW2", event: "button.sw2.short_press", action: "shift_right", label: "挡板右移" },
-        { control: "前方旋钮", event: "button.encoder.short_press", action: "start", label: "开始或重开" },
+        { control: "SW1", event: "button.sw1.short_press", action: "start", label: "开始或重开" },
+        { control: "前方摇杆", event: "knob.rotate_ccw", action: "shift_left", label: "挡板左移" },
+        { control: "前方摇杆", event: "knob.rotate_cw", action: "shift_right", label: "挡板右移" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "退出游戏" },
       ],
       screens: [
         {
@@ -184,7 +186,7 @@ export const BUILTIN_COMPONENT_CENTER = {
         headline: "SW1 拍翅开始",
         metricLabel: "得分",
         metricValue: "0",
-        footer: "SW1 拍翅 · 旋钮长按退出",
+        footer: "SW1 拍翅 · SW3 退出",
         visualStyle: "pixel",
         visualPalette: "arcade",
         visualLayout: "arcade",
@@ -192,7 +194,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       },
       defaultBindings: [
         { control: "SW1", event: "button.sw1.short_press", action: "flappy.flap", label: "拍翅" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -214,30 +216,30 @@ export const BUILTIN_COMPONENT_CENTER = {
       status: "available",
       accent: "purple",
       gameType: "blocks",
-      goal: "方块会自动下落；旋钮左右移动，SW1 旋转、SW2 快速落下、SW3 开始或重开，填满一行后自动消除并计分。",
+      goal: "SW1 开始或重开；摇杆左/右移动、上旋转、下快速落下，SW3 退出，填满一行后自动消除并计分。",
       sharePayload: "分享的是像素方块小游戏，包含自动下落、左右移动、旋转、落下、消行和板端计分。",
-      capabilities: ["game.blocks", "runtime.p4_bounded_game", "input.encoder_sw1_sw2_sw3", "display.pixel_grid"],
+      capabilities: ["game.blocks", "runtime.p4_bounded_game", "input.joystick_sw1_sw3", "display.pixel_grid"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
       dashboard: {
         title: "像素方块",
-        eyebrow: "自动下落",
-        headline: "按 SW3 开始",
+        eyebrow: "准备开始",
+        headline: "按 SW1 开始",
         metricLabel: "分数",
         metricValue: "0",
         note: "READY",
-        footer: "SW3开始 · 旋钮左右移 · SW1旋转 · SW2落下",
+        footer: "SW1开始 · 摇杆四向操作 · SW3退出",
         visualStyle: "pixel",
         visualPalette: "arcade",
         visualLayout: "arcade",
         visualSprite: "blocks",
       },
       defaultBindings: [
-        { control: "SW3", event: "button.sw3.short_press", action: "blocks.start", label: "开始/重开" },
-        { control: "前方旋钮", event: "knob.rotate_ccw", action: "blocks.left", label: "向左移动" },
-        { control: "前方旋钮", event: "knob.rotate_cw", action: "blocks.right", label: "向右移动" },
-        { control: "SW1", event: "button.sw1.short_press", action: "blocks.rotate", label: "旋转" },
-        { control: "SW2", event: "button.sw2.short_press", action: "blocks.drop", label: "快速落下" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "SW1", event: "button.sw1.short_press", action: "blocks.start", label: "开始/重开" },
+        { control: "前方摇杆", event: "knob.rotate_ccw", action: "blocks.left", label: "向左移动" },
+        { control: "前方摇杆", event: "knob.rotate_cw", action: "blocks.right", label: "向右移动" },
+        { control: "前方摇杆", event: "joystick.up", action: "blocks.rotate", label: "旋转" },
+        { control: "前方摇杆", event: "joystick.down", action: "blocks.drop", label: "快速落下" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -263,28 +265,28 @@ export const BUILTIN_COMPONENT_CENTER = {
       status: "available",
       accent: "green",
       gameType: "snake",
-      goal: "蛇会持续前进；SW1 左转、SW2 开始或重开、SW3 右转，吃到食物增长并计分，撞墙或撞到自己后结算。",
-      sharePayload: "分享的是像素贪吃蛇小游戏，包含持续移动、三键转向与重开、食物、成长、碰撞和板端计分。",
-      capabilities: ["game.snake", "runtime.p4_bounded_game", "input.sw1_sw2_sw3", "display.pixel_grid"],
+      goal: "蛇会持续前进；SW1 开始或重开，摇杆左右转向，SW3 退出，吃到食物增长并计分，撞墙或撞到自己后结算。",
+      sharePayload: "分享的是像素贪吃蛇小游戏，包含持续移动、摇杆转向、SW1 重开、食物、成长、碰撞和板端计分。",
+      capabilities: ["game.snake", "runtime.p4_bounded_game", "input.joystick_sw1_sw3", "display.pixel_grid"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
       dashboard: {
         title: "像素贪吃蛇",
-        eyebrow: "持续前进",
-        headline: "按 SW2 开始",
+        eyebrow: "准备开始",
+        headline: "按 SW1 开始",
         metricLabel: "食物",
         metricValue: "0",
         note: "READY",
-        footer: "SW1左转 · SW2开始 · SW3右转",
+        footer: "SW1开始 · 摇杆左右转向 · SW3退出",
         visualStyle: "pixel",
         visualPalette: "mint",
         visualLayout: "arcade",
         visualSprite: "snake",
       },
       defaultBindings: [
-        { control: "SW1", event: "button.sw1.short_press", action: "snake.turn_left", label: "向左转" },
-        { control: "SW2", event: "button.sw2.short_press", action: "snake.start", label: "开始/重开" },
-        { control: "SW3", event: "button.sw3.short_press", action: "snake.turn_right", label: "向右转" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "SW1", event: "button.sw1.short_press", action: "snake.start", label: "开始/重开" },
+        { control: "前方摇杆", event: "knob.rotate_ccw", action: "snake.turn_left", label: "向左转" },
+        { control: "前方摇杆", event: "knob.rotate_cw", action: "snake.turn_right", label: "向右转" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -307,7 +309,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       source: "本地状态机",
       status: "available",
       accent: "pink",
-      goal: "25 分钟专注与 5 分钟休息自动循环；SW1 暂停或继续，SW2 跳过当前阶段，SW3 重置本轮。",
+      goal: "25 分钟专注与 5 分钟休息自动循环；SW1 暂停或继续，SW2 跳过，摇杆下重置，SW3 退出。",
       sharePayload: "分享的是番茄钟工具组件，包含专注/休息循环、阶段进度、完成轮次与三键控制。",
       capabilities: ["timer.pomodoro", "runtime.bounded_state", "input.sw1_sw2_sw3", "display.progress"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
@@ -320,7 +322,7 @@ export const BUILTIN_COMPONENT_CENTER = {
         metricUnit: "",
         badge: "0",
         note: "右上显示完成轮次",
-        footer: "SW1暂停 · SW2跳过 · SW3重置",
+        footer: "SW1暂停 · SW2跳过 · 摇杆下重置 · SW3退出",
         progress: { value: 100, label: "本轮剩余" },
         visualStyle: "pixel",
         visualPalette: "sunset",
@@ -330,8 +332,8 @@ export const BUILTIN_COMPONENT_CENTER = {
       defaultBindings: [
         { control: "SW1", event: "button.sw1.short_press", action: "tomato.start_pause", label: "暂停 / 继续" },
         { control: "SW2", event: "button.sw2.short_press", action: "tomato.skip_phase", label: "跳过阶段" },
-        { control: "SW3", event: "button.sw3.short_press", action: "tomato.reset_phase", label: "重置本轮" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "前方摇杆", event: "joystick.down", action: "tomato.reset_phase", label: "重置本轮" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -354,7 +356,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       source: "本地状态机",
       status: "available",
       accent: "green",
-      goal: "每 60 分钟提醒补水；SW1 确认喝水并重置倒计时，SW2 暂停或恢复，SW3 查看今日记录。",
+      goal: "每 60 分钟提醒补水；SW1 确认喝水，SW2 暂停或恢复，摇杆右切换视图，SW3 退出。",
       sharePayload: "分享的是喝水提醒工具组件，包含补水倒计时、到点提醒、暂停恢复和今日喝水次数。",
       capabilities: ["timer.hydration", "runtime.bounded_state", "input.sw1_sw2_sw3", "display.multi_page"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
@@ -367,7 +369,7 @@ export const BUILTIN_COMPONENT_CENTER = {
         metricUnit: "分钟",
         badge: "0",
         note: "每 60 分钟提醒一次",
-        footer: "SW1我喝了 · SW2暂停 · SW3切换",
+        footer: "SW1我喝了 · SW2暂停 · 摇杆右切换 · SW3退出",
         progress: { value: 100, label: "距提醒" },
         visualStyle: "pixel",
         visualPalette: "mint",
@@ -377,8 +379,8 @@ export const BUILTIN_COMPONENT_CENTER = {
       defaultBindings: [
         { control: "SW1", event: "button.sw1.short_press", action: "reminder.acknowledge", label: "我喝了" },
         { control: "SW2", event: "button.sw2.short_press", action: "reminder.pause_resume", label: "暂停 / 恢复" },
-        { control: "SW3", event: "button.sw3.short_press", action: "reminder.switch_view", label: "切换视图" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "前方摇杆", event: "knob.rotate_cw", action: "reminder.switch_view", label: "切换视图" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -408,7 +410,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       source: "桌面 bridge 数据",
       status: "available",
       accent: "blue",
-      goal: "实时展示当前 coding agent 的 Token 统计；SW1 看总量，SW2 看输入，SW3 看输出，并持续显示缓存量。",
+      goal: "实时展示当前 coding agent 的 Token 统计；SW1 看总量，SW2 看输入，摇杆右看输出，SW3 退出。",
       sharePayload: "分享的是 Token 仪表盘工具组件，包含桌面桥接数据来源、总量/输入/输出三页和缓存统计。",
       capabilities: ["bridge.tokenUsage", "runtime.stats", "input.sw1_sw2_sw3", "display.multi_page"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
@@ -420,7 +422,7 @@ export const BUILTIN_COMPONENT_CENTER = {
         metricValue: "—",
         metricUnit: "TOKEN",
         note: "缓存 —",
-        footer: "SW1总量 · SW2输入 · SW3输出",
+        footer: "SW1总量 · SW2输入 · 摇杆右输出 · SW3退出",
         visualStyle: "pixel",
         visualPalette: "arcade",
         visualLayout: "tool",
@@ -429,8 +431,8 @@ export const BUILTIN_COMPONENT_CENTER = {
       defaultBindings: [
         { control: "SW1", event: "button.sw1.short_press", action: "stats.show_total", label: "总量" },
         { control: "SW2", event: "button.sw2.short_press", action: "stats.show_input", label: "输入" },
-        { control: "SW3", event: "button.sw3.short_press", action: "stats.show_output", label: "输出" },
-        { control: "前方旋钮", event: "button.encoder.long_press", action: "page_main", label: "返回桌宠" },
+        { control: "前方摇杆", event: "knob.rotate_cw", action: "stats.show_output", label: "输出" },
+        { control: "SW3", event: "button.sw3.short_press", action: "page_main", label: "返回桌宠" },
       ],
       screens: [
         {
@@ -447,10 +449,10 @@ export const BUILTIN_COMPONENT_CENTER = {
   ],
   hardwareControls: [
     {
-      id: "knob",
-      name: "屏幕前红色编码旋钮",
-      events: ["knob.rotate_cw", "knob.rotate_ccw", "knob.rotate_cw / knob.rotate_ccw"],
-      productMeaning: "系统页面仍用于音量；进入负一屏后可由已安装组件绑定为移动或转向动作。",
+      id: "joystick",
+      name: "屏幕前四向摇杆",
+      events: ["joystick.up", "joystick.down", "knob.rotate_cw", "knob.rotate_ccw"],
+      productMeaning: "进入组件后由组件绑定为移动、转向、旋转、落下或切换视图等方向动作。",
     },
     {
       id: "screen-region",

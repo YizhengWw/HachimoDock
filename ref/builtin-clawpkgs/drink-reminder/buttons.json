@@ -12,14 +12,14 @@
     "label": "暂停 / 恢复"
   },
   {
-    "control": "SW3",
-    "event": "button.sw3.short_press",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw",
     "action": "reminder.switch_view",
     "label": "切换视图"
   },
   {
-    "control": "前方旋钮",
-    "event": "button.encoder.long_press",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
     "action": "page_main",
     "label": "返回桌宠"
   }

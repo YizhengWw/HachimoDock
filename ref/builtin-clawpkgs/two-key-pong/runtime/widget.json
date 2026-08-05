@@ -14,11 +14,11 @@
   "dashboard": {
     "title": "双键接球",
     "eyebrow": {"switch_state":{"ready":"经典电子乒乓","playing":"经典电子乒乓","result":"本局结束"}},
-    "headline": {"switch_state":{"ready":"短按旋钮键开始","playing":"守住底线","result":"漏球了"}},
+    "headline": {"switch_state":{"ready":"按 SW1 开始","playing":"守住底线","result":"漏球了"}},
     "metricLabel": "连续接球",
     "metricValue": {"var":"score"},
     "metricUnit": "次",
-    "footer": {"switch_state":{"ready":"短按旋钮键开始","playing":"SW1 左移 · SW2 右移","result":"短按旋钮键开始"}},
+    "footer": {"switch_state":{"ready":"SW1开始 · 摇杆左右移动 · SW3退出","playing":"摇杆左右移动 · SW3退出","result":"SW1重开 · SW3退出"}},
     "visualStyle": "pixel",
     "visualPalette": "mono",
     "visualLayout": "scoreboard",

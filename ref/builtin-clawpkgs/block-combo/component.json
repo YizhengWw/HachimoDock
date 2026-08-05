@@ -2,7 +2,7 @@
   "id": "block-combo",
   "name": "像素方块",
   "kind": "game",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "author": "openclaw",
-  "description": "会自动下落、移动、旋转、落下和消行的板端像素方块游戏。"
+  "description": "SW1 开始或重开，摇杆左/右移动、上旋转、下快速落下，SW3 退出的像素方块游戏。"
 }

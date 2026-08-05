@@ -63,7 +63,7 @@
     },
     "headline": {
       "switch_state": {
-        "ready": "按 SW2 开始",
+        "ready": "按 SW1 开始",
         "playing": "寻找食物",
         "result": "碰撞结束"
       }
@@ -81,9 +81,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW2开始 · 旋钮长按退出",
-        "playing": "SW1左转 · SW3右转 · 旋钮长按退出",
-        "result": "SW2重开 · 旋钮长按退出"
+        "ready": "SW1开始 · 摇杆左右转向 · SW3退出",
+        "playing": "摇杆左右转向 · SW3退出",
+        "result": "SW1重开 · SW3退出"
       }
     },
     "visualStyle": "pixel",

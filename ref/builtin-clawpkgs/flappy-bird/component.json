@@ -2,7 +2,7 @@
   "id": "flappy-bird",
   "name": "Flappy Bird",
   "kind": "game",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "openclaw",
-  "description": "正统 Flappy Bird 玩法：SW1 拍翅，持续重力与管道横移，碰撞结束，穿管得分。"
+  "description": "正统 Flappy Bird 玩法：SW1 拍翅、开始或重开，SW3 退出，碰撞结束，穿管得分。"
 }

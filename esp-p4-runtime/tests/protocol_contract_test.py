@@ -2,7 +2,7 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
-visual-preset parity, including the built-in two-key catch game.
+visual-preset parity, including standardized SW1/SW3/joystick builtin controls.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
@@ -411,7 +411,7 @@ def test_builtin_tool_widgets_declare_bounded_completion_cycles():
     assert all(set(page) == {"id"} for page in token_usage["pages"])
 
 
-def test_builtin_tool_widgets_use_three_keys_and_fit_p4_limits():
+def test_builtin_tool_widgets_use_sw3_exit_and_fit_p4_limits():
     expected_actions = {
         "tomato-clock": [
             "tomato.start_pause",
@@ -428,6 +428,11 @@ def test_builtin_tool_widgets_use_three_keys_and_fit_p4_limits():
             "stats.show_input",
             "stats.show_output",
         ],
+    }
+    displaced_action_events = {
+        "tomato-clock": "joystick.down",
+        "drink-reminder": "knob.rotate_cw",
+        "token-usage": "knob.rotate_cw",
     }
     kinds = {
         "two-key-pong": "game",
@@ -467,12 +472,16 @@ def test_builtin_tool_widgets_use_three_keys_and_fit_p4_limits():
             "button.sw2.short_press",
             "button.sw3.short_press",
         ]
-        assert [binding["action"] for binding in switch_bindings] == actions
-        assert any(
-            binding["event"] == "button.encoder.long_press"
-            and binding["action"] == "page_main"
+        assert [binding["action"] for binding in switch_bindings] == [
+            actions[0],
+            actions[1],
+            "page_main",
+        ]
+        assert next(
+            binding["event"]
             for binding in buttons
-        )
+            if binding["action"] == actions[2]
+        ) == displaced_action_events[widget_id]
         assert runtime["dashboard"]["visualStyle"] == "pixel"
         assert runtime["dashboard"]["visualLayout"] in {"arcade", "scoreboard", "tool"}
         assert "visualPalette" in runtime["dashboard"]
@@ -682,15 +691,32 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             for binding in buttons
             if binding["event"].endswith(".short_press")
         }
-        assert {"SW1", "SW2", "SW3"} <= switch_controls
+        assert switch_controls == {"SW1", "SW3"}
         actions = [binding["action"] for binding in buttons]
         assert len(actions) == len(set(actions))
+    block_buttons = json.loads(
+        read_workspace("ref/builtin-clawpkgs/block-combo/buttons.json")
+    )
+    assert {
+        binding["action"]: binding["event"] for binding in block_buttons
+    } == {
+        "blocks.start": "button.sw1.short_press",
+        "blocks.left": "knob.rotate_ccw",
+        "blocks.right": "knob.rotate_cw",
+        "blocks.rotate": "joystick.up",
+        "blocks.drop": "joystick.down",
+        "page_main": "button.sw3.short_press",
+    }
     flappy_buttons = json.loads(
         read_workspace("ref/builtin-clawpkgs/flappy-bird/buttons.json")
     )
     assert [binding["action"] for binding in flappy_buttons] == [
         "flappy.flap",
         "page_main",
+    ]
+    assert [binding["event"] for binding in flappy_buttons] == [
+        "button.sw1.short_press",
+        "button.sw3.short_press",
     ]
 
 

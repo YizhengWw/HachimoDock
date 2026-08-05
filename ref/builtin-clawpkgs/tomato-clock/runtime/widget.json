@@ -119,10 +119,10 @@
     },
     "footer": {
       "switch_state": {
-        "focus": "SW1暂停 · SW2跳过 · SW3重置",
-        "focus_paused": "SW1继续 · SW2跳过 · SW3重置",
-        "rest": "SW1暂停 · SW2跳过 · SW3重置",
-        "rest_paused": "SW1继续 · SW2跳过 · SW3重置"
+        "focus": "SW1暂停 · SW2跳过 · 摇杆下重置 · SW3退出",
+        "focus_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · SW3退出",
+        "rest": "SW1暂停 · SW2跳过 · 摇杆下重置 · SW3退出",
+        "rest_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · SW3退出"
       }
     },
     "progress": {

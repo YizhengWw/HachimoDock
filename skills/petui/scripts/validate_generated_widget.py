@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a generated petui component against the current P4 contract."""
+"""Validate generated petui packages, including joystick and SW3 exit rules."""
 
 from __future__ import annotations
 
@@ -130,6 +130,12 @@ SHOOTER_CLAIMS = (
     "shoot", "firing", "bullet", "enemy fighter", "lane fighter", "shooter",
 )
 RESERVED_PAGE_MAIN = {
+    "action": "page_main",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
+    "label": "退出组件",
+}
+LEGACY_PAGE_MAIN = {
     "action": "page_main",
     "control": "前方旋钮",
     "event": "button.encoder.long_press",
@@ -1000,8 +1006,8 @@ def validate_buttons(
         if isinstance(label, str) and utf8_size(label) > 30:
             errors.append(f"buttons.json[{index}].label 超过 30 UTF-8 字节")
         if isinstance(event, str):
-            if event == "button.sw3.short_press":
-                errors.append("button.sw3.short_press 保留给设备全局返回，组件不得占用")
+            if event == "button.sw3.short_press" and action != "page_main":
+                errors.append("button.sw3.short_press 只能用于 page_main 退出组件")
             if SW_HOLD_PATTERN.fullmatch(event):
                 errors.append(f"SW1/SW2/SW3 不支持长按或 hold: {event}")
             if event not in ALLOWED_EVENTS:
@@ -1014,13 +1020,24 @@ def validate_buttons(
                 occupied_events.add(slot)
         if action == "page_main":
             page_main_count += 1
-            for field, expected in RESERVED_PAGE_MAIN.items():
-                if binding.get(field) != expected:
-                    errors.append(f'page_main 的 {field} 必须为 "{expected}"')
+            is_current_exit = all(
+                binding.get(field) == expected
+                for field, expected in RESERVED_PAGE_MAIN.items()
+                if field != "label"
+            )
+            is_legacy_exit = all(
+                binding.get(field) == expected
+                for field, expected in LEGACY_PAGE_MAIN.items()
+                if field != "label"
+            )
+            if not (is_current_exit or is_legacy_exit):
+                errors.append("page_main 必须使用 SW3 退出映射或受支持的旧版旋钮返回映射")
     if len(actions) != len(set(actions)):
         errors.append("buttons.json.action 必须唯一")
     if page_main_count > 1:
         errors.append("buttons.json 最多包含一个兼容用 page_main")
+    if page_main_count == 0:
+        errors.append("buttons.json 必须包含 page_main 退出映射（新包使用 SW3）")
     normal_actions = set(actions) - {"page_main"}
     missing_transitions = sorted(normal_actions - transition_actions)
     if missing_transitions:

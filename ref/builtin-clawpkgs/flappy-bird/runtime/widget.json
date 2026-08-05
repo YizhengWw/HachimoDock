@@ -46,9 +46,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW1 拍翅 · 长按退出",
-        "playing": "SW1 拍翅 · 长按退出",
-        "result": "SW1 重开 · 长按退出"
+        "ready": "SW1 拍翅 · SW3 退出",
+        "playing": "SW1 拍翅 · SW3 退出",
+        "result": "SW1 重开 · SW3 退出"
       }
     },
     "visualStyle": "pixel",

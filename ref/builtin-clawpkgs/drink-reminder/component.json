@@ -2,7 +2,7 @@
   "id": "drink-reminder",
   "name": "喝水提醒",
   "kind": "tool",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "openclaw",
-  "description": "60 分钟补水倒计时，到点进入提醒状态，并可查看今日记录、暂停或确认喝水。"
+  "description": "60 分钟补水倒计时：SW1 确认喝水、SW2 暂停、摇杆右切换视图、SW3 退出。"
 }

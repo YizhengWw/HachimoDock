@@ -1,6 +1,7 @@
 """
 [Input] Factory image sources, built-in Terrier media, and built-in P4 component packages.
-[Output] Contract checks for hashing, H.264, component preload, layout, and export settings.
+[Output] Contract checks for hashing, H.264, component preload/control mappings,
+layout, and export settings.
 [Pos] Unit coverage for ESP32-P4 factory provisioning.
 [Sync] If this file changes, update esp-p4-runtime/.folder.md.
 """
@@ -219,9 +220,16 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     assert two_key_widget["engine"] == "p4-bounded-runtime-v3"
     assert two_key_widget["scene"]["grid"] == {"width": 16, "height": 16}
     assert [binding["action"] for binding in two_key_buttons] == [
+        "start",
         "shift_left",
         "shift_right",
-        "start",
+        "page_main",
+    ]
+    assert [binding["event"] for binding in two_key_buttons] == [
+        "button.sw1.short_press",
+        "knob.rotate_ccw",
+        "knob.rotate_cw",
+        "button.sw3.short_press",
     ]
 
     token_widget = json.loads(
