@@ -1,6 +1,6 @@
 /*
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
- * [Output] Native consent with activation-ordered Accessibility-pane routing, activation-gated Chromium AX priming, stable/rebindable visible-composer submission with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
+ * [Output] Native consent with activation-ordered Accessibility-pane routing, activation-gated Chromium AX priming, stable/rebindable visible-composer submission through a composer-adjacent send control with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -51,7 +51,7 @@ const MAX_TREE_DEPTH: usize = 64;
 const MAX_ANCESTOR_DEPTH: usize = 20;
 const SESSION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_READBACK_TIMEOUT: Duration = Duration::from_millis(500);
-const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(1_500);
+const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(3_000);
 const DEEPLINK_FOCUS_DELAY: Duration = Duration::from_millis(450);
 const COMPOSER_FOCUS_DELAY: Duration = Duration::from_millis(120);
 const KEYBOARD_READBACK_DELAY: Duration = Duration::from_millis(80);
@@ -1859,6 +1859,53 @@ fn send_button_score(element: &AXUIElement) -> Option<u8> {
     None
 }
 
+fn send_button_bounds_match_composer(
+    composer: (i64, i64, i64, i64),
+    button: (i64, i64, i64, i64),
+) -> bool {
+    let (composer_x, composer_y, composer_width, composer_height) = composer;
+    let (button_x, button_y, button_width, button_height) = button;
+    if composer_width <= 0 || composer_height <= 0 || button_width <= 0 || button_height <= 0 {
+        return false;
+    }
+
+    let composer_right = composer_x.saturating_add(composer_width);
+    let composer_bottom = composer_y.saturating_add(composer_height);
+    let button_right = button_x.saturating_add(button_width);
+    let button_center_x = button_x.saturating_add(button_width / 2);
+    let button_center_y = button_y.saturating_add(button_height / 2);
+    let vertical_margin = composer_height.clamp(24, 56);
+
+    // Codex and Claude place the send control inside, or immediately to the
+    // right of, the bottom composer. Image-result cards can also expose a
+    // generic “Send” action, but it is vertically separated from the composer.
+    button_center_y >= composer_y.saturating_sub(vertical_margin)
+        && button_center_y <= composer_bottom.saturating_add(vertical_margin)
+        && button_right >= composer_x.saturating_sub(24)
+        && button_x <= composer_right.saturating_add(120)
+        && button_center_x >= composer_x.saturating_add(composer_width / 3)
+}
+
+fn elements_share_near_ancestor(left: &AXUIElement, right: &AXUIElement) -> bool {
+    let left_ancestors = ancestors(left);
+    let right_ancestors = ancestors(right);
+    left_ancestors.iter().take(5).any(|left_ancestor| {
+        right_ancestors
+            .iter()
+            .take(5)
+            .any(|right_ancestor| right_ancestor == left_ancestor)
+    })
+}
+
+fn send_button_matches_composer(button: &AXUIElement, composer: &AXUIElement) -> bool {
+    match (rounded_bounds(composer), rounded_bounds(button)) {
+        (Some(composer_bounds), Some(button_bounds)) => {
+            send_button_bounds_match_composer(composer_bounds, button_bounds)
+        }
+        _ => elements_share_near_ancestor(button, composer),
+    }
+}
+
 fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
     let result = unsafe { AXUIElementPostKeyboardEvent(app.as_concrete_TypeRef(), 13, 36, true) };
     if result != kAXErrorSuccess {
@@ -1887,6 +1934,7 @@ fn submit_target(target: &ComposerTarget) -> Result<(), String> {
             && element_is_enabled(element)
             && element_supports_press(element)
             && send_button_score(element).is_some()
+            && send_button_matches_composer(element, &target.composer)
     })
     .into_iter()
     .filter_map(|button| send_button_score(&button).map(|score| (score, button)))
@@ -1907,7 +1955,7 @@ fn submit_target(target: &ComposerTarget) -> Result<(), String> {
         press_enter(target.agent, &target.app)?;
     } else {
         return Err(format!(
-            "{} macOS 输入框附近存在多个可用发送按钮",
+            "{} macOS 主输入框附近存在多个可用发送按钮",
             target.agent.label()
         ));
     }
@@ -2172,6 +2220,27 @@ mod tests {
         assert!(is_placeholder("Type / for commands"));
         assert!(is_placeholder("Write a message..."));
         assert!(!is_placeholder("existing draft"));
+    }
+
+    #[test]
+    fn send_button_geometry_accepts_only_composer_adjacent_controls() {
+        let composer = (300, 800, 720, 96);
+        assert!(send_button_bounds_match_composer(
+            composer,
+            (944, 824, 48, 48)
+        ));
+        assert!(send_button_bounds_match_composer(
+            composer,
+            (1008, 824, 48, 48)
+        ));
+        assert!(!send_button_bounds_match_composer(
+            composer,
+            (944, 360, 48, 48)
+        ));
+        assert!(!send_button_bounds_match_composer(
+            composer,
+            (80, 824, 48, 48)
+        ));
     }
 
     #[test]
