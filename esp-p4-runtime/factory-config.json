@@ -24,7 +24,7 @@
       "drink-reminder",
       "token-usage"
     ],
-    "defaultActiveId": "flappy-bird",
+    "defaultActiveId": "two-key-pong",
     "maxInstalled": 16,
     "widgetMaxBytes": 4095,
     "buttonsMaxBytes": 2047

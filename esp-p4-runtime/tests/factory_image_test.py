@@ -177,7 +177,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     spiffs_tree.mkdir()
     summary = factory.build_builtin_component_tree(RUNTIME, config, spiffs_tree)
     assert summary["count"] == len(expected_ids)
-    assert summary["defaultActiveId"] == "flappy-bird"
+    assert summary["defaultActiveId"] == "two-key-pong"
     assert summary["physicalFiles"] == len(expected_ids) * 2 + 1
     assert not (spiffs_tree / "p4-miniapp-id.txt").exists()
 
@@ -186,7 +186,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     )
     assert catalog["version"] == 2
     assert catalog["sequence"] == 1
-    assert catalog["activeWidgetId"] == "flappy-bird"
+    assert catalog["activeWidgetId"] == "two-key-pong"
     assert [item["widgetId"] for item in catalog["items"]] == expected_ids
     assert [item["slot"] for item in catalog["items"]] == list(range(len(expected_ids)))
     assert [item["packageGeneration"] for item in catalog["items"]] == [0] * len(expected_ids)

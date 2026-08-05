@@ -23,7 +23,7 @@ from serial.tools import list_ports
 ROOT = Path(__file__).resolve().parents[1]
 BUILTINS = ROOT / "ref" / "builtin-clawpkgs"
 SUPPORTED_USB_VIDS = {0x1A86, 0x303A, 0x10C4, 0x0403}
-BAUD = 3_000_000
+BAUD = 4_000_000
 WIDGET_CHUNK_MAX_ATTEMPTS = 3
 WIDGET_COMMIT_ACK_TIMEOUT = 15.0
 
@@ -116,6 +116,19 @@ class P4Client:
             self.send("system/heartbeat", {"desktopDeviceId": self.desktop_id})
             self.last_heartbeat = now
 
+    def send_handshake(self) -> None:
+        self.send("bind", {"desktopDeviceId": self.desktop_id})
+        legacy_hello = {
+            "v": 1,
+            "type": "hello",
+            "desktopDeviceId": self.desktop_id,
+            "namespace": "desk",
+        }
+        self.serial.write(
+            (json.dumps(legacy_hello, separators=(",", ":")) + "\n").encode("utf-8")
+        )
+        self.serial.flush()
+
     def read_message(self, deadline: float) -> dict | None:
         while time.monotonic() < deadline:
             self.heartbeat()
@@ -147,7 +160,7 @@ class P4Client:
         while time.monotonic() < deadline:
             now = time.monotonic()
             if now >= next_probe:
-                self.send("bind", {"desktopDeviceId": self.desktop_id})
+                self.send_handshake()
                 self.heartbeat(force=True)
                 next_probe = now + 1.0
             message = self.read_message(deadline)

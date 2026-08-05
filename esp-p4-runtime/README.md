@@ -185,8 +185,7 @@ cd esp-p4-runtime
 The preloaded component catalog contains Two-key Pong first, followed by Flappy
 Bird, Blocks, Snake, Tomato Clock, Drink Reminder, and Token Usage. The removed
 Falling Catch package is not provisioned. The firmware starts on the normal pet
-page; Flappy Bird remains the initial component selected inside Component
-Center.
+page; Two-key Pong is the initial component selected inside Component Center.
 
 `factory_upload` is intentionally destructive: because the merged image starts
 at `0x0`, it resets NVS, the inactive OTA slot, previous components, and both
