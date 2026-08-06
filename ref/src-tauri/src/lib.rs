@@ -18,8 +18,9 @@
  *          overrides plus explicit target-bound transactional removal and
  *          live USB/SSH installed-component inventory,
  *          runtime-aware Linux/P4 input configuration with
- *          backend-held ACK confirmation, board-authoritative config reads,
- *          and configurable P4 enter/back navigation,
+ *          transfer-serialized reads/writes, backend-held ACK confirmation,
+ *          client-authoritative reconciliation, and configurable P4
+ *          two-page/enter/back navigation,
  *          P4 hardware Agent-event injection,
  *          Agent-switch-isolated selected-Session title/position/display-enable
  *          and active-ID sync to the P4 display plus
@@ -3845,7 +3846,7 @@ fn send_button_config_and_wait_for_ack(
 
 #[tauri::command]
 #[allow(non_snake_case)]
-fn button_config_signal(
+async fn button_config_signal(
     app_handle: tauri::AppHandle,
     boardDeviceId: String,
     bindings: Vec<ButtonConfigBinding>,
@@ -3904,28 +3905,40 @@ fn button_config_signal(
         "bindings": normalized_bindings,
     });
 
-    let (ack_payload, binding_count) = match send_button_config_and_wait_for_ack(
-        usb_manager.inner(),
-        &boardDeviceId,
-        command_topic,
-        &request_id,
-        &command_payload,
-        normalized_bindings.len(),
-    ) {
-        Ok(result) => result,
-        Err(error) if error == BUTTON_CONFIG_ACK_TIMEOUT_MESSAGE => {
-            reconnect_usb_serial_for_command(&app_handle, usb_manager.inner())?;
-            send_button_config_and_wait_for_ack(
-                usb_manager.inner(),
-                &boardDeviceId,
+    let manager = usb_manager.inner().clone();
+    let wait_app_handle = app_handle.clone();
+    let wait_board_device_id = boardDeviceId.clone();
+    let wait_request_id = request_id.clone();
+    let wait_command_payload = command_payload.clone();
+    let fallback_binding_count = normalized_bindings.len();
+    let (ack_payload, binding_count) = tauri::async_runtime::spawn_blocking(move || {
+        manager.with_asset_transfer_guard(|| {
+            match send_button_config_and_wait_for_ack(
+                &manager,
+                &wait_board_device_id,
                 command_topic,
-                &request_id,
-                &command_payload,
-                normalized_bindings.len(),
-            )?
-        }
-        Err(error) => return Err(error),
-    };
+                &wait_request_id,
+                &wait_command_payload,
+                fallback_binding_count,
+            ) {
+                Ok(result) => Ok(result),
+                Err(error) if error == BUTTON_CONFIG_ACK_TIMEOUT_MESSAGE => {
+                    reconnect_usb_serial_for_command(&wait_app_handle, &manager)?;
+                    send_button_config_and_wait_for_ack(
+                        &manager,
+                        &wait_board_device_id,
+                        command_topic,
+                        &wait_request_id,
+                        &wait_command_payload,
+                        fallback_binding_count,
+                    )
+                }
+                Err(error) => Err(error),
+            }
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())??;
 
     Ok(serde_json::json!({
         "ok": true,

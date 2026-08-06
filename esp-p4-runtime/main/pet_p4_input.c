@@ -2,9 +2,9 @@
  * [Input] Debounced SW1-SW3/shared center-key/legacy encoder GPIO events,
  *         calibrated four-direction joystick ADC samples, and validated
  *         desktop bindings.
- * [Output] Persisted configurable input actions, four-way catalog navigation,
- *          center-aware joystick decoding and ADC diagnostics with legacy encoder-event aliases, immediate visible-session queue selection
- *          with exact selected-session event metadata, and component-local
+ * [Output] Persisted configurable input actions, up/down catalog selection,
+ *          left/right two-page navigation, center-aware joystick decoding and
+ *          ADC diagnostics with legacy encoder-event aliases, and component-local
  *          button routing that is active only while the component page is
  *          open, while the persisted global page-back gesture always wins and
  *          every other unmapped system-navigation gesture is suppressed, and
@@ -1009,27 +1009,20 @@ static bool apply_local_action(
   }
   if (strcmp(binding->action, "session_next") == 0
       || strcmp(binding->action, "session_previous") == 0) {
-    if (state->session_queue_count == 0) return false;
-    unsigned int selected = state->current_session_index > 0
-      ? state->current_session_index - 1
-      : 0;
-    if (selected >= state->session_queue_count) selected = 0;
-    if (strcmp(binding->action, "session_previous") == 0) {
-      selected = selected == 0 ? state->session_queue_count - 1 : selected - 1;
-    } else {
-      selected = (selected + 1) % state->session_queue_count;
-    }
-    state->current_session_index = selected + 1;
-    state->current_session_count = state->session_queue_count;
+    const bool main_open = strcmp(state->screen_page, "main") == 0;
+    const bool center_open = strcmp(state->screen_page, "components") == 0;
+    if (!main_open && !center_open) return false;
+    if (main_open) pet_p4_miniapp_catalog_focus_active();
     copy_text(
-      state->current_session_id,
-      sizeof(state->current_session_id),
-      state->session_queue[selected].id
+      state->screen_page,
+      sizeof(state->screen_page),
+      main_open ? "components" : "main"
     );
     copy_text(
-      state->current_session_title,
-      sizeof(state->current_session_title),
-      state->session_queue[selected].title
+      action_override,
+      action_override_size,
+      strcmp(binding->action, "session_previous") == 0
+        ? "page_previous" : "page_next"
     );
     state->last_update_ms = ts_ms;
     return true;
@@ -1037,11 +1030,11 @@ static bool apply_local_action(
   if (strcmp(binding->action, "page_toggle") == 0) {
     const bool app_open = strcmp(state->screen_page, "app") == 0;
     const bool center_open = strcmp(state->screen_page, "components") == 0;
-    if (!app_open && !center_open && !pet_p4_miniapp_active()) return false;
+    if (!app_open && !center_open) pet_p4_miniapp_catalog_focus_active();
     copy_text(
       state->screen_page,
       sizeof(state->screen_page),
-      app_open ? "main" : (pet_p4_miniapp_active() ? "app" : "main")
+      app_open ? "components" : (center_open ? "main" : "components")
     );
     state->last_update_ms = ts_ms;
     return true;
@@ -1051,15 +1044,14 @@ static bool apply_local_action(
     if (strcmp(state->screen_page, "components") == 0) {
       if (!pet_p4_miniapp_catalog_activate_selected()) return false;
       copy_text(state->screen_page, sizeof(state->screen_page), "app");
-    } else {
-      pet_p4_miniapp_catalog_focus_active();
-      copy_text(state->screen_page, sizeof(state->screen_page), "components");
-    }
+    } else return false;
     state->last_update_ms = ts_ms;
     return true;
   }
   if (strcmp(binding->action, "page_back") == 0) {
     const bool app_open = strcmp(state->screen_page, "app") == 0;
+    const bool center_open = strcmp(state->screen_page, "components") == 0;
+    if (!app_open && !center_open) return false;
     if (app_open) pet_p4_miniapp_catalog_focus_active();
     copy_text(
       state->screen_page,
@@ -1117,6 +1109,8 @@ static bool component_system_action(const char *action) {
   return action
     && (
       strcmp(action, "page_toggle") == 0
+      || strcmp(action, "session_next") == 0
+      || strcmp(action, "session_previous") == 0
       || strcmp(action, "page_enter") == 0
       || strcmp(action, "page_back") == 0
       || strcmp(action, "page_main") == 0
@@ -1366,13 +1360,11 @@ void pet_p4_input_process(
         case PET_P4_JOYSTICK_LEFT:
           event_name = "knob.rotate_ccw";
           gesture = "left";
-          catalog_delta = -1;
           event.delta = -1;
           break;
         case PET_P4_JOYSTICK_RIGHT:
           event_name = "knob.rotate_cw";
           gesture = "right";
-          catalog_delta = 1;
           event.delta = 1;
           break;
         default:

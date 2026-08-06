@@ -253,11 +253,12 @@ static void process_touch_event(
   bool handled_locally = false;
   char action[PET_P4_MINIAPP_ACTION_MAX] = {0};
   if (gesture_is_swipe(event->gesture)) {
-    const char *next_page = state
-      && strcmp(state->screen_page, "main") == 0
-      && pet_p4_miniapp_active()
-        ? "app" : "main";
+    const bool main_open = state && strcmp(state->screen_page, "main") == 0;
+    const char *next_page = main_open ? "components"
+      : state && strcmp(state->screen_page, "app") == 0 ? "components"
+      : "main";
     if (state) {
+      if (main_open) pet_p4_miniapp_catalog_focus_active();
       snprintf(state->screen_page, sizeof(state->screen_page), "%s", next_page);
       state->last_update_ms += 1;
       handled_locally = true;

@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.38-p4",
-    "buildId": "0.7.38-p4+290f402abcd1",
+    "fw": "0.7.39-p4",
+    "buildId": "0.7.39-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 6,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 6,
-    "buildId": "0.7.38-p4+0123456789ab"
+    "buildId": "0.7.39-p4+0123456789ab"
   }
 }
 ```
@@ -337,12 +337,10 @@ PC to board:
   arrives for 12 seconds; already terminal cards keep only their original
   remaining 60-second deadline. This protects the screen from stale working
   cards if the desktop bridge stops publishing while other USB traffic remains.
-  Encoder previous/next actions rotate immediately across this exact visible
-  queue, including retained cards. The resulting `input/event` includes
-  `sessionId`, `sessionTitle`, `sessionIndex`, and `sessionCount`, allowing the
-  desktop to route and locate the same card without reconstructing a different
-  active-only index. A following `session/current` refresh preserves a selected
-  retained card by its ID.
+  Session cards remain display-only on current joystick hardware. Device
+  previous/next actions now switch the two peer pages instead of mutating the
+  selected Session; desktop Session routing is therefore not coupled to page
+  navigation.
   On a followed-Agent change, the desktop sends the new `agentId` with an empty
   `sessions`/`activeSessionIds` snapshot before loading that Agent's queue.
   Firmware treats this as an immediate cross-Agent clear. `displayEnabled:
@@ -496,18 +494,16 @@ Current Session example:
 }
 ```
 
-For `session_previous` and `session_next`, current firmware sets
-`handledLocally: true` and adds the exact visible selection:
+For the compatibility action IDs `session_previous` and `session_next`, current
+firmware switches `main` and `components`, marks the event handled locally, and
+reports the resolved page action so the desktop does not also change Session:
 
 ```json
 {
   "topic": "input/event",
   "payload": {
-    "action": "session_next",
-    "sessionId": "019f...",
-    "sessionTitle": "完善会话切换",
-    "sessionIndex": 2,
-    "sessionCount": 3,
+    "action": "page_next",
+    "context": "components",
     "handledLocally": true
   }
 }
@@ -610,12 +606,12 @@ Allowed actions are `disabled`, `voice_ptt`, `agent_enter`, `agent_prompt`,
 `page_toggle`, `page_enter`, `page_back`, `page_main`, and `page_app`.
 The firmware keeps this full set for stored-config and component compatibility.
 Pet Manager's P4 button menu exposes only custom prompt, voice input,
-previous/next session, clear sessions, component center, confirm, back/cancel,
+previous/next page, clear sessions, component center, confirm, back/cancel,
 and unbound.
 
 SW3 short press and joystick center short press both default to `page_enter`:
-from `main` either one opens `components`, and from `components` it activates
-the selection and opens `app`. SW1 short press defaults to the global
+they activate the selection and open `app` only from `components`; they do not
+open the catalog from `main`. SW1 short press defaults to the global
 `page_back` path. Center long press and the new up/down directions default to
 `disabled`; all remain editable and are persisted with the rest of the input
 map. SW2 short press opens the component center. Other SW short/long gestures
@@ -623,32 +619,35 @@ default to `disabled`, except SW1 long
 press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
 and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
 so old component packages continue to work without conversion. Inside the
-catalog, left/up selects the previous entry and right/down selects the next;
-outside the catalog, left/right retain their previous/next-session defaults.
+catalog, up/down selects the previous/next entry. Left/right switches the two
+peer pages (`main` and `components`) and updates the matching two-dot indicator;
+while `app` is open, component bindings retain priority.
 New packages may bind `joystick.up` and `joystick.down`.
 
-`page_toggle` switches between `main` and
-the active `app`; `page_main` and `page_app` remain accepted for older persisted
+`page_toggle` switches between `main` and `components`; from `app` it returns to
+`components`. `page_main` and `page_app` remain accepted for older persisted
 device configs. Component packages no longer own navigation: PC downlink removes
 legacy `page_main/page_back` records, and firmware ignores any such records that
 remain in an already-installed package. While `app` is open, whichever persisted
 global event currently maps to `page_back` is resolved before component gameplay
 bindings, so changing the global exit key immediately changes every component.
-The default remains SW1 short press; SW1 long-press PTT is unaffected. The two session
-actions move through the current live conversation queue; they do not persist
-or configure a fixed Session id. The two mini-app proxy actions only run while
+The default remains SW1 short press; SW1 long-press PTT is unaffected. The two
+legacy-named session actions now move between the two peer pages. The two mini-app proxy actions only run while
 the app page is open and dispatch its existing `screen.region.tap` or
 `screen.region.long_press` binding. Custom values are limited to 159 UTF-8 bytes.
 The board replies on `input/config-ack`; legacy config uses `button-config-ack`.
-The desktop reads the authoritative NVS-backed map after opening the device
-dashboard or reconnecting USB:
+The desktop reads the NVS-backed device map after opening the dashboard or
+reconnecting USB. This read waits for any firmware or asset transaction to
+finish before using the serial link:
 
 ```json
 {"topic":"input/config-query","payload":{"requestId":"device-request-42"}}
 ```
 
 The board correlates the response and returns the complete persisted map. The
-desktop updates its in-memory model and local cache only after this response:
+desktop compares it with the complete PC mapping; any difference is resolved by
+writing the PC mapping to the board. The board response never replaces the PC
+cache, and a failed read falls back to the same full PC write:
 
 ```json
 {

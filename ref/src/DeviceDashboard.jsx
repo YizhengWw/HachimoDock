@@ -5,9 +5,9 @@
  *          joystick center short/long and four directions), an internal hold transport for PTT,
  *          shared voice enablement across button and assistant surfaces,
  *          fully repeatable hardware actions with optional exit plus versioned default migration,
- *          bounded Agent prompt/session-switch bindings, ACK-gated USB config,
+ *          bounded Agent prompt/top-level-page bindings, ACK-gated USB config,
  *          exact-board identity on emergency appearance downlinks,
- *          board-authoritative button-config hydration with local caching,
+ *          client-authoritative button reconciliation after serialized board reads,
  *          deduplicated managed-bridge recovery/input injection, device-side Session title sync,
  *          Agent-owned Session state that cannot leak across follow changes,
  *          with polling/reduction and device synchronization delegated to focused hooks,
@@ -119,11 +119,11 @@ export const VOICE_BUTTON_OPTIONS = P4_VOICE_BUTTON_OPTIONS;
 export const BUTTON_FUNCTION_OPTIONS = [
   { id: "agent_prompt", label: "发送自定义指令", detail: "按下对应手势后，将该按钮下方填写的指令直接发送给当前 Code Agent。" },
   { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后提交；可以绑定到多个长按手势。" },
-  { id: "session_previous", label: "上一个", detail: "切换到当前 Agent 的上一个可用会话，并让状态和语音输入跟随它。" },
-  { id: "session_next", label: "下一个", detail: "切换到当前 Agent 的下一个可用会话，并让状态和语音输入跟随它。" },
+  { id: "session_previous", label: "上一页", detail: "向左切换宠物主界面与组件中心，组件运行界面不响应。" },
+  { id: "session_next", label: "下一页", detail: "向右切换宠物主界面与组件中心，组件运行界面不响应。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },
   { id: "component_center", label: "组件中心", detail: "进入板端组件目录，用摇杆选择并打开已安装组件。" },
-  { id: "page_enter", label: "确认", detail: "从桌宠首页进入当前组件；组件已打开时优先执行组件自己的按键映射。" },
+  { id: "page_enter", label: "确认", detail: "在组件中心启动当前选中的组件；组件已打开时优先执行组件自己的按键映射。" },
   { id: "page_back", label: "返回（取消）", detail: "取消当前选择，或从当前组件返回上一级。" },
   { id: "disabled", label: "不绑定", detail: "下发 disabled，让新版板端忽略该输入；不会继续触发系统切页或负一屏操作。" },
   { id: "system_page", label: "系统切页", detail: "保持 main / stats 页面切换，适合旋钮短按。" },
@@ -423,13 +423,6 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
     && row.holdEvent
     && bindingsByEvent.get(row.holdEvent)?.action === "voice_ptt"
   ));
-  const boardVoiceEnabled = typeof boardConfig?.voiceEnabled === "boolean"
-    ? boardConfig.voiceEnabled
-    : typeof boardConfig?.voice_enabled === "boolean"
-      ? boardConfig.voice_enabled
-      : runtimeId === P4_RUNTIME_ID
-        ? p4VoiceBindingEnabled
-        : Boolean(voiceRow);
   const boardVoiceButton = String(
     boardConfig?.voiceButton || boardConfig?.voice_button || "",
   ).trim();
@@ -438,6 +431,13 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
     buttonActions,
     boardVoiceButton || current.trigger,
   );
+  const boardVoiceEnabled = typeof boardConfig?.voiceEnabled === "boolean"
+    ? boardConfig.voiceEnabled
+    : typeof boardConfig?.voice_enabled === "boolean"
+      ? boardConfig.voice_enabled
+      : runtimeId === P4_RUNTIME_ID
+        ? p4VoiceBindingEnabled
+        : Boolean(voiceRow);
   const trigger = runtimeId === P4_RUNTIME_ID
     ? voiceRow?.voiceTriggerId
       || (P4_VOICE_BUTTON_OPTIONS.some((option) => option.id === boardVoiceButton)
@@ -458,6 +458,49 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
   return boardMigration.migrated
     ? { ...normalized, boardDefaultsMigrated: true }
     : normalized;
+}
+
+export function resolveButtonConfigForRuntime(value = {}, runtime = "") {
+  const config = normalizeVoiceConfig(value);
+  const runtimeId = String(runtime || "").trim().toLowerCase();
+  if (runtimeId !== P4_RUNTIME_ID) {
+    return {
+      config,
+      voiceButton: config.trigger,
+      voiceEnabled: config.enabled,
+    };
+  }
+  const voiceRow = preferredVoiceRow(
+    P4_BUTTON_CONTROL_ROWS,
+    config.buttonActions,
+    config.trigger,
+  );
+  return {
+    config,
+    voiceButton: voiceRow?.voiceTriggerId || P4_DEFAULT_VOICE_TRIGGER,
+    voiceEnabled: config.enabled && Boolean(voiceRow),
+  };
+}
+
+function comparableButtonConfig(value = {}, runtime = "") {
+  const resolved = resolveButtonConfigForRuntime(value, runtime);
+  return {
+    bindings: buildBoardButtonConfigBindings(
+      resolved.config.buttonActions,
+      resolved.config.buttonValues,
+      runtime,
+      resolved.voiceEnabled,
+    ),
+    voiceButton: resolved.voiceButton,
+    voiceEnabled: resolved.voiceEnabled,
+  };
+}
+
+export function boardButtonConfigMatchesClient(clientConfig = {}, response = {}, runtime = "") {
+  const boardConfig = mergeBoardButtonConfig(clientConfig, response, runtime);
+  if (boardConfig.boardDefaultsMigrated === true) return false;
+  return JSON.stringify(comparableButtonConfig(clientConfig, runtime))
+    === JSON.stringify(comparableButtonConfig(boardConfig, runtime));
 }
 
 export function applyVoiceEnabledForRuntime(value = {}, enabled = false, runtime = "") {
@@ -779,8 +822,20 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     setVoiceConfigOtaState({
       pending: true,
       tone: "",
-      message: "正在从板端读取按钮配置...",
+      message: "正在校验设备与客户端按钮配置...",
     });
+    const clientConfig = normalizeVoiceConfig(voiceConfigRef.current);
+    const syncClientConfig = async () => {
+      const resolved = resolveButtonConfigForRuntime(clientConfig, usb.runtime);
+      return dispatchBoardButtonConfig({
+        boardDeviceId: buttonConfigTargetBoardDeviceId,
+        buttonActions: resolved.config.buttonActions,
+        buttonValues: resolved.config.buttonValues,
+        runtime: usb.runtime,
+        voiceButton: resolved.voiceButton,
+        voiceEnabled: resolved.voiceEnabled,
+      });
+    };
     try {
       const boardConfig = await invoke("usb_get_button_config", {
         expectedBoardDeviceId: buttonConfigTargetBoardDeviceId,
@@ -791,69 +846,73 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
       ) {
         return null;
       }
-      const next = mergeBoardButtonConfig(voiceConfigRef.current, boardConfig, usb.runtime);
-      const boardDefaultsMigrated = next.boardDefaultsMigrated === true;
-      const persistedNext = normalizeVoiceConfig(next);
-      voiceConfigRef.current = persistedNext;
-      saveVoiceConfigToStorage(persistedNext);
-      setVoiceConfig(persistedNext);
-      if (!boardDefaultsMigrated) {
+      if (boardButtonConfigMatchesClient(clientConfig, boardConfig, usb.runtime)) {
         setVoiceConfigDirty(false);
         setVoiceConfigOtaState({
           pending: false,
           tone: "success",
-          message: "已从板端读取按钮配置并更新客户端缓存。",
+          message: "设备按钮配置与客户端一致。",
         });
         return boardConfig;
       }
 
-      const migrationRevision = ++buttonConfigRevisionRef.current;
       setVoiceConfigDirty(true);
       setVoiceConfigOtaState({
         pending: true,
         tone: "",
-        message: "检测到板端仍是旧版默认按键，正在自动迁移 SW1/SW3...",
+        message: "检测到设备与客户端按钮配置不一致，正在用客户端配置覆盖设备...",
       });
-      const migratedVoiceRow = preferredVoiceRow(
-        P4_BUTTON_CONTROL_ROWS,
-        persistedNext.buttonActions,
-        persistedNext.trigger,
-      );
       try {
-        await dispatchBoardButtonConfig({
-          boardDeviceId: buttonConfigTargetBoardDeviceId,
-          buttonActions: persistedNext.buttonActions,
-          buttonValues: persistedNext.buttonValues,
-          runtime: usb.runtime,
-          voiceButton: migratedVoiceRow?.voiceTriggerId || P4_DEFAULT_VOICE_TRIGGER,
-          voiceEnabled: persistedNext.enabled && Boolean(migratedVoiceRow),
-        });
-        if (buttonConfigRevisionRef.current === migrationRevision) {
+        await syncClientConfig();
+        if (startingRevision === buttonConfigRevisionRef.current) {
           setVoiceConfigDirty(false);
           setVoiceConfigOtaState({
             pending: false,
             tone: "success",
-            message: "旧版默认按键已自动迁移：SW1 返回，SW3 确认。",
+            message: "检测到配置差异，已使用客户端按钮配置覆盖设备。",
           });
         }
-      } catch (migrationError) {
-        if (buttonConfigRevisionRef.current === migrationRevision) {
+      } catch (syncError) {
+        if (startingRevision === buttonConfigRevisionRef.current) {
           setVoiceConfigDirty(true);
           setVoiceConfigOtaState({
             pending: false,
             tone: "warning",
-            message: `SW1/SW3 已在客户端迁移；自动同步设备失败，请点击“同步到设备”：${migrationError}`,
+            message: `检测到配置差异，但客户端配置自动覆盖失败，请点击“同步到设备”：${syncError}`,
           });
         }
       }
       return boardConfig;
     } catch (error) {
-      if (queryToken !== buttonConfigQueryTokenRef.current) return null;
+      if (
+        queryToken !== buttonConfigQueryTokenRef.current
+        || startingRevision !== buttonConfigRevisionRef.current
+      ) return null;
+      setVoiceConfigDirty(true);
       setVoiceConfigOtaState({
-        pending: false,
-        tone: "warning",
-        message: `读取板端按钮配置失败，暂时显示客户端缓存：${error}`,
+        pending: true,
+        tone: "",
+        message: "设备配置读取失败，正在直接写入客户端按钮配置...",
       });
+      try {
+        await syncClientConfig();
+        if (startingRevision === buttonConfigRevisionRef.current) {
+          setVoiceConfigDirty(false);
+          setVoiceConfigOtaState({
+            pending: false,
+            tone: "success",
+            message: "设备配置读取超时，已按客户端配置重新写入设备。",
+          });
+        }
+      } catch (syncError) {
+        if (startingRevision === buttonConfigRevisionRef.current) {
+          setVoiceConfigOtaState({
+            pending: false,
+            tone: "warning",
+            message: `设备配置校验失败，客户端配置自动覆盖也未完成：${syncError}`,
+          });
+        }
+      }
       return null;
     } finally {
       if (queryToken === buttonConfigQueryTokenRef.current) {
@@ -1024,22 +1083,13 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
   }, [isP4Runtime]);
 
   const applyVoiceConfigOverUsb = useCallback(async (configOverride = null) => {
-    const requestedConfig = configOverride?.buttonActions
+    const requestedConfigInput = configOverride?.buttonActions
       ? normalizeVoiceConfig(configOverride)
       : voiceConfig;
-    const requestedP4VoiceRow = isP4Runtime
-      ? preferredVoiceRow(
-        P4_BUTTON_CONTROL_ROWS,
-        requestedConfig.buttonActions,
-        requestedConfig.trigger,
-      )
-      : null;
-    const requestedRuntimeVoiceEnabled = isP4Runtime
-      ? requestedConfig.enabled && Boolean(requestedP4VoiceRow)
-      : requestedConfig.enabled;
-    const requestedVoiceTriggerId = isP4Runtime
-      ? requestedP4VoiceRow?.voiceTriggerId || P4_DEFAULT_VOICE_TRIGGER
-      : requestedConfig.trigger;
+    const requested = resolveButtonConfigForRuntime(requestedConfigInput, usb.runtime);
+    const requestedConfig = requested.config;
+    const requestedRuntimeVoiceEnabled = requested.voiceEnabled;
+    const requestedVoiceTriggerId = requested.voiceButton;
     if (!usb.connected) {
       setVoiceConfigOtaState({ pending: false, tone: "warning", message: "需要先通过 USB 连接设备，才能把按钮配置 OTA 到板端。" });
       return;

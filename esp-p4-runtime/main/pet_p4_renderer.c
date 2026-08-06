@@ -2,7 +2,8 @@
  * [Input] Pet lifecycle/session state, decoded assets, and bounded mini-app view presets.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus current SW1-back/SW3-enter hints in the component catalog and
+ *          plus a two-dot main/components indicator, current SW1-back/SW3-enter
+ *          hints in the component catalog, and
  *          a lightweight transfer screen that never reads changing assets.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and renderer tests.
@@ -2357,8 +2358,8 @@ static void draw_touch_feedback(
 }
 
 static void draw_page_indicator(const char *page) {
-  int count = 3;
-  int current = strcmp(page, "components") == 0 ? 1 : (strcmp(page, "app") == 0 ? 2 : 0);
+  int count = 2;
+  int current = strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0;
   int x = PET_P4_PAGE_INDICATOR_X;
   int y = PET_P4_PAGE_INDICATOR_Y;
   uint16_t background = rgb565(11, 14, 13);

@@ -2,9 +2,9 @@
  * [Input] DeviceDashboard.jsx orchestrator, pure P4 Session service, and dashboard subcomponent sources.
  * [Output] Static Node coverage for dashboard layout/configuration, Agent-isolated
  * strict active-only P4 conversation sizing with 60-second terminal retention,
- * exact visible-card encoder routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
- * MiMoCode current-caret voice delivery, ACK-gated board configuration, and
- * stale bridge/USB guards, SW1-back/SW3-confirm defaults and migration,
+ * two-page joystick routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
+ * MiMoCode current-caret voice delivery, client-authoritative ACK-gated board
+ * configuration, and stale bridge/USB guards, SW1-back/SW3-confirm defaults and migration,
  * immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -207,7 +207,7 @@ test("voice button configuration groups physical controls before device sync", (
   assert.match(css, /\.board-button-panel__toolbar\s*\{/);
 });
 
-test("dashboard hydrates the button cache from the connected board before restoring P4 voice", () => {
+test("dashboard keeps the client button map authoritative across reconnect and firmware OTA", () => {
   const dashboard = readSource("DeviceDashboard.jsx");
   const rust = readRepoFile("src-tauri", "src", "lib.rs");
   const usb = readRepoFile("src-tauri", "src", "usb_serial.rs");
@@ -216,18 +216,21 @@ test("dashboard hydrates the button cache from the connected board before restor
   const linuxBoard = readRepoFile("..", "legacy", "board-runtime", "src", "board_server.c");
 
   assert.match(dashboard, /invoke\("usb_get_button_config"/);
-  assert.match(dashboard, /mergeBoardButtonConfig\(voiceConfigRef\.current, boardConfig, usb\.runtime\)/);
-  assert.match(dashboard, /saveVoiceConfigToStorage\(persistedNext\)/);
-  assert.match(dashboard, /boardDefaultsMigrated/);
-  assert.match(dashboard, /旧版默认按键已自动迁移：SW1 返回，SW3 确认/);
+  assert.match(dashboard, /boardButtonConfigMatchesClient\(clientConfig, boardConfig, usb\.runtime\)/);
+  assert.match(dashboard, /await syncClientConfig\(\)/);
+  assert.match(dashboard, /已使用客户端按钮配置覆盖设备/);
+  assert.match(dashboard, /设备配置读取失败，正在直接写入客户端按钮配置/);
+  assert.doesNotMatch(dashboard, /saveVoiceConfigToStorage\(persistedNext\)/);
+  assert.doesNotMatch(dashboard, /已从板端读取按钮配置并更新客户端缓存/);
   assert.match(dashboard, /buttonConfigHydratedFor !== p4TargetBoardDeviceId/);
   assert.match(dashboard, /startingRevision !== buttonConfigRevisionRef\.current/);
-  assert.match(dashboard, /已从板端读取按钮配置并更新客户端缓存/);
   assert.match(dashboard, /component_center/);
   assert.match(rust, /async fn usb_get_button_config/);
   assert.match(rust, /manager\.query_button_config/);
   assert.match(usb, /"input\/config-query"/);
   assert.match(usb, /"input\/config-state"/);
+  assert.match(usb, /query_button_config[\s\S]*with_asset_transfer_guard/);
+  assert.match(rust, /button_config_signal[\s\S]*with_asset_transfer_guard/);
   assert.match(p4Protocol, /strcmp\(topic, "input\/config-query"\)/);
   assert.match(p4Input, /pet_p4_input_send_config_state/);
   assert.match(p4Input, /cJSON_AddItemToObject\(config, "bindings", bindings\)/);
@@ -288,8 +291,8 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /event:\s*"joystick\.up"/);
   assert.match(dashboard, /event:\s*"joystick\.down"/);
   assert.match(visibleOptions[1], /id: "agent_prompt", label: "发送自定义指令"[\s\S]*id: "voice_ptt", label: "语音输入"/);
-  assert.match(visibleOptions[1], /id: "session_previous", label: "上一个"/);
-  assert.match(visibleOptions[1], /id: "session_next", label: "下一个"/);
+  assert.match(visibleOptions[1], /id: "session_previous", label: "上一页"/);
+  assert.match(visibleOptions[1], /id: "session_next", label: "下一页"/);
   assert.match(dashboard, /直接发送给当前 Code Agent/);
   assert.match(visibleOptions[1], /id: "component_center", label: "组件中心"/);
   assert.match(visibleOptions[1], /id: "page_enter", label: "确认"/);
@@ -346,44 +349,26 @@ test("Negative-screen proxy actions stay runtime-compatible without appearing in
   assert.doesNotMatch(miniapp, /strcmp\(event_name, "button\.sw1\.long_press"\)/);
 });
 
-test("Hardware session actions cycle the current Agent sessions and update routing", () => {
+test("Hardware previous and next actions switch the two top-level device pages", () => {
   const dashboard = readSource("DeviceDashboard.jsx");
   const sessionSync = readSource("dashboard/useP4SessionSync.js");
   const panel = readSource("dashboard/BoardButtonPanel.jsx");
   const rust = readRepoFile("src-tauri", "src", "lib.rs");
   const firmware = readRepoFile("..", "esp-p4-runtime", "main", "pet_p4_input.c");
 
-  assert.match(sessionSync, /export function cycleVoiceSessionId/);
-  assert.match(sessionSync, /action === "session_next"/);
-  assert.match(sessionSync, /action === "session_previous"/);
-  assert.match(sessionSync, /onSessionChange\(nextSessionId\)/);
-  assert.match(sessionSync, /sessionLabel: formatSessionOption/);
-  assert.match(sessionSync, /pendingNoticeRef/);
-  assert.match(sessionSync, /sessionTitle: selectedSessionTitle/);
-  assert.match(sessionSync, /sessionCwd: selectedSessionCwd/);
-  assert.match(sessionSync, /sessionTitleUnique: selectedSessionTitleUnique/);
-  assert.match(sessionSync, /const boardSelectedSessionId = normalizeText\(payload\.sessionId\)/);
-  assert.match(sessionSync, /switchCandidates\.find/);
-  assert.match(sessionSync, /boardSelectedSession\s*\?[\s\S]*boardSelectedSessionId/);
-  assert.match(sessionSync, /const selectedStillExists = switchCandidates\.some/);
-  assert.doesNotMatch(sessionSync, /routingSessions\.forEach\(append\)/);
-  assert.match(sessionSync, /locateDesktop: Boolean\(matchedNotice\)/);
-  assert.match(sessionSync, /isDeviceSessionTargetUnique/);
-  assert.match(sessionSync, /cwd: clampUtf8Text/);
-  assert.match(sessionSync, /desktopLocation/);
-  assert.match(sessionSync, /desktopAgentLabel/);
-  assert.match(sessionSync, /claude-code/);
-  assert.match(sessionSync, /notice,/);
-  assert.match(dashboard, /formatSessionOption: formatVoiceSessionOption/);
+  assert.match(dashboard, /label: "上一页"/);
+  assert.match(dashboard, /label: "下一页"/);
   assert.doesNotMatch(panel, /P4 目标会话/);
   assert.doesNotMatch(panel, /p4-session-config/);
   assert.match(rust, /"session_next"/);
   assert.match(rust, /"session_previous"/);
-  assert.match(rust, /should_locate_desktop_session\(input\.locate_desktop/);
   assert.match(firmware, /"session_next"/);
   assert.match(firmware, /"session_previous"/);
-  assert.match(firmware, /cJSON_AddStringToObject\(payload, "sessionId", selected->id\)/);
-  assert.match(firmware, /state->current_session_index = selected \+ 1/);
+  assert.match(firmware, /main_open \? "components" : "main"/);
+  assert.match(firmware, /"page_previous" : "page_next"/);
+  assert.doesNotMatch(firmware, /state->current_session_index = selected \+ 1/);
+  assert.match(sessionSync, /action === "session_next"/);
+  assert.match(sessionSync, /action === "session_previous"/);
 });
 
 test("voice session state is render-safe before the first bus response", () => {
@@ -457,7 +442,8 @@ test("voice enablement binds a real hardware PTT action and applies it immediate
   assert.match(source, /export function applyVoiceEnabledForRuntime/);
   assert.match(source, /next\.buttonActions\[selectedRow\.id\]|\? "voice_ptt"/);
   assert.match(source, /P4_DEFAULT_VOICE_TRIGGER = "sw1\.hold"/);
-  assert.match(source, /requestedConfig\.enabled && Boolean\(requestedP4VoiceRow\)/);
+  assert.match(source, /resolveButtonConfigForRuntime\(requestedConfigInput, usb\.runtime\)/);
+  assert.match(source, /const requestedRuntimeVoiceEnabled = requested\.voiceEnabled/);
   assert.match(source, /const updateVoiceEnabled = useCallback/);
   assert.match(source, /await applyVoiceConfigOverUsb\(next\)/);
   assert.match(source, /onVoiceEnabledChange=\{updateVoiceEnabled\}/);

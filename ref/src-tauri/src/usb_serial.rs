@@ -15,8 +15,8 @@
  *          legacy unsupported-phase NACK correlation, capability-sized,
  *          retry-before-downshift Base64 firmware chunks with stale-transfer
  *          discovery, exact abort recovery, and connection-generation pinning,
- *          request-id-matched live device
- *          widget inventory, and persisted input configuration reads;
+ *          request-id-matched live device widget inventory, and persisted
+ *          input configuration reads/writes serialized behind bulk transfers;
  *          transaction_waiters owns shared ACK/request matching;
  *          appearance_transaction owns appearance integrity, sync planning,
  *          slot fallback, ACK fallback, and deterministic pack-ID policy;
@@ -1553,11 +1553,24 @@ impl UsbSerialManager {
         &self,
         expected_board_device_id: &str,
     ) -> Result<serde_json::Value, String> {
-        self.send_device_request_and_wait(
-            expected_board_device_id,
-            "input/config-query",
-            "input/config-state",
-        )
+        self.with_asset_transfer_guard(|| {
+            self.send_device_request_and_wait(
+                expected_board_device_id,
+                "input/config-query",
+                "input/config-state",
+            )
+        })
+    }
+
+    pub(crate) fn with_asset_transfer_guard<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let _transfer_guard = self
+            .asset_transfer_guard
+            .lock()
+            .map_err(|error| error.to_string())?;
+        operation()
     }
 
     pub fn reset_input_config(
@@ -5788,6 +5801,43 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn control_transactions_wait_for_an_active_asset_transfer() {
+        let manager = UsbSerialManager::new();
+        let transfer_manager = manager.clone();
+        let (transfer_started_tx, transfer_started_rx) = mpsc::channel();
+        let (release_transfer_tx, release_transfer_rx) = mpsc::channel();
+        let transfer_thread = thread::spawn(move || {
+            transfer_manager.with_asset_transfer_guard(|| {
+                transfer_started_tx.send(()).unwrap();
+                release_transfer_rx.recv().unwrap();
+                Ok(())
+            })
+        });
+        transfer_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("asset transfer should acquire the guard");
+
+        let control_manager = manager.clone();
+        let (control_started_tx, control_started_rx) = mpsc::channel();
+        let control_thread = thread::spawn(move || {
+            control_manager.with_asset_transfer_guard(|| {
+                control_started_tx.send(()).unwrap();
+                Ok(())
+            })
+        });
+        assert!(control_started_rx
+            .recv_timeout(Duration::from_millis(50))
+            .is_err());
+
+        release_transfer_tx.send(()).unwrap();
+        transfer_thread.join().unwrap().unwrap();
+        control_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("control transaction should resume after the asset transfer");
+        control_thread.join().unwrap().unwrap();
+    }
 
     #[test]
     fn appearance_sync_cancellation_is_scoped_to_an_active_transfer() {
