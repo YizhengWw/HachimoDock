@@ -442,8 +442,9 @@ PC to board:
   current size; three repeated rejections reduce it through 2046, 1020, then
   510 bytes without restarting the transaction, and 32 successful chunks
   restore the next larger size. Schema-5 firmware has an idle-clock race, so
-  the desktop starts and remains on the 510-byte rescue path while installing
-  schema 6; schema-6 firmware restores the 4092-byte fast path. The firmware
+  the desktop starts at 510 bytes, promotes through the larger sizes after
+  stable ACK streaks, and automatically rebuilds a transaction if the old
+  firmware clears it. Schema-6 firmware starts directly at 4092 bytes. The firmware
   timeout reaper ignores a loop timestamp older than the most recent chunk so
   unsigned subtraction cannot clear a healthy transfer. Before a new update,
   Pet Manager queries

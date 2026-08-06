@@ -19,6 +19,7 @@ const INITIAL_PROGRESS = { stage: "idle", bytesSent: 0, bytesTotal: 0, percent: 
 
 const STAGE_LABELS = {
   begin: "正在创建备用固件槽",
+  recover: "旧版固件中断，正在自动恢复升级",
   upload: "正在传输并逐块校验",
   verify: "正在校验镜像完整性",
   reboot: "镜像完整性通过，正在等待设备重启",

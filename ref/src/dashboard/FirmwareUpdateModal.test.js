@@ -25,7 +25,7 @@ test("firmware modal selects only ESP32-P4 .bin images", () => {
 test("firmware modal invokes the ACK-gated backend and listens for progress", () => {
   assert.match(source, /invoke\("usb_update_firmware",\s*\{[\s\S]*?firmwarePath,[\s\S]*?expectedBoardDeviceId,[\s\S]*?\}\)/);
   assert.match(source, /listen\("usb-firmware-update-progress"/);
-  for (const stage of ["begin", "upload", "verify", "reboot", "validate"]) {
+  for (const stage of ["begin", "recover", "upload", "verify", "reboot", "validate"]) {
     assert.match(source, new RegExp(`\\b${stage}:`));
   }
 });
