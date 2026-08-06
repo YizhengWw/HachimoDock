@@ -223,13 +223,11 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
         "start",
         "shift_left",
         "shift_right",
-        "page_main",
     ]
     assert [binding["event"] for binding in two_key_buttons] == [
-        "button.sw1.short_press",
+        "button.sw3.short_press",
         "knob.rotate_ccw",
         "knob.rotate_cw",
-        "button.sw3.short_press",
     ]
 
     token_widget = json.loads(

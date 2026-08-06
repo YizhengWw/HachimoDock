@@ -2,7 +2,7 @@
  * [Input] Read ComponentPreviewModal.jsx source.
  * [Output] Static Node coverage: default export, explicit game/tool type, button editor,
  *          component-scope/conflict guidance, replacement warning, current-device removal,
- *          SW1 global-return guidance, and install-button disabled states.
+ *          dynamic global-return guidance, and install-button disabled states.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -47,6 +47,7 @@ test("ComponentPreviewModal accepts component, install, and per-component button
   assert.match(source, /\bonDelete\b/);
   assert.match(source, /\bonClose\b/);
   assert.match(source, /\bbindings\b/);
+  assert.match(source, /\bglobalExitControl\b/);
   assert.match(source, /\bonBindingChange\b/);
   assert.match(source, /\bcomponentButtonsWillApply\b/);
   assert.match(source, /\binstallBlockedReason\b/);
@@ -165,10 +166,11 @@ test("ComponentPreviewModal traps keyboard focus, closes on Escape, and restores
   assert.match(source, /previous\?\.isConnected/);
 });
 
-test("ComponentPreviewModal explains component buttons do not overwrite device navigation", () => {
+test("ComponentPreviewModal explains component exit follows the global mapping", () => {
   assert.match(source, /componentButtonsWillApply/);
-  assert.match(source, /组件按钮仅在打开该组件后生效/);
-  assert.match(source, /SW1 短按返回等系统级导航保持不变/);
+  assert.match(source, /组件按钮仅包含游戏或工具动作/);
+  assert.match(source, /退出始终跟随设备全局设置/);
+  assert.match(source, /当前退出键是 \{globalExitControl\}/);
   assert.match(source, /component-preview-modal__impact/);
   assert.match(source, /同步影响/);
 });

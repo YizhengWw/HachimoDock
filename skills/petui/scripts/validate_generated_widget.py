@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate generated petui packages, including joystick and SW3 exit rules."""
+"""Validate generated petui packages, including joystick and global-exit isolation."""
 
 from __future__ import annotations
 
@@ -129,17 +129,14 @@ SHOOTER_CLAIMS = (
     "射击", "开火", "子弹", "敌机", "战机", "飞机大战",
     "shoot", "firing", "bullet", "enemy fighter", "lane fighter", "shooter",
 )
-RESERVED_PAGE_MAIN = {
-    "action": "page_main",
-    "control": "SW3",
-    "event": "button.sw3.short_press",
-    "label": "退出组件",
-}
-LEGACY_PAGE_MAIN = {
-    "action": "page_main",
-    "control": "前方旋钮",
-    "event": "button.encoder.long_press",
-    "label": "返回桌宠",
+DEFAULT_GLOBAL_EXIT_EVENT = "button.sw1.short_press"
+SYSTEM_ACTIONS = {
+    "page_toggle",
+    "page_enter",
+    "page_back",
+    "page_main",
+    "page_app",
+    "component_center",
 }
 
 
@@ -986,7 +983,6 @@ def validate_buttons(
         errors.append(f"buttons.json 最多 8 条，当前为 {len(buttons)}")
     actions: list[str] = []
     occupied_events: set[str] = set()
-    page_main_count = 0
     touch_ready = bool(
         isinstance(capabilities.get("touchInput"), dict)
         and capabilities["touchInput"].get("ready") is True
@@ -1003,11 +999,13 @@ def validate_buttons(
         label = binding.get("label")
         if isinstance(action, str) and action:
             actions.append(action)
+            if action in SYSTEM_ACTIONS:
+                errors.append(f"组件不得定义系统导航 action: {action}；退出由全局设置负责")
         if isinstance(label, str) and utf8_size(label) > 30:
             errors.append(f"buttons.json[{index}].label 超过 30 UTF-8 字节")
         if isinstance(event, str):
-            if event == "button.sw3.short_press" and action != "page_main":
-                errors.append("button.sw3.short_press 只能用于 page_main 退出组件")
+            if event == DEFAULT_GLOBAL_EXIT_EVENT:
+                errors.append("button.sw1.short_press 是默认全局退出键，组件不得占用")
             if SW_HOLD_PATTERN.fullmatch(event):
                 errors.append(f"SW1/SW2/SW3 不支持长按或 hold: {event}")
             if event not in ALLOWED_EVENTS:
@@ -1018,27 +1016,9 @@ def validate_buttons(
                 if slot in occupied_events:
                     errors.append(f"buttons.json 物理事件重复: {slot}")
                 occupied_events.add(slot)
-        if action == "page_main":
-            page_main_count += 1
-            is_current_exit = all(
-                binding.get(field) == expected
-                for field, expected in RESERVED_PAGE_MAIN.items()
-                if field != "label"
-            )
-            is_legacy_exit = all(
-                binding.get(field) == expected
-                for field, expected in LEGACY_PAGE_MAIN.items()
-                if field != "label"
-            )
-            if not (is_current_exit or is_legacy_exit):
-                errors.append("page_main 必须使用 SW3 退出映射或受支持的旧版旋钮返回映射")
     if len(actions) != len(set(actions)):
         errors.append("buttons.json.action 必须唯一")
-    if page_main_count > 1:
-        errors.append("buttons.json 最多包含一个兼容用 page_main")
-    if page_main_count == 0:
-        errors.append("buttons.json 必须包含 page_main 退出映射（新包使用 SW3）")
-    normal_actions = set(actions) - {"page_main"}
+    normal_actions = set(actions)
     missing_transitions = sorted(normal_actions - transition_actions)
     if missing_transitions:
         errors.append(f"按钮 action 未出现在 transitions: {', '.join(missing_transitions)}")

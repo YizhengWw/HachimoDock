@@ -7,7 +7,7 @@
     "metricValue": "—",
     "metricUnit": "TOKEN",
     "note": "缓存 —",
-    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · SW3退出",
+    "footer": "SW3总量 · SW2输入 · 摇杆右输出 · SW1退出",
     "visualStyle": "pixel",
     "visualPalette": "arcade",
     "visualLayout": "tool",

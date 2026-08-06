@@ -314,25 +314,26 @@ All controls are active-low to GND and use internal pull-ups:
 
 | Control | GPIO | Default behavior |
 | --- | ---: | --- |
-| SW1 | 50 | Short press unbound; long press defaults to voice input |
+| SW1 | 50 | Short press returns/cancels; long press defaults to voice input |
 | SW2 | 49 | Short press opens Component Center; long press is unbound |
-| SW3 | 5 | Short press returns/cancels; long press is unbound |
-| Encoder press | 4 | Short press confirms; long press is unbound |
-| Encoder B | 3 | EC11 quadrature input; left rotation defaults to previous |
-| Encoder A | 2 | EC11 quadrature input; right rotation defaults to next |
+| SW3 | 5 | Short press confirms/enters; long press is unbound |
+| Joystick key | 4 | Short press confirms; long press is unbound |
+| Joystick left/right compatibility | 3/2 | Left/right retain the legacy encoder event names |
 
 GPIO is sampled every 5ms with 25ms button debounce. Events are queued away
 from rendering and transport callbacks. Applied mappings are stored as a
 versioned NVS blob and survive reboot.
-Pet Manager exposes SW1/SW2/SW3 short and long press plus encoder short press,
-long press, left rotation, and right rotation. Encoder short press defaults to
+Pet Manager exposes SW1/SW2/SW3 short and long press plus joystick-center short
+press, long press, and four directions. Joystick-center short press defaults to
 `page_enter` (“确认”), while encoder long press defaults to `disabled`.
-SW2 short press defaults to `component_center`, and SW3 short press defaults to
-`page_back` (“返回（取消）”). Every gesture remains editable and persists in NVS
+SW2 short press defaults to `component_center`, SW1 short press defaults to
+`page_back` (“返回（取消）”), and SW3 short press defaults to `page_enter`.
+Every gesture remains editable and persists in NVS
 after downlink.
-Component `buttons.json` mappings are resolved only while `app` is open, so
-installing or switching a component does not overwrite the device-page
-navigation configured in Pet Manager.
+The global `page_back` binding always wins while `app` is open. Component
+`buttons.json` contains only gameplay/tool actions; legacy package navigation
+records are ignored, so installing or switching a component cannot overwrite
+the exit key configured in Pet Manager.
 
 ## Appearance Assets
 

@@ -1,8 +1,9 @@
 /**
- * [Input] component metadata, exact-source current state, resolved per-component bindings/control choices, component-scope/conflict state, live-device state, and actions.
+ * [Input] component metadata, exact-source current state, resolved gameplay bindings,
+ *         board-authoritative global-exit control, component-scope/conflict state, live-device state, and actions.
  * [Output] Structured preview/sync confirmation with a device-preview overview,
  *          dedicated button-mapping workspace, duplicate-input guard, consolidated
- *          sync-impact panel, SW1 global-return guidance, and context-aware confirmation footer.
+ *          sync-impact panel, dynamic global-return guidance, and context-aware confirmation footer.
  * [Pos] component node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -25,6 +26,7 @@ export default function ComponentPreviewModal({
   installing,
   bindings = [],
   bindingConflict = "",
+  globalExitControl = "SW1",
   getControlOptions,
   onBindingChange,
   onResetBindings,
@@ -170,7 +172,7 @@ export default function ComponentPreviewModal({
                           <strong>
                             {assigned.length
                               ? assigned.map((binding) => binding.label).join(" / ")
-                              : "可分配"}
+                              : control === globalExitControl ? "全局退出" : "可分配"}
                           </strong>
                         </div>
                       );
@@ -196,7 +198,7 @@ export default function ComponentPreviewModal({
                               value={option.label}
                               disabled={option.disabled}
                             >
-                              {option.label}{option.disabled ? "（已占用）" : ""}
+                              {option.label}{option.disabled ? `（${option.disabledReason || "已占用"}）` : ""}
                             </option>
                           ))}
                         </select>
@@ -239,8 +241,8 @@ export default function ComponentPreviewModal({
                 )}
                 {componentButtonsWillApply && (
                   <p>
-                    <b>组件按钮仅在打开该组件后生效。</b>
-                    设备的 SW1 短按返回等系统级导航保持不变。
+                    <b>组件按钮仅包含游戏或工具动作。</b>
+                    退出始终跟随设备全局设置；当前退出键是 {globalExitControl}，不会写入组件包。
                   </p>
                 )}
                 {installBlockedReason && (

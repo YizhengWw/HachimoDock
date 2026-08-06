@@ -1,7 +1,7 @@
 [
   {
-    "control": "SW1",
-    "event": "button.sw1.short_press",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
     "action": "tomato.start_pause",
     "label": "暂停 / 继续"
   },
@@ -16,11 +16,5 @@
     "event": "joystick.down",
     "action": "tomato.reset_phase",
     "label": "重置本轮"
-  },
-  {
-    "control": "SW3",
-    "event": "button.sw3.short_press",
-    "action": "page_main",
-    "label": "返回桌宠"
   }
 ]

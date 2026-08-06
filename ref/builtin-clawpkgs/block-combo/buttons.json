@@ -1,8 +1,8 @@
 [
   {
     "action": "blocks.start",
-    "control": "SW1",
-    "event": "button.sw1.short_press",
+    "control": "SW3",
+    "event": "button.sw3.short_press",
     "label": "开始/重开"
   },
   {
@@ -28,11 +28,5 @@
     "control": "前方摇杆",
     "event": "joystick.down",
     "label": "快速落下"
-  },
-  {
-    "action": "page_main",
-    "control": "SW3",
-    "event": "button.sw3.short_press",
-    "label": "返回桌宠"
   }
 ]

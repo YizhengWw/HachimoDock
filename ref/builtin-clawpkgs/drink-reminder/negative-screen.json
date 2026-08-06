@@ -8,7 +8,7 @@
     "metricUnit": "分钟",
     "badge": "0",
     "note": "每 60 分钟提醒一次",
-    "footer": "SW1我喝了 · SW2暂停 · 摇杆右切换 · SW3退出",
+    "footer": "SW3我喝了 · SW2暂停 · 摇杆右切换 · SW1退出",
     "progress": {
       "value": 100,
       "label": "距提醒"

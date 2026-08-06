@@ -585,11 +585,13 @@ outside the catalog, left/right retain their previous/next-session defaults.
 New packages may bind `joystick.up` and `joystick.down`.
 
 `page_toggle` switches between `main` and
-the active `app`; `page_main` and `page_app` remain accepted for older configs
-and component packages. Interactive component packages reserve `page_main` for
-an explicit physical return-to-pet binding; unlike gameplay actions it stays a
-native input action and is not wrapped as `miniapp_action` or declared as a
-widget transition. The two session
+the active `app`; `page_main` and `page_app` remain accepted for older persisted
+device configs. Component packages no longer own navigation: PC downlink removes
+legacy `page_main/page_back` records, and firmware ignores any such records that
+remain in an already-installed package. While `app` is open, whichever persisted
+global event currently maps to `page_back` is resolved before component gameplay
+bindings, so changing the global exit key immediately changes every component.
+The default remains SW1 short press; SW1 long-press PTT is unaffected. The two session
 actions move through the current live conversation queue; they do not persist
 or configure a fixed Session id. The two mini-app proxy actions only run while
 the app page is open and dispatch its existing `screen.region.tap` or
@@ -640,12 +642,13 @@ selection but sends both SW1 long-press bindings as `disabled`. The complete
 ten-row client model therefore remains a fourteen-binding board map. Config
 version 3 migrates version-2 values that exactly match either previous default
 layout to this map while preserving unrelated custom actions.
-While `app` is open, an event declared in that
-component's `buttons.json` is resolved first; outside `app`, or for an
-undeclared component event, the persisted device-page mapping remains
-authoritative. A component-declared `.long_press` also suppresses the matching
-global `.hold` while that component is open, preventing an editable PTT binding
-from firing underneath the component action.
+While `app` is open, the persisted global `page_back` event is resolved first.
+Other events declared in the component's `buttons.json` then resolve as gameplay
+or tool actions; outside `app`, or for an undeclared component event, the
+persisted device-page mapping remains authoritative. Package-authored system
+navigation actions are ignored. A component-declared `.long_press` also
+suppresses the matching global `.hold` while that component is open, preventing
+an editable PTT binding from firing underneath the component action.
 
 Board to PC:
 

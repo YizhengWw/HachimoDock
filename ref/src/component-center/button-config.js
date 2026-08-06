@@ -1,7 +1,8 @@
 /**
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
  * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
- *          exact shipped-v6 board-default migration, button-config model-v7
+ *          exact shipped-v6 board-default migration, authoritative global-exit
+ *          event resolution, button-config model-v7
  *          signaling, and compatibility-only complete-map and snapshot helpers.
  *          Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
@@ -99,6 +100,19 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
 export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 7;
 export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
+export const DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT = "button.sw1.short_press";
+
+export function resolveGlobalExitEvent(response = {}) {
+  const boardConfig = response?.config && typeof response.config === "object"
+    ? response.config
+    : response;
+  const bindings = Array.isArray(boardConfig?.bindings) ? boardConfig.bindings : [];
+  const exitBinding = bindings.find((binding) => (
+    String(binding?.action || "").trim() === "page_back"
+    && P4_COMPONENT_BUTTON_EVENTS.includes(String(binding?.event || "").trim())
+  ));
+  return String(exitBinding?.event || "").trim() || DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT;
+}
 
 const P4_V6_SHIPPED_DEFAULT_BINDINGS = {
   "button.sw1.short_press": "page_enter",

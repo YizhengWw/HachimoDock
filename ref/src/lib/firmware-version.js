@@ -1,5 +1,5 @@
 /**
- * [Input] Device and bundled firmware version strings such as `0.7.29-p4`.
+ * [Input] Device and bundled firmware version strings such as `0.7.30-p4`.
  * [Output] Numeric comparison plus update/latest/unknown sidebar disposition.
  * [Pos] Pure firmware-version helper in ref/src/lib.
  * [Sync] If this file changes, update `ref/src/.folder.md`.

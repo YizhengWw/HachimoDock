@@ -24,7 +24,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
    - 每个可用输入产生的即时、可见结果。
    - 开始、进行、成功/失败、重开或复位条件。
    - 每一项需求分别由哪个 runtime 原语实现。
-   - 哪些动作适合摇杆上/下/左/右，游戏的 SW1 开始/重开动作，以及 SW2 的题材专属动作；SW3 固定用于退出组件。
+   - 哪些动作适合摇杆上/下/左/右，游戏的 SW3 开始/重开动作，以及 SW2 的题材专属动作；退出由设备全局设置负责（默认 SW1），组件不得定义退出动作或占用默认退出键。
 6. 读取 [references/patterns.md](references/patterns.md) 检查机制是否完整。该文件只有抽象检查项，不是组件模板。
 7. 在正式组件库之外准备独立工作包：
    - 新建组件必须从空目录开始，不要复制或改名任何既有组件。
@@ -77,8 +77,8 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - `game/tool` 路由符合用户目标。
 - 逐项对照生成前的机制清单；用户要求的每个核心行为都能在 runtime 中找到对应实现，且没有无来源的模板机制。
 - 默认画面无需操作也有明确含义，且与 runtime 初始 state/page/vars 一致。
-- 每个普通 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。生成或更新的包必须将 SW3 短按声明为 `page_main` 退出动作，且不为它写 runtime transition；摇杆中键长按默认不绑定。
-- 游戏优先将方向动作放到四向摇杆，将 SW1 用作开始/重新开始，将 SW2 留给射击、技能、暂停等题材专属动作。工具仍以 SW1 为主操作、SW2 为次操作，并可按语义使用摇杆方向切页或调节。
+- 每个 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。组件不得声明 `page_main/page_back` 等系统导航 action；退出由设备全局绑定统一处理，摇杆中键长按默认不绑定。
+- 默认 SW1 短按是设备全局退出键，生成或更新组件时不得占用。游戏优先将方向动作放到四向摇杆，将 SW3 用作开始/重新开始，将 SW2 留给射击、技能、暂停等题材专属动作。工具以 SW3 为主操作、SW2 为次操作，并可按语义使用摇杆方向切页或调节。
 - 无触控设备不含触屏事件；需要移动/碰撞时只使用能力清单声明的通用 scene 原语。
 - 没有虚构数据、未声明的数据源或示例残留。
 - 校验和发布命令均成功，最终路径位于正式 `library`，而不是工作目录或 `.staging`。

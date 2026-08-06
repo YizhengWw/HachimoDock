@@ -1,6 +1,7 @@
 /**
  * [Input] Widget buttons.json binding records across screen gestures, P4 switches, and joystick input.
- * [Output] User-facing physical-control labels plus a single allowlist predicate shared by component-center previews and installs.
+ * [Output] User-facing physical-control labels plus a component-action allowlist
+ *          that hides legacy package-authored system navigation from previews and installs.
  * [Pos] helper node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -37,6 +38,18 @@ const ROUTED_WIDGET_EVENTS = new Set([
   "knob.rotate_cw / knob.rotate_ccw",
 ]);
 
+const COMPONENT_SYSTEM_ACTIONS = new Set([
+  "page_toggle",
+  "page_enter",
+  "page_back",
+  "page_main",
+  "page_app",
+  "component_center",
+]);
+
 export function isRoutedWidgetBinding(binding = {}) {
-  return ROUTED_WIDGET_EVENTS.has(String(binding.event || "").trim());
+  return (
+    ROUTED_WIDGET_EVENTS.has(String(binding.event || "").trim())
+    && !COMPONENT_SYSTEM_ACTIONS.has(String(binding.action || "").trim())
+  );
 }

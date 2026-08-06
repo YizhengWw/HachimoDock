@@ -119,10 +119,10 @@
     },
     "footer": {
       "switch_state": {
-        "focus": "SW1暂停 · SW2跳过 · 摇杆下重置 · SW3退出",
-        "focus_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · SW3退出",
-        "rest": "SW1暂停 · SW2跳过 · 摇杆下重置 · SW3退出",
-        "rest_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · SW3退出"
+        "focus": "SW3暂停 · SW2跳过 · 摇杆下重置 · SW1退出",
+        "focus_paused": "SW3继续 · SW2跳过 · 摇杆下重置 · SW1退出",
+        "rest": "SW3暂停 · SW2跳过 · 摇杆下重置 · SW1退出",
+        "rest_paused": "SW3继续 · SW2跳过 · 摇杆下重置 · SW1退出"
       }
     },
     "progress": {

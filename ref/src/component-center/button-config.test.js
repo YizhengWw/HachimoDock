@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import {
   COMPONENT_CONTROL_OPTIONS,
   COMPONENT_SYSTEM_ACTION_PAGE_MAIN,
+  DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT,
   DEVICE_BUTTON_CONFIG_MODEL_VERSION,
   P4_COMPONENT_BUTTON_EVENTS,
   buildComponentButtonConfigBindings,
@@ -18,6 +19,7 @@ import {
   componentInputEventSlots,
   defaultControlLabelForBinding,
   migrateP4V6ShippedBoardDefaults,
+  resolveGlobalExitEvent,
 } from "./button-config.js";
 
 test("device button config model advances for the SW1-back/SW3-confirm defaults", () => {
@@ -64,6 +66,21 @@ test("the exact shipped v6 board map migrates SW1/SW3 without changing custom ma
   const preserved = migrateP4V6ShippedBoardDefaults(customized, "esp-p4");
   assert.equal(preserved.migrated, false);
   assert.equal(preserved.response, customized);
+});
+
+test("component exit follows the authoritative board page-back binding", () => {
+  assert.equal(resolveGlobalExitEvent({ bindings: [] }), DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+  assert.equal(
+    resolveGlobalExitEvent({
+      config: {
+        bindings: [
+          { event: "button.sw1.short_press", action: "page_enter" },
+          { event: "button.sw3.short_press", action: "page_back" },
+        ],
+      },
+    }),
+    "button.sw3.short_press",
+  );
 });
 
 test("component controls expose screen, switches, and joystick events without duplicates", () => {

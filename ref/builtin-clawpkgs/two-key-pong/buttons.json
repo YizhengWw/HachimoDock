@@ -1,6 +1,5 @@
 [
-  {"action":"start","control":"SW1","event":"button.sw1.short_press","label":"开始或重开"},
+  {"action":"start","control":"SW3","event":"button.sw3.short_press","label":"开始或重开"},
   {"action":"shift_left","control":"前方摇杆","event":"knob.rotate_ccw","label":"挡板左移"},
-  {"action":"shift_right","control":"前方摇杆","event":"knob.rotate_cw","label":"挡板右移"},
-  {"action":"page_main","control":"SW3","event":"button.sw3.short_press","label":"退出游戏"}
+  {"action":"shift_right","control":"前方摇杆","event":"knob.rotate_cw","label":"挡板右移"}
 ]

@@ -1,6 +1,7 @@
 /*
  * [Input] Widget package paths/JSON bytes, device capabilities, and chunk metadata.
- * [Output] P4-safe widget payloads, capability gates, path checks, and OTA timing policy.
+ * [Output] P4-safe widget payloads with legacy package-navigation bindings removed,
+ *          capability gates, path checks, and OTA timing policy.
  * [Pos] Pure component/widget transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -156,6 +157,25 @@ pub(super) fn prepare_p4_widget_file(
                 }
             }
         }
+    }
+
+    if path == "buttons.json" {
+        let bindings = value
+            .as_array_mut()
+            .ok_or_else(|| "buttons.json 必须是 JSON 数组，无法下发到 P4".to_string())?;
+        bindings.retain(|binding| {
+            !matches!(
+                binding.get("action").and_then(Value::as_str),
+                Some(
+                    "page_toggle"
+                        | "page_enter"
+                        | "page_back"
+                        | "page_main"
+                        | "page_app"
+                        | "component_center"
+                )
+            )
+        });
     }
 
     if widget_id == "token-usage" && path == "runtime/widget.json" {

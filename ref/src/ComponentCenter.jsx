@@ -4,9 +4,9 @@
  *          game/tool library whose cards reflect live board truth and perform immediate
  *          per-component sync/removal. The manager chrome stays product-native while every widget
  *          preview and generated package uses the bounded pixel visual contract. Formal local
- *          buttons.json is preserved per component, editable across screen/SW1-SW3/
- *          four-direction joystick inputs, conflict-checked, persisted by component/action, and stored
- *          inside the installed P4 component without overwriting device navigation.
+ *          gameplay-only buttons.json is editable across screen/SW1-SW3/four-direction
+ *          joystick inputs, conflict-checked against the board-authoritative global exit
+ *          gesture, persisted by component/action, and stored inside the installed P4 component.
  *          Live inventory, not localStorage, is authoritative for what is on the board. The
  *          latest result is retained only in module memory for the current App session, so
  *          returning to Component Center does not re-query the board while a full App restart does.
@@ -60,14 +60,16 @@ import { isRoutedWidgetBinding } from "./component-center/binding-labels.js";
 import { sortComponentsByCreatedAt } from "./component-center/library-order.js";
 import {
   COMPONENT_CONTROL_OPTIONS,
+  DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT,
   componentInputEventSlots,
   defaultControlLabelForBinding,
   optionForControlLabel,
+  resolveGlobalExitEvent,
 } from "./component-center/button-config.js";
 
 const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-overrides:v1";
 const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong";
-const FEATURED_BUILTIN_VERSION_HASH = "f9a6379e140aa854";
+const FEATURED_BUILTIN_VERSION_HASH = "e2e24f8185433eae";
 const EMPTY_DEVICE_INVENTORY = Object.freeze({
   freshness: "idle",
   runtime: "",
@@ -413,6 +415,7 @@ export default function ComponentCenter() {
   );
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [libraryKind, setLibraryKind] = useState("all");
+  const [globalExitEvent, setGlobalExitEvent] = useState(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
   const libraryRefreshRequestRef = useRef(0);
   const inventoryRefreshRequestRef = useRef(0);
   const componentActionDialogRef = useRef(null);
@@ -429,6 +432,26 @@ export default function ComponentCenter() {
   useEffect(() => {
     setActiveComponentRecord(deviceCurrentComponent);
   }, [deviceCurrentComponent]);
+
+  useEffect(() => {
+    const boardDeviceId = String(usb.boardDeviceId || "").trim();
+    if (!usb.connected || !boardDeviceId || String(usb.runtime || "").toLowerCase() !== "esp-p4") {
+      setGlobalExitEvent(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+      return undefined;
+    }
+    let cancelled = false;
+    invoke("usb_get_button_config", { expectedBoardDeviceId: boardDeviceId })
+      .then((response) => {
+        if (!cancelled) setGlobalExitEvent(resolveGlobalExitEvent(response));
+      })
+      .catch((error) => {
+        console.warn("[ComponentCenter] global exit binding query failed", error);
+        if (!cancelled) setGlobalExitEvent(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [usb.boardDeviceId, usb.connected, usb.runtime]);
 
   const refreshComponentLibrary = useCallback(async () => {
     const requestId = libraryRefreshRequestRef.current + 1;
@@ -1041,9 +1064,12 @@ export default function ComponentCenter() {
     const seen = new Map();
     for (const binding of resolveComponentBindings(component)) {
       if (binding.event.startsWith("screen.") && !deviceTouchReady(usb)) {
-        return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为 SW1/SW2/SW3 或摇杆`;
+        return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为未被全局退出占用的按键或摇杆`;
       }
       for (const eventSlot of componentInputEventSlots(binding.event)) {
+        if (eventSlot === globalExitEvent) {
+          return `${binding.label} 占用了当前全局退出键，请改用其他按键`;
+        }
         if (seen.has(eventSlot)) {
           return `${seen.get(eventSlot)} 和 ${binding.label} 都绑定到了 ${binding.controlLabel}`;
         }
@@ -1055,7 +1081,7 @@ export default function ComponentCenter() {
 
   function buildBindingOverridesForInstall(component) {
     if (!component || !Array.isArray(component.defaultBindings)) return {};
-    return component.defaultBindings.reduce((overrides, binding) => {
+    return component.defaultBindings.filter(isRoutedWidgetBinding).reduce((overrides, binding) => {
       const selectedLabel = bindingOverrides[bindingKey(component, binding.action)]
         || bindingOverrides[`${component.id}:${binding.action}`];
       if (selectedLabel && selectedLabel !== defaultControlLabelForBinding(binding)) {
@@ -1088,12 +1114,16 @@ export default function ComponentCenter() {
       .map((option) => ({
         ...option,
         disabled: (
-          (option.event.startsWith("screen.") && !deviceTouchReady(usb))
+          componentInputEventSlots(option.event).includes(globalExitEvent)
+          || (option.event.startsWith("screen.") && !deviceTouchReady(usb))
           || (
             option.event !== currentEvent
             && componentInputEventSlots(option.event).some((event) => usedEvents.has(event))
           )
         ),
+        disabledReason: componentInputEventSlots(option.event).includes(globalExitEvent)
+          ? "全局退出"
+          : "已占用",
       }));
   }
 
@@ -1491,6 +1521,10 @@ export default function ComponentCenter() {
           installing={otaPhase === "installing"}
           bindings={resolveComponentBindings(previewComponent)}
           bindingConflict={bindingConflictForComponent(previewComponent)}
+          globalExitControl={
+            COMPONENT_CONTROL_OPTIONS.find((option) => option.event === globalExitEvent)?.control
+              || "当前全局按键"
+          }
           getControlOptions={(binding) => controlOptionsForBinding(binding, previewComponent)}
           onBindingChange={(binding, nextControl) => updateBinding(binding, nextControl, previewComponent)}
           onResetBindings={() => resetBindings(previewComponent)}

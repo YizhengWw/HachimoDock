@@ -2,11 +2,11 @@
   "dashboard": {
     "title": "像素方块",
     "eyebrow": "准备开始",
-    "headline": "按 SW1 开始",
+    "headline": "按 SW3 开始",
     "metricLabel": "分数",
     "metricValue": "0",
     "note": "READY",
-    "footer": "SW1开始 · 摇杆四向操作 · SW3退出",
+    "footer": "SW3开始 · 摇杆四向操作 · SW1退出",
     "visualStyle": "pixel",
     "visualPalette": "arcade",
     "visualLayout": "arcade",

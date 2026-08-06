@@ -5,7 +5,7 @@
  *          session-scoped device-inventory caching and formal-library file watching, while verifying
  *          first-visit component onboarding,
  *          the featured 双键接球 builtin first, newest-first user components next, complete built-in Flappy package wiring,
- *          standardized SW1/SW3/joystick mappings across every builtin,
+ *          global SW1 exit plus SW3/joystick gameplay mappings across every builtin,
  *          per-component buttons.json, editable component bindings, explicit component-scope guidance,
  *          P4 button-map downlink, semantic enabled state, card-owned device sync/removal,
  *          device-first dual deletion, exact target identity, focus-safe confirmation,
@@ -208,7 +208,7 @@ test("component button editor only offers screen gestures to a touch-ready devic
   assert.match(component, /function deviceTouchReady\(usb\)/);
   assert.match(component, /option\.event\.startsWith\("screen\."\)/);
   assert.match(component, /当前设备未报告触屏可用/);
-  assert.match(component, /请改为 SW1\/SW2\/SW3 或摇杆/);
+  assert.match(component, /请改为未被全局退出占用的按键或摇杆/);
 });
 
 test("USB preflight trusts the shared DeviceContext USB state", () => {
@@ -508,7 +508,7 @@ test("component library pins 双键接球 first and keeps other user components 
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
   assert.match(component, /const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong"/);
-  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "f9a6379e140aa854"/);
+  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "e2e24f8185433eae"/);
   assert.match(component, /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
@@ -523,13 +523,13 @@ test("builtin catalog starts with the validated 双键接球 package", () => {
 
   assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
   assert.equal(componentManifest.id, "two-key-pong");
-  assert.equal(componentManifest.version, "1.1.2");
+  assert.equal(componentManifest.version, "1.1.3");
   assert.equal(widget.engine, "p4-bounded-runtime-v3");
   assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
-  assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right", "page_main"]);
+  assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right"]);
 });
 
-test("all builtin components reserve SW3 for exit and games use the joystick", () => {
+test("all builtin components omit exit actions, reserve SW1 globally, and use SW3 for primary actions", () => {
   const packageRoot = join(srcDir, "../builtin-clawpkgs");
   const packageIds = [
     "two-key-pong",
@@ -551,15 +551,8 @@ test("all builtin components reserve SW3 for exit and games use the joystick", (
     const buttons = JSON.parse(
       readFileSync(join(packageRoot, packageId, "buttons.json"), "utf8"),
     );
-    assert.deepEqual(
-      buttons.find((binding) => binding.action === "page_main"),
-      {
-        action: "page_main",
-        control: "SW3",
-        event: "button.sw3.short_press",
-        label: packageId === "two-key-pong" ? "退出游戏" : "返回桌宠",
-      },
-    );
+    assert.equal(buttons.some((binding) => binding.action.startsWith("page_")), false);
+    assert.equal(buttons.some((binding) => binding.event === "button.sw1.short_press"), false);
     assert.equal(
       buttons.filter((binding) => binding.event === "button.sw3.short_press").length,
       1,
@@ -567,7 +560,7 @@ test("all builtin components reserve SW3 for exit and games use the joystick", (
     if (gameStartActions[packageId]) {
       assert.equal(
         buttons.find((binding) => binding.action === gameStartActions[packageId])?.event,
-        "button.sw1.short_press",
+        "button.sw3.short_press",
       );
     }
   }
@@ -578,12 +571,11 @@ test("all builtin components reserve SW3 for exit and games use the joystick", (
   assert.deepEqual(
     Object.fromEntries(blocks.map((binding) => [binding.action, binding.event])),
     {
-      "blocks.start": "button.sw1.short_press",
+      "blocks.start": "button.sw3.short_press",
       "blocks.left": "knob.rotate_ccw",
       "blocks.right": "knob.rotate_cw",
       "blocks.rotate": "joystick.up",
       "blocks.drop": "joystick.down",
-      page_main: "button.sw3.short_press",
     },
   );
 });
@@ -691,7 +683,7 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(contract, /joystick\.down/);
   assert.match(contract, /左.*`knob\.rotate_ccw`/);
   assert.match(contract, /右.*`knob\.rotate_cw`/);
-  assert.match(contract, /"event": "button\.sw3\.short_press"/);
+  assert.match(contract, /SW3.*开始\/重新开始/);
   assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
   assert.match(contract, /knob\.rotate_cw/);
   assert.match(contract, /\.staging.*不是“草稿库”/);
@@ -814,7 +806,7 @@ test("fixtures expose 双键接球 first, three remaining games, and three tools
   assert.equal((data.match(/kind: "tool"/g) || []).length, 3);
   assert.equal((data.match(/visualStyle: "pixel"/g) || []).length, 7);
   assert.equal((data.match(/visualLayout: "tool"/g) || []).length, 3);
-  assert.match(data, /button\.sw1\.short_press/);
+  assert.doesNotMatch(data, /event: "button\.sw1\.short_press"/);
   assert.match(data, /button\.sw2\.short_press/);
   assert.match(data, /button\.sw3\.short_press/);
   assert.match(data, /joystick\.up/);
@@ -848,7 +840,7 @@ test("Flappy Bird is shipped as a complete installable builtin template", () => 
   assert.deepEqual(runtime.game.actions, { flap: "flappy.flap" });
   assert.deepEqual(
     buttons.map((binding) => binding.action),
-    ["flappy.flap", "page_main"],
+    ["flappy.flap"],
   );
   assert.match(share.summary, /Flappy Bird/);
 });
@@ -888,12 +880,18 @@ test("component install keeps its button map package-owned without replacing dev
   const tauri = readFileSync(join(srcDir, "../src-tauri/src/lib.rs"), "utf8");
   const firmware = readFileSync(join(srcDir, "../../esp-p4-runtime/main/pet_p4_input.c"), "utf8");
   const miniapp = readFileSync(join(srcDir, "../../esp-p4-runtime/main/pet_p4_miniapp.c"), "utf8");
+  const bindingLabels = readFileSync(join(srcDir, "component-center/binding-labels.js"), "utf8");
+  const widgetTransaction = readFileSync(join(srcDir, "../src-tauri/src/usb_serial/widget_transaction.rs"), "utf8");
   assert.doesNotMatch(component, /buildComponentButtonConfigBindings/);
   assert.doesNotMatch(component, /invoke\("button_config_signal"/);
   assert.doesNotMatch(component, /applyComponentButtonConfig/);
   assert.doesNotMatch(component, /DEVICE_BUTTON_CONFIG_STORAGE_KEY/);
   assert.match(component, /bindingOverrides: buildBindingOverridesForInstall\(component\)/);
   assert.match(firmware, /dispatch_component_binding_event/);
+  assert.match(firmware, /active_global_exit_binding/);
+  assert.match(firmware, /if \(component_system_action\(component_action\)\) return false/);
+  assert.match(bindingLabels, /COMPONENT_SYSTEM_ACTIONS/);
+  assert.match(widgetTransaction, /bindings\.retain/);
   assert.match(firmware, /strcmp\(state->screen_page, "app"\) != 0/);
   assert.match(firmware, /pet_p4_miniapp_resolve_input/);
   assert.match(firmware, /strcmp\(binding->action, "miniapp_action"\)/);

@@ -2,7 +2,7 @@
   "id": "block-combo",
   "name": "像素方块",
   "kind": "game",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "author": "openclaw",
-  "description": "SW1 开始或重开，摇杆左/右移动、上旋转、下快速落下，SW3 退出的像素方块游戏。"
+  "description": "SW3 开始或重开，摇杆左/右移动、上旋转、下快速落下；退出跟随全局设置，默认 SW1。"
 }

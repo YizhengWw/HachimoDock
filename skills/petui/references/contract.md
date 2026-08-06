@@ -131,33 +131,11 @@ screen.region.long_press
 | 中键长按 | `button.encoder.long_press` | 只在用户明确要求时使用 |
 
 - 四个方向语义不同时使用独立 action。只使用玩法真正需要的方向，不为填满输入而制造无效动作。
-- 游戏默认把方向动作放到摇杆，把 SW1 映射为开始/重新开始；SW2 可按玩法定义为射击、技能、暂停等次要动作，也可以不用。
-- 工具默认用 SW1 执行主操作、SW2 执行次操作；摇杆方向可用于切页、选择或数值调节。
-- 生成或更新的组件必须包含下面的 SW3 退出动作。`page_main` 不写 runtime transition：
-
-```json
-{
-  "action": "page_main",
-  "control": "SW3",
-  "event": "button.sw3.short_press",
-  "label": "退出组件"
-}
-```
-
-退出 label 可按组件类型写成“退出组件”或“退出游戏”，但 action、control 和 event 必须保持一致。
-
-- 历史包可能包含下面的兼容返回动作；读取旧包时可识别，生成或更新时应迁移为上面的 SW3 映射：
-
-```json
-{
-  "action": "page_main",
-  "control": "前方旋钮",
-  "event": "button.encoder.long_press",
-  "label": "返回桌宠"
-}
-```
-
-`page_main` 不写 runtime transition，且最多一条。组件按钮只在组件打开时生效，不覆盖设备页面导航。
+- 设备全局退出动作不属于组件包。默认是 SW1 短按，因此生成或更新组件时禁止绑定 `button.sw1.short_press`，也禁止声明 `page_main`、`page_back`、`page_enter`、`page_toggle`、`page_app` 或 `component_center` 等系统导航 action。
+- 游戏默认把方向动作放到摇杆，把 SW3 映射为开始/重新开始；SW2 可按玩法定义为射击、技能、暂停等次要动作，也可以不用。
+- 工具默认用 SW3 执行主操作、SW2 执行次操作；摇杆方向可用于切页、选择或数值调节。
+- 用户在 Pet Manager 中修改全局退出绑定后，固件会让新的全局按键优先于组件动作。组件无需、也不得复制这条绑定。
+- 历史包里的 `page_main/page_back` 记录只用于读取兼容；PC 下发时会移除，固件运行时也会忽略。优化历史组件时必须删除这些记录，并把原先占用默认 SW1 的普通动作迁移到 SW3、SW2 或摇杆。
 
 ## 5. Runtime 结构
 

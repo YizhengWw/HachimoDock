@@ -3,7 +3,7 @@
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
 visual-preset parity, including SW1-back/SW3-confirm global defaults and
-standardized SW1/SW3/joystick component controls.
+global-exit-first SW3/joystick component controls.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
@@ -412,7 +412,7 @@ def test_builtin_tool_widgets_declare_bounded_completion_cycles():
     assert all(set(page) == {"id"} for page in token_usage["pages"])
 
 
-def test_builtin_tool_widgets_use_sw3_exit_and_fit_p4_limits():
+def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
     expected_actions = {
         "tomato-clock": [
             "tomato.start_pause",
@@ -467,17 +467,17 @@ def test_builtin_tool_widgets_use_sw3_exit_and_fit_p4_limits():
             binding for binding in buttons
             if binding["control"] in {"SW1", "SW2", "SW3"}
         ]
-        assert [binding["control"] for binding in switch_bindings] == ["SW1", "SW2", "SW3"]
+        assert [binding["control"] for binding in switch_bindings] == ["SW3", "SW2"]
         assert [binding["event"] for binding in switch_bindings] == [
-            "button.sw1.short_press",
-            "button.sw2.short_press",
             "button.sw3.short_press",
+            "button.sw2.short_press",
         ]
         assert [binding["action"] for binding in switch_bindings] == [
             actions[0],
             actions[1],
-            "page_main",
         ]
+        assert not any(binding["event"] == "button.sw1.short_press" for binding in buttons)
+        assert not any(binding["action"].startswith("page_") for binding in buttons)
         assert next(
             binding["event"]
             for binding in buttons
@@ -692,7 +692,7 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             for binding in buttons
             if binding["event"].endswith(".short_press")
         }
-        assert switch_controls == {"SW1", "SW3"}
+        assert switch_controls == {"SW3"}
         actions = [binding["action"] for binding in buttons]
         assert len(actions) == len(set(actions))
     block_buttons = json.loads(
@@ -701,22 +701,19 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
     assert {
         binding["action"]: binding["event"] for binding in block_buttons
     } == {
-        "blocks.start": "button.sw1.short_press",
+        "blocks.start": "button.sw3.short_press",
         "blocks.left": "knob.rotate_ccw",
         "blocks.right": "knob.rotate_cw",
         "blocks.rotate": "joystick.up",
         "blocks.drop": "joystick.down",
-        "page_main": "button.sw3.short_press",
     }
     flappy_buttons = json.loads(
         read_workspace("ref/builtin-clawpkgs/flappy-bird/buttons.json")
     )
     assert [binding["action"] for binding in flappy_buttons] == [
         "flappy.flap",
-        "page_main",
     ]
     assert [binding["event"] for binding in flappy_buttons] == [
-        "button.sw1.short_press",
         "button.sw3.short_press",
     ]
 
@@ -1470,7 +1467,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.29-p4")' in project
+    assert 'set(PROJECT_VER "0.7.30-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1549,7 +1546,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.29-p4")' in project
+    assert 'set(PROJECT_VER "0.7.30-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1999,6 +1996,9 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert '"已安装 %u 个"' in renderer
     assert '"SW1返回，SW3进入"' in renderer
     assert "dispatch_component_binding_event" in input_source
+    assert "active_global_exit_binding" in input_source
+    assert 'strcmp(binding->action, "page_back") == 0' in input_source
+    assert "if (component_system_action(component_action)) return false" in input_source
     assert "pet_p4_miniapp_resolve_input" in input_source
     assert "pet_p4_miniapp_has_input(long_event_name)" in input_source
     assert "nvs_set_blob" in input_source

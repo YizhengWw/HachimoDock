@@ -7432,6 +7432,27 @@ mod tests {
     }
 
     #[test]
+    fn p4_widget_buttons_drop_legacy_component_navigation_actions() {
+        let source = br#"[
+          {"action":"game.start","control":"SW3","event":"button.sw3.short_press","label":"start"},
+          {"action":"page_main","control":"SW1","event":"button.sw1.short_press","label":"exit"},
+          {"action":"page_back","control":"SW2","event":"button.sw2.short_press","label":"back"}
+        ]"#;
+        let prepared = prepare_p4_widget_file("legacy-game", "buttons.json", source).unwrap();
+        let buttons: serde_json::Value = serde_json::from_slice(&prepared).unwrap();
+
+        assert_eq!(
+            buttons,
+            serde_json::json!([{
+                "action": "game.start",
+                "control": "SW3",
+                "event": "button.sw3.short_press",
+                "label": "start"
+            }])
+        );
+    }
+
+    #[test]
     fn p4_widget_json_rejects_compacted_content_beyond_device_buffer() {
         let source = serde_json::to_vec(&serde_json::json!({
             "schema_version": 1,

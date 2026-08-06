@@ -73,7 +73,7 @@
     },
     "headline": {
       "switch_state": {
-        "ready": "按 SW1 开始",
+        "ready": "按 SW3 开始",
         "playing": "方块下落中",
         "result": "堆满结束"
       }
@@ -91,9 +91,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW1开始 · 摇杆四向操作 · SW3退出",
-        "playing": "摇杆四向操作 · SW3退出",
-        "result": "SW1重开 · SW3退出"
+        "ready": "SW3开始 · 摇杆四向操作 · SW1退出",
+        "playing": "摇杆四向操作 · SW1退出",
+        "result": "SW3重开 · SW1退出"
       }
     },
     "visualStyle": "pixel",

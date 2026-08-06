@@ -6,7 +6,8 @@
  *          center-aware joystick decoding and ADC diagnostics with legacy encoder-event aliases, immediate visible-session queue selection
  *          with exact selected-session event metadata, and component-local
  *          button routing that is active only while the component page is
- *          open, plus correlated snapshots of the authoritative NVS-backed
+ *          open, while the persisted global page-back gesture always wins and
+ *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
  *          input configuration with versioned SW1-back/SW3-confirm defaults.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
@@ -1123,6 +1124,15 @@ static bool component_system_action(const char *action) {
     );
 }
 
+static const pet_p4_input_binding_t *active_global_exit_binding(
+  const pet_p4_runtime_state_t *state,
+  const char *event_name
+) {
+  if (!state || strcmp(state->screen_page, "app") != 0) return NULL;
+  const pet_p4_input_binding_t *binding = active_binding(event_name);
+  return binding && strcmp(binding->action, "page_back") == 0 ? binding : NULL;
+}
+
 static bool dispatch_component_binding_event(
   pet_p4_runtime_state_t *state,
   pet_p4_send_line_fn send_line,
@@ -1142,13 +1152,14 @@ static bool dispatch_component_binding_event(
         sizeof(component_action)
       )) return false;
 
+  // Component packages own gameplay actions only. Older packages may still
+  // contain page_main/page_back records; ignore those records so the current
+  // persisted global exit mapping remains the single navigation authority.
+  if (component_system_action(component_action)) return false;
+
   copy_text(binding.event, sizeof(binding.event), event_name);
-  if (component_system_action(component_action)) {
-    copy_text(binding.action, sizeof(binding.action), component_action);
-  } else {
-    copy_text(binding.action, sizeof(binding.action), "miniapp_action");
-    copy_text(binding.value, sizeof(binding.value), component_action);
-  }
+  copy_text(binding.action, sizeof(binding.action), "miniapp_action");
+  copy_text(binding.value, sizeof(binding.value), component_action);
   handled_locally = apply_local_action(
     state,
     &binding,
@@ -1178,6 +1189,30 @@ static void dispatch_binding_event(
   const char *event_name,
   const char *gesture
 ) {
+  const pet_p4_input_binding_t *binding = active_binding(event_name);
+  const pet_p4_input_binding_t *global_exit = active_global_exit_binding(state, event_name);
+  if (global_exit) {
+    char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
+    const bool handled_locally = apply_local_action(
+      state,
+      global_exit,
+      event->ts_ms,
+      miniapp_action,
+      sizeof(miniapp_action)
+    );
+    send_input_event(
+      state,
+      send_line,
+      ctx,
+      event,
+      event_name,
+      gesture,
+      global_exit,
+      miniapp_action,
+      handled_locally
+    );
+    return;
+  }
   if (dispatch_component_binding_event(
         state,
         send_line,
@@ -1186,7 +1221,6 @@ static void dispatch_binding_event(
         event_name,
         gesture
       )) return;
-  const pet_p4_input_binding_t *binding = active_binding(event_name);
   char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
   bool handled_locally = apply_local_action(
     state,
@@ -1324,7 +1358,8 @@ void pet_p4_input_process(
       }
       if (state
           && strcmp(state->screen_page, "app") == 0
-          && !pet_p4_miniapp_has_input(event_name)) {
+          && !pet_p4_miniapp_has_input(event_name)
+          && !active_global_exit_binding(state, event_name)) {
         pet_p4_input_binding_t ignored_binding = {0};
         copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
         copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
@@ -1368,7 +1403,8 @@ void pet_p4_input_process(
       }
       if (state
           && strcmp(state->screen_page, "app") == 0
-          && !pet_p4_miniapp_has_input(event_name)) {
+          && !pet_p4_miniapp_has_input(event_name)
+          && !active_global_exit_binding(state, event_name)) {
         pet_p4_input_binding_t ignored_binding = {0};
         copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
         copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
