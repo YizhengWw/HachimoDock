@@ -8,7 +8,7 @@ project_dir = env.subst("$PROJECT_DIR")
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
 
 
-def normalize_component_lock(source, target, build_env):
+def normalize_component_lock(source, target, env):
     """Undo ESP-IDF's machine-specific lock rewrite after a successful build."""
     lock_path = os.path.join(project_dir, "dependencies.lock")
     if not os.path.isfile(lock_path):

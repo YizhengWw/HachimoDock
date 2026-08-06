@@ -1655,6 +1655,7 @@ def test_p4_component_lock_uses_platformio_exported_portable_root():
     assert "D:\\" not in dependency_lock
     assert 'env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir' in platformio_hook
     assert 'env.subst("$PROJECT_DIR")' in platformio_hook
+    assert "def normalize_component_lock(source, target, env):" in platformio_hook
     assert 'env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", normalize_component_lock)' in platformio_hook
     assert 'portable_root = "$PET_P4_PROJECT_DIR"' in platformio_hook
 
