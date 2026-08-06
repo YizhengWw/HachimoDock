@@ -1,6 +1,9 @@
 /*
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
- * [Output] Native consent with activation-ordered Accessibility-pane routing, activation-gated Chromium AX priming, stable/rebindable visible-composer submission through a composer-adjacent send control with intentional draft replacement, and clipboard-preserving current-caret insertion plus Return.
+ * [Output] Native consent with activation-ordered Accessibility-pane routing,
+ *          activation-gated Chromium AX priming, AX-only stable/rebindable
+ *          visible-composer submission with intentional draft replacement,
+ *          and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -53,7 +56,6 @@ const SESSION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_READBACK_TIMEOUT: Duration = Duration::from_millis(500);
 const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(3_000);
 const DEEPLINK_FOCUS_DELAY: Duration = Duration::from_millis(450);
-const COMPOSER_FOCUS_DELAY: Duration = Duration::from_millis(120);
 const KEYBOARD_READBACK_DELAY: Duration = Duration::from_millis(80);
 const ACCESSIBILITY_TREE_READY_TIMEOUT: Duration = Duration::from_millis(750);
 const ACCESSIBILITY_TREE_RETRY_DELAY: Duration = Duration::from_millis(25);
@@ -121,11 +123,9 @@ fn agent_application_names(agent: MacosAgent) -> &'static [&'static str] {
 
 pub(super) struct MacosComposerState {
     agent: MacosAgent,
-    deep_link: String,
     session_id: String,
     session_title: String,
     last_value: String,
-    keyboard_fallback: bool,
     current_visible_target: Option<ComposerTarget>,
 }
 
@@ -756,161 +756,6 @@ fn claude_session_is_latest_focused(session_id: &str) -> bool {
         }
     }
     target.last_focused_at > 0 && target.last_focused_at == newest
-}
-
-fn focused_composer_value(agent: MacosAgent) -> Result<Option<String>, String> {
-    let target = primary_agent_window(agent)?;
-    let attribute = AXAttribute::new(&CFString::new("AXFocusedUIElement"));
-    let Ok(value): Result<CFType, _> = target.app.attribute(&attribute) else {
-        return Ok(None);
-    };
-    if value.type_of() != AXUIElement::type_id() {
-        return Ok(None);
-    }
-    let focused =
-        unsafe { AXUIElement::wrap_under_get_rule(value.as_CFTypeRef() as AXUIElementRef) };
-    if !is_composer_element(&focused) {
-        return Ok(None);
-    }
-    Ok(Some(composer_value(&focused)))
-}
-
-fn verify_empty_composer_probe(agent: MacosAgent, probe: &str) -> Result<bool, String> {
-    match focused_composer_value(agent)? {
-        None => return Ok(false),
-        Some(value) if !value.is_empty() => {
-            post_command_key(0)?;
-            post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
-            thread::sleep(KEYBOARD_READBACK_DELAY);
-            if focused_composer_value(agent)?.as_deref() != Some("") {
-                return Err(format!("{} macOS 输入框草稿无法覆盖", agent.label()));
-            }
-        }
-        Some(_) => {}
-    }
-    paste_focused_text(probe)?;
-    if focused_composer_value(agent)?.as_deref() != Some(probe) {
-        return Ok(false);
-    }
-    post_command_key(0)?;
-    post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
-    thread::sleep(Duration::from_millis(40));
-    if focused_composer_value(agent)?.as_deref() != Some("") {
-        return Err(format!("{} macOS 可逆输入探针没有完整清除", agent.label()));
-    }
-    Ok(true)
-}
-
-fn verify_empty_focused_composer(
-    agent: MacosAgent,
-    session_id: &str,
-    deep_link: &str,
-) -> Result<(), String> {
-    focus_session_deeplink(agent, session_id, deep_link)?;
-    let snapshot = PasteboardSnapshot::capture()?;
-    let result = (|| {
-        let probe = format!("PMF{}", std::process::id());
-        if verify_empty_composer_probe(agent, &probe)? {
-            return Ok(());
-        }
-
-        // Once the largest primary window is frontmost, Codex's renderer
-        // handles Escape as its own `focus-composer` command. Allow a second
-        // bounded attempt for builds whose first event is consumed by another
-        // transient renderer surface.
-        for _ in 0..2 {
-            post_keyboard_event(KeyCode::ESCAPE, CGEventFlags::CGEventFlagNull)?;
-            thread::sleep(COMPOSER_FOCUS_DELAY);
-            if verify_empty_composer_probe(agent, &probe)? {
-                return Ok(());
-            }
-        }
-        Err(format!("{} macOS 输入焦点无法确认", agent.label()))
-    })();
-    snapshot.restore();
-    result
-}
-
-fn focus_empty_focused_composer(
-    agent: MacosAgent,
-    session_id: &str,
-    deep_link: &str,
-) -> Result<(), String> {
-    focus_session_deeplink(agent, session_id, deep_link)?;
-    for attempt in 0..3 {
-        match focused_composer_value(agent)? {
-            Some(value) if value.is_empty() => return Ok(()),
-            Some(_) if attempt < 2 => {
-                post_command_key(0)?;
-                post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
-                thread::sleep(KEYBOARD_READBACK_DELAY);
-            }
-            None if attempt < 2 => {
-                post_keyboard_event(KeyCode::ESCAPE, CGEventFlags::CGEventFlagNull)?;
-                thread::sleep(COMPOSER_FOCUS_DELAY);
-            }
-            Some(_) | None => break,
-        }
-    }
-    Err(format!(
-        "{} macOS 输入焦点无法确认，或输入框草稿无法覆盖",
-        agent.label()
-    ))
-}
-
-fn type_and_submit_focused_composer(
-    agent: MacosAgent,
-    session_id: &str,
-    deep_link: &str,
-    text: &str,
-) -> Result<(), String> {
-    // begin_voice already ran the reversible paste/delete safety probe. At
-    // final submission, reopening the exact deep link can briefly rebuild
-    // Chromium's focused AX node; repeating the destructive probe here races
-    // that rebuild and incorrectly reports a valid empty composer as a draft.
-    // Reconfirm the exact session, focus and empty value without mutating it,
-    // then rely on the full-text readback below before pressing Enter.
-    focus_empty_focused_composer(agent, session_id, deep_link)?;
-    let snapshot = PasteboardSnapshot::capture()?;
-    let result = (|| {
-        paste_focused_text(text)?;
-        if focused_composer_value(agent)?.as_deref() != Some(text) {
-            return Err(format!(
-                "{} macOS 输入框没有确认完整语音文本；为避免误删其他内容，已停止提交",
-                agent.label()
-            ));
-        }
-        post_keyboard_event(KeyCode::RETURN, CGEventFlags::CGEventFlagNull)?;
-        let deadline = Instant::now() + SUBMIT_CONFIRM_TIMEOUT;
-        loop {
-            thread::sleep(KEYBOARD_READBACK_DELAY);
-            match focused_composer_value(agent)? {
-                Some(value) if value.is_empty() => return Ok(()),
-                Some(value) if value == text && Instant::now() < deadline => continue,
-                Some(value) if value == text => {
-                    post_command_key(0)?;
-                    post_keyboard_event(KeyCode::DELETE, CGEventFlags::CGEventFlagNull)?;
-                    return Err(format!(
-                        "{} macOS 提交后输入框没有清空，已移除语音草稿以避免重复发送",
-                        agent.label()
-                    ));
-                }
-                Some(_) => {
-                    return Err(format!(
-                        "{} macOS 提交结果无法确认；为避免误删其他内容，本次不再继续操作",
-                        agent.label()
-                    ));
-                }
-                // Codex can remove or defocus the AXTextArea immediately
-                // after accepting Enter. The exact speech text was read back
-                // before submission, so disappearance is a successful
-                // terminal state and must not trigger a retry.
-                None => return Ok(()),
-            }
-        }
-    })();
-    snapshot.restore();
-    result
 }
 
 fn cf_string(result: Result<CFString, accessibility::Error>) -> Option<String> {
@@ -1766,24 +1611,26 @@ pub(super) fn begin_voice(
             focus_composer(&target)?;
             Ok(MacosComposerState {
                 agent,
-                deep_link: deep_link.to_string(),
                 session_id: session_id.to_string(),
                 session_title,
                 last_value: String::new(),
-                keyboard_fallback: false,
                 current_visible_target: None,
             })
         }
-        Err(_) if !session_id.trim().is_empty() => {
-            verify_empty_focused_composer(agent, session_id, deep_link)?;
+        Err(session_match_error) if !session_id.trim().is_empty() => {
+            // The exact deep link has already selected the requested session.
+            // If Codex temporarily omits its title from the AX tree, bind the
+            // now-visible composer directly instead of typing a global
+            // paste/delete probe into the user's input box.
+            let target = find_current_visible_target(agent)
+                .map_err(|focus_error| format!("{session_match_error}; {focus_error}"))?;
+            focus_composer(&target)?;
             Ok(MacosComposerState {
                 agent,
-                deep_link: deep_link.to_string(),
                 session_id: session_id.to_string(),
                 session_title,
                 last_value: String::new(),
-                keyboard_fallback: true,
-                current_visible_target: None,
+                current_visible_target: Some(target),
             })
         }
         Err(error) => Err(error),
@@ -1795,11 +1642,9 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
     focus_composer(&target)?;
     Ok(MacosComposerState {
         agent,
-        deep_link: String::new(),
         session_id: String::new(),
         session_title: String::new(),
         last_value: String::new(),
-        keyboard_fallback: false,
         current_visible_target: Some(target),
     })
 }
@@ -1807,10 +1652,6 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
     let text = normalize_text(text);
     if text == state.last_value {
-        return Ok(text);
-    }
-    if state.keyboard_fallback {
-        state.last_value = text.clone();
         return Ok(text);
     }
     let mut last_error = String::new();
@@ -1963,12 +1804,7 @@ fn submit_target(target: &ComposerTarget) -> Result<(), String> {
 }
 
 pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
-    let text = update_voice(state, text)?;
-    if state.keyboard_fallback {
-        type_and_submit_focused_composer(state.agent, &state.session_id, &state.deep_link, &text)?;
-        state.last_value.clear();
-        return Ok(String::new());
-    }
+    update_voice(state, text)?;
     thread::sleep(Duration::from_millis(80));
     let target = find_voice_target(state)?;
     submit_target(&target)?;
@@ -1996,10 +1832,6 @@ pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result
 }
 
 pub(super) fn cancel_voice(state: &mut MacosComposerState) {
-    if state.keyboard_fallback {
-        state.last_value.clear();
-        return;
-    }
     if state.last_value.is_empty() {
         return;
     }
@@ -2013,7 +1845,7 @@ pub(super) fn cancel_voice(state: &mut MacosComposerState) {
 
 #[cfg(debug_assertions)]
 pub(super) fn debug_probe_final_focus(state: &MacosComposerState) -> Result<(), String> {
-    focus_empty_focused_composer(state.agent, &state.session_id, &state.deep_link)
+    find_current_visible_target(state.agent).and_then(|target| focus_composer(&target))
 }
 
 #[cfg(debug_assertions)]

@@ -11,8 +11,9 @@
  *          audio-only patch commits, legacy full-sync fallback for boards that
  *          do not support per-file asset acks yet, short-id ACK-gated widget
  *          .clawpkg OTA plus capability-gated, expected-board-id removal with
- *          legacy unsupported-phase NACK correlation, Base64-safe firmware
- *          chunks below legacy line limits, request-id-matched live device
+ *          legacy unsupported-phase NACK correlation, adaptively downshifted
+ *          Base64-safe firmware chunks below legacy line limits,
+ *          request-id-matched live device
  *          widget inventory, and persisted input configuration reads;
  *          transaction_waiters owns shared ACK/request matching;
  *          appearance_transaction owns appearance integrity, sync planning,
@@ -71,8 +72,8 @@ use appearance_transaction::{
 use connection_handle::serial_open_error_is_transient;
 use connection_handle::{open_serial_pair_with_retry, ProbedSerialPort, UsbConnection};
 use firmware_transaction::{
-    evaluate_firmware_validation, parse_esp_idf_app_descriptor, FirmwareCommandError,
-    VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
+    evaluate_firmware_validation, firmware_corruption_fallback_size, parse_esp_idf_app_descriptor,
+    FirmwareCommandError, VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
     P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_CHUNK_SIZE, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
     P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, P4_FIRMWARE_MAX_IMAGE_SIZE, P4_FIRMWARE_RECONNECT_TIMEOUT,
 };
@@ -80,7 +81,7 @@ pub use firmware_transaction::{inspect_firmware_image, FirmwareImageInfo, Firmwa
 #[cfg(test)]
 use firmware_transaction::{
     ESP_APP_DESC_MAGIC, ESP_APP_DESC_SIZE, ESP_IMAGE_HEADER_SIZE, ESP_IMAGE_SEGMENT_HEADER_SIZE,
-    P4_FIRMWARE_PROJECT_NAME,
+    P4_FIRMWARE_FALLBACK_CHUNK_SIZE, P4_FIRMWARE_PROJECT_NAME, P4_FIRMWARE_SAFE_CHUNK_SIZE,
 };
 use transaction_waiters::{
     resolve_asset_ack, resolve_device_response, resolve_firmware_ack, resolve_widget_ack,
@@ -1664,30 +1665,45 @@ impl UsbSerialManager {
             .to_string();
 
         let transfer_result = (|| {
-            for (sequence, chunk) in firmware.chunks(P4_FIRMWARE_CHUNK_SIZE).enumerate() {
-                let received_bytes =
-                    ((sequence + 1) * P4_FIRMWARE_CHUNK_SIZE).min(firmware.len()) as u64;
+            let mut offset = 0usize;
+            let mut sequence = 0u64;
+            let mut chunk_size = P4_FIRMWARE_CHUNK_SIZE;
+            while offset < firmware.len() {
+                let chunk_end = offset.saturating_add(chunk_size).min(firmware.len());
+                let chunk = &firmware[offset..chunk_end];
+                let received_bytes = chunk_end as u64;
                 let payload = serde_json::json!({
                     "transferId": transfer_id,
                     "seq": sequence,
                     "decodedSize": chunk.len(),
                     "data": base64::engine::general_purpose::STANDARD.encode(chunk),
                 });
-                let mut chunk_result = Err("firmware chunk was not attempted".to_string());
+                let mut chunk_result = Err(FirmwareCommandError::Send(
+                    "firmware chunk was not attempted".to_string(),
+                ));
+                let mut fallback_size = None;
                 for attempt in 1..=P4_FIRMWARE_CHUNK_MAX_ATTEMPTS {
-                    chunk_result = self
-                        .send_firmware_command_and_wait(
-                            &expected_board_device_id,
-                            "firmware/chunk",
-                            &payload,
-                            &transfer_id,
-                            "chunk",
-                            sequence as u64 + 1,
-                            received_bytes,
-                            P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
-                        )
-                        .map_err(|error| error.to_string());
+                    chunk_result = self.send_firmware_command_and_wait(
+                        &expected_board_device_id,
+                        "firmware/chunk",
+                        &payload,
+                        &transfer_id,
+                        "chunk",
+                        sequence + 1,
+                        received_bytes,
+                        P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
+                    );
                     if chunk_result.is_ok() {
+                        break;
+                    }
+                    if let Some(smaller_size) = firmware_corruption_fallback_size(
+                        chunk_size,
+                        chunk_result.as_ref().unwrap_err(),
+                    ) {
+                        fallback_size = Some(smaller_size);
+                        eprintln!(
+                            "[usb-firmware-ota] payload corruption at seq={sequence}; reducing decoded chunks from {chunk_size} to {smaller_size} bytes"
+                        );
                         break;
                     }
                     eprintln!(
@@ -1701,20 +1717,28 @@ impl UsbSerialManager {
                         thread::sleep(P4_FIRMWARE_CHUNK_RETRY_DELAY);
                     }
                 }
-                chunk_result?;
+                if let Some(smaller_size) = fallback_size {
+                    chunk_size = smaller_size;
+                    continue;
+                }
+                chunk_result.map_err(|error| error.to_string())?;
                 on_progress(received_bytes, total_bytes, "upload");
+                offset = chunk_end;
+                sequence += 1;
             }
-            Ok::<(), String>(())
+            Ok::<u64, String>(sequence)
         })();
 
-        if let Err(error) = transfer_result {
-            self.best_effort_firmware_abort(&expected_board_device_id, &transfer_id);
-            return Err(error);
-        }
+        let expected_next_sequence = match transfer_result {
+            Ok(sequence) => sequence,
+            Err(error) => {
+                self.best_effort_firmware_abort(&expected_board_device_id, &transfer_id);
+                return Err(error);
+            }
+        };
 
         on_progress(total_bytes, total_bytes, "verify");
         let commit_payload = serde_json::json!({ "transferId": transfer_id });
-        let expected_next_sequence = firmware.chunks(P4_FIRMWARE_CHUNK_SIZE).count() as u64;
         let mut commit_ack = None;
         let mut last_commit_delivery_error = String::new();
         for attempt in 1..=P4_FIRMWARE_COMMIT_MAX_ATTEMPTS {
@@ -6604,6 +6628,33 @@ mod tests {
             line.len() < 4 * 1024,
             "firmware Base64 JSON must fit the legacy P4 line buffer"
         );
+    }
+
+    #[test]
+    fn firmware_base64_corruption_downshifts_without_restarting_the_transfer() {
+        let corruption =
+            FirmwareCommandError::Rejected("firmware chunk base64 mismatch".to_string());
+        assert_eq!(
+            firmware_corruption_fallback_size(P4_FIRMWARE_CHUNK_SIZE, &corruption),
+            Some(P4_FIRMWARE_FALLBACK_CHUNK_SIZE)
+        );
+        assert_eq!(
+            firmware_corruption_fallback_size(P4_FIRMWARE_FALLBACK_CHUNK_SIZE, &corruption),
+            Some(P4_FIRMWARE_SAFE_CHUNK_SIZE)
+        );
+        assert_eq!(
+            firmware_corruption_fallback_size(P4_FIRMWARE_SAFE_CHUNK_SIZE, &corruption),
+            None
+        );
+        assert_eq!(
+            firmware_corruption_fallback_size(
+                P4_FIRMWARE_CHUNK_SIZE,
+                &FirmwareCommandError::Rejected("firmware transferId mismatch".to_string()),
+            ),
+            None
+        );
+        assert_eq!(P4_FIRMWARE_FALLBACK_CHUNK_SIZE % 3, 0);
+        assert_eq!(P4_FIRMWARE_SAFE_CHUNK_SIZE % 3, 0);
     }
 
     #[test]

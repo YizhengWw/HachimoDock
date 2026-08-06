@@ -1,3 +1,10 @@
+/*
+ * [Input] P4 LCD panel operations, boot lifecycle, and RGB565 frame buffers.
+ * [Output] Hidden-until-first-frame display initialization and bounded draws.
+ * [Pos] Public LCD contract for the ESP32-P4 runtime.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md`.
+ */
+
 #pragma once
 
 #include <stddef.h>
@@ -5,7 +12,9 @@
 
 #include "esp_err.h"
 
+esp_err_t pet_p4_lcd_prepare_boot(void);
 esp_err_t pet_p4_lcd_init(void);
+esp_err_t pet_p4_lcd_reveal(void);
 esp_err_t pet_p4_lcd_backlight_status(void);
 esp_err_t pet_p4_lcd_keep_awake(void);
 esp_err_t pet_p4_lcd_show_color_bar(void);

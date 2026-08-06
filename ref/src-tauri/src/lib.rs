@@ -11869,7 +11869,11 @@ mod tests {
         assert!(source.contains("COMPOSER_STABILITY_DELAY"));
         assert!(source.contains("application == target.app"));
         assert!(source.contains("pinned.composer = composer.clone()"));
-        assert!(source.contains("输入框草稿无法覆盖"));
+        assert!(source.contains("let target = find_current_visible_target(agent)"));
+        assert!(source.contains("set_attribute(&AXAttribute::value()"));
+        assert!(!source.contains("keyboard_fallback"));
+        assert!(!source.contains("PMF{}"));
+        assert!(!source.contains("verify_empty_composer_probe"));
         assert!(!source.contains("输入框已有用户草稿，已拒绝覆盖"));
         assert!(!source.contains("当前会话或输入框在语音输入期间发生变化"));
     }

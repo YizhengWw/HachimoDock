@@ -1511,7 +1511,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.31-p4")' in project
+    assert 'set(PROJECT_VER "0.7.32-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1583,6 +1583,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     ota = read_required("main/pet_p4_ota.c")
     protocol = read("main/pet_p4_protocol.c")
     main = read("main/pet_p4_main.c")
+    lcd = read("main/pet_p4_lcd.c")
     desktop = read_usb_serial_contract()
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/FirmwareUpdateModal.jsx")
@@ -1590,7 +1591,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.31-p4")' in project
+    assert 'set(PROJECT_VER "0.7.32-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1629,6 +1630,10 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
         "ref/src-tauri/src/usb_serial.rs"
     )
     assert "P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 20" in desktop
+    assert "P4_FIRMWARE_FALLBACK_CHUNK_SIZE: usize = 1_020" in desktop
+    assert "P4_FIRMWARE_SAFE_CHUNK_SIZE: usize = 510" in desktop
+    assert "firmware_corruption_fallback_size" in desktop
+    assert "payload corruption at seq=" in read_workspace("ref/src-tauri/src/usb_serial.rs")
     assert "P4_FIRMWARE_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(3)" in desktop
     assert "sequence + 1 == g_next_sequence" in ota
     assert "g_commit_result.next_sequence" in ota
@@ -1652,6 +1657,12 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert 'disposition === "update"' in bundled_ui
     assert 'disposition === "latest"' in bundled_ui
     assert "已最新" in bundled_ui
+    assert "pet_p4_lcd_prepare_boot" in main
+    assert "pet_p4_lcd_reveal" in main
+    assert main.index("pet_p4_lcd_prepare_boot") < main.index("pet_p4_miniapp_sync_builtins")
+    assert main.index("pet_p4_renderer_render") < main.index("pet_p4_lcd_reveal")
+    assert "bsp_display_backlight_off" in lcd
+    assert "first complete" in lcd
 
 
 def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():

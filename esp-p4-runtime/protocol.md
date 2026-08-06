@@ -424,7 +424,12 @@ PC to board:
   readable for compatibility; Linux `videos/*.mp4` or `videos/*.wav` assets
   are rejected explicitly.
 - `firmware/begin`, `firmware/chunk`, `firmware/commit`, `firmware/abort`:
-  writes a SHA-256-verified ESP-IDF image to the inactive 2.5MiB OTA slot.
+  writes a SHA-256-verified ESP-IDF image to the inactive 2.5MiB OTA slot. The
+  desktop starts with 2046-byte decoded chunks and, without restarting the
+  transaction or advancing its sequence, reduces a device-rejected Base64
+  chunk to 1020 and then 510 bytes. After reboot the backlight remains hidden
+  through built-in component migration and is revealed only after the first
+  complete frame has rendered.
 - `firmware/query`: returns running, boot, and next partition metadata on
   `firmware/status`.
 - `diagnostics/query`: returns boot/reset history, heap and PSRAM low-water

@@ -3,7 +3,8 @@
  * [Output] initialized P4 runtime with serialized state access, origin-aware
  *          protocol replies, non-destructive storage mounting, and independent
  *          render/RX health samples, plus post-OTA synchronization of the
- *          built-in component bundle carried inside the application image.
+ *          built-in component bundle carried inside the application image and
+ *          a backlight-gated first complete frame.
  * [Pos] ESP32-P4 firmware entry point and task coordinator.
  * [Sync] If this file changes, update esp-p4-runtime/.folder.md.
  */
@@ -549,6 +550,10 @@ void app_main(void) {
   char lcd_status[192];
   char i2c_devices[128];
   char board_device_id[PET_P4_DEVICE_ID_MAX];
+  esp_err_t backlight_hide_err = pet_p4_lcd_prepare_boot();
+  if (backlight_hide_err != ESP_OK) {
+    ESP_LOGW(TAG, "LCD boot backlight could not be hidden: %s", esp_err_to_name(backlight_hide_err));
+  }
   ESP_ERROR_CHECK(nvs_flash_init());
   g_render_mutex = xSemaphoreCreateMutex();
   ESP_ERROR_CHECK(g_render_mutex ? ESP_OK : ESP_ERR_NO_MEM);
@@ -624,6 +629,9 @@ void app_main(void) {
     pet_p4_view_model_t boot_view;
     pet_p4_build_view_model(&g_state, &boot_view);
     render_err = pet_p4_renderer_render(&g_state, &boot_view, 0);
+    if (render_err == ESP_OK) {
+      render_err = pet_p4_lcd_reveal();
+    }
     runtime_render_healthy = render_err == ESP_OK;
   } else {
     ESP_LOGW(TAG, "LCD init failed, keep USB runtime alive: %s", esp_err_to_name(lcd_err));

@@ -1,7 +1,7 @@
 /*
  * [Input] ESP-IDF application images plus post-reboot P4 diagnostics.
- * [Output] Firmware image metadata/preflight, sub-4-KiB Base64 wire chunks,
- *          OTA limits/errors, and validated reboot results.
+ * [Output] Firmware image metadata/preflight, adaptive sub-4-KiB Base64 wire
+ *          chunks, OTA limits/errors, and validated reboot results.
  * [Pos] Pure firmware transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -15,6 +15,8 @@ use std::time::Duration;
 // while finishing before older firmware's whole-transfer watchdog expires.
 // 2046 is divisible by three, so every full chunk is padding-free.
 pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
+pub(super) const P4_FIRMWARE_FALLBACK_CHUNK_SIZE: usize = 1_020;
+pub(super) const P4_FIRMWARE_SAFE_CHUNK_SIZE: usize = 510;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
 pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 // A healthy 4 Mbaud board ACK arrives within a few milliseconds. A longer
@@ -63,6 +65,26 @@ pub(super) enum FirmwareCommandError {
     Send(String),
     Timeout { phase: String },
     Rejected(String),
+}
+
+pub(super) fn firmware_corruption_fallback_size(
+    current_size: usize,
+    error: &FirmwareCommandError,
+) -> Option<usize> {
+    if !matches!(
+        error,
+        FirmwareCommandError::Rejected(message)
+            if message.contains("firmware chunk base64 mismatch")
+    ) {
+        return None;
+    }
+    if current_size > P4_FIRMWARE_FALLBACK_CHUNK_SIZE {
+        Some(P4_FIRMWARE_FALLBACK_CHUNK_SIZE)
+    } else if current_size > P4_FIRMWARE_SAFE_CHUNK_SIZE {
+        Some(P4_FIRMWARE_SAFE_CHUNK_SIZE)
+    } else {
+        None
+    }
 }
 
 impl std::fmt::Display for FirmwareCommandError {
