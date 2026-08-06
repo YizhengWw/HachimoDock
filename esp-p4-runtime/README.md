@@ -43,6 +43,9 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
+- Firmware `0.7.37-p4` fixes an unsigned idle-clock underflow that could abort a
+  healthy OTA transaction immediately after a chunk; protocol schema 6 tells
+  the desktop that 4092-byte fast chunks are safe again.
 - Firmware `0.7.36-p4` lets the desktop discover and abort an OTA transaction
   retained after a cable pull, and replaces the formerly frozen frame during
   firmware/appearance transfer with a lightweight transfer-only screen.

@@ -75,12 +75,13 @@ use appearance_transaction::{
 use connection_handle::serial_open_error_is_transient;
 use connection_handle::{open_serial_pair_with_retry, ProbedSerialPort, UsbConnection};
 use firmware_transaction::{
-    evaluate_firmware_validation, firmware_corruption_fallback_size, firmware_recovery_chunk_size,
-    parse_esp_idf_app_descriptor, preferred_firmware_chunk_size, FirmwareCommandError,
-    VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_BEGIN_MAX_ATTEMPTS,
-    P4_FIRMWARE_CHUNK_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
-    P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK,
-    P4_FIRMWARE_MAX_IMAGE_SIZE, P4_FIRMWARE_RECONNECT_TIMEOUT,
+    evaluate_firmware_validation, firmware_chunk_error_is_retryable,
+    firmware_corruption_fallback_size, firmware_recovery_chunk_size, parse_esp_idf_app_descriptor,
+    preferred_firmware_chunk_size, FirmwareCommandError, VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT,
+    P4_FIRMWARE_BEGIN_MAX_ATTEMPTS, P4_FIRMWARE_CHUNK_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_MAX_ATTEMPTS,
+    P4_FIRMWARE_COMMIT_ACK_TIMEOUT, P4_FIRMWARE_COMMIT_MAX_ATTEMPTS,
+    P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK, P4_FIRMWARE_MAX_IMAGE_SIZE,
+    P4_FIRMWARE_RECONNECT_TIMEOUT,
 };
 pub use firmware_transaction::{inspect_firmware_image, FirmwareImageInfo, FirmwareUpdateResult};
 #[cfg(test)]
@@ -1721,6 +1722,15 @@ impl UsbSerialManager {
             "[usb-firmware-ota] recovering interrupted transfer={} next_sequence={} received_bytes={}",
             stale_transfer_id, next_sequence, received_bytes
         );
+        transfer_log::record(
+            "firmware",
+            "stale_transfer_detected",
+            serde_json::json!({
+                "transferId": stale_transfer_id,
+                "nextSequence": next_sequence,
+                "receivedBytes": received_bytes,
+            }),
+        );
         self.send_firmware_command_and_wait(
             expected_board_device_id,
             expected_connection_id,
@@ -1825,6 +1835,19 @@ impl UsbSerialManager {
         let sha256 = format!("{:x}", Sha256::digest(&firmware));
         let transfer_id = format!("firmware-{}", uuid::Uuid::new_v4());
         let total_bytes = firmware.len() as u64;
+        transfer_log::record(
+            "firmware",
+            "transaction_started",
+            serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "boardDeviceId": expected_board_device_id.as_str(),
+                "sourceFirmware": status.firmware.as_str(),
+                "targetFirmware": descriptor.version.as_str(),
+                "protocolSchema": status.protocol_schema,
+                "chunkBytes": preferred_chunk_size,
+                "bytes": total_bytes,
+            }),
+        );
         on_progress(0, total_bytes, "begin");
 
         let begin_payload = serde_json::json!({
@@ -1920,6 +1943,21 @@ impl UsbSerialManager {
                         P4_FIRMWARE_CHUNK_MAX_ATTEMPTS,
                         chunk_result.as_ref().unwrap_err()
                     );
+                    transfer_log::record(
+                        "firmware",
+                        "chunk_attempt_failed",
+                        serde_json::json!({
+                            "transferId": transfer_id.as_str(),
+                            "seq": sequence,
+                            "offset": offset,
+                            "chunkBytes": chunk_size,
+                            "attempt": attempt,
+                            "error": chunk_result.as_ref().unwrap_err().to_string(),
+                        }),
+                    );
+                    if !firmware_chunk_error_is_retryable(chunk_result.as_ref().unwrap_err()) {
+                        break;
+                    }
                     if attempt < P4_FIRMWARE_CHUNK_MAX_ATTEMPTS {
                         thread::sleep(P4_FIRMWARE_CHUNK_RETRY_DELAY);
                     }
@@ -1967,6 +2005,14 @@ impl UsbSerialManager {
                 sequence
             }
             Err(error) => {
+                transfer_log::record(
+                    "firmware",
+                    "transaction_failed",
+                    serde_json::json!({
+                        "transferId": transfer_id.as_str(),
+                        "error": error.as_str(),
+                    }),
+                );
                 self.best_effort_firmware_abort(
                     &expected_board_device_id,
                     firmware_connection_id,
@@ -2035,6 +2081,19 @@ impl UsbSerialManager {
             &on_progress,
             total_bytes,
         )?;
+
+        transfer_log::record(
+            "firmware",
+            "transaction_committed",
+            serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "version": descriptor.version.as_str(),
+                "partition": verified.partition.as_str(),
+                "bytes": total_bytes,
+                "attempts": upload_attempts,
+                "elapsedMs": upload_started.elapsed().as_millis(),
+            }),
+        );
 
         Ok(FirmwareUpdateResult {
             transfer_id,
@@ -7171,12 +7230,16 @@ mod tests {
     }
 
     #[test]
-    fn advertised_schema_five_receiver_uses_the_full_decoded_chunk_budget() {
+    fn schema_five_uses_rescue_chunks_until_the_idle_clock_fix_is_installed() {
         let capabilities = serde_json::json!({
             "firmwareUpdate": { "chunkBytes": 4096 }
         });
         assert_eq!(
             preferred_firmware_chunk_size(5, &capabilities),
+            P4_FIRMWARE_SAFE_CHUNK_SIZE
+        );
+        assert_eq!(
+            preferred_firmware_chunk_size(6, &capabilities),
             P4_FIRMWARE_FAST_CHUNK_SIZE
         );
         assert_eq!(
@@ -7188,7 +7251,7 @@ mod tests {
                 5,
                 &serde_json::json!({ "firmwareUpdate": { "chunkBytes": 2048 } }),
             ),
-            P4_FIRMWARE_CHUNK_SIZE
+            P4_FIRMWARE_SAFE_CHUNK_SIZE
         );
 
         let encoded_len = P4_FIRMWARE_FAST_CHUNK_SIZE.div_ceil(3) * 4;
@@ -7237,6 +7300,24 @@ mod tests {
         assert_eq!(P4_FIRMWARE_CHUNK_SIZE % 3, 0);
         assert_eq!(P4_FIRMWARE_FALLBACK_CHUNK_SIZE % 3, 0);
         assert_eq!(P4_FIRMWARE_SAFE_CHUNK_SIZE % 3, 0);
+    }
+
+    #[test]
+    fn firmware_chunk_retries_only_delivery_or_base64_corruption() {
+        assert!(firmware_chunk_error_is_retryable(
+            &FirmwareCommandError::Timeout {
+                phase: "chunk".to_string(),
+            }
+        ));
+        assert!(firmware_chunk_error_is_retryable(
+            &FirmwareCommandError::Rejected("firmware chunk base64 mismatch".to_string())
+        ));
+        assert!(!firmware_chunk_error_is_retryable(
+            &FirmwareCommandError::Rejected("firmware transferId mismatch".to_string())
+        ));
+        assert!(!firmware_chunk_error_is_retryable(
+            &FirmwareCommandError::Rejected("ESP_ERR_FLASH_OP_FAIL".to_string())
+        ));
     }
 
     #[test]

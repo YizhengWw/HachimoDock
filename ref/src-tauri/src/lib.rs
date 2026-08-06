@@ -11658,7 +11658,7 @@ mod tests {
             .as_str()
             .is_some_and(|value| !value.is_empty()));
         assert!(build["dirty"].is_boolean());
-        assert_eq!(build["protocolSchema"], 5);
+        assert_eq!(build["protocolSchema"], 6);
     }
 
     #[test]

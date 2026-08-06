@@ -10,15 +10,18 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
-// Protocol-schema-5 firmware advertises a decoded 4 KiB receiver and uses a
-// 32 KiB JSON line buffer. Keep three bytes below that decoded ceiling so full
-// Base64 chunks have no padding. Legacy receivers retain the sub-4-KiB wire
-// line below; both sizes are drained through short physical serial writes.
+// Protocol-schema-6 firmware fixes the OTA idle-clock race and advertises a
+// decoded 4 KiB receiver with a 32 KiB JSON line buffer. Keep three bytes below
+// that decoded ceiling so full Base64 chunks have no padding. Schema-5 boards
+// must use the 510-byte rescue path while receiving their one-time fix; older
+// receivers retain the sub-4-KiB wire line below. Every size is drained through
+// short physical serial writes.
 pub(super) const P4_FIRMWARE_FAST_CHUNK_SIZE: usize = 4_092;
 pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
 pub(super) const P4_FIRMWARE_FALLBACK_CHUNK_SIZE: usize = 1_020;
 pub(super) const P4_FIRMWARE_SAFE_CHUNK_SIZE: usize = 510;
-pub(super) const P4_FIRMWARE_FAST_PROTOCOL_SCHEMA: u32 = 5;
+pub(super) const P4_FIRMWARE_FAST_PROTOCOL_SCHEMA: u32 = 6;
+pub(super) const P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA: u32 = 5;
 pub(super) const P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK: usize = 3;
 pub(super) const P4_FIRMWARE_RECOVERY_SUCCESS_STREAK: usize = 32;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
@@ -104,8 +107,20 @@ pub(super) fn preferred_firmware_chunk_size(protocol_schema: u32, capabilities: 
         && advertised_max >= P4_FIRMWARE_FAST_CHUNK_SIZE
     {
         P4_FIRMWARE_FAST_CHUNK_SIZE
+    } else if protocol_schema == P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA {
+        P4_FIRMWARE_SAFE_CHUNK_SIZE
     } else {
         P4_FIRMWARE_CHUNK_SIZE
+    }
+}
+
+pub(super) fn firmware_chunk_error_is_retryable(error: &FirmwareCommandError) -> bool {
+    match error {
+        FirmwareCommandError::Timeout { .. } => true,
+        FirmwareCommandError::Rejected(message) => {
+            message.contains("firmware chunk base64 mismatch")
+        }
+        FirmwareCommandError::Send(_) => false,
     }
 }
 

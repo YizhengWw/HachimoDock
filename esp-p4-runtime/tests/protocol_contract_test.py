@@ -1517,7 +1517,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.36-p4")' in project
+    assert 'set(PROJECT_VER "0.7.37-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1597,7 +1597,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.36-p4")' in project
+    assert 'set(PROJECT_VER "0.7.37-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1619,6 +1619,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "pet_p4_diagnostics_reboot_pending" in ota
     assert "modf(item->valuedouble" in ota
     assert 'json_string(request, "requestId")' in ota
+    assert "now_ms >= g_last_activity_ms" in ota
     for topic in [
         "firmware/begin",
         "firmware/chunk",
@@ -1693,7 +1694,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/DeviceDiagnosticsModal.jsx")
 
-    assert "set(PET_P4_PROTOCOL_SCHEMA 5)" in project
+    assert "set(PET_P4_PROTOCOL_SCHEMA 6)" in project
     assert "rev-parse --short=12 HEAD" in project
     assert 'PET_P4_BUILD_ID="${PET_P4_BUILD_ID}"' in main_cmake
     assert "PET_P4_PROTOCOL_SCHEMA=${PET_P4_PROTOCOL_SCHEMA}" in main_cmake
@@ -1704,7 +1705,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
         assert f'"{field}"' in protocol
         assert f'"{field}"' in diagnostics
 
-    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 5" in desktop_build
+    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 6" in desktop_build
     assert '"rev-parse", "--short=12", "HEAD"' in desktop_build
     assert "PET_MANAGER_BUILD_ID" in desktop_build
     assert "pub build_id: String" in desktop_serial

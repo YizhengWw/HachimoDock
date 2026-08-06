@@ -23,11 +23,11 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.29-p4",
-    "buildId": "0.7.29-p4+290f402abcd1",
+    "fw": "0.7.37-p4",
+    "buildId": "0.7.37-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
-    "protocolSchema": 5,
+    "protocolSchema": 6,
     "wireProtocol": "pet-usb-jsonl-v3",
     "hardware": {
       "soc": "ESP32-P4 RISC-V Dual-Core",
@@ -230,8 +230,8 @@ Kinds:
     "protocol": "pet-usb-native-v1",
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
-    "protocolSchema": 5,
-    "buildId": "0.7.29-p4+0123456789ab"
+    "protocolSchema": 6,
+    "buildId": "0.7.37-p4+0123456789ab"
   }
 }
 ```
@@ -441,7 +441,12 @@ PC to board:
   2046-byte size. A transient Base64 rejection retries the same sequence at the
   current size; three repeated rejections reduce it through 2046, 1020, then
   510 bytes without restarting the transaction, and 32 successful chunks
-  restore the next larger size. Before a new update, Pet Manager queries
+  restore the next larger size. Schema-5 firmware has an idle-clock race, so
+  the desktop starts and remains on the 510-byte rescue path while installing
+  schema 6; schema-6 firmware restores the 4092-byte fast path. The firmware
+  timeout reaper ignores a loop timestamp older than the most recent chunk so
+  unsigned subtraction cannot clear a healthy transfer. Before a new update,
+  Pet Manager queries
   `firmware/status`; if a disconnected host left an active transaction, it
   aborts that exact reported `transferId` before starting the replacement.
   Every upload is also pinned to its original USB connection generation, so an

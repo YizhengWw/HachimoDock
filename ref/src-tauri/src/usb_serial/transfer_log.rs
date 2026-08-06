@@ -1,5 +1,5 @@
 /*
- * [Input] Structured USB appearance-transfer lifecycle and acknowledgement events.
+ * [Input] Structured USB appearance and firmware transfer lifecycle/ack events.
  * [Output] Bounded JSONL diagnostics persisted under the current app-data directory.
  * [Pos] Release-safe USB transfer observability helper for usb_serial.
  * [Sync] If this file changes, update `ref/.folder.md`.

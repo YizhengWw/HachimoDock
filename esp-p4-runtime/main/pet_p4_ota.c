@@ -754,6 +754,7 @@ void pet_p4_ota_process(unsigned long long now_ms) {
   bool restart = false;
   if (!g_ota_mutex || xSemaphoreTake(g_ota_mutex, portMAX_DELAY) != pdTRUE) return;
   if (g_active && g_last_activity_ms
+      && now_ms >= g_last_activity_ms
       && now_ms - g_last_activity_ms >= PET_P4_OTA_TRANSFER_IDLE_TIMEOUT_MS) {
     ESP_LOGW(TAG, "aborting idle OTA transfer=%s after %llu ms", g_transfer_id,
              now_ms - g_last_activity_ms);
