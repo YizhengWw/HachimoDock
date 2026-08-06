@@ -2,7 +2,8 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
-visual-preset parity, including standardized SW1/SW3/joystick builtin controls.
+visual-preset parity, including SW1-back/SW3-confirm global defaults and
+standardized SW1/SW3/joystick component controls.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
@@ -1469,7 +1470,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.28-p4")' in project
+    assert 'set(PROJECT_VER "0.7.29-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1544,8 +1545,11 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     desktop = read_usb_serial_contract()
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/FirmwareUpdateModal.jsx")
+    bundled_ui = read_workspace("ref/src/shell/FirmwareUpdateNavItem.jsx")
+    tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
+    resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.28-p4")' in project
+    assert 'set(PROJECT_VER "0.7.29-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1593,6 +1597,17 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "usb_update_firmware" in desktop_lib
     assert "expected_board_device_id" in desktop_lib
     assert 'listen("usb-firmware-update-progress"' in desktop_ui
+    assert "usb_get_bundled_firmware_info" in desktop_lib
+    assert "usb_update_bundled_firmware" in desktop_lib
+    assert "compare_firmware_versions" in desktop_lib
+    assert "VersionOrdering::Less" in desktop_lib
+    assert '"firmware/esp32-p4/firmware.bin"' in tauri_config
+    assert "validateBundledP4Firmware" in resource_preflight
+    assert "usb_get_bundled_firmware_info" in bundled_ui
+    assert "usb_update_bundled_firmware" in bundled_ui
+    assert 'disposition === "update"' in bundled_ui
+    assert 'disposition === "latest"' in bundled_ui
+    assert "已最新" in bundled_ui
 
 
 def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
@@ -1914,8 +1929,8 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "PET_P4_INPUT_GESTURE_HOLD_END" in input_source
     assert '"button.sw1.hold", "voice_ptt"' in input_source
     assert '"button.sw2.short_press", "component_center"' in input_source
-    assert '"button.sw1.short_press", "page_enter"' in input_source
-    assert '"button.sw3.short_press", "page_back"' in input_source
+    assert '"button.sw1.short_press", "page_back"' in input_source
+    assert '"button.sw3.short_press", "page_enter"' in input_source
     assert '"button.sw3.long_press", "disabled"' in input_source
     assert '"button.encoder.short_press", "page_enter"' in input_source
     assert '"button.encoder.long_press", "disabled"' in input_source
@@ -1933,8 +1948,9 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "migrate_v3_config" in input_source
     assert "migrate_v4_config" in input_source
     assert "migrate_v5_config" in input_source
+    assert "migrate_v6_config" in input_source
     assert "migrate_input_config" in input_source
-    assert "PET_P4_INPUT_CONFIG_VERSION 6" in read_required("main/pet_p4_input.h")
+    assert "PET_P4_INPUT_CONFIG_VERSION 7" in read_required("main/pet_p4_input.h")
     assert "center_binding" not in input_source
     assert '"page_toggle"' in input_source
     assert '"page_enter"' in input_source
@@ -1965,8 +1981,7 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"摇杆四向选择 · 中按进入 · SW3返回"' in renderer
-    assert '"SW3短按返回"' in renderer
+    assert '"SW1返回，SW3进入"' in renderer
     assert "dispatch_component_binding_event" in input_source
     assert "pet_p4_miniapp_resolve_input" in input_source
     assert "pet_p4_miniapp_has_input(long_event_name)" in input_source

@@ -18,7 +18,8 @@
  *          slot fallback, ACK fallback, and deterministic pack-ID policy;
  *          widget_transaction owns component capability/path/payload policy;
  *          while the manager retains transfer sequencing;
- *          firmware_transaction owns ESP-IDF preflight and rollback validation
+ *          firmware_transaction owns reusable bundled/manual ESP-IDF image
+ *          inspection, preflight, and rollback validation
  *          while the manager performs
  *          ESP32-P4 A/B OTA with SHA-256 and per-chunk ACKs; macOS
  *          scans prefer /dev/cu.* callout ports to avoid blocking /dev/tty.*
@@ -68,13 +69,13 @@ use appearance_transaction::{
 #[cfg(test)]
 use connection_handle::serial_open_error_is_transient;
 use connection_handle::{open_serial_pair_with_retry, ProbedSerialPort, UsbConnection};
-pub use firmware_transaction::FirmwareUpdateResult;
 use firmware_transaction::{
     evaluate_firmware_validation, parse_esp_idf_app_descriptor, FirmwareCommandError,
     VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
     P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_CHUNK_SIZE, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
     P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, P4_FIRMWARE_MAX_IMAGE_SIZE, P4_FIRMWARE_RECONNECT_TIMEOUT,
 };
+pub use firmware_transaction::{inspect_firmware_image, FirmwareImageInfo, FirmwareUpdateResult};
 #[cfg(test)]
 use firmware_transaction::{
     ESP_APP_DESC_MAGIC, ESP_APP_DESC_SIZE, ESP_IMAGE_HEADER_SIZE, ESP_IMAGE_SEGMENT_HEADER_SIZE,

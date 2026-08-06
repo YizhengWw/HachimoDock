@@ -2,7 +2,7 @@
  * [Input] Pet lifecycle/session state, decoded assets, and bounded mini-app view presets.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus current four-direction joystick hints in the component catalog.
+ *          plus current SW1-back/SW3-enter hints in the component catalog.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and renderer tests.
  */
@@ -2471,9 +2471,7 @@ static void render_component_center_page(void) {
   }
 
   fill_round_rect_outline(28, 408, 584, 44, 9, panel, panel_outline);
-  const char *hint = count > 0
-    ? "摇杆四向选择 · 中按进入 · SW3返回"
-    : "SW3短按返回";
+  const char *hint = "SW1返回，SW3进入";
   draw_text_center(
     hint,
     320,

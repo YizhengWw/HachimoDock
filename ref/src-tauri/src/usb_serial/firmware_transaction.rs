@@ -1,6 +1,6 @@
 /*
  * [Input] ESP-IDF application images plus post-reboot P4 diagnostics.
- * [Output] Firmware preflight metadata, OTA limits/errors, and validated reboot results.
+ * [Output] Firmware image metadata/preflight, OTA limits/errors, and validated reboot results.
  * [Pos] Pure firmware transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -34,6 +34,14 @@ pub struct FirmwareUpdateResult {
     pub project_name: String,
     pub image_state: String,
     pub pending_reboot: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirmwareImageInfo {
+    pub version: String,
+    pub project_name: String,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +142,24 @@ pub(super) fn parse_esp_idf_app_descriptor(firmware: &[u8]) -> Result<EspIdfAppD
     Ok(EspIdfAppDescriptor {
         version,
         project_name,
+    })
+}
+
+pub fn inspect_firmware_image(path: &std::path::Path) -> Result<FirmwareImageInfo, String> {
+    let firmware = std::fs::read(path)
+        .map_err(|error| format!("read firmware {}: {error}", path.display()))?;
+    if firmware.is_empty() || firmware.len() > P4_FIRMWARE_MAX_IMAGE_SIZE {
+        return Err(format!(
+            "firmware image must be 1..={} bytes, got {}",
+            P4_FIRMWARE_MAX_IMAGE_SIZE,
+            firmware.len()
+        ));
+    }
+    let descriptor = parse_esp_idf_app_descriptor(&firmware)?;
+    Ok(FirmwareImageInfo {
+        version: descriptor.version,
+        project_name: descriptor.project_name,
+        bytes: firmware.len() as u64,
     })
 }
 

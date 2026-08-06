@@ -1,6 +1,6 @@
 /**
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
- * [Output] Pet Manager desktop app shell with a native macOS Accessibility consent request at startup, first-level device/gallery/component-center/API-configuration sidebar tabs, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
+ * [Output] Pet Manager desktop app shell with a native macOS Accessibility consent request at startup, first-level device/gallery/component-center/API-configuration sidebar tabs plus an inline version-gated bundled-firmware updater, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
  * [Pos] component node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -24,6 +24,7 @@ import ApiSettings from "./ApiSettings";
 import { DeviceContextProvider, useDeviceContext } from "./shell/DeviceContext.jsx";
 import ToastStack, { ToastProvider, useToast } from "./shell/ToastStack.jsx";
 import ContextRail from "./shell/ContextRail.jsx";
+import FirmwareUpdateNavItem from "./shell/FirmwareUpdateNavItem.jsx";
 import {
   acknowledgeGenerationTask,
   subscribeGenerationTask,
@@ -221,7 +222,7 @@ function AppInner({
   handleDetailBack,
 }) {
   const { push } = useToast();
-  const { refresh } = useDeviceContext();
+  const { refresh, usb } = useDeviceContext();
   const lastEpochRef = useRef(0);
 
   const handleSetupCompleteWithRefresh = useCallback(async () => {
@@ -335,6 +336,7 @@ function AppInner({
               <KeyRound size={16} />
               <span className="sidebar-nav-label">API 配置</span>
             </button>
+            <FirmwareUpdateNavItem usb={usb} />
           </nav>
           <div className="sidebar-spacer" />
           <ContextRail

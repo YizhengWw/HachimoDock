@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide the token-driven Pet Manager visual language, including unified page/card/control/modal primitives, a semantic shared Button hierarchy, USB-only first-run and dashboard status surfaces without Wi-Fi configuration chrome, first-visit page onboarding with compact reopenable quick-start dialogs, a unified Component Center library whose cards own device sync/removal state while pixel styling remains inside widget previews, a compact step-based device guide with hardware-shaped cues, a responsive centralized API-configuration workspace and provider-readiness strips, the preview-first appearance workspace, editable per-component button mappings with compact/mobile layouts, image-first grouped Linux/P4 hardware controls with shared voice enablement, compact Agent rows with global active-session controls, responsive shell/context navigation, and a high-density voice command bar with API readiness, diagnostics, and platform-specific foreground-input recovery tips.
+ * [Output] Provide the token-driven Pet Manager visual language, including unified page/card/control/modal primitives, a semantic shared Button hierarchy, USB-only first-run and dashboard status surfaces without Wi-Fi configuration chrome, first-visit page onboarding with compact reopenable quick-start dialogs, a unified Component Center library whose cards own device sync/removal state while pixel styling remains inside widget previews, a compact step-based device guide with hardware-shaped cues, a responsive centralized API-configuration workspace and provider-readiness strips, the preview-first appearance workspace, editable per-component button mappings with compact/mobile layouts, image-first grouped Linux/P4 hardware controls with shared voice enablement, compact Agent rows with global active-session controls, responsive shell/context navigation with inline firmware-update states, and a high-density voice command bar with API readiness, diagnostics, and platform-specific foreground-input recovery tips.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -610,6 +610,42 @@ select:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.sidebar-firmware-update {
+  cursor: default;
+}
+
+.sidebar-firmware-update__action {
+  flex: 0 0 auto;
+  min-width: 42px;
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sidebar-firmware-update__action:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+}
+
+.sidebar-firmware-update__action:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.sidebar-firmware-update__latest {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .sidebar-foot {
@@ -6811,6 +6847,10 @@ select:focus-visible {
   .sidebar-nav__item {
     flex: 1;
     justify-content: center;
+  }
+
+  .sidebar-firmware-update {
+    min-width: 150px;
   }
 
   .component-center-hero,

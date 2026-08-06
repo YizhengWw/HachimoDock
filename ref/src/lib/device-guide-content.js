@@ -3,7 +3,7 @@
  *         modal in DeviceDashboard.
  * [Output] Card data + storage key + canonical labels used by DeviceGuideModal,
  *          including compact screen/physical-control labels, all twelve P4
- *          gestures, and install-time widget button functions.
+ *          gestures, SW1-back/SW3-confirm defaults, and install-time widget button functions.
  * [Pos] lib helper for ref/src/DeviceGuideModal.jsx
  * [Sync] If `esp-p4-runtime/main/pet_p4_input.c` or legacy device input maps
  *        change meaning, update CARDS here. No hardcoded copy in the JSX.
@@ -110,7 +110,7 @@ export const P4_CARDS = [
     headline: "左右切换，中按进入；上下方向可独立配置。",
     screenIds: ["main", "components"],
     canonicalControl: "p4Joystick",
-    canonicalActionText: "默认中按确认，向左或向右选择上一个或下一个会话；返回（取消）由 SW3 短按完成。",
+    canonicalActionText: "默认中按确认，向左或向右选择上一个或下一个会话；返回（取消）由 SW1 短按完成。",
     otherWays: [
       { control: "p4Joystick", text: "向右默认：下一个" },
       { control: "p4Joystick", text: "向左默认：上一个" },
@@ -126,7 +126,7 @@ export const P4_CARDS = [
       { gesture: "中按短按", action: "确认 / 进入" },
       { gesture: "中按长按", action: "暂不绑定" },
     ],
-    supportingText: "这些默认动作可以在 PC 端独立调整；SW3 短按默认承担清晰的返回路径。",
+    supportingText: "这些默认动作可以在 PC 端独立调整；SW1 短按默认承担清晰的返回路径。",
   },
   {
     id: "controls",
@@ -137,7 +137,7 @@ export const P4_CARDS = [
       {
         control: "sw1",
         rows: [
-          { gesture: "短按", action: "确认 / 进入" },
+          { gesture: "短按", action: "返回（取消）" },
           { gesture: "长按", action: "按住说话" },
         ],
       },
@@ -151,7 +151,7 @@ export const P4_CARDS = [
       {
         control: "sw3",
         rows: [
-          { gesture: "短按", action: "返回（取消）" },
+          { gesture: "短按", action: "确认 / 进入" },
           { gesture: "长按", action: "暂不绑定" },
         ],
       },
@@ -165,10 +165,10 @@ export const P4_CARDS = [
     example: {
       name: "推荐起点",
       rows: [
-        { control: "sw1", gesture: "短按", action: "确认 / 进入" },
+        { control: "sw1", gesture: "短按", action: "返回 / 取消" },
         { control: "sw1", gesture: "长按", action: "语音输入" },
         { control: "sw2", gesture: "短按", action: "打开组件中心" },
-        { control: "sw3", gesture: "短按", action: "返回 / 取消" },
+        { control: "sw3", gesture: "短按", action: "确认 / 进入" },
         { control: "p4Joystick", gesture: "中按短按", action: "确认 / 进入" },
         { control: "p4Joystick", gesture: "向左 / 向右", action: "上一个 / 下一个" },
       ],

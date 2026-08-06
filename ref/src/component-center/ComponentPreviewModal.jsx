@@ -2,7 +2,7 @@
  * [Input] component metadata, exact-source current state, resolved per-component bindings/control choices, component-scope/conflict state, live-device state, and actions.
  * [Output] Structured preview/sync confirmation with a device-preview overview,
  *          dedicated button-mapping workspace, duplicate-input guard, consolidated
- *          sync-impact panel, and context-aware confirmation footer.
+ *          sync-impact panel, SW1 global-return guidance, and context-aware confirmation footer.
  * [Pos] component node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -240,7 +240,7 @@ export default function ComponentPreviewModal({
                 {componentButtonsWillApply && (
                   <p>
                     <b>组件按钮仅在打开该组件后生效。</b>
-                    设备的 SW3 短按返回等系统级导航保持不变。
+                    设备的 SW1 短按返回等系统级导航保持不变。
                   </p>
                 )}
                 {installBlockedReason && (

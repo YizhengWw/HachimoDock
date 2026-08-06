@@ -7,7 +7,7 @@
  *          with exact selected-session event metadata, and component-local
  *          button routing that is active only while the component page is
  *          open, plus correlated snapshots of the authoritative NVS-backed
- *          input configuration.
+ *          input configuration with versioned SW1-back/SW3-confirm defaults.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -242,13 +242,13 @@ static void add_default_binding(
 static void load_default_config(pet_p4_input_config_t *config) {
   memset(config, 0, sizeof(*config));
   config->version = PET_P4_INPUT_CONFIG_VERSION;
-  add_default_binding(config, "button.sw1.short_press", "page_enter", "");
+  add_default_binding(config, "button.sw1.short_press", "page_back", "");
   add_default_binding(config, "button.sw1.long_press", "disabled", "");
   add_default_binding(config, "button.sw1.hold", "voice_ptt", "");
   add_default_binding(config, "button.sw2.short_press", "component_center", "");
   add_default_binding(config, "button.sw2.long_press", "disabled", "");
   add_default_binding(config, "button.sw2.hold", "disabled", "");
-  add_default_binding(config, "button.sw3.short_press", "page_back", "");
+  add_default_binding(config, "button.sw3.short_press", "page_enter", "");
   add_default_binding(config, "button.sw3.long_press", "disabled", "");
   add_default_binding(config, "button.sw3.hold", "disabled", "");
   add_default_binding(config, "button.encoder.short_press", "page_enter", "");
@@ -386,6 +386,31 @@ static bool migrate_v5_config(pet_p4_input_config_t *config) {
     "page_enter",
     ""
   );
+  config->version = 6;
+  return true;
+}
+
+static bool migrate_v6_config(pet_p4_input_config_t *config) {
+  if (!config || config->version != 6 || !config_bindings_are_valid(config)) return false;
+
+  // Version 7 swaps only the shipped SW1/SW3 navigation defaults. Explicit
+  // user mappings on either switch and every unrelated gesture stay intact.
+  migrate_default_binding(
+    config,
+    "button.sw1.short_press",
+    "page_enter",
+    "",
+    "page_back",
+    ""
+  );
+  migrate_default_binding(
+    config,
+    "button.sw3.short_press",
+    "page_back",
+    "",
+    "page_enter",
+    ""
+  );
   config->version = PET_P4_INPUT_CONFIG_VERSION;
   return true;
 }
@@ -395,7 +420,8 @@ static bool migrate_input_config(pet_p4_input_config_t *config) {
   if (config->version == 2 && !migrate_v2_config(config)) return false;
   if (config->version == 3 && !migrate_v3_config(config)) return false;
   if (config->version == 4 && !migrate_v4_config(config)) return false;
-  return config->version == 5 && migrate_v5_config(config);
+  if (config->version == 5 && !migrate_v5_config(config)) return false;
+  return config->version == 6 && migrate_v6_config(config);
 }
 
 static esp_err_t persist_config(const pet_p4_input_config_t *config) {

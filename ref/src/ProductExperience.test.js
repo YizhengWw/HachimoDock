@@ -150,6 +150,11 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assertResource(resources, "bridge/hooks", "bridge/hooks");
   assertResource(
     resources,
+    "firmware/esp32-p4/firmware.bin",
+    "firmware/esp32-p4/firmware.bin",
+  );
+  assertResource(
+    resources,
     "bridge/packages/clawd-backend-service/node_modules",
     "bridge/packages/clawd-backend-service/node_modules",
   );
@@ -250,6 +255,7 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assertTauriResourceSourceExists("bridge/packages/agent-session-bus/src");
   assertTauriResourceSourceExists("bridge/agents");
   assertTauriResourceSourceExists("bridge/hooks");
+  assertTauriResourceSourceExists("src-tauri/firmware/esp32-p4/firmware.bin");
   assertTauriResourceSourceExists("../../skills/petui");
   assert.ok(existsSync(join(refRoot, "src-tauri/bridge/packages/clawd-backend-service/package-lock.json")));
 
@@ -272,6 +278,9 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assert.match(prepareScript, /--enable-nonfree/);
   assert.match(prepareScript, /依法不可随安装包分发/);
   assert.match(prepareScript, /Git LFS 指针/);
+  assert.match(prepareScript, /readFirmwareBuildId/);
+  assert.match(prepareScript, /必须来自干净的 12 位 Git 提交/);
+  assert.match(prepareScript, /\[0-9a-f\]\{12\}/);
   assert.match(prepareScript, /assertRuntimeMatchesTarget/);
   assert.match(prepareScript, /\/usr\/bin\/otool/);
   assert.match(prepareScript, /依赖未随应用打包的动态库/);

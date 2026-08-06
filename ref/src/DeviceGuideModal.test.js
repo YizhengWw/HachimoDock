@@ -1,7 +1,8 @@
 /**
  * [Input] DeviceGuideModal.jsx, lib/device-guide-content.js, and styles.css source.
  * [Output] Static Node coverage for the compact three-step guide, accessible shared
- *          controls, all twelve P4 gestures, and responsive hardware-shaped layout.
+ *          controls, SW1-back/SW3-confirm defaults, all twelve P4 gestures,
+ *          and responsive hardware-shaped layout.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -33,9 +34,9 @@ test("device guide documents P4 navigation and all twelve configurable gestures"
   assert.match(content, /export const P4_CARDS/);
   assert.match(content, /共 12 个独立入口/);
   assert.match(content, /组件按键只在该组件打开时生效/);
-  assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "确认 \/ 进入/);
+  assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "返回（取消）/);
   assert.match(content, /control: "sw2"[\s\S]{0,160}短按", action: "组件中心/);
-  assert.match(content, /control: "sw3"[\s\S]{0,160}短按", action: "返回（取消）/);
+  assert.match(content, /control: "sw3"[\s\S]{0,160}短按", action: "确认 \/ 进入/);
   assert.match(content, /control: "sw1"[\s\S]{0,200}gesture: "长按"[\s\S]{0,100}按住说话/);
   assert.match(modal, /runtime\)\.toLowerCase\(\) === "esp-p4" \? P4_CARDS : CARDS/);
 });

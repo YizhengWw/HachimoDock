@@ -23,8 +23,8 @@
  *          and active-ID sync to the P4 display plus
  *          explicit-action-only Codex/Claude Desktop task navigation,
  *          and stale USB writer reconnect retry,
- *          ACK-gated ESP32-P4 A/B firmware OTA with SHA-256 verification and
- *          desktop progress events,
+ *          ACK-gated ESP32-P4 A/B firmware OTA with SHA-256 verification,
+ *          a version-guarded bundled-image update path, and desktop progress events,
  *          validated P4 device-microphone PCM with capture-start frozen
  *          Agent/Session routing, utterance-correlated delivery events,
  *          single-claim final submission, cloud speech recognition, and
@@ -53,6 +53,7 @@ mod usb_serial;
 mod volcengine_asr;
 
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering as VersionOrdering;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
@@ -106,6 +107,7 @@ const USB_AUTO_RETRY_MIN_SECS: u64 = 5;
 const USB_AUTO_RETRY_MAX_SECS: u64 = 60;
 const P4_SESSION_TERMINAL_HOLD_MS: u64 = 60_000;
 const JSON_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
+const BUNDLED_P4_FIRMWARE_RESOURCE: &str = "firmware/esp32-p4/firmware.bin";
 
 fn desktop_build_info() -> serde_json::Value {
     serde_json::json!({
@@ -5943,33 +5945,68 @@ async fn usb_reboot_device(
         .map_err(|error| error.to_string())?
 }
 
+fn parse_firmware_version(value: &str) -> Option<Vec<u64>> {
+    let normalized = value.trim().trim_start_matches(['v', 'V']);
+    let core = normalized
+        .split_once('-')
+        .map_or(normalized, |(core, _)| core);
+    let parts = core
+        .split('.')
+        .map(str::parse::<u64>)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+    Some(parts)
+}
+
+fn compare_firmware_versions(left: &str, right: &str) -> Result<VersionOrdering, String> {
+    let mut left = parse_firmware_version(left)
+        .ok_or_else(|| format!("invalid device firmware version: {left}"))?;
+    let mut right = parse_firmware_version(right)
+        .ok_or_else(|| format!("invalid bundled firmware version: {right}"))?;
+    let width = left.len().max(right.len());
+    left.resize(width, 0);
+    right.resize(width, 0);
+    Ok(left.cmp(&right))
+}
+
+fn bundled_p4_firmware_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        candidates.push(resource_dir.join(BUNDLED_P4_FIRMWARE_RESOURCE));
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_P4_FIRMWARE_RESOURCE));
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!("bundled P4 firmware resource was not found: {BUNDLED_P4_FIRMWARE_RESOURCE}")
+        })
+}
+
 #[tauri::command]
-async fn usb_update_firmware(
+fn usb_get_bundled_firmware_info(
     app_handle: tauri::AppHandle,
-    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
-    firmware_path: String,
+) -> Result<usb_serial::FirmwareImageInfo, String> {
+    let path = bundled_p4_firmware_path(&app_handle)?;
+    usb_serial::inspect_firmware_image(&path)
+}
+
+async fn run_usb_firmware_update(
+    app_handle: tauri::AppHandle,
+    manager: usb_serial::UsbSerialManager,
+    firmware_path: PathBuf,
     expected_board_device_id: String,
 ) -> Result<usb_serial::FirmwareUpdateResult, String> {
-    let path = PathBuf::from(firmware_path.trim());
-    if !path.is_file() {
-        return Err(format!("firmware image does not exist: {}", path.display()));
-    }
-    if !path
-        .extension()
-        .and_then(|value| value.to_str())
-        .is_some_and(|value| value.eq_ignore_ascii_case("bin"))
-    {
-        return Err("firmware image must use the .bin extension".to_string());
-    }
-
-    let manager = usb_manager.inner().clone();
     let emitter = app_handle.clone();
     let reconnect_manager = manager.clone();
     let reconnect_app = app_handle.clone();
     let reconnect_board_device_id = expected_board_device_id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         manager.update_firmware(
-            &path,
+            &firmware_path,
             &expected_board_device_id,
             |bytes_sent, bytes_total, stage| {
                 let percent = if bytes_total == 0 {
@@ -5998,6 +6035,60 @@ async fn usb_update_firmware(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn usb_update_firmware(
+    app_handle: tauri::AppHandle,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    firmware_path: String,
+    expected_board_device_id: String,
+) -> Result<usb_serial::FirmwareUpdateResult, String> {
+    let path = PathBuf::from(firmware_path.trim());
+    if !path.is_file() {
+        return Err(format!("firmware image does not exist: {}", path.display()));
+    }
+    if !path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("bin"))
+    {
+        return Err("firmware image must use the .bin extension".to_string());
+    }
+
+    run_usb_firmware_update(
+        app_handle,
+        usb_manager.inner().clone(),
+        path,
+        expected_board_device_id,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn usb_update_bundled_firmware(
+    app_handle: tauri::AppHandle,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    expected_board_device_id: String,
+) -> Result<usb_serial::FirmwareUpdateResult, String> {
+    let firmware_path = bundled_p4_firmware_path(&app_handle)?;
+    let firmware_info = usb_serial::inspect_firmware_image(&firmware_path)?;
+    let manager = usb_manager.inner().clone();
+    let status = manager.status();
+    if !status.connected || status.board_device_id != expected_board_device_id {
+        return Err("connected USB board changed before bundled firmware update".to_string());
+    }
+    if !status.runtime.eq_ignore_ascii_case("esp-p4") {
+        return Err("bundled firmware update is only supported by ESP32-P4".to_string());
+    }
+    if compare_firmware_versions(&status.firmware, &firmware_info.version)? != VersionOrdering::Less
+    {
+        return Err(format!(
+            "device firmware {} is already newer than or equal to bundled firmware {}",
+            status.firmware, firmware_info.version
+        ));
+    }
+    run_usb_firmware_update(app_handle, manager, firmware_path, expected_board_device_id).await
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9361,7 +9452,9 @@ pub fn run() {
             usb_get_button_config,
             usb_reset_input_config,
             usb_reboot_device,
+            usb_get_bundled_firmware_info,
             usb_update_firmware,
+            usb_update_bundled_firmware,
             prepare_p4_appearance,
             usb_cancel_appearance_sync,
             usb_sync_appearance,
@@ -11233,6 +11326,23 @@ fn current_timestamp_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_firmware_version_comparison_is_numeric_and_suffix_tolerant() {
+        assert_eq!(
+            compare_firmware_versions("0.7.28-p4", "0.7.29-p4").unwrap(),
+            VersionOrdering::Less
+        );
+        assert_eq!(
+            compare_firmware_versions("v0.7.29", "0.7.29-p4").unwrap(),
+            VersionOrdering::Equal
+        );
+        assert_eq!(
+            compare_firmware_versions("0.8.0-p4", "0.7.29-p4").unwrap(),
+            VersionOrdering::Greater
+        );
+        assert!(compare_firmware_versions("unknown", "0.7.29-p4").is_err());
+    }
 
     fn write_test_clawpkg_dir(path: &Path) {
         fs::create_dir_all(path.join("runtime")).unwrap();

@@ -4,7 +4,8 @@
  * strict active-only P4 conversation sizing with 60-second terminal retention,
  * exact visible-card encoder routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
  * MiMoCode current-caret voice delivery, ACK-gated board configuration, and
- * stale bridge/USB guards, immediate saved-ASR voice rearming, and exact-board appearance recovery.
+ * stale bridge/USB guards, SW1-back/SW3-confirm defaults and migration,
+ * immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -256,11 +257,11 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.ok(rows, "expected P4_BUTTON_CONTROL_ROWS");
   assert.ok(visibleOptions, "expected BUTTON_FUNCTION_OPTIONS");
   assert.ok(p4Options, "expected P4_CUSTOM_ACTION_OPTIONS");
-  assert.match(dashboard, /p4_sw1_short:\s*"page_enter"/);
+  assert.match(dashboard, /p4_sw1_short:\s*"page_back"/);
   assert.match(dashboard, /p4_sw1_long:\s*"voice_ptt"/);
   assert.match(dashboard, /p4_sw2_short:\s*"component_center"/);
   assert.match(dashboard, /p4_sw2_long:\s*"disabled"/);
-  assert.match(dashboard, /p4_sw3_short:\s*"page_back"/);
+  assert.match(dashboard, /p4_sw3_short:\s*"page_enter"/);
   assert.match(dashboard, /p4_sw3_long:\s*"disabled"/);
   assert.match(dashboard, /p4_encoder_press:\s*"page_enter"/);
   assert.match(dashboard, /p4_encoder_long:\s*"disabled"/);
@@ -300,7 +301,8 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /P4_V3_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V4_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V5_DEFAULT_BUTTON_ACTIONS/);
-  assert.match(dashboard, /storedButtonModelVersion === 5[\s\S]*P4_V5_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /P4_V6_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /storedButtonModelVersion === 6[\s\S]*P4_V6_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /action === "agent_prompt" \|\| action === "miniapp_action"/);
   assert.match(dashboard, /buttonLabels/);
   assert.doesNotMatch(dashboard, /label: "返回首页"/);

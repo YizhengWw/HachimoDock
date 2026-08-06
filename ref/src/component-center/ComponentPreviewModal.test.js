@@ -2,7 +2,7 @@
  * [Input] Read ComponentPreviewModal.jsx source.
  * [Output] Static Node coverage: default export, explicit game/tool type, button editor,
  *          component-scope/conflict guidance, replacement warning, current-device removal,
- *          and install-button disabled states.
+ *          SW1 global-return guidance, and install-button disabled states.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -168,7 +168,7 @@ test("ComponentPreviewModal traps keyboard focus, closes on Escape, and restores
 test("ComponentPreviewModal explains component buttons do not overwrite device navigation", () => {
   assert.match(source, /componentButtonsWillApply/);
   assert.match(source, /组件按钮仅在打开该组件后生效/);
-  assert.match(source, /SW3 短按返回等系统级导航保持不变/);
+  assert.match(source, /SW1 短按返回等系统级导航保持不变/);
   assert.match(source, /component-preview-modal__impact/);
   assert.match(source, /同步影响/);
 });

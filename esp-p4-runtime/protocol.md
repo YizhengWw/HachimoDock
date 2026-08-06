@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.28-p4",
-    "buildId": "0.7.28-p4+290f402abcd1",
+    "fw": "0.7.29-p4",
+    "buildId": "0.7.29-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 5,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 5,
-    "buildId": "0.7.28-p4+0123456789ab"
+    "buildId": "0.7.29-p4+0123456789ab"
   }
 }
 ```
@@ -538,15 +538,15 @@ PC to board:
   "topic": "input/config",
   "payload": {
     "requestId": "input-42",
-    "version": 6,
+    "version": 7,
     "bindings": [
-      {"event":"button.sw1.short_press","action":"page_enter","value":""},
+      {"event":"button.sw1.short_press","action":"page_back","value":""},
       {"event":"button.sw1.long_press","action":"disabled","value":""},
       {"event":"button.sw1.hold","action":"voice_ptt","value":""},
       {"event":"button.sw2.short_press","action":"component_center","value":""},
       {"event":"button.sw2.long_press","action":"disabled","value":""},
       {"event":"button.sw2.hold","action":"disabled","value":""},
-      {"event":"button.sw3.short_press","action":"page_back","value":""},
+      {"event":"button.sw3.short_press","action":"page_enter","value":""},
       {"event":"button.sw3.long_press","action":"disabled","value":""},
       {"event":"button.sw3.hold","action":"disabled","value":""},
       {"event":"button.encoder.short_press","action":"page_enter","value":""},
@@ -570,13 +570,13 @@ Pet Manager's P4 button menu exposes only custom prompt, voice input,
 previous/next session, clear sessions, component center, confirm, back/cancel,
 and unbound.
 
-SW1 short press and joystick center short press both default to `page_enter`:
-from `main` either one opens
-`components`, and from `components` it activates the selection and opens
-`app`. Center long press and the new up/down directions default to `disabled`;
-all remain editable and are persisted with the rest of the input map. SW2 short
-press opens the component center, while SW3 short press is the global back
-path. Other SW short/long gestures default to `disabled`, except SW1 long
+SW3 short press and joystick center short press both default to `page_enter`:
+from `main` either one opens `components`, and from `components` it activates
+the selection and opens `app`. SW1 short press defaults to the global
+`page_back` path. Center long press and the new up/down directions default to
+`disabled`; all remain editable and are persisted with the rest of the input
+map. SW2 short press opens the component center. Other SW short/long gestures
+default to `disabled`, except SW1 long
 press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
 and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
 so old component packages continue to work without conversion. Inside the
@@ -615,11 +615,11 @@ desktop updates its in-memory model and local cache only after this response:
     "runtime": "esp-p4",
     "bindingCount": 16,
     "config": {
-      "version": 6,
+      "version": 7,
       "voiceEnabled": false,
       "voiceButton": "",
       "bindings": [
-        {"event":"button.sw1.short_press","action":"page_enter","value":""}
+        {"event":"button.sw1.short_press","action":"page_back","value":""}
       ]
     }
   }

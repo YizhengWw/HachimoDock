@@ -1,6 +1,6 @@
 /**
- * [Input] Target desktop platform, relocatable target-compatible Node/FFmpeg executables, bridge runtime lock, and built-in pet media.
- * [Output] Install-relative Node/FFmpeg/bridge resources plus a validated, preconverted built-in P4 ready pack.
+ * [Input] Target desktop platform, relocatable target-compatible Node/FFmpeg executables, bridge runtime lock, built-in pet media, and the release P4 application image.
+ * [Output] Install-relative Node/FFmpeg/bridge resources plus a validated, preconverted built-in P4 ready pack and version-matched bundled firmware.
  * [Pos] Desktop packaging preflight shared by local builds and CI.
  * [Sync] If this file changes, update `scripts/.folder.md`.
  */
@@ -30,6 +30,8 @@ const bridgeRuntimePackage = join(
   "clawd-backend-service",
 );
 const generatedRuntime = join(tauriRoot, "generated-runtime");
+const bundledP4Firmware = join(tauriRoot, "firmware", "esp32-p4", "firmware.bin");
+const p4ProjectCmake = join(repositoryRoot, "esp-p4-runtime", "CMakeLists.txt");
 const ffmpegStaticRelease = "b6.1.1";
 const ffmpegStaticBaseUrl =
   `https://github.com/eugeneware/ffmpeg-static/releases/download/${ffmpegStaticRelease}`;
@@ -214,6 +216,51 @@ function assertRuntimeMatchesTarget(runtimePath, target, arch) {
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function readNullTerminatedUtf8(bytes) {
+  const end = bytes.indexOf(0);
+  return bytes.subarray(0, end < 0 ? bytes.length : end).toString("utf8").trim();
+}
+
+function readFirmwareBuildId(firmware, version) {
+  const prefix = Buffer.from(`${version}+`, "utf8");
+  const offset = firmware.indexOf(prefix);
+  if (offset < 0) return "";
+  return readNullTerminatedUtf8(firmware.subarray(offset, offset + 128));
+}
+
+function validateBundledP4Firmware() {
+  if (!existsSync(bundledP4Firmware)) {
+    throw new Error(`缺少 PC 内置 P4 固件：${bundledP4Firmware}`);
+  }
+  const firmware = readFileSync(bundledP4Firmware);
+  const descriptorOffset = 24 + 8;
+  if (firmware.length < descriptorOffset + 256 || firmware[0] !== 0xe9) {
+    throw new Error("PC 内置 P4 固件不是有效的 ESP-IDF application image");
+  }
+  const magic = firmware.readUInt32LE(descriptorOffset);
+  if (magic !== 0xabcd5432) {
+    throw new Error("PC 内置 P4 固件缺少有效的 ESP-IDF app descriptor");
+  }
+  const version = readNullTerminatedUtf8(firmware.subarray(descriptorOffset + 16, descriptorOffset + 48));
+  const projectName = readNullTerminatedUtf8(firmware.subarray(descriptorOffset + 48, descriptorOffset + 80));
+  const cmake = readFileSync(p4ProjectCmake, "utf8");
+  const expectedVersion = cmake.match(/set\(PROJECT_VER\s+"([^"]+)"\)/)?.[1] || "";
+  if (projectName !== "pet_manager_p4_runtime") {
+    throw new Error(`PC 内置固件 projectName 异常：${projectName || "(empty)"}`);
+  }
+  if (!expectedVersion || version !== expectedVersion) {
+    throw new Error(`PC 内置固件版本 ${version || "(empty)"} 与源码版本 ${expectedVersion || "(empty)"} 不一致`);
+  }
+  const buildId = readFirmwareBuildId(firmware, version);
+  const cleanBuildPattern = new RegExp(`^${version.replaceAll(".", "\\.")}\\+[0-9a-f]{12}$`);
+  if (!cleanBuildPattern.test(buildId)) {
+    throw new Error(
+      `PC 内置固件必须来自干净的 12 位 Git 提交，当前 buildId：${buildId || "(missing)"}`,
+    );
+  }
+  return { version, buildId, bytes: firmware.length, sha256: sha256(firmware) };
 }
 
 async function downloadBytes(url, label) {
@@ -421,6 +468,7 @@ const target = requestedTarget(process.argv.slice(2), process.platform);
 const targetArch = requestedArch(target, process.platform, process.arch);
 const runtimeName = target === "windows" ? "node.exe" : "node";
 const targetRuntime = join(generatedRuntime, runtimeName);
+const p4Firmware = validateBundledP4Firmware();
 let sourceRuntime = process.env.PET_MANAGER_NODE_BIN
   ? resolve(process.env.PET_MANAGER_NODE_BIN)
   : process.execPath;
@@ -467,5 +515,5 @@ const p4Ready = prepareBuiltInP4Ready({
 });
 
 console.log(
-  `desktop resources ready: ${target}-${targetArch}, generated-runtime/${runtimeName}, generated-runtime/${ffmpegRuntimeName}, p4-ready/${p4Ready.profile} (${p4Ready.bytes} bytes)`,
+  `desktop resources ready: ${target}-${targetArch}, generated-runtime/${runtimeName}, generated-runtime/${ffmpegRuntimeName}, p4-ready/${p4Ready.profile} (${p4Ready.bytes} bytes), firmware/${p4Firmware.buildId} (${p4Firmware.bytes} bytes, sha256 ${p4Firmware.sha256})`,
 );

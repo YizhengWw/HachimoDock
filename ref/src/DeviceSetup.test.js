@@ -1,6 +1,6 @@
 /**
  * [Input] DeviceSetup.jsx and App.jsx first-run routing sources.
- * [Output] Static Node coverage for USB-only automatic discovery, binding persistence, manual rescan, and removal of the legacy Ethernet/Wi-Fi wizard.
+ * [Output] Static Node coverage for USB-only automatic discovery, binding persistence, shared-context refresh/snapshot consumption, manual rescan, and removal of the legacy Ethernet/Wi-Fi wizard.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -65,7 +65,7 @@ test("setup completion refreshes shared device context before dashboard render",
   const source = readSource("App.jsx");
 
   assert.match(source, /useDeviceContext/);
-  assert.match(source, /const\s+\{\s*refresh\s*\}\s*=\s*useDeviceContext\(\)/);
+  assert.match(source, /const\s+\{\s*refresh,\s*usb\s*\}\s*=\s*useDeviceContext\(\)/);
   assert.match(source, /const\s+handleSetupCompleteWithRefresh\s*=\s*useCallback\(\s*async\s*\(\)\s*=>/);
   assert.match(source, /await\s+refresh\(\)/);
   assert.match(source, /<DeviceSetup\s+onComplete=\{handleSetupCompleteWithRefresh\}/);

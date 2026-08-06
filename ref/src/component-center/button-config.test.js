@@ -1,6 +1,7 @@
 /**
  * [Input] component-center/button-config.js pure option and P4 downlink helpers.
- * [Output] Regression coverage for unique component controls and retained legacy full-map helpers.
+ * [Output] Regression coverage for model-v7 signaling, unique component controls,
+ *          and retained legacy full-map helpers.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -18,8 +19,8 @@ import {
   defaultControlLabelForBinding,
 } from "./button-config.js";
 
-test("device button config model advances for the SW1 confirm default", () => {
-  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 6);
+test("device button config model advances for the SW1-back/SW3-confirm defaults", () => {
+  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 7);
 });
 
 test("component controls expose screen, switches, and joystick events without duplicates", () => {
@@ -138,5 +139,5 @@ test("ACKed component bindings replace the dashboard snapshot with the same mini
   assert.equal(snapshot.buttonActions.p4_encoder_cw, "disabled");
   assert.equal(snapshot.buttonActions.p4_joystick_up, "disabled");
   assert.equal(snapshot.buttonActions.p4_joystick_down, "disabled");
-  assert.equal(snapshot.buttonModelVersion, 6);
+  assert.equal(snapshot.buttonModelVersion, 7);
 });

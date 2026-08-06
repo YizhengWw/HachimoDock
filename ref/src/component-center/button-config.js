@@ -1,7 +1,7 @@
 /**
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
  * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
- *          button-config model versioning, and compatibility-only complete-map
+ *          button-config model-v7 migration signaling, and compatibility-only complete-map
  *          and snapshot helpers. Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -96,7 +96,7 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
 ];
 
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
-export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 6;
+export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 7;
 export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
 
 const P4_COMPONENT_DOWNLINK_EVENTS = [
