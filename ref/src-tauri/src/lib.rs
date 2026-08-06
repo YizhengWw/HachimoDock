@@ -12,6 +12,8 @@
  *          persistent USB transfer diagnostics, and serialized, exact-board
  *          native-only appearance attempts,
  *          USB desktop identity propagation,
+ *          visible-composer submission outcomes that preserve unconfirmed
+ *          delivery semantics without falling through to another channel,
  *          formal local component latest-version listing/deletion with game/tool kind
  *          and manifest descriptions for component-center card summaries, without a manual import command,
  *          .clawpkg USB/SSH installs with per-component button-function
@@ -669,6 +671,11 @@ fn classify_visible_composer_submit(
 ) -> VisibleComposerSubmitOutcome {
     match result {
         Ok(Ok(_)) => VisibleComposerSubmitOutcome::Submitted,
+        Ok(Err(error))
+            if error.contains("提交结果未确认") || error.contains("无法安全确认发送结果") =>
+        {
+            VisibleComposerSubmitOutcome::Unconfirmed(error)
+        }
         Ok(Err(error)) => VisibleComposerSubmitOutcome::ExplicitFailure(error),
         Err(codex_composer::CodexComposerWaitError::StartTimeout) => {
             VisibleComposerSubmitOutcome::Unconfirmed(
@@ -11653,6 +11660,18 @@ mod tests {
             outcome,
             VisibleComposerSubmitOutcome::ExplicitFailure("composer rejected".to_string())
         );
+    }
+
+    #[test]
+    fn composer_readback_uncertainty_stays_unconfirmed() {
+        let outcome = classify_visible_composer_submit(Ok(Err(
+            "ChatGPT（Codex）macOS 提交结果未确认；为避免重复发送".to_string(),
+        )));
+
+        assert!(matches!(
+            outcome,
+            VisibleComposerSubmitOutcome::Unconfirmed(_)
+        ));
     }
 
     #[test]

@@ -43,9 +43,13 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
-- Firmware `0.7.39-p4` renders `main` and `components` as two peer pages with
-  two indicator dots. Joystick left/right switches those pages, up/down selects
-  catalog entries, and the running `app` remains a child of Component Center.
+- Firmware `0.7.40-p4` keeps `main` and `components` as two peer pages with two
+  indicator dots, but SW2 short press is now their sole default hardware toggle.
+  Previous/next selects Session bubbles on `main` and catalog entries on
+  `components`; the running `app` remains a child of Component Center and owns
+  SW2 whenever its package binds that event.
+- Firmware `0.7.39-p4` introduced the two-dot peer-page renderer; its temporary
+  left/right page-switch policy is superseded by `0.7.40-p4`.
 - Firmware `0.7.38-p4` keeps the `0.7.37-p4` idle-clock correction and also
   migrates every upgraded device to the canonical built-in component order,
   with 双键接球 first and user-installed components preserved afterward.

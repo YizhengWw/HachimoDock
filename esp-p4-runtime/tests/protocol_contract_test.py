@@ -2,8 +2,9 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including client-authoritative NVS input-config reconciliation and desktop/device
-widget visual-preset parity, including SW1-back/SW3-confirm global defaults,
-two-page navigation, global-exit-first component controls, and firmware-embedded built-ins.
+widget visual-preset parity, including SW1-back/SW2-page-toggle/SW3-confirm
+global defaults, page-local previous/next selection, global-exit-first component
+controls, and firmware-embedded built-ins.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
@@ -1522,7 +1523,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.39-p4")' in project
+    assert 'set(PROJECT_VER "0.7.40-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1602,7 +1603,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.39-p4")' in project
+    assert 'set(PROJECT_VER "0.7.40-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2056,9 +2057,12 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert '"joystick.down", "disabled"' in input_source
     assert 'strcmp(binding->action, "session_next") == 0' in input_source
     assert 'strcmp(binding->action, "session_previous") == 0' in input_source
-    assert 'main_open ? "components" : "main"' in input_source
-    assert '? "page_previous" : "page_next"' in input_source
-    assert "state->current_session_index = selected + 1" not in input_source
+    assert 'center_open ? "main" : "components"' in input_source
+    assert 'pet_p4_miniapp_catalog_move(direction)' in input_source
+    assert '"component_select"' in input_source
+    assert 'main_open ? "components" : "main"' not in input_source
+    assert '? "page_previous" : "page_next"' not in input_source
+    assert "state->current_session_index = selected + 1" in input_source
     assert "migrate_v2_config" in input_source
     assert "migrate_v3_config" in input_source
     assert "migrate_v4_config" in input_source
@@ -2084,15 +2088,12 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "activation_down" in core_header
     assert 'event_name = "joystick.up"' in input_source
     assert 'event_name = "joystick.down"' in input_source
-    assert "catalog_delta = -1" in input_source
-    assert "catalog_delta = 1" in input_source
+    assert "catalog_delta" not in input_source
     left_case = re.search(r'case PET_P4_JOYSTICK_LEFT:([\s\S]*?)break;', input_source)
     right_case = re.search(r'case PET_P4_JOYSTICK_RIGHT:([\s\S]*?)break;', input_source)
     assert left_case and "event.delta = -1;" in left_case.group(1)
     assert right_case and "event.delta = 1;" in right_case.group(1)
-    assert "catalog_delta" not in left_case.group(1)
-    assert "catalog_delta" not in right_case.group(1)
-    assert "pet_p4_miniapp_catalog_move(catalog_delta)" in input_source
+    assert "pet_p4_miniapp_catalog_move(direction)" in input_source
     assert "-(int) direction" not in input_source
     assert "pet_p4_miniapp_catalog_move(event.delta)" in input_source
     assert "pet_p4_miniapp_catalog_move(-event.delta)" not in input_source

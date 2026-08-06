@@ -1,7 +1,7 @@
 /**
  * [Input] DeviceGuideModal.jsx, lib/device-guide-content.js, and styles.css source.
  * [Output] Static Node coverage for the compact three-step guide, accessible shared
- *          controls, SW1-back/SW3-confirm defaults, all twelve P4 gestures,
+ *          controls, SW1-back/SW2-page-toggle/SW3-confirm defaults, all twelve P4 gestures,
  *          and responsive hardware-shaped layout.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -24,7 +24,7 @@ test("device guide documents P4 navigation and all twelve configurable gestures"
   const modal = readSource("DeviceGuideModal.jsx");
 
   assert.match(content, /screenIds: \["main", "components"\]/);
-  assert.match(content, /左右切换，中按进入；上下方向可独立配置/);
+  assert.match(content, /左右选择当前内容，SW2 在宠物与组件页面间切换/);
   assert.match(content, /\{ gesture: "向上", action: "可独立配置" \}/);
   assert.match(content, /\{ gesture: "向下", action: "可独立配置" \}/);
   assert.match(content, /\{ gesture: "向左", action: "上一个" \}/);
@@ -35,7 +35,7 @@ test("device guide documents P4 navigation and all twelve configurable gestures"
   assert.match(content, /共 12 个独立入口/);
   assert.match(content, /组件按键只在该组件打开时生效/);
   assert.match(content, /control: "sw1"[\s\S]{0,160}短按", action: "返回（取消）/);
-  assert.match(content, /control: "sw2"[\s\S]{0,160}短按", action: "组件中心/);
+  assert.match(content, /control: "sw2"[\s\S]{0,180}短按", action: "切换宠物\/组件/);
   assert.match(content, /control: "sw3"[\s\S]{0,160}短按", action: "确认 \/ 进入/);
   assert.match(content, /control: "sw1"[\s\S]{0,200}gesture: "长按"[\s\S]{0,100}按住说话/);
   assert.match(modal, /runtime\)\.toLowerCase\(\) === "esp-p4" \? P4_CARDS : CARDS/);

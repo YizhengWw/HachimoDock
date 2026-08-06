@@ -292,10 +292,10 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /event:\s*"joystick\.up"/);
   assert.match(dashboard, /event:\s*"joystick\.down"/);
   assert.match(visibleOptions[1], /id: "agent_prompt", label: "发送自定义指令"[\s\S]*id: "voice_ptt", label: "语音输入"/);
-  assert.match(visibleOptions[1], /id: "session_previous", label: "上一页"/);
-  assert.match(visibleOptions[1], /id: "session_next", label: "下一页"/);
+  assert.match(visibleOptions[1], /id: "session_previous", label: "上一个"/);
+  assert.match(visibleOptions[1], /id: "session_next", label: "下一个"/);
   assert.match(dashboard, /直接发送给当前 Code Agent/);
-  assert.match(visibleOptions[1], /id: "component_center", label: "组件中心"/);
+  assert.match(visibleOptions[1], /id: "component_center", label: "切换宠物\/组件"/);
   assert.match(visibleOptions[1], /id: "page_enter", label: "确认"/);
   assert.match(visibleOptions[1], /id: "page_back", label: "返回（取消）"/);
   assert.doesNotMatch(visibleOptions[1], /继续 Agent|触发当前负一屏|当前组件动作|切换屏幕/);
@@ -350,24 +350,28 @@ test("Negative-screen proxy actions stay runtime-compatible without appearing in
   assert.doesNotMatch(miniapp, /strcmp\(event_name, "button\.sw1\.long_press"\)/);
 });
 
-test("Hardware previous and next actions switch the two top-level device pages", () => {
+test("SW2 toggles top-level pages while previous and next stay inside the current page", () => {
   const dashboard = readSource("DeviceDashboard.jsx");
   const sessionSync = readSource("dashboard/useP4SessionSync.js");
   const panel = readSource("dashboard/BoardButtonPanel.jsx");
   const rust = readRepoFile("src-tauri", "src", "lib.rs");
   const firmware = readRepoFile("..", "esp-p4-runtime", "main", "pet_p4_input.c");
 
-  assert.match(dashboard, /label: "上一页"/);
-  assert.match(dashboard, /label: "下一页"/);
+  assert.match(dashboard, /label: "上一个"/);
+  assert.match(dashboard, /label: "下一个"/);
+  assert.match(dashboard, /label: "切换宠物\/组件"/);
   assert.doesNotMatch(panel, /P4 目标会话/);
   assert.doesNotMatch(panel, /p4-session-config/);
   assert.match(rust, /"session_next"/);
   assert.match(rust, /"session_previous"/);
   assert.match(firmware, /"session_next"/);
   assert.match(firmware, /"session_previous"/);
-  assert.match(firmware, /main_open \? "components" : "main"/);
-  assert.match(firmware, /"page_previous" : "page_next"/);
-  assert.doesNotMatch(firmware, /state->current_session_index = selected \+ 1/);
+  assert.match(firmware, /center_open \? "main" : "components"/);
+  assert.match(firmware, /state->current_session_index = selected \+ 1/);
+  assert.match(firmware, /pet_p4_miniapp_catalog_move\(direction\)/);
+  assert.match(firmware, /copy_text\(action_override, action_override_size, "component_select"\)/);
+  assert.doesNotMatch(firmware, /main_open \? "components" : "main"/);
+  assert.doesNotMatch(firmware, /"page_previous" : "page_next"/);
   assert.match(sessionSync, /action === "session_next"/);
   assert.match(sessionSync, /action === "session_previous"/);
 });

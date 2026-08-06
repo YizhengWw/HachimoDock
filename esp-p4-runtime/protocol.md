@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.39-p4",
-    "buildId": "0.7.39-p4+290f402abcd1",
+    "fw": "0.7.40-p4",
+    "buildId": "0.7.40-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 6,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 6,
-    "buildId": "0.7.39-p4+0123456789ab"
+    "buildId": "0.7.40-p4+0123456789ab"
   }
 }
 ```
@@ -337,10 +337,10 @@ PC to board:
   arrives for 12 seconds; already terminal cards keep only their original
   remaining 60-second deadline. This protects the screen from stale working
   cards if the desktop bridge stops publishing while other USB traffic remains.
-  Session cards remain display-only on current joystick hardware. Device
-  previous/next actions now switch the two peer pages instead of mutating the
-  selected Session; desktop Session routing is therefore not coupled to page
-  navigation.
+  On `main`, device previous/next actions update the selected Session card and
+  report its exact ID back to the desktop. On `components`, the same actions
+  select the previous/next catalog entry without changing desktop Session
+  routing. SW2's default `component_center` action toggles the two peer pages.
   On a followed-Agent change, the desktop sends the new `agentId` with an empty
   `sessions`/`activeSessionIds` snapshot before loading that Agent's queue.
   Firmware treats this as an immediate cross-Agent clear. `displayEnabled:
@@ -495,14 +495,16 @@ Current Session example:
 ```
 
 For the compatibility action IDs `session_previous` and `session_next`, current
-firmware switches `main` and `components`, marks the event handled locally, and
-reports the resolved page action so the desktop does not also change Session:
+firmware resolves the action inside the visible peer page. On `main` it reports
+the selected Session metadata so the desktop follows the same card. On
+`components` it reports `component_select`, so desktop Session routing does not
+change:
 
 ```json
 {
   "topic": "input/event",
   "payload": {
-    "action": "page_next",
+    "action": "component_select",
     "context": "components",
     "handledLocally": true
   }
@@ -606,7 +608,7 @@ Allowed actions are `disabled`, `voice_ptt`, `agent_enter`, `agent_prompt`,
 `page_toggle`, `page_enter`, `page_back`, `page_main`, and `page_app`.
 The firmware keeps this full set for stored-config and component compatibility.
 Pet Manager's P4 button menu exposes only custom prompt, voice input,
-previous/next page, clear sessions, component center, confirm, back/cancel,
+previous/next item, clear sessions, pet/component page toggle, confirm, back/cancel,
 and unbound.
 
 SW3 short press and joystick center short press both default to `page_enter`:
@@ -614,14 +616,14 @@ they activate the selection and open `app` only from `components`; they do not
 open the catalog from `main`. SW1 short press defaults to the global
 `page_back` path. Center long press and the new up/down directions default to
 `disabled`; all remain editable and are persisted with the rest of the input
-map. SW2 short press opens the component center. Other SW short/long gestures
+map. SW2 short press toggles `main` and `components` in both directions. Other SW short/long gestures
 default to `disabled`, except SW1 long
 press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
 and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
 so old component packages continue to work without conversion. Inside the
-catalog, up/down selects the previous/next entry. Left/right switches the two
-peer pages (`main` and `components`) and updates the matching two-dot indicator;
-while `app` is open, component bindings retain priority.
+catalog, previous/next selects the prior/following catalog entry. On `main`, the
+same actions select Session bubbles. Neither action changes the two-dot peer
+page; SW2 does that. While `app` is open, component bindings—including SW2—retain priority.
 New packages may bind `joystick.up` and `joystick.down`.
 
 `page_toggle` switches between `main` and `components`; from `app` it returns to
@@ -632,7 +634,7 @@ remain in an already-installed package. While `app` is open, whichever persisted
 global event currently maps to `page_back` is resolved before component gameplay
 bindings, so changing the global exit key immediately changes every component.
 The default remains SW1 short press; SW1 long-press PTT is unaffected. The two
-legacy-named session actions now move between the two peer pages. The two mini-app proxy actions only run while
+legacy-named session actions now select content within the current peer page. The two mini-app proxy actions only run while
 the app page is open and dispatch its existing `screen.region.tap` or
 `screen.region.long_press` binding. Custom values are limited to 159 UTF-8 bytes.
 The board replies on `input/config-ack`; legacy config uses `button-config-ack`.

@@ -5,6 +5,7 @@
  *          exact-session visible-composer submission with intentional draft
  *          replacement, plus ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
+ *          Enter-first submission with a same-draft send-button fallback,
  *          and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
@@ -57,6 +58,7 @@ const MAX_ANCESTOR_DEPTH: usize = 20;
 const SESSION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_READBACK_TIMEOUT: Duration = Duration::from_millis(500);
 const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(3_000);
+const SUBMIT_FALLBACK_DELAY: Duration = Duration::from_millis(800);
 const DEEPLINK_FOCUS_DELAY: Duration = Duration::from_millis(450);
 const KEYBOARD_READBACK_DELAY: Duration = Duration::from_millis(80);
 const ACCESSIBILITY_TREE_READY_TIMEOUT: Duration = Duration::from_millis(750);
@@ -1776,7 +1778,7 @@ fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
     }
 }
 
-fn submit_target(target: &ComposerTarget) -> Result<(), String> {
+fn press_unique_send_button(target: &ComposerTarget) -> Result<bool, String> {
     focus_composer(target)?;
     let mut buttons = walk_elements(&target.window, |element| {
         element_role(element) == "AXButton"
@@ -1799,34 +1801,117 @@ fn submit_target(target: &ComposerTarget) -> Result<(), String> {
             .1
             .press()
             .map_err(|error| format!("{} macOS 发送按钮执行失败: {error}", target.agent.label()))?;
+        Ok(true)
     } else if best.is_empty() {
-        focus_composer(target)?;
-        press_enter(target.agent, &target.app)?;
+        Ok(false)
     } else {
-        return Err(format!(
+        Err(format!(
             "{} macOS 主输入框附近存在多个可用发送按钮",
             target.agent.label()
-        ));
+        ))
     }
-    Ok(())
 }
 
-pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
-    update_voice(state, text)?;
-    thread::sleep(Duration::from_millis(80));
-    let target = find_voice_target(state)?;
-    submit_target(&target)?;
-    let deadline = Instant::now() + SUBMIT_CONFIRM_TIMEOUT;
-    while Instant::now() < deadline {
-        if let Ok(target) = find_voice_target(state) {
-            if target.value.is_empty() {
-                state.last_value.clear();
-                return Ok(String::new());
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SubmitReadback {
+    Confirmed,
+    DraftUnchanged,
+    ComposerChanged,
+}
+
+fn submit_readback(value: &str, submitted_text: &str) -> SubmitReadback {
+    if value.is_empty() {
+        SubmitReadback::Confirmed
+    } else if value == submitted_text {
+        SubmitReadback::DraftUnchanged
+    } else {
+        SubmitReadback::ComposerChanged
+    }
+}
+
+fn wait_for_submit_readback(
+    state: &mut MacosComposerState,
+    submitted_text: &str,
+    timeout: Duration,
+) -> Result<SubmitReadback, String> {
+    let deadline = Instant::now() + timeout;
+    let mut last_error = String::new();
+    loop {
+        match find_voice_target(state) {
+            Ok(target) => {
+                let readback = submit_readback(&target.value, submitted_text);
+                if readback != SubmitReadback::DraftUnchanged || Instant::now() >= deadline {
+                    return Ok(readback);
+                }
             }
+            Err(error) => last_error = error,
+        }
+        if Instant::now() >= deadline {
+            return Err(last_error);
         }
         thread::sleep(Duration::from_millis(40));
     }
-    let cleanup = find_voice_target(state).and_then(|target| replace_composer_text(&target, ""));
+}
+
+pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
+    let text = update_voice(state, text)?;
+    thread::sleep(Duration::from_millis(80));
+    let target = find_voice_target(state)?;
+    focus_composer(&target)?;
+    press_enter(target.agent, &target.app)?;
+
+    match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY) {
+        Ok(SubmitReadback::Confirmed) => {
+            state.last_value.clear();
+            return Ok(String::new());
+        }
+        Ok(SubmitReadback::ComposerChanged) => {
+            state.last_value.clear();
+            return Err(format!(
+                "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
+                state.agent.label()
+            ));
+        }
+        Ok(SubmitReadback::DraftUnchanged) => {
+            // AX keyboard delivery is the most reliable path in current Codex
+            // builds. Only if the exact speech draft is still present after a
+            // bounded delay do we press the unique composer-adjacent button.
+            // The equality guard prevents a late fallback after the composer
+            // has cleared, been replaced, or received new user text.
+            if let Ok(target) = find_voice_target(state) {
+                if target.value == text {
+                    let _ = press_unique_send_button(&target);
+                }
+            }
+        }
+        Err(_) => {}
+    }
+
+    match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT) {
+        Ok(SubmitReadback::Confirmed) => {
+            state.last_value.clear();
+            return Ok(String::new());
+        }
+        Ok(SubmitReadback::ComposerChanged) => {
+            state.last_value.clear();
+            return Err(format!(
+                "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
+                state.agent.label()
+            ));
+        }
+        Ok(SubmitReadback::DraftUnchanged) | Err(_) => {}
+    }
+
+    let cleanup = find_voice_target(state).and_then(|target| {
+        if target.value == text {
+            replace_composer_text(&target, "")
+        } else {
+            Err(format!(
+                "{} macOS 输入框已发生变化，未清理其它内容",
+                state.agent.label()
+            ))
+        }
+    });
     state.last_value.clear();
     if let Err(error) = cleanup {
         return Err(format!(
@@ -2081,6 +2166,19 @@ mod tests {
             composer,
             (80, 824, 48, 48)
         ));
+    }
+
+    #[test]
+    fn submit_readback_only_retries_an_identical_remaining_draft() {
+        assert_eq!(submit_readback("", "hello"), SubmitReadback::Confirmed);
+        assert_eq!(
+            submit_readback("hello", "hello"),
+            SubmitReadback::DraftUnchanged
+        );
+        assert_eq!(
+            submit_readback("new user draft", "hello"),
+            SubmitReadback::ComposerChanged
+        );
     }
 
     #[test]

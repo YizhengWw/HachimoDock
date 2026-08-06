@@ -3,7 +3,8 @@
  *         modal in DeviceDashboard.
  * [Output] Card data + storage key + canonical labels used by DeviceGuideModal,
  *          including compact screen/physical-control labels, all twelve P4
- *          gestures, SW1-back/SW3-confirm defaults, and install-time widget button functions.
+ *          gestures, SW1-back/SW2-page-toggle/SW3-confirm defaults, and
+ *          install-time widget button functions.
  * [Pos] lib helper for ref/src/DeviceGuideModal.jsx
  * [Sync] If `esp-p4-runtime/main/pet_p4_input.c` or legacy device input maps
  *        change meaning, update CARDS here. No hardcoded copy in the JSX.
@@ -105,12 +106,12 @@ export const CARDS = [
 export const P4_CARDS = [
   {
     id: "screen-switch",
-    title: "用四向摇杆完成板端导航",
+    title: "用摇杆选择，用 SW2 切换页面",
     shortTitle: "摇杆导航",
-    headline: "左右切换，中按进入；上下方向可独立配置。",
+    headline: "左右选择当前内容，SW2 在宠物与组件页面间切换。",
     screenIds: ["main", "components"],
     canonicalControl: "p4Joystick",
-    canonicalActionText: "默认中按确认，向左或向右选择上一个或下一个会话；返回（取消）由 SW1 短按完成。",
+    canonicalActionText: "宠物界面左右切换会话气泡，组件中心左右切换组件；SW2 短按切换两个页面。",
     otherWays: [
       { control: "p4Joystick", text: "向右默认：下一个" },
       { control: "p4Joystick", text: "向左默认：上一个" },
@@ -144,7 +145,7 @@ export const P4_CARDS = [
       {
         control: "sw2",
         rows: [
-          { gesture: "短按", action: "组件中心" },
+          { gesture: "短按", action: "切换宠物/组件" },
           { gesture: "长按", action: "暂不绑定" },
         ],
       },
@@ -167,7 +168,7 @@ export const P4_CARDS = [
       rows: [
         { control: "sw1", gesture: "短按", action: "返回 / 取消" },
         { control: "sw1", gesture: "长按", action: "语音输入" },
-        { control: "sw2", gesture: "短按", action: "打开组件中心" },
+        { control: "sw2", gesture: "短按", action: "切换宠物/组件" },
         { control: "sw3", gesture: "短按", action: "确认 / 进入" },
         { control: "p4Joystick", gesture: "中按短按", action: "确认 / 进入" },
         { control: "p4Joystick", gesture: "向左 / 向右", action: "上一个 / 下一个" },

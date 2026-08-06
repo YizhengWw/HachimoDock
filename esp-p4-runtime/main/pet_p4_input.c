@@ -2,9 +2,9 @@
  * [Input] Debounced SW1-SW3/shared center-key/legacy encoder GPIO events,
  *         calibrated four-direction joystick ADC samples, and validated
  *         desktop bindings.
- * [Output] Persisted configurable input actions, up/down catalog selection,
- *          left/right two-page navigation, center-aware joystick decoding and
- *          ADC diagnostics with legacy encoder-event aliases, and component-local
+ * [Output] Persisted configurable input actions, context-local previous/next
+ *          selection plus SW2 top-level page toggling, center-aware joystick
+ *          decoding and ADC diagnostics with legacy encoder-event aliases, and component-local
  *          button routing that is active only while the component page is
  *          open, while the persisted global page-back gesture always wins and
  *          every other unmapped system-navigation gesture is suppressed, and
@@ -1012,17 +1012,34 @@ static bool apply_local_action(
     const bool main_open = strcmp(state->screen_page, "main") == 0;
     const bool center_open = strcmp(state->screen_page, "components") == 0;
     if (!main_open && !center_open) return false;
-    if (main_open) pet_p4_miniapp_catalog_focus_active();
+    const int direction = strcmp(binding->action, "session_previous") == 0 ? -1 : 1;
+    if (center_open) {
+      if (!pet_p4_miniapp_catalog_move(direction)) return false;
+      copy_text(action_override, action_override_size, "component_select");
+      state->last_update_ms = ts_ms;
+      return true;
+    }
+    if (state->session_queue_count == 0) return false;
+    unsigned int selected = state->current_session_index > 0
+      ? state->current_session_index - 1
+      : 0;
+    if (selected >= state->session_queue_count) selected = 0;
+    if (direction < 0) {
+      selected = selected == 0 ? state->session_queue_count - 1 : selected - 1;
+    } else {
+      selected = (selected + 1) % state->session_queue_count;
+    }
+    state->current_session_index = selected + 1;
+    state->current_session_count = state->session_queue_count;
     copy_text(
-      state->screen_page,
-      sizeof(state->screen_page),
-      main_open ? "components" : "main"
+      state->current_session_id,
+      sizeof(state->current_session_id),
+      state->session_queue[selected].id
     );
     copy_text(
-      action_override,
-      action_override_size,
-      strcmp(binding->action, "session_previous") == 0
-        ? "page_previous" : "page_next"
+      state->current_session_title,
+      sizeof(state->current_session_title),
+      state->session_queue[selected].title
     );
     state->last_update_ms = ts_ms;
     return true;
@@ -1067,8 +1084,15 @@ static bool apply_local_action(
     return true;
   }
   if (strcmp(binding->action, "component_center") == 0) {
-    pet_p4_miniapp_catalog_focus_active();
-    copy_text(state->screen_page, sizeof(state->screen_page), "components");
+    const bool main_open = strcmp(state->screen_page, "main") == 0;
+    const bool center_open = strcmp(state->screen_page, "components") == 0;
+    if (!main_open && !center_open) return false;
+    if (main_open) pet_p4_miniapp_catalog_focus_active();
+    copy_text(
+      state->screen_page,
+      sizeof(state->screen_page),
+      center_open ? "main" : "components"
+    );
     state->last_update_ms = ts_ms;
     return true;
   }
@@ -1343,18 +1367,15 @@ void pet_p4_input_process(
         && event.gesture == PET_P4_INPUT_GESTURE_DIRECTION) {
       const char *event_name = "";
       const char *gesture = "";
-      int catalog_delta = 0;
       switch ((pet_p4_joystick_direction_t) event.delta) {
         case PET_P4_JOYSTICK_UP:
           event_name = "joystick.up";
           gesture = "up";
-          catalog_delta = -1;
           event.delta = 0;
           break;
         case PET_P4_JOYSTICK_DOWN:
           event_name = "joystick.down";
           gesture = "down";
-          catalog_delta = 1;
           event.delta = 0;
           break;
         case PET_P4_JOYSTICK_LEFT:
@@ -1371,27 +1392,6 @@ void pet_p4_input_process(
           break;
       }
       if (!event_name[0]) continue;
-      if (state && strcmp(state->screen_page, "components") == 0 && catalog_delta != 0) {
-        static const pet_p4_input_binding_t select_binding = {
-          .event = "knob.rotate_cw",
-          .action = "component_select",
-          .value = "",
-        };
-        (void) pet_p4_miniapp_catalog_move(catalog_delta);
-        state->last_update_ms = event.ts_ms;
-        send_input_event(
-          state,
-          send_line,
-          ctx,
-          &event,
-          event_name,
-          gesture,
-          &select_binding,
-          "component_select",
-          true
-        );
-        continue;
-      }
       if (state
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
