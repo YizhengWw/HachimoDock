@@ -4,7 +4,7 @@
  * strict active-only P4 conversation sizing with 60-second terminal retention,
  * two-page joystick routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
  * MiMoCode current-caret voice delivery, client-authoritative ACK-gated board
- * configuration, safe unique-row macOS Session recovery, and stale bridge/USB
+ * configuration, ID-deeplink-confirmed macOS Session recovery, and stale bridge/USB
  * guards, SW1-back/SW3-confirm defaults and migration,
  * immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
@@ -741,12 +741,12 @@ test("macOS Codex conversation switching uses native accessibility foreground de
     /pub\(super\) fn begin_voice[\s\S]*?pub\(super\) fn begin_current_voice/,
   );
   assert.ok(exactVoiceStart, "expected macOS exact-session voice start block");
-  assert.match(exactVoiceStart[0], /find_exact_voice_target/);
-  const uniqueRowRecovery = exactVoiceStart[0].match(
-    /Err\(exact_error\) if agent == MacosAgent::Codex[\s\S]*?press_unique_session_row[\s\S]*?find_current_visible_target/,
+  assert.match(exactVoiceStart[0], /find_target/);
+  assert.match(
+    exactVoiceStart[0],
+    /Err\(session_match_error\)[\s\S]*?agent == MacosAgent::Codex[\s\S]*?!session_id\.trim\(\)\.is_empty\(\)[\s\S]*?find_current_visible_target/,
   );
-  assert.ok(uniqueRowRecovery, "expected title-row-verified Codex recovery");
-  assert.match(exactVoiceStart[0], /无法通过唯一侧边栏会话恢复定位/);
+  assert.doesNotMatch(exactVoiceStart[0], /press_unique_session_row/);
   assert.match(exactVoiceStart[0], /current_visible_target: pin_visible_target\.then_some\(target\)/);
   const uniqueRowGuard = macComposer.match(
     /fn press_unique_session_row[\s\S]*?pub\(super\) fn focus_session/,

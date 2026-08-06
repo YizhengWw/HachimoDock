@@ -1,7 +1,7 @@
 {
   "name": "pet-manager-client",
   "private": true,
-  "version": "0.1.25",
+  "version": "0.1.26",
   "author": "Yizheng Wang",
   "license": "AGPL-3.0-only",
   "type": "module",

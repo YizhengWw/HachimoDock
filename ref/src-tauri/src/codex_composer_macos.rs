@@ -3,8 +3,8 @@
  * [Output] Native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
  *          exact-session visible-composer submission with intentional draft
- *          replacement, plus unique-sidebar-row recovery when a Codex build
- *          omits the active title, without an unverified-current-window fallback,
+ *          replacement, plus ID-deeplink-confirmed visible-composer recovery
+ *          when a Codex build omits both the active title and sidebar row,
  *          and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
@@ -1547,28 +1547,6 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
     }
 }
 
-fn find_exact_voice_target(
-    agent: MacosAgent,
-    session_id: &str,
-    session_title: &str,
-) -> Result<ComposerTarget, String> {
-    let deadline = Instant::now() + SESSION_CONFIRM_TIMEOUT;
-    loop {
-        match find_target(agent, session_id, session_title) {
-            Ok(target) => return Ok(target),
-            Err(error) => {
-                if Instant::now() >= deadline {
-                    return Err(format!(
-                        "{} macOS 已打开目标会话，但无法确认该会话的输入框: {error}",
-                        agent.label()
-                    ));
-                }
-            }
-        }
-        thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
-    }
-}
-
 fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, String> {
     let Some(pinned) = state.current_visible_target.as_ref() else {
         return find_target(state.agent, &state.session_id, &state.session_title);
@@ -1643,24 +1621,20 @@ pub(super) fn begin_voice(
 ) -> Result<MacosComposerState, String> {
     focus_session(agent, deep_link, session_id, session_title, workspace_label)?;
     let session_title = normalize_text(session_title);
-    let (target, pin_visible_target) =
-        match find_exact_voice_target(agent, session_id, &session_title) {
-            Ok(target) => (target, false),
-            Err(exact_error) if agent == MacosAgent::Codex && !session_title.is_empty() => {
-                press_unique_session_row(agent, &session_title, workspace_label).map_err(
-                    |row_error| {
-                        format!("{exact_error}; 无法通过唯一侧边栏会话恢复定位: {row_error}")
-                    },
-                )?;
-                let target = find_current_visible_target(agent).map_err(|composer_error| {
-                    format!(
-                    "{exact_error}; 已重新选择唯一侧边栏会话，但输入框仍不可用: {composer_error}"
-                )
-                })?;
-                (target, true)
-            }
-            Err(error) => return Err(error),
-        };
+    let (target, pin_visible_target) = match find_target(agent, session_id, &session_title) {
+        Ok(target) => (target, false),
+        Err(session_match_error) if agent == MacosAgent::Codex && !session_id.trim().is_empty() => {
+            // A successful exact ID deep link has already selected the requested
+            // Codex task. Some Codex builds expose neither the active title nor
+            // the matching sidebar row through AX; in that case bind the one
+            // stable composer now visible in the foreground window. Pinning the
+            // element keeps later updates from falling back to title matching.
+            let target = find_current_visible_target(agent)
+                .map_err(|focus_error| format!("{session_match_error}; {focus_error}"))?;
+            (target, true)
+        }
+        Err(error) => return Err(error),
+    };
     focus_composer(&target)?;
     Ok(MacosComposerState {
         agent,
