@@ -2,7 +2,7 @@
  * [Input] TinyUSB vendor frames for JSON control and raw asset payloads.
  * [Output] framed native-USB responses, callback-safe queued protocol work,
  *          serialized runtime mutations, transactional asset writes,
- *          restart-safe slot cleanup, and legacy-pack migration.
+ *          restart-safe/idle-timeout slot cleanup, and legacy-pack migration.
  * [Pos] ESP32-P4 high-speed USB device transport.
  * [Sync] If this file changes, update esp-p4-runtime/protocol.md and .folder.md.
  */
@@ -80,7 +80,12 @@ static char g_current_path[PET_P4_NATIVE_PATH_MAX];
 static char g_expected_checksum[17];
 static unsigned long long g_expected_size;
 static unsigned long long g_received_size;
+static unsigned long long g_transfer_last_activity_ms;
 static int g_target_slot = -1;
+
+static unsigned long long native_now_ms(void) {
+  return (unsigned long long) (esp_timer_get_time() / 1000ULL);
+}
 
 static uint32_t le32(const uint8_t *bytes) {
   return (uint32_t) bytes[0] | ((uint32_t) bytes[1] << 8) | ((uint32_t) bytes[2] << 16) | ((uint32_t) bytes[3] << 24);
@@ -288,6 +293,7 @@ static void handle_file_begin(const uint8_t *payload, uint32_t len) {
   g_expected_size = json_u64(root, "size", 0);
   g_received_size = 0;
   if (g_state) g_state->asset_transfer_active = true;
+  g_transfer_last_activity_ms = native_now_ms();
   send_asset_ack(transfer_id, "file-begin", path, true, NULL);
   cJSON_Delete(root);
 }
@@ -312,6 +318,7 @@ static void handle_file_data(const uint8_t *payload, uint32_t len) {
   }
   fclose(file);
   g_received_size += (unsigned long long) len;
+  g_transfer_last_activity_ms = native_now_ms();
 }
 
 static void handle_file_end(const uint8_t *payload, uint32_t len) {
@@ -324,6 +331,7 @@ static void handle_file_end(const uint8_t *payload, uint32_t len) {
   unsigned long long checksum = 0;
   FILE *file;
   if (!path || !path[0]) path = g_current_path;
+  g_transfer_last_activity_ms = native_now_ms();
   if (!pet_p4_asset_fs_path_for_slot(g_target_slot, path, true, tmp_path, sizeof(tmp_path)) ||
       !pet_p4_asset_fs_path_for_slot(g_target_slot, path, false, fs_path, sizeof(fs_path))) {
     send_asset_ack(g_transfer_id, "file", path, false, "unsupported p4 asset path");
@@ -384,6 +392,7 @@ static void handle_commit(const uint8_t *payload, uint32_t len) {
     pet_p4_load_asset_manifest(g_state);
     g_state->asset_transfer_active = false;
   }
+  g_transfer_last_activity_ms = 0;
   send_asset_ack(transfer_id, "commit", NULL, true, NULL);
   ESP_LOGI(TAG, "native USB committed transfer=%s slot=%d", transfer_id, g_target_slot);
   cJSON_Delete(root);
@@ -407,10 +416,36 @@ static bool handle_asset_abort_json(const uint8_t *payload, uint32_t len) {
   g_expected_size = 0;
   g_received_size = 0;
   g_target_slot = -1;
+  g_transfer_last_activity_ms = 0;
   if (g_state) g_state->asset_transfer_active = false;
   send_asset_ack(transfer_id, "abort", NULL, true, NULL);
   cJSON_Delete(root);
   return true;
+}
+
+void pet_p4_native_usb_process(unsigned long long now_ms) {
+  if (!g_state || !g_state->asset_transfer_active || g_target_slot < 0
+      || g_transfer_last_activity_ms == 0
+      || now_ms < g_transfer_last_activity_ms
+      || now_ms - g_transfer_last_activity_ms < PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS) {
+    return;
+  }
+  ESP_LOGW(
+    TAG,
+    "aborting idle native appearance transfer id=%s idle_ms=%llu",
+    g_transfer_id,
+    now_ms - g_transfer_last_activity_ms
+  );
+  if (g_target_slot >= 0) (void) clear_slot_files(g_target_slot);
+  g_transfer_id[0] = '\0';
+  g_cleaned_transfer_id[0] = '\0';
+  g_current_path[0] = '\0';
+  g_expected_checksum[0] = '\0';
+  g_expected_size = 0;
+  g_received_size = 0;
+  g_target_slot = -1;
+  g_transfer_last_activity_ms = 0;
+  g_state->asset_transfer_active = false;
 }
 
 static void handle_json_frame(const uint8_t *payload, uint32_t len) {

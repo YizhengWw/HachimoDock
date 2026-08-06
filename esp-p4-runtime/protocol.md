@@ -281,6 +281,10 @@ cache-miss full sync targets the dedicated raw slot `1`. `asset/abort` closes
 any open file, invalidates incomplete raw metadata, clears inactive staging,
 releases the runtime transfer gate, and replies with `asset/ack` phase `abort`;
 the previously active appearance pack remains valid.
+If either serial or native-USB appearance traffic stops for 15 seconds before
+commit, firmware applies the same inactive-slot cleanup locally and releases
+the render gate. This is a crash/disconnect safeguard; normal host failures
+still send `asset/abort` immediately.
 
 PC to board:
 
@@ -372,7 +376,9 @@ PC to board:
   `asset/patch-commit`, `asset/stat`, `asset/abort`: transactional appearance
   transfer lifecycle plus exact cached-pack discovery/reactivation. A cancelled
   host transfer must send `asset/abort` so the device discards the incomplete
-  inactive-slot staging data.
+  inactive-slot staging data. Pet Manager records the transaction, file,
+  raw-chunk checksum/retry, device acknowledgement, and terminal result as a
+  bounded JSONL log under the current app-data `logs/usb-transfer.jsonl` path.
 - `widget/begin`, `widget/chunk`, `widget/commit`: installs a bounded declarative
   `.clawpkg` subset and replies on `widget-install-ack`. The P4 runtime rejects
   unknown grammar, fetchers, readers, unsupported package files, and inputs that

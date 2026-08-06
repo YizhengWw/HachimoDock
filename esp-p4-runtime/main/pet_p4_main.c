@@ -3,8 +3,9 @@
  * [Output] initialized P4 runtime with serialized state access, origin-aware
  *          protocol replies, non-destructive storage mounting, and independent
  *          render/RX health samples, plus post-OTA synchronization of the
- *          built-in component bundle carried inside the application image and
- *          a backlight-gated first complete frame.
+ *          built-in component bundle carried inside the application image,
+ *          idle appearance-transfer recovery, and a backlight-gated first
+ *          complete frame.
  * [Pos] ESP32-P4 firmware entry point and task coordinator.
  * [Sync] If this file changes, update esp-p4-runtime/.folder.md.
  */
@@ -699,6 +700,8 @@ void app_main(void) {
     xSemaphoreTake(g_state_mutex, portMAX_DELAY);
     pet_p4_diagnostics_process(now_ms, &g_state);
     pet_p4_ota_process(now_ms);
+    pet_p4_asset_transfer_process(&g_state, now_ms);
+    pet_p4_native_usb_process(now_ms);
     pet_p4_miniapp_process(now_ms);
     pet_p4_state_process(&g_state, now_ms);
     pet_p4_touch_process(&g_state, transport_send_line, NULL);

@@ -23,6 +23,7 @@ esp_err_t pet_p4_native_usb_init(
   void *enqueue_ctx
 );
 void pet_p4_native_usb_send_json_line(const char *line, void *ctx);
+void pet_p4_native_usb_process(unsigned long long now_ms);
 
 #ifdef __cplusplus
 }

@@ -46,6 +46,7 @@ def read_usb_serial_contract():
         "ref/src-tauri/src/usb_serial/connection_handle.rs",
         "ref/src-tauri/src/usb_serial/firmware_transaction.rs",
         "ref/src-tauri/src/usb_serial/native_usb_protocol.rs",
+        "ref/src-tauri/src/usb_serial/transfer_log.rs",
         "ref/src-tauri/src/usb_serial/transaction_waiters.rs",
         "ref/src-tauri/src/usb_serial/widget_transaction.rs",
     ]
@@ -1511,7 +1512,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.34-p4")' in project
+    assert 'set(PROJECT_VER "0.7.35-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1591,7 +1592,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.34-p4")' in project
+    assert 'set(PROJECT_VER "0.7.35-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1728,6 +1729,25 @@ def test_p4_runtime_pauses_rendering_during_asset_transfer():
     assert "state->asset_transfer_active = true" in source
     assert "state->asset_transfer_active = false" in source
     assert "!g_state.asset_transfer_active" in main
+
+
+def test_p4_stale_appearance_transfer_aborts_on_both_transports():
+    header = read("main/pet_p4_protocol.h")
+    protocol = read("main/pet_p4_protocol.c")
+    native = read("main/pet_p4_usb_native.c")
+    main = read("main/pet_p4_main.c")
+    desktop = read_usb_serial_contract()
+
+    assert "PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS 15000ULL" in header
+    assert "void pet_p4_asset_transfer_process" in protocol
+    assert "abort_serial_asset_transfer(state)" in protocol
+    assert "void pet_p4_native_usb_process" in native
+    assert "pet_p4_asset_transfer_process(&g_state, now_ms)" in main
+    assert "pet_p4_native_usb_process(now_ms)" in main
+    assert "run_serial_asset_transaction" in desktop
+    assert '"transaction_failed"' in desktop
+    assert '"raw_chunk_ack"' in desktop
+    assert '"usb-transfer.jsonl"' in desktop
 
 
 def test_p4_asset_checksum_failure_cleans_staged_file():

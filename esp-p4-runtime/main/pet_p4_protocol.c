@@ -3,7 +3,7 @@
  * [Output] validated runtime updates, ACK/NACK responses, persisted input
  *          configuration snapshots, transfer routing, deterministic appearance
  *          pack discovery/reactivation across both flash slots, restart-safe
- *          slot cleanup and legacy-pack migration, 60-second per-session
+ *          slot cleanup, idle-transfer recovery and legacy-pack migration, 60-second per-session
  *          terminal conversation visibility across active-queue refreshes,
  *          stable first-seen card ordering, and exact retained-card selection
  *          preservation after host refreshes.
@@ -55,6 +55,7 @@ static const char *TAG = "pet-p4-protocol";
 static int g_asset_active_slot = -1;
 static int g_asset_transfer_slot = -1;
 static char g_asset_transfer_id[PET_P4_DEVICE_ID_MAX];
+static unsigned long long g_asset_transfer_last_activity_ms;
 static FILE *g_asset_chunk_file;
 static char g_asset_chunk_logical_path[PET_P4_LOGICAL_PATH_MAX];
 static char g_asset_chunk_error[128];
@@ -533,6 +534,41 @@ static void reset_asset_transfer_slot(void) {
   pet_p4_raw_assets_reset_transfer();
   g_asset_transfer_slot = -1;
   g_asset_transfer_id[0] = '\0';
+}
+
+static void note_asset_transfer_activity(void) {
+  g_asset_transfer_last_activity_ms =
+    (unsigned long long) (esp_timer_get_time() / 1000ULL);
+}
+
+static void abort_serial_asset_transfer(pet_p4_runtime_state_t *state) {
+  reset_raw_asset_chunk();
+  reset_asset_chunk_tracking();
+  if (slot_is_valid(g_asset_transfer_slot)) {
+    (void) clear_slot_files(g_asset_transfer_slot);
+  }
+  reset_asset_transfer_slot();
+  g_asset_transfer_last_activity_ms = 0;
+  if (state) state->asset_transfer_active = false;
+}
+
+void pet_p4_asset_transfer_process(
+  pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+) {
+  if (!state || !state->asset_transfer_active || g_asset_transfer_slot < 0
+      || g_asset_transfer_last_activity_ms == 0
+      || now_ms < g_asset_transfer_last_activity_ms
+      || now_ms - g_asset_transfer_last_activity_ms < PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS) {
+    return;
+  }
+  ESP_LOGW(
+    TAG,
+    "aborting idle serial appearance transfer id=%s idle_ms=%llu",
+    g_asset_transfer_id,
+    now_ms - g_asset_transfer_last_activity_ms
+  );
+  abort_serial_asset_transfer(state);
 }
 
 static void p4_asset_fs_path_for_slot(int slot, const char *logical_path, bool tmp, char *out, size_t out_size) {
@@ -1051,6 +1087,7 @@ size_t pet_p4_consume_raw_asset_bytes(
   bool ok;
   unsigned long long checksum;
   if (!g_raw_asset_chunk.active || !data || len == 0) return 0;
+  note_asset_transfer_activity();
 
   remaining = g_raw_asset_chunk.expected_size - g_raw_asset_chunk.received_size;
   consumed = len < remaining ? len : remaining;
@@ -1248,6 +1285,7 @@ static void handle_asset_topic(
 ) {
   const char *transfer_id = json_string(payload, "transferId");
   const char *path = json_string(payload, "path");
+  note_asset_transfer_activity();
   if (strcmp(topic, "asset/slot-query") == 0) {
     send_asset_slot_query_ack(send_line, ctx, transfer_id);
   } else if (strcmp(topic, "asset/activate") == 0) {
@@ -1267,6 +1305,7 @@ static void handle_asset_topic(
     reset_asset_transfer_slot();
     if (!ensure_asset_transfer_slot(transfer_id)) {
       state->asset_transfer_active = false;
+      g_asset_transfer_last_activity_ms = 0;
       send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, "slot prepare failed");
       return;
     }
@@ -1277,6 +1316,7 @@ static void handle_asset_topic(
         (void) clear_slot_files(g_asset_transfer_slot);
         reset_asset_transfer_slot();
         state->asset_transfer_active = false;
+        g_asset_transfer_last_activity_ms = 0;
         send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, error);
         return;
       }
@@ -1288,6 +1328,7 @@ static void handle_asset_topic(
       (void) clear_slot_files(g_asset_transfer_slot);
       reset_asset_transfer_slot();
       state->asset_transfer_active = false;
+      g_asset_transfer_last_activity_ms = 0;
       send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, error);
       return;
     }
@@ -1296,13 +1337,7 @@ static void handle_asset_topic(
              (unsigned int) PET_P4_ASSET_BEGIN_GC_BYTES);
     send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, true, NULL);
   } else if (strcmp(topic, "asset/abort") == 0) {
-    reset_raw_asset_chunk();
-    reset_asset_chunk_tracking();
-    if (slot_is_valid(g_asset_transfer_slot)) {
-      (void) clear_slot_files(g_asset_transfer_slot);
-    }
-    reset_asset_transfer_slot();
-    state->asset_transfer_active = false;
+    abort_serial_asset_transfer(state);
     send_asset_ack(send_line, ctx, transfer_id, "abort", NULL, true, NULL);
   } else if (strcmp(topic, "asset/chunk") == 0) {
     state->asset_transfer_active = true;
@@ -1343,6 +1378,7 @@ static void handle_asset_topic(
     if (!commit_ok) {
       reset_asset_transfer_slot();
       state->asset_transfer_active = false;
+      g_asset_transfer_last_activity_ms = 0;
       send_asset_ack(send_line, ctx, transfer_id, "commit", NULL, false, commit_error);
       return;
     }
@@ -1350,12 +1386,14 @@ static void handle_asset_topic(
     pet_p4_load_asset_manifest(state);
     reset_asset_transfer_slot();
     state->asset_transfer_active = false;
+    g_asset_transfer_last_activity_ms = 0;
     send_asset_ack(send_line, ctx, transfer_id, "commit", NULL, true, NULL);
   } else if (strcmp(topic, "asset/patch-commit") == 0) {
     reset_raw_asset_chunk();
     reset_asset_chunk_tracking();
     reset_asset_transfer_slot();
     state->asset_transfer_active = false;
+    g_asset_transfer_last_activity_ms = 0;
     send_asset_ack(send_line, ctx, transfer_id, "patch", NULL, true, NULL);
   } else if (path_is_p4_asset(path)) {
     send_asset_ack(send_line, ctx, transfer_id, "unknown", path, false, "unknown p4 asset phase");

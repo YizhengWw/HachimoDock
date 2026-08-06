@@ -7,8 +7,9 @@
  *          stale-state-safe, bounded local-file USB-first forwarding with SSH state fallback and
  *          active speech sync plus immediate reconnect replay, a P4 host
  *          heartbeat, and verified USB binding refresh, built-in
- *          appearance default/override WAV cue sync plus P4 cached-slot reuse
- *          results and serialized, exact-board native-only appearance attempts,
+ *          appearance default/override WAV cue sync plus P4 cached-slot reuse,
+ *          persistent USB transfer diagnostics, and serialized, exact-board
+ *          native-only appearance attempts,
  *          USB desktop identity propagation,
  *          formal local component latest-version listing/deletion with game/tool kind
  *          and manifest descriptions for component-center card summaries, without a manual import command,
@@ -9363,6 +9364,13 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
+            let usb_transfer_log =
+                usb_serial::configure_transfer_logging(&app.path().app_local_data_dir()?)
+                    .map_err(std::io::Error::other)?;
+            eprintln!(
+                "[usb-transfer-log] persistent diagnostics={}",
+                usb_transfer_log.display()
+            );
             #[cfg(target_os = "macos")]
             volcengine_asr::configure_storage_dir(app.path().app_data_dir()?)
                 .map_err(std::io::Error::other)?;

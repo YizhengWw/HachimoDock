@@ -37,6 +37,7 @@ extern "C" {
 #define PET_P4_DONE_HOLD_MS 60000ULL
 #define PET_P4_HOST_HEARTBEAT_TIMEOUT_MS 6000ULL
 #define PET_P4_SESSION_SNAPSHOT_TIMEOUT_MS 30000ULL
+#define PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS 15000ULL
 
 typedef void (*pet_p4_send_line_fn)(const char *line, void *ctx);
 
@@ -93,6 +94,10 @@ typedef struct {
 
 void pet_p4_state_init(pet_p4_runtime_state_t *state, const char *board_device_id);
 void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_ms);
+void pet_p4_asset_transfer_process(
+  pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+);
 bool pet_p4_state_request_touch(
   pet_p4_runtime_state_t *state,
   const char *family,

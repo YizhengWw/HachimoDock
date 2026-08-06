@@ -4,6 +4,7 @@
  *          persistent prebuilt P4 H.264 Annex-B/WAV ready packs plus 4 Mbaud
  *          8KiB raw-chunk
  *          transactional OTA with checksum acks and deterministic pack IDs
+ *          with bounded app-data JSONL diagnostics and failure-path aborts
  *          that instantly reactivate either cached P4 A/B slot,
  *          serialized bulk-write transactions and native-USB raw-pack
  *          rejection before any destructive full-sync write plus nonce-bound
@@ -54,6 +55,7 @@ mod connection_handle;
 mod firmware_transaction;
 mod native_usb_protocol;
 mod transaction_waiters;
+mod transfer_log;
 mod widget_transaction;
 
 use appearance_transaction::{
@@ -107,6 +109,10 @@ use native_usb_protocol::{
     P4_NATIVE_KIND_FILE_DATA, P4_NATIVE_KIND_FILE_END, P4_NATIVE_KIND_JSON, P4_NATIVE_KIND_PING,
     P4_NATIVE_USB_MAX_PAYLOAD,
 };
+
+pub fn configure_transfer_logging(app_data_dir: &Path) -> Result<PathBuf, String> {
+    transfer_log::configure(app_data_dir)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -895,84 +901,128 @@ where
         "[usb-p4-native-ota] begin native USB bulk transfer_id={} files={} bytes={}",
         transfer_id, total_files, total_bytes
     );
-
-    let mut file_count = 0u32;
-    let mut byte_count = 0u64;
-    on_progress(0, total_files, 0, total_bytes);
-    for asset in assets.iter() {
-        if cancel_requested.load(Ordering::SeqCst) {
-            transport.best_effort_asset_abort(&transfer_id);
-            return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
-        }
-        let bytes = std::fs::read(&asset.source_path)
-            .map_err(|e| format!("读取 P4 资源失败 {}: {}", asset.source_path.display(), e))?;
-        let file_size = bytes.len() as u64;
-        let checksum = asset_checksum_hex(&bytes);
-        let metadata = serde_json::to_vec(&serde_json::json!({
-            "transferId": transfer_id,
-            "path": asset.device_path.as_str(),
-            "size": file_size,
-            "checksum": checksum,
-        }))
-        .map_err(|e| e.to_string())?;
-        transport.send_frame(P4_NATIVE_KIND_FILE_BEGIN, &metadata)?;
-        transport.wait_asset_ack(
-            &transfer_id,
-            "file-begin",
-            Some(&asset.device_path),
-            cancel_requested,
-        )?;
-
-        for (index, chunk) in bytes.chunks(P4_NATIVE_USB_FILE_CHUNK_SIZE).enumerate() {
-            if cancel_requested.load(Ordering::SeqCst) {
-                transport.best_effort_asset_abort(&transfer_id);
-                return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
-            }
-            transport.send_frame(P4_NATIVE_KIND_FILE_DATA, chunk)?;
-            let chunk_bytes_sent = std::cmp::min(
-                ((index + 1) * P4_NATIVE_USB_FILE_CHUNK_SIZE) as u64,
-                file_size,
-            );
-            on_progress(
-                file_count,
-                total_files,
-                byte_count + chunk_bytes_sent,
-                total_bytes,
-            );
-        }
-
-        let end_metadata = serde_json::to_vec(&serde_json::json!({
-            "transferId": transfer_id,
-            "path": asset.device_path.as_str(),
-        }))
-        .map_err(|e| e.to_string())?;
-        transport.send_frame(P4_NATIVE_KIND_FILE_END, &end_metadata)?;
-        transport.wait_asset_ack(
-            &transfer_id,
-            "file",
-            Some(&asset.device_path),
-            cancel_requested,
-        )?;
-
-        file_count += 1;
-        byte_count += file_size;
-        on_progress(file_count, total_files, byte_count, total_bytes);
-    }
-
-    let commit_metadata = serde_json::to_vec(&serde_json::json!({
-        "transferId": transfer_id,
-        "fileCount": file_count,
-        "totalBytes": byte_count,
-    }))
-    .map_err(|e| e.to_string())?;
-    transport.send_frame(P4_NATIVE_KIND_COMMIT, &commit_metadata)?;
-    transport.wait_asset_ack(&transfer_id, "commit", None, cancel_requested)?;
-    eprintln!(
-        "[usb-p4-native-ota] commit transfer_id={} sent_files={} sent_bytes={}",
-        transfer_id, file_count, byte_count
+    transfer_log::record(
+        "appearance",
+        "native_transaction_started",
+        serde_json::json!({
+            "transferId": transfer_id.as_str(),
+            "boardDeviceId": expected_board_device_id,
+            "files": total_files,
+            "bytes": total_bytes,
+            "transport": "native-usb-v1",
+            "packId": pack_id.as_str(),
+        }),
     );
 
-    Ok((file_count, byte_count, false))
+    let transfer_result = (|| {
+        let mut file_count = 0u32;
+        let mut byte_count = 0u64;
+        on_progress(0, total_files, 0, total_bytes);
+        for asset in assets.iter() {
+            if cancel_requested.load(Ordering::SeqCst) {
+                return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
+            }
+            let bytes = std::fs::read(&asset.source_path)
+                .map_err(|e| format!("读取 P4 资源失败 {}: {}", asset.source_path.display(), e))?;
+            let file_size = bytes.len() as u64;
+            let checksum = asset_checksum_hex(&bytes);
+            transfer_log::record(
+                "appearance",
+                "native_file_started",
+                serde_json::json!({
+                    "transferId": transfer_id.as_str(),
+                    "devicePath": asset.device_path.as_str(),
+                    "sourcePath": &asset.source_path,
+                    "size": file_size,
+                    "checksum": checksum.as_str(),
+                }),
+            );
+            let metadata = serde_json::to_vec(&serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "path": asset.device_path.as_str(),
+                "size": file_size,
+                "checksum": checksum.as_str(),
+            }))
+            .map_err(|e| e.to_string())?;
+            transport.send_frame(P4_NATIVE_KIND_FILE_BEGIN, &metadata)?;
+            transport.wait_asset_ack(
+                &transfer_id,
+                "file-begin",
+                Some(&asset.device_path),
+                cancel_requested,
+            )?;
+
+            for (index, chunk) in bytes.chunks(P4_NATIVE_USB_FILE_CHUNK_SIZE).enumerate() {
+                if cancel_requested.load(Ordering::SeqCst) {
+                    return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
+                }
+                transport.send_frame(P4_NATIVE_KIND_FILE_DATA, chunk)?;
+                let chunk_bytes_sent = std::cmp::min(
+                    ((index + 1) * P4_NATIVE_USB_FILE_CHUNK_SIZE) as u64,
+                    file_size,
+                );
+                on_progress(
+                    file_count,
+                    total_files,
+                    byte_count + chunk_bytes_sent,
+                    total_bytes,
+                );
+            }
+
+            let end_metadata = serde_json::to_vec(&serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "path": asset.device_path.as_str(),
+            }))
+            .map_err(|e| e.to_string())?;
+            transport.send_frame(P4_NATIVE_KIND_FILE_END, &end_metadata)?;
+            transport.wait_asset_ack(
+                &transfer_id,
+                "file",
+                Some(&asset.device_path),
+                cancel_requested,
+            )?;
+
+            file_count += 1;
+            byte_count += file_size;
+            on_progress(file_count, total_files, byte_count, total_bytes);
+        }
+
+        let commit_metadata = serde_json::to_vec(&serde_json::json!({
+            "transferId": transfer_id.as_str(),
+            "fileCount": file_count,
+            "totalBytes": byte_count,
+        }))
+        .map_err(|e| e.to_string())?;
+        transport.send_frame(P4_NATIVE_KIND_COMMIT, &commit_metadata)?;
+        transport.wait_asset_ack(&transfer_id, "commit", None, cancel_requested)?;
+        eprintln!(
+            "[usb-p4-native-ota] commit transfer_id={} sent_files={} sent_bytes={}",
+            transfer_id, file_count, byte_count
+        );
+        transfer_log::record(
+            "appearance",
+            "native_transaction_committed",
+            serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "files": file_count,
+                "bytes": byte_count,
+            }),
+        );
+
+        Ok((file_count, byte_count, false))
+    })();
+    if let Err(error) = &transfer_result {
+        transfer_log::record(
+            "appearance",
+            "native_transaction_failed",
+            serde_json::json!({
+                "transferId": transfer_id.as_str(),
+                "error": error,
+            }),
+        );
+        transport.best_effort_asset_abort(&transfer_id);
+    }
+    transfer_result
 }
 
 fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Result<(), String> {
@@ -2157,6 +2207,11 @@ impl UsbSerialManager {
     }
 
     fn best_effort_asset_abort(&self, transfer_id: &str) {
+        transfer_log::record(
+            "appearance",
+            "abort_requested",
+            serde_json::json!({ "transferId": transfer_id }),
+        );
         let _ = self.send(
             "asset/abort",
             &serde_json::json!({ "transferId": transfer_id }),
@@ -2175,6 +2230,29 @@ impl UsbSerialManager {
                 }),
             );
         }
+    }
+
+    fn run_serial_asset_transaction<T, F>(
+        &self,
+        transfer_id: &str,
+        operation: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce() -> Result<T, String>,
+    {
+        let result = operation();
+        if let Err(error) = &result {
+            transfer_log::record(
+                "appearance",
+                "transaction_failed",
+                serde_json::json!({
+                    "transferId": transfer_id,
+                    "error": error,
+                }),
+            );
+            self.best_effort_asset_abort(transfer_id);
+        }
+        result
     }
 
     /// Send asset_chunk: a base64-encoded file chunk
@@ -2242,13 +2320,14 @@ impl UsbSerialManager {
         } else {
             None
         };
+        let chunk_checksum = asset_checksum_hex(chunk);
         let header = serde_json::json!({
             "topic": "asset/raw-chunk",
             "payload": {
                 "transferId": transfer_id,
                 "path": path,
                 "size": chunk.len(),
-                "checksum": asset_checksum_hex(chunk),
+                "checksum": chunk_checksum.as_str(),
                 "index": index.to_string(),
             },
         });
@@ -2280,6 +2359,18 @@ impl UsbSerialManager {
                             "P4 raw asset readiness channel closed".to_string()
                         }
                     })?;
+                transfer_log::record(
+                    "appearance",
+                    "raw_ready_ack",
+                    serde_json::json!({
+                        "transferId": transfer_id,
+                        "path": path,
+                        "index": index,
+                        "size": chunk.len(),
+                        "checksum": chunk_checksum.as_str(),
+                        "response": &ready,
+                    }),
+                );
                 if ready.get("ok").and_then(|value| value.as_bool()) != Some(true) {
                     return Err(ready
                         .get("error")
@@ -2300,6 +2391,18 @@ impl UsbSerialManager {
             Ok(())
         })();
         if let Err(error) = send_result {
+            transfer_log::record(
+                "appearance",
+                "raw_chunk_write_failed",
+                serde_json::json!({
+                    "transferId": transfer_id,
+                    "path": path,
+                    "index": index,
+                    "size": chunk.len(),
+                    "checksum": chunk_checksum.as_str(),
+                    "error": error.as_str(),
+                }),
+            );
             self.remove_asset_ack_waiter(transfer_id, phase, Some(path), Some(index));
             if wait_for_ready {
                 self.remove_asset_ack_waiter(transfer_id, ready_phase, Some(path), Some(index));
@@ -2329,6 +2432,19 @@ impl UsbSerialManager {
                 }
             }
         };
+        transfer_log::record(
+            "appearance",
+            "raw_chunk_ack",
+            serde_json::json!({
+                "transferId": transfer_id,
+                "path": path,
+                "index": index,
+                "size": chunk.len(),
+                "checksum": chunk_checksum.as_str(),
+                "elapsedMs": send_started.elapsed().as_millis(),
+                "response": &ack,
+            }),
+        );
         if ack.get("ok").and_then(|value| value.as_bool()) != Some(true) {
             return Err(ack
                 .get("error")
@@ -2384,9 +2500,36 @@ impl UsbSerialManager {
     ) -> Result<(), String> {
         let mut last_error = String::new();
         for attempt in 1..=P4_RAW_APPEARANCE_CHUNK_MAX_ATTEMPTS {
+            transfer_log::record(
+                "appearance",
+                "raw_chunk_attempt",
+                serde_json::json!({
+                    "transferId": transfer_id,
+                    "path": path,
+                    "index": index,
+                    "size": chunk.len(),
+                    "checksum": asset_checksum_hex(chunk),
+                    "attempt": attempt,
+                    "maxAttempts": P4_RAW_APPEARANCE_CHUNK_MAX_ATTEMPTS,
+                    "baud": self.status().baud_rate,
+                }),
+            );
             match self.send_asset_raw_chunk_once(transfer_id, path, chunk, index) {
                 Ok(()) => return Ok(()),
                 Err(error) => {
+                    transfer_log::record(
+                        "appearance",
+                        "raw_chunk_attempt_failed",
+                        serde_json::json!({
+                            "transferId": transfer_id,
+                            "path": path,
+                            "index": index,
+                            "size": chunk.len(),
+                            "checksum": asset_checksum_hex(chunk),
+                            "attempt": attempt,
+                            "error": error.as_str(),
+                        }),
+                    );
                     let timed_out = error.contains("timed out waiting for raw P4 asset chunk");
                     let checksum_failed = error.contains("raw chunk checksum mismatch");
                     if attempt == P4_RAW_APPEARANCE_CHUNK_MAX_ATTEMPTS
@@ -3441,127 +3584,180 @@ impl UsbSerialManager {
             negotiated_baud,
             chunk_size
         );
+        transfer_log::record(
+            "appearance",
+            "transaction_started",
+            serde_json::json!({
+                "transferId": transfer_id,
+                "boardDeviceId": expected_board_device_id,
+                "files": total_files,
+                "bytes": total_bytes,
+                "rawBytes": raw_bytes,
+                "transport": if use_raw_chunks { "uart-raw-v1" } else { "json-base64-v1" },
+                "baud": negotiated_baud,
+                "chunkBytes": chunk_size,
+                "packId": pack_id.as_str(),
+            }),
+        );
         let transfer_started = Instant::now();
-        self.send_asset_begin_checked_with_raw_bytes(
-            &transfer_id,
-            total_bytes,
-            use_raw_slot.then_some(raw_bytes),
-        )?;
-
-        let mut file_count: u32 = 0;
-        let mut byte_count: u64 = 0;
-        on_progress(0, total_files, 0, total_bytes);
-
-        for asset in assets {
-            self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
-            eprintln!(
-                "[usb-p4-ota] file family={} kind={} path={}",
-                asset.family_name,
-                asset.kind,
-                asset.source_path.display()
-            );
-            let mut file = std::fs::File::open(&asset.source_path)
-                .map_err(|e| format!("打开 P4 资源失败 {}: {}", asset.family_name, e))?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| format!("读取 P4 资源失败 {}: {}", asset.family_name, e))?;
-
-            let file_size = buf.len() as u64;
-            let checksum = asset_checksum_hex(&buf);
-            let mut chunk_count = 0u64;
-            for (i, chunk) in buf.chunks(chunk_size).enumerate() {
-                self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
-                if use_raw_chunks {
-                    self.send_asset_raw_chunk_checked(
-                        &transfer_id,
-                        &asset.device_path,
-                        chunk,
-                        i as u32,
-                    )?;
-                } else {
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(chunk);
-                    let mut accepted = false;
-                    let mut last_error = String::new();
-                    for attempt in 1..=P4_APPEARANCE_CHUNK_DECODE_MAX_ATTEMPTS {
-                        self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
-                        match self.send_asset_chunk_checked(
-                            &transfer_id,
-                            &asset.device_path,
-                            &b64,
-                            chunk.len(),
-                            i as u32,
-                        ) {
-                            Ok(()) => {
-                                accepted = true;
-                                break;
-                            }
-                            Err(error) if error.contains("base64 decode failed") => {
-                                last_error = error;
-                                eprintln!(
-                                    "[usb-p4-ota] retry decoded chunk path={} index={} attempt={}",
-                                    asset.device_path, i, attempt
-                                );
-                                thread::sleep(Duration::from_millis(10));
-                            }
-                            Err(error) => return Err(error),
-                        }
-                    }
-                    if !accepted {
-                        return Err(format!(
-                            "P4 asset chunk failed after {} decode attempts: path={} index={} error={}",
-                            P4_APPEARANCE_CHUNK_DECODE_MAX_ATTEMPTS,
-                            asset.device_path,
-                            i,
-                            last_error
-                        ));
-                    }
-                }
-                chunk_count += 1;
-                let chunk_bytes_sent = std::cmp::min(((i + 1) * chunk_size) as u64, file_size);
-                on_progress(
-                    file_count,
-                    total_files,
-                    byte_count + chunk_bytes_sent,
-                    total_bytes,
-                );
-            }
-            self.send_asset_file_commit_checked(
+        self.run_serial_asset_transaction(&transfer_id, || {
+            self.send_asset_begin_checked_with_raw_bytes(
                 &transfer_id,
-                &asset.device_path,
-                file_size,
-                &checksum,
-                chunk_count,
+                total_bytes,
+                use_raw_slot.then_some(raw_bytes),
             )?;
 
-            file_count += 1;
-            byte_count += file_size;
-            on_progress(file_count, total_files, byte_count, total_bytes);
-        }
+            let mut file_count: u32 = 0;
+            let mut byte_count: u64 = 0;
+            on_progress(0, total_files, 0, total_bytes);
 
-        self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
-        self.send_asset_commit_checked(&transfer_id, file_count, byte_count)?;
-        let elapsed = transfer_started.elapsed();
-        let effective_bytes_per_sec = if elapsed.is_zero() {
-            0
-        } else {
-            (byte_count as u128 * 1_000 / elapsed.as_millis().max(1)) as u64
-        };
-        eprintln!(
-            "[usb-p4-ota] commit transfer_id={} sent_files={} sent_bytes={} transport={} baud={} elapsed_ms={} effective_kib_s={:.1}",
-            transfer_id,
-            file_count,
-            byte_count,
-            if use_raw_chunks {
-                "uart-raw-v1"
+            for asset in assets {
+                self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
+                eprintln!(
+                    "[usb-p4-ota] file family={} kind={} path={}",
+                    asset.family_name,
+                    asset.kind,
+                    asset.source_path.display()
+                );
+                let mut file = std::fs::File::open(&asset.source_path)
+                    .map_err(|e| format!("打开 P4 资源失败 {}: {}", asset.family_name, e))?;
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf)
+                    .map_err(|e| format!("读取 P4 资源失败 {}: {}", asset.family_name, e))?;
+
+                let file_size = buf.len() as u64;
+                let checksum = asset_checksum_hex(&buf);
+                transfer_log::record(
+                    "appearance",
+                    "file_started",
+                    serde_json::json!({
+                        "transferId": transfer_id.as_str(),
+                        "family": asset.family_name.as_str(),
+                        "kind": asset.kind,
+                        "sourcePath": &asset.source_path,
+                        "devicePath": asset.device_path.as_str(),
+                        "size": file_size,
+                        "checksum": checksum.as_str(),
+                    }),
+                );
+                let mut chunk_count = 0u64;
+                for (i, chunk) in buf.chunks(chunk_size).enumerate() {
+                    self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
+                    if use_raw_chunks {
+                        self.send_asset_raw_chunk_checked(
+                            &transfer_id,
+                            &asset.device_path,
+                            chunk,
+                            i as u32,
+                        )?;
+                    } else {
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(chunk);
+                        let mut accepted = false;
+                        let mut last_error = String::new();
+                        for attempt in 1..=P4_APPEARANCE_CHUNK_DECODE_MAX_ATTEMPTS {
+                            self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
+                            match self.send_asset_chunk_checked(
+                                &transfer_id,
+                                &asset.device_path,
+                                &b64,
+                                chunk.len(),
+                                i as u32,
+                            ) {
+                                Ok(()) => {
+                                    accepted = true;
+                                    break;
+                                }
+                                Err(error) if error.contains("base64 decode failed") => {
+                                    last_error = error;
+                                    eprintln!(
+                                        "[usb-p4-ota] retry decoded chunk path={} index={} attempt={}",
+                                        asset.device_path, i, attempt
+                                    );
+                                    thread::sleep(Duration::from_millis(10));
+                                }
+                                Err(error) => return Err(error),
+                            }
+                        }
+                        if !accepted {
+                            return Err(format!(
+                                "P4 asset chunk failed after {} decode attempts: path={} index={} error={}",
+                                P4_APPEARANCE_CHUNK_DECODE_MAX_ATTEMPTS,
+                                asset.device_path,
+                                i,
+                                last_error
+                            ));
+                        }
+                    }
+                    chunk_count += 1;
+                    let chunk_bytes_sent = std::cmp::min(((i + 1) * chunk_size) as u64, file_size);
+                    on_progress(
+                        file_count,
+                        total_files,
+                        byte_count + chunk_bytes_sent,
+                        total_bytes,
+                    );
+                }
+                self.send_asset_file_commit_checked(
+                    &transfer_id,
+                    &asset.device_path,
+                    file_size,
+                    &checksum,
+                    chunk_count,
+                )?;
+                transfer_log::record(
+                    "appearance",
+                    "file_committed",
+                    serde_json::json!({
+                        "transferId": transfer_id.as_str(),
+                        "devicePath": asset.device_path.as_str(),
+                        "size": file_size,
+                        "checksum": checksum.as_str(),
+                        "chunks": chunk_count,
+                    }),
+                );
+
+                file_count += 1;
+                byte_count += file_size;
+                on_progress(file_count, total_files, byte_count, total_bytes);
+            }
+
+            self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
+            self.send_asset_commit_checked(&transfer_id, file_count, byte_count)?;
+            let elapsed = transfer_started.elapsed();
+            let effective_bytes_per_sec = if elapsed.is_zero() {
+                0
             } else {
-                "json-base64-v1"
-            },
-            negotiated_baud,
-            elapsed.as_millis(),
-            effective_bytes_per_sec as f64 / 1024.0
-        );
+                (byte_count as u128 * 1_000 / elapsed.as_millis().max(1)) as u64
+            };
+            eprintln!(
+                "[usb-p4-ota] commit transfer_id={} sent_files={} sent_bytes={} transport={} baud={} elapsed_ms={} effective_kib_s={:.1}",
+                transfer_id,
+                file_count,
+                byte_count,
+                if use_raw_chunks {
+                    "uart-raw-v1"
+                } else {
+                    "json-base64-v1"
+                },
+                negotiated_baud,
+                elapsed.as_millis(),
+                effective_bytes_per_sec as f64 / 1024.0
+            );
+            transfer_log::record(
+                "appearance",
+                "transaction_committed",
+                serde_json::json!({
+                    "transferId": transfer_id.as_str(),
+                    "files": file_count,
+                    "bytes": byte_count,
+                    "baud": negotiated_baud,
+                    "elapsedMs": elapsed.as_millis(),
+                    "effectiveBytesPerSecond": effective_bytes_per_sec,
+                }),
+            );
 
-        Ok((file_count, byte_count, false))
+            Ok((file_count, byte_count, false))
+        })
     }
 
     pub fn sync_appearance_p4_native_only<F>(

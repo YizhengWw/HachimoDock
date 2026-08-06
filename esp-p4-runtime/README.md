@@ -43,6 +43,10 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
+- Firmware `0.7.35-p4` releases the render gate and discards only incomplete
+  slot-1 staging when serial or native-USB appearance traffic is idle for 15
+  seconds; the previously active appearance remains intact after a host crash
+  or cable disconnect.
 - ESP32-P4 `esp_h264` software dual-task decoding to I420, with BT.709
   I420-to-RGB565 conversion and legacy hardware JPEG/TJPGD decoding retained
   for older MJPEG packs.

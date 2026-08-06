@@ -3,7 +3,8 @@
  *         board-authoritative global-exit control, component-scope/conflict state, live-device state, and actions.
  * [Output] Structured preview/sync confirmation with a device-preview overview,
  *          dedicated button-mapping workspace, duplicate-input guard, consolidated
- *          sync-impact panel, dynamic global-return guidance, and context-aware confirmation footer.
+ *          sync-impact panel without ambiguous current-component replacement copy,
+ *          dynamic global-return guidance, and context-aware confirmation footer.
  * [Pos] component node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -214,8 +215,7 @@ export default function ComponentPreviewModal({
               )}
             </div>
           </div>
-          {((currentComponent && !isUpdatingCurrent && !isDeviceOnly)
-            || componentButtonsWillApply
+          {(componentButtonsWillApply
             || installBlockedReason
             || !deviceConnected
             || isDeviceOnly
@@ -232,9 +232,6 @@ export default function ComponentPreviewModal({
                     确认后会用这个组件替换 <b>{currentComponent.name}</b>；
                     旧组件不会保留在板端，但仍保留在本机组件库。
                   </p>
-                )}
-                {currentComponent && !isUpdatingCurrent && !isDeviceOnly && !singleSlotReplacement && (
-                  <p>安装后将替换当前的 <b>{currentComponent.name}</b></p>
                 )}
                 {isInstalled && !isUpdatingCurrent && !isDeviceOnly && !singleSlotReplacement && (
                   <p>这个组件已同步到设备；确认后会重新同步配置和按钮。</p>

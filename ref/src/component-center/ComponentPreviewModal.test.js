@@ -1,7 +1,7 @@
 /**
  * [Input] Read ComponentPreviewModal.jsx source.
  * [Output] Static Node coverage: default export, explicit game/tool type, button editor,
- *          component-scope/conflict guidance, replacement warning, current-device removal,
+ *          component-scope/conflict guidance, single-slot replacement warning, current-device removal,
  *          dynamic global-return guidance, and install-button disabled states.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -145,10 +145,9 @@ test("ComponentPreviewModal offers PC or dual deletion for every formal local co
   assert.match(source, /<Trash2/);
 });
 
-// 5. Replace warning shown when currentComponent.id !== component.id
-test("ComponentPreviewModal renders replace warning when currentComponent.id !== component.id", () => {
-  assert.match(source, /currentComponent && !isUpdatingCurrent/);
-  assert.match(source, /安装后将替换当前的/);
+// 5. Multi-slot sync has no ambiguous current-component replacement copy.
+test("ComponentPreviewModal does not describe multi-slot sync as replacing a current component", () => {
+  assert.doesNotMatch(source, /安装后将替换当前的/);
 });
 
 test("ComponentPreviewModal explains destructive single-slot replacement in the final confirmation", () => {
