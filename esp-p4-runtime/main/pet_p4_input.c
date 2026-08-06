@@ -7,6 +7,7 @@
  *          with exact selected-session event metadata, and component-local
  *          button routing that is active only while the component page is
  *          open, while the persisted global page-back gesture always wins and
+ *          every other unmapped system-navigation gesture is suppressed, and
  *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
  *          input configuration with versioned SW1-back/SW3-confirm defaults.
  * [Pos] ESP32-P4 physical-input runtime.
@@ -1181,6 +1182,30 @@ static bool dispatch_component_binding_event(
   return true;
 }
 
+static void send_ignored_component_event(
+  pet_p4_runtime_state_t *state,
+  pet_p4_send_line_fn send_line,
+  void *ctx,
+  const pet_p4_input_event_t *event,
+  const char *event_name,
+  const char *gesture
+) {
+  pet_p4_input_binding_t ignored_binding = {0};
+  copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
+  copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
+  send_input_event(
+    state,
+    send_line,
+    ctx,
+    event,
+    event_name,
+    gesture,
+    &ignored_binding,
+    "",
+    true
+  );
+}
+
 static void dispatch_binding_event(
   pet_p4_runtime_state_t *state,
   pet_p4_send_line_fn send_line,
@@ -1221,6 +1246,25 @@ static void dispatch_binding_event(
         event_name,
         gesture
       )) return;
+  // While a component is open, its package owns optional gameplay buttons.
+  // An unmapped system-navigation gesture must not fall through to the global
+  // action (for example SW2 -> component_center) and look like a second exit.
+  // The configured page_back gesture was already handled above and remains
+  // the only system-navigation escape from a running component.
+  if (state
+      && strcmp(state->screen_page, "app") == 0
+      && binding
+      && component_system_action(binding->action)) {
+    send_ignored_component_event(
+      state,
+      send_line,
+      ctx,
+      event,
+      event_name,
+      gesture
+    );
+    return;
+  }
   char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
   bool handled_locally = apply_local_action(
     state,
@@ -1360,19 +1404,13 @@ void pet_p4_input_process(
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
           && !active_global_exit_binding(state, event_name)) {
-        pet_p4_input_binding_t ignored_binding = {0};
-        copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
-        copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
-        send_input_event(
+        send_ignored_component_event(
           state,
           send_line,
           ctx,
           &event,
           event_name,
-          gesture,
-          &ignored_binding,
-          "",
-          true
+          gesture
         );
         continue;
       }
@@ -1405,19 +1443,13 @@ void pet_p4_input_process(
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
           && !active_global_exit_binding(state, event_name)) {
-        pet_p4_input_binding_t ignored_binding = {0};
-        copy_text(ignored_binding.event, sizeof(ignored_binding.event), event_name);
-        copy_text(ignored_binding.action, sizeof(ignored_binding.action), "disabled");
-        send_input_event(
+        send_ignored_component_event(
           state,
           send_line,
           ctx,
           &event,
           event_name,
-          event.delta > 0 ? "rotate_cw" : "rotate_ccw",
-          &ignored_binding,
-          "",
-          true
+          event.delta > 0 ? "rotate_cw" : "rotate_ccw"
         );
         continue;
       }

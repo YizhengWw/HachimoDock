@@ -1511,7 +1511,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.32-p4")' in project
+    assert 'set(PROJECT_VER "0.7.33-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1591,7 +1591,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.32-p4")' in project
+    assert 'set(PROJECT_VER "0.7.33-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2054,6 +2054,14 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "active_global_exit_binding" in input_source
     assert 'strcmp(binding->action, "page_back") == 0' in input_source
     assert "if (component_system_action(component_action)) return false" in input_source
+    assert "send_ignored_component_event" in input_source
+    assert "&& component_system_action(binding->action)" in input_source
+    assert input_source.index("if (global_exit)") < input_source.index(
+        "if (dispatch_component_binding_event("
+    )
+    assert input_source.index("if (dispatch_component_binding_event(") < input_source.index(
+        "&& component_system_action(binding->action)"
+    )
     assert "pet_p4_miniapp_resolve_input" in input_source
     assert "pet_p4_miniapp_has_input(long_event_name)" in input_source
     assert "nvs_set_blob" in input_source

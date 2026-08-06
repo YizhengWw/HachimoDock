@@ -352,7 +352,12 @@ PC to board:
 - `stats/update`: updates the bounded P4 statistics model. The same token and
   runtime metrics are also extracted from `state/<agent>` payloads.
 - `input/config`: validates and persists the P4 input map. The compatibility
-  envelope `control/command` with `type: button_config` is also accepted.
+  envelope `control/command` with `type: button_config` is also accepted. While
+  a component is open, its mapped gameplay action wins; the current global
+  `page_back` gesture is the only system navigation allowed to escape it.
+  Other unmapped system-navigation actions such as `component_center` are
+  acknowledged as disabled instead of falling through and closing the
+  component. Outside a component, those global actions keep their normal role.
 - `input/config-query`: returns the complete authoritative input map on
   `input/config-state`, correlated by `requestId`.
 - Input configuration and component inventory requests keep their large
