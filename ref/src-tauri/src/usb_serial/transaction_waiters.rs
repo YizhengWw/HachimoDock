@@ -1,6 +1,7 @@
 /*
  * [Input] Device ACK/response topics and their request-correlated JSON payloads.
- * [Output] One-shot waiter matching for appearance, widget, firmware, and device requests.
+ * [Output] One-shot waiter matching for appearance, widget, firmware ACK/status,
+ *          and device requests.
  * [Pos] Shared transaction-response routing boundary beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -29,6 +30,11 @@ pub(super) struct FirmwareAckWaiter {
     pub(super) phase: String,
     pub(super) expected_next_sequence: u64,
     pub(super) expected_received_bytes: u64,
+    pub(super) sender: mpsc::Sender<Value>,
+}
+
+pub(super) struct FirmwareStatusWaiter {
+    pub(super) request_id: String,
     pub(super) sender: mpsc::Sender<Value>,
 }
 
@@ -197,6 +203,36 @@ pub(super) fn resolve_firmware_ack(
             sender.is_some()
         );
     }
+    if let Some(sender) = sender {
+        let _ = sender.send(payload.clone());
+    }
+}
+
+pub(super) fn resolve_firmware_status(
+    waiters: &Arc<Mutex<Vec<FirmwareStatusWaiter>>>,
+    topic: &str,
+    payload: &Value,
+) {
+    if topic != "firmware/status" {
+        return;
+    }
+    let response_request_id = payload
+        .get("requestId")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let sender = waiters.lock().ok().and_then(|mut waiters| {
+        // Current firmware echoes requestId. Older schema-5 builds do not, so
+        // the sole serialized firmware transaction may consume the next status
+        // frame as a backwards-compatible response.
+        let index = if response_request_id.is_empty() {
+            (waiters.len() == 1).then_some(0)
+        } else {
+            waiters
+                .iter()
+                .position(|waiter| waiter.request_id == response_request_id)
+        }?;
+        Some(waiters.remove(index).sender)
+    });
     if let Some(sender) = sender {
         let _ = sender.send(payload.clone());
     }

@@ -10,6 +10,7 @@ Also locks logical RGB565 to the matching RGB element order used by the panel.
 Also locks completed conversation visibility to 60 seconds before returning idle.
 Also locks deterministic H.264 appearance pack IDs and protected slot roles.
 Also locks paced CH343 writes for both firmware and raw appearance payloads.
+Also locks interrupted OTA recovery and visible transfer feedback on the device.
 [Pos] Fast host-side contract suite run before firmware build and hardware smoke tests.
 """
 
@@ -1516,7 +1517,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.35-p4")' in project
+    assert 'set(PROJECT_VER "0.7.36-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1596,7 +1597,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.35-p4")' in project
+    assert 'set(PROJECT_VER "0.7.36-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1617,6 +1618,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "pet_p4_ota_transfer_active" in ota
     assert "pet_p4_diagnostics_reboot_pending" in ota
     assert "modf(item->valuedouble" in ota
+    assert 'json_string(request, "requestId")' in ota
     for topic in [
         "firmware/begin",
         "firmware/chunk",
@@ -1651,6 +1653,10 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "parse_esp_idf_app_descriptor" in desktop
     assert "expected_next_sequence" in desktop
     assert "wait_for_firmware_validation" in desktop
+    assert "recover_stale_firmware_transfer" in desktop
+    assert "query_firmware_status" in desktop
+    assert "expected_connection_id" in desktop
+    assert "resolve_firmware_status" in desktop
     assert '"imageState"' in desktop
     assert "usb_update_firmware" in desktop_lib
     assert "expected_board_device_id" in desktop_lib
@@ -1724,15 +1730,22 @@ def test_p4_component_lock_uses_platformio_exported_portable_root():
     assert 'portable_root = "$PET_P4_PROJECT_DIR"' in platformio_hook
 
 
-def test_p4_runtime_pauses_rendering_during_asset_transfer():
+def test_p4_runtime_shows_a_lightweight_screen_during_bulk_transfers():
     header = read("main/pet_p4_protocol.h")
     source = read("main/pet_p4_protocol.c")
     main = read("main/pet_p4_main.c")
+    renderer = read("main/pet_p4_renderer.c")
+    renderer_header = read("main/pet_p4_renderer.h")
 
     assert "asset_transfer_active" in header
     assert "state->asset_transfer_active = true" in source
     assert "state->asset_transfer_active = false" in source
-    assert "!g_state.asset_transfer_active" in main
+    assert "pet_p4_renderer_render_transfer_status" in renderer_header
+    assert "pet_p4_renderer_render_transfer_status(firmware_transfer_active, now_ms)" in main
+    assert 'const char *title = firmware_update ? "固件更新中" : "形象同步中"' in renderer
+    assert '"请保持设备连接，不要拔出数据线"' in renderer
+    transfer_renderer = renderer[renderer.index("esp_err_t pet_p4_renderer_render_transfer_status"):]
+    assert "render_asset_pet_frame" not in transfer_renderer
 
 
 def test_p4_stale_appearance_transfer_aborts_on_both_transports():
@@ -2326,7 +2339,7 @@ if __name__ == "__main__":
         test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash,
         test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc,
         test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics,
-        test_p4_runtime_pauses_rendering_during_asset_transfer,
+        test_p4_runtime_shows_a_lightweight_screen_during_bulk_transfers,
         test_p4_asset_checksum_failure_cleans_staged_file,
         test_p4_asset_chunks_are_acknowledged_for_pacing,
         test_p4_asset_chunks_keep_staged_file_open_between_acks,

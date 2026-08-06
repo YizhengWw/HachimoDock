@@ -1,8 +1,9 @@
 /*
  * [Input] firmware update JSON topics, inactive ESP-IDF OTA partition, and runtime
  *         readiness from the LCD/render initialization path.
- * [Output] 4KB ACK-gated A/B image writes, SHA-256 verification, boot-slot
- *          switching, delayed validity confirmation, and automatic rollback.
+ * [Output] 4KB ACK-gated A/B image writes, request-correlated resumable status,
+ *          SHA-256 verification, boot-slot switching, delayed validity
+ *          confirmation, and automatic rollback.
  * [Pos] ESP32-P4 firmware update node in esp-p4-runtime/main
  * [Sync] If this file changes, update esp-p4-runtime/protocol.md and .folder.md.
  */
@@ -140,7 +141,11 @@ static void add_partition(cJSON *payload, const char *key, const esp_partition_t
   cJSON_AddItemToObject(payload, key, item);
 }
 
-static void send_status_locked(pet_p4_send_line_fn send_line, void *ctx) {
+static void send_status_locked(
+  const cJSON *request,
+  pet_p4_send_line_fn send_line,
+  void *ctx
+) {
   const esp_partition_t *running = esp_ota_get_running_partition();
   const esp_partition_t *boot = esp_ota_get_boot_partition();
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
@@ -150,6 +155,8 @@ static void send_status_locked(pet_p4_send_line_fn send_line, void *ctx) {
     ? esp_ota_get_state_partition(running, &image_state)
     : ESP_ERR_NOT_FOUND;
   cJSON *payload = cJSON_CreateObject();
+  const char *request_id = json_string(request, "requestId");
+  if (request_id[0]) cJSON_AddStringToObject(payload, "requestId", request_id);
   cJSON_AddBoolToObject(payload, "supported", running && next && running != next);
   cJSON_AddBoolToObject(payload, "active", g_active);
   cJSON_AddBoolToObject(payload, "pendingVerify", g_pending_verify);
@@ -668,7 +675,7 @@ bool pet_p4_ota_handle_topic(
   if (!g_initialized) {
     const char *transfer_id = json_string(payload, "transferId");
     if (strcmp(topic, "firmware/query") == 0) {
-      send_status_locked(send_line, ctx);
+      send_status_locked(payload, send_line, ctx);
     } else if (strcmp(topic, "firmware/chunk") == 0) {
       send_chunk_ack(
         send_line,
@@ -706,7 +713,7 @@ bool pet_p4_ota_handle_topic(
   } else if (strcmp(topic, "firmware/abort") == 0) {
     handle_abort(payload, send_line, ctx);
   } else if (strcmp(topic, "firmware/query") == 0) {
-    send_status_locked(send_line, ctx);
+    send_status_locked(payload, send_line, ctx);
   } else {
     handled = false;
   }
@@ -716,7 +723,7 @@ bool pet_p4_ota_handle_topic(
 
 void pet_p4_ota_send_status(pet_p4_send_line_fn send_line, void *ctx) {
   if (!g_ota_mutex || xSemaphoreTake(g_ota_mutex, portMAX_DELAY) != pdTRUE) return;
-  send_status_locked(send_line, ctx);
+  send_status_locked(NULL, send_line, ctx);
   xSemaphoreGive(g_ota_mutex);
 }
 

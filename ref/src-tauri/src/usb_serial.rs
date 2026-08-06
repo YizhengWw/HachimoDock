@@ -13,7 +13,8 @@
  *          do not support per-file asset acks yet, short-id ACK-gated widget
  *          .clawpkg OTA plus capability-gated, expected-board-id removal with
  *          legacy unsupported-phase NACK correlation, capability-sized,
- *          retry-before-downshift Base64 firmware chunks with recovery,
+ *          retry-before-downshift Base64 firmware chunks with stale-transfer
+ *          discovery, exact abort recovery, and connection-generation pinning,
  *          request-id-matched live device
  *          widget inventory, and persisted input configuration reads;
  *          transaction_waiters owns shared ACK/request matching;
@@ -77,21 +78,21 @@ use firmware_transaction::{
     evaluate_firmware_validation, firmware_corruption_fallback_size, firmware_recovery_chunk_size,
     parse_esp_idf_app_descriptor, preferred_firmware_chunk_size, FirmwareCommandError,
     VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_BEGIN_MAX_ATTEMPTS,
-    P4_FIRMWARE_CHUNK_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_CHUNK_SIZE,
-    P4_FIRMWARE_COMMIT_ACK_TIMEOUT, P4_FIRMWARE_COMMIT_MAX_ATTEMPTS,
-    P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK, P4_FIRMWARE_MAX_IMAGE_SIZE,
-    P4_FIRMWARE_RECONNECT_TIMEOUT,
+    P4_FIRMWARE_CHUNK_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
+    P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK,
+    P4_FIRMWARE_MAX_IMAGE_SIZE, P4_FIRMWARE_RECONNECT_TIMEOUT,
 };
 pub use firmware_transaction::{inspect_firmware_image, FirmwareImageInfo, FirmwareUpdateResult};
 #[cfg(test)]
 use firmware_transaction::{
     ESP_APP_DESC_MAGIC, ESP_APP_DESC_SIZE, ESP_IMAGE_HEADER_SIZE, ESP_IMAGE_SEGMENT_HEADER_SIZE,
-    P4_FIRMWARE_FALLBACK_CHUNK_SIZE, P4_FIRMWARE_FAST_CHUNK_SIZE, P4_FIRMWARE_PROJECT_NAME,
-    P4_FIRMWARE_RECOVERY_SUCCESS_STREAK, P4_FIRMWARE_SAFE_CHUNK_SIZE,
+    P4_FIRMWARE_CHUNK_SIZE, P4_FIRMWARE_FALLBACK_CHUNK_SIZE, P4_FIRMWARE_FAST_CHUNK_SIZE,
+    P4_FIRMWARE_PROJECT_NAME, P4_FIRMWARE_RECOVERY_SUCCESS_STREAK, P4_FIRMWARE_SAFE_CHUNK_SIZE,
 };
 use transaction_waiters::{
-    resolve_asset_ack, resolve_device_response, resolve_firmware_ack, resolve_widget_ack,
-    AssetAckWaiter, DeviceResponseWaiter, FirmwareAckWaiter, WidgetAckWaiter,
+    resolve_asset_ack, resolve_device_response, resolve_firmware_ack, resolve_firmware_status,
+    resolve_widget_ack, AssetAckWaiter, DeviceResponseWaiter, FirmwareAckWaiter,
+    FirmwareStatusWaiter, WidgetAckWaiter,
 };
 #[cfg(test)]
 use widget_transaction::P4_WIDGET_JSON_MAX_BYTES;
@@ -211,6 +212,7 @@ const P4_NATIVE_USB_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const P4_NATIVE_USB_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 const P4_NATIVE_USB_IDENTITY_TIMEOUT: Duration = Duration::from_secs(2);
 const P4_DEVICE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const P4_FIRMWARE_STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 // Firmware and raw appearance data share the board's 4 Mbaud CH343 control
 // link. Force short, drained bursts so the macOS USB-serial stack cannot hand
 // the adapter one multi-kilobyte payload that is silently damaged.
@@ -1074,6 +1076,7 @@ pub struct UsbSerialManager {
     asset_ack_waiters: Arc<Mutex<Vec<AssetAckWaiter>>>,
     widget_ack_waiters: Arc<Mutex<Vec<WidgetAckWaiter>>>,
     firmware_ack_waiters: Arc<Mutex<Vec<FirmwareAckWaiter>>>,
+    firmware_status_waiters: Arc<Mutex<Vec<FirmwareStatusWaiter>>>,
     device_response_waiters: Arc<Mutex<Vec<DeviceResponseWaiter>>>,
 }
 
@@ -1122,6 +1125,7 @@ impl UsbSerialManager {
             asset_ack_waiters: Arc::new(Mutex::new(Vec::new())),
             widget_ack_waiters: Arc::new(Mutex::new(Vec::new())),
             firmware_ack_waiters: Arc::new(Mutex::new(Vec::new())),
+            firmware_status_waiters: Arc::new(Mutex::new(Vec::new())),
             device_response_waiters: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -1309,6 +1313,7 @@ impl UsbSerialManager {
         let asset_ack_waiters = Arc::clone(&self.asset_ack_waiters);
         let widget_ack_waiters = Arc::clone(&self.widget_ack_waiters);
         let firmware_ack_waiters = Arc::clone(&self.firmware_ack_waiters);
+        let firmware_status_waiters = Arc::clone(&self.firmware_status_waiters);
         let device_response_waiters = Arc::clone(&self.device_response_waiters);
 
         thread::spawn(move || {
@@ -1348,6 +1353,7 @@ impl UsbSerialManager {
                 resolve_asset_ack(&asset_ack_waiters, &msg.topic, &msg.payload);
                 resolve_widget_ack(&widget_ack_waiters, &msg.topic, &msg.payload);
                 resolve_firmware_ack(&firmware_ack_waiters, &msg.topic, &msg.payload);
+                resolve_firmware_status(&firmware_status_waiters, &msg.topic, &msg.payload);
                 resolve_device_response(&device_response_waiters, &msg.topic, &msg.payload);
 
                 // Handle hello -> refresh identity and send ack. Never block the
@@ -1407,24 +1413,15 @@ impl UsbSerialManager {
 
     /// Send a message to the device
     pub fn send(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
-        self.send_inner(topic, payload, true, None, None)
+        self.send_inner(topic, payload, true, None, None, None)
     }
 
     /// Send without flush - for streaming bulk data.
     fn send_no_flush(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
-        self.send_inner(topic, payload, false, None, None)
+        self.send_inner(topic, payload, false, None, None, None)
     }
 
     pub(crate) fn send_to_board(
-        &self,
-        expected_board_device_id: &str,
-        topic: &str,
-        payload: &serde_json::Value,
-    ) -> Result<(), String> {
-        self.send_inner(topic, payload, true, Some(expected_board_device_id), None)
-    }
-
-    fn send_firmware_to_board(
         &self,
         expected_board_device_id: &str,
         topic: &str,
@@ -1435,6 +1432,24 @@ impl UsbSerialManager {
             payload,
             true,
             Some(expected_board_device_id),
+            None,
+            None,
+        )
+    }
+
+    fn send_firmware_to_board(
+        &self,
+        expected_board_device_id: &str,
+        expected_connection_id: u64,
+        topic: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        self.send_inner(
+            topic,
+            payload,
+            true,
+            Some(expected_board_device_id),
+            Some(expected_connection_id),
             Some(P4_CH343_SERIAL_WRITE_SLICE_BYTES),
         )
     }
@@ -1445,6 +1460,7 @@ impl UsbSerialManager {
         payload: &serde_json::Value,
         flush: bool,
         expected_board_device_id: Option<&str>,
+        expected_connection_id: Option<u64>,
         write_slice_bytes: Option<usize>,
     ) -> Result<(), String> {
         let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
@@ -1452,6 +1468,14 @@ impl UsbSerialManager {
 
         if !conn.connected {
             return Err("Connection lost".to_string());
+        }
+        if let Some(expected_connection_id) = expected_connection_id {
+            if conn.connection_id != expected_connection_id {
+                return Err(format!(
+                    "USB connection changed during firmware update: expected session {expected_connection_id}, got {}",
+                    conn.connection_id
+                ));
+            }
         }
         if let Some(expected_board_device_id) = expected_board_device_id {
             let expected_board_device_id =
@@ -1633,6 +1657,91 @@ impl UsbSerialManager {
         }
     }
 
+    fn query_firmware_status(
+        &self,
+        expected_board_device_id: &str,
+        expected_connection_id: u64,
+    ) -> Result<serde_json::Value, String> {
+        let request_id = format!("firmware-status-{}", uuid::Uuid::new_v4());
+        let (sender, receiver) = mpsc::channel();
+        self.firmware_status_waiters
+            .lock()
+            .map_err(|error| error.to_string())?
+            .push(FirmwareStatusWaiter {
+                request_id: request_id.clone(),
+                sender,
+            });
+        if let Err(error) = self.send_firmware_to_board(
+            expected_board_device_id,
+            expected_connection_id,
+            "firmware/query",
+            &serde_json::json!({ "requestId": request_id }),
+        ) {
+            self.remove_firmware_status_waiter(&request_id);
+            return Err(error);
+        }
+        receiver
+            .recv_timeout(P4_FIRMWARE_STATUS_TIMEOUT)
+            .map_err(|_| {
+                self.remove_firmware_status_waiter(&request_id);
+                "firmware status query timed out".to_string()
+            })
+    }
+
+    fn remove_firmware_status_waiter(&self, request_id: &str) {
+        if let Ok(mut waiters) = self.firmware_status_waiters.lock() {
+            waiters.retain(|waiter| waiter.request_id != request_id);
+        }
+    }
+
+    fn recover_stale_firmware_transfer(
+        &self,
+        expected_board_device_id: &str,
+        expected_connection_id: u64,
+    ) -> Result<(), String> {
+        let status =
+            self.query_firmware_status(expected_board_device_id, expected_connection_id)?;
+        if status.get("active").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Ok(());
+        }
+        let stale_transfer_id = status
+            .get("transferId")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or("device reports an active firmware transfer without transferId")?;
+        let next_sequence = status
+            .get("nextSequence")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default();
+        let received_bytes = status
+            .get("receivedBytes")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default();
+        eprintln!(
+            "[usb-firmware-ota] recovering interrupted transfer={} next_sequence={} received_bytes={}",
+            stale_transfer_id, next_sequence, received_bytes
+        );
+        self.send_firmware_command_and_wait(
+            expected_board_device_id,
+            expected_connection_id,
+            "firmware/abort",
+            &serde_json::json!({ "transferId": stale_transfer_id }),
+            stale_transfer_id,
+            "abort",
+            next_sequence,
+            received_bytes,
+            P4_FIRMWARE_ACK_TIMEOUT,
+        )
+        .map_err(|error| format!("failed to clear interrupted firmware transfer: {error}"))?;
+
+        let recovered =
+            self.query_firmware_status(expected_board_device_id, expected_connection_id)?;
+        if recovered.get("active").and_then(serde_json::Value::as_bool) == Some(true) {
+            return Err("interrupted firmware transfer is still active after abort".to_string());
+        }
+        Ok(())
+    }
+
     pub fn update_firmware<F, R>(
         &self,
         firmware_path: &Path,
@@ -1650,13 +1759,15 @@ impl UsbSerialManager {
             .asset_transfer_guard
             .lock()
             .map_err(|error| error.to_string())?;
-        let status = self.connected_board_status(&expected_board_device_id)?;
+        let (status, firmware_connection_id) =
+            self.connected_board_snapshot(&expected_board_device_id)?;
         if !status.runtime.eq_ignore_ascii_case("esp-p4") {
             return Err(format!(
                 "firmware OTA is only supported by ESP32-P4, connected runtime is {}",
                 status.runtime
             ));
         }
+        self.recover_stale_firmware_transfer(&expected_board_device_id, firmware_connection_id)?;
         let preferred_chunk_size =
             preferred_firmware_chunk_size(status.protocol_schema, &status.capabilities);
         // A desktop crash or a force-stopped hardware test can leave the
@@ -1721,14 +1832,22 @@ impl UsbSerialManager {
             "size": total_bytes,
             "sha256": sha256,
         });
-        let begin_ack =
-            self.begin_firmware_transfer(&expected_board_device_id, &begin_payload, &transfer_id)?;
+        let begin_ack = self.begin_firmware_transfer(
+            &expected_board_device_id,
+            firmware_connection_id,
+            &begin_payload,
+            &transfer_id,
+        )?;
         let target_partition = begin_ack
             .get("targetPartition")
             .and_then(|value| value.as_str())
             .filter(|value| !value.is_empty())
             .ok_or_else(|| {
-                self.best_effort_firmware_abort(&expected_board_device_id, &transfer_id);
+                self.best_effort_firmware_abort(
+                    &expected_board_device_id,
+                    firmware_connection_id,
+                    &transfer_id,
+                );
                 "firmware begin acknowledgement did not include targetPartition".to_string()
             })?
             .to_string();
@@ -1761,6 +1880,7 @@ impl UsbSerialManager {
                     upload_attempts += 1;
                     chunk_result = self.send_firmware_command_and_wait(
                         &expected_board_device_id,
+                        firmware_connection_id,
                         "firmware/chunk",
                         &payload,
                         &transfer_id,
@@ -1847,7 +1967,11 @@ impl UsbSerialManager {
                 sequence
             }
             Err(error) => {
-                self.best_effort_firmware_abort(&expected_board_device_id, &transfer_id);
+                self.best_effort_firmware_abort(
+                    &expected_board_device_id,
+                    firmware_connection_id,
+                    &transfer_id,
+                );
                 return Err(error);
             }
         };
@@ -1859,6 +1983,7 @@ impl UsbSerialManager {
         for attempt in 1..=P4_FIRMWARE_COMMIT_MAX_ATTEMPTS {
             match self.send_firmware_command_and_wait(
                 &expected_board_device_id,
+                firmware_connection_id,
                 "firmware/commit",
                 &commit_payload,
                 &transfer_id,
@@ -1872,7 +1997,11 @@ impl UsbSerialManager {
                     break;
                 }
                 Err(FirmwareCommandError::Rejected(error)) => {
-                    self.best_effort_firmware_abort(&expected_board_device_id, &transfer_id);
+                    self.best_effort_firmware_abort(
+                        &expected_board_device_id,
+                        firmware_connection_id,
+                        &transfer_id,
+                    );
                     return Err(error);
                 }
                 Err(error) => {
@@ -1923,6 +2052,14 @@ impl UsbSerialManager {
         &self,
         expected_board_device_id: &str,
     ) -> Result<UsbConnectionStatus, String> {
+        self.connected_board_snapshot(expected_board_device_id)
+            .map(|(status, _)| status)
+    }
+
+    fn connected_board_snapshot(
+        &self,
+        expected_board_device_id: &str,
+    ) -> Result<(UsbConnectionStatus, u64), String> {
         let expected_board_device_id = validate_expected_board_device_id(expected_board_device_id)?;
         let conn = self.connection.lock().map_err(|error| error.to_string())?;
         let conn = conn.as_ref().ok_or("USB is not connected")?;
@@ -1939,22 +2076,26 @@ impl UsbSerialManager {
                 }
             ));
         }
-        Ok(UsbConnectionStatus {
-            connected: true,
-            port_name: conn.port_name.clone(),
-            baud_rate: conn.baud_rate,
-            board_device_id: conn.board_device_id.clone(),
-            transport: "usb".to_string(),
-            runtime: conn.runtime.clone(),
-            device_model: conn.device_model.clone(),
-            firmware: conn.firmware.clone(),
-            build_id: conn.build_id.clone(),
-            git_sha: conn.git_sha.clone(),
-            build_dirty: conn.build_dirty,
-            protocol_schema: conn.protocol_schema,
-            wire_protocol: conn.wire_protocol.clone(),
-            capabilities: conn.capabilities.clone(),
-        })
+        let connection_id = conn.connection_id;
+        Ok((
+            UsbConnectionStatus {
+                connected: true,
+                port_name: conn.port_name.clone(),
+                baud_rate: conn.baud_rate,
+                board_device_id: conn.board_device_id.clone(),
+                transport: "usb".to_string(),
+                runtime: conn.runtime.clone(),
+                device_model: conn.device_model.clone(),
+                firmware: conn.firmware.clone(),
+                build_id: conn.build_id.clone(),
+                git_sha: conn.git_sha.clone(),
+                build_dirty: conn.build_dirty,
+                protocol_schema: conn.protocol_schema,
+                wire_protocol: conn.wire_protocol.clone(),
+                capabilities: conn.capabilities.clone(),
+            },
+            connection_id,
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2029,9 +2170,15 @@ impl UsbSerialManager {
         ))
     }
 
-    fn best_effort_firmware_abort(&self, expected_board_device_id: &str, transfer_id: &str) {
-        let _ = self.send_to_board(
+    fn best_effort_firmware_abort(
+        &self,
+        expected_board_device_id: &str,
+        expected_connection_id: u64,
+        transfer_id: &str,
+    ) {
+        let _ = self.send_firmware_to_board(
             expected_board_device_id,
+            expected_connection_id,
             "firmware/abort",
             &serde_json::json!({ "transferId": transfer_id }),
         );
@@ -2040,6 +2187,7 @@ impl UsbSerialManager {
     fn begin_firmware_transfer(
         &self,
         expected_board_device_id: &str,
+        expected_connection_id: u64,
         begin_payload: &serde_json::Value,
         transfer_id: &str,
     ) -> Result<serde_json::Value, String> {
@@ -2047,6 +2195,7 @@ impl UsbSerialManager {
         for attempt in 1..=P4_FIRMWARE_BEGIN_MAX_ATTEMPTS {
             match self.send_firmware_command_and_wait(
                 expected_board_device_id,
+                expected_connection_id,
                 "firmware/begin",
                 begin_payload,
                 transfer_id,
@@ -2056,8 +2205,25 @@ impl UsbSerialManager {
                 P4_FIRMWARE_ACK_TIMEOUT,
             ) {
                 Ok(ack) => return Ok(ack),
+                Err(FirmwareCommandError::Rejected(error))
+                    if error.contains("another firmware transfer is active") =>
+                {
+                    last_error = error;
+                    self.recover_stale_firmware_transfer(
+                        expected_board_device_id,
+                        expected_connection_id,
+                    )?;
+                    if attempt < P4_FIRMWARE_BEGIN_MAX_ATTEMPTS {
+                        continue;
+                    }
+                    return Err(last_error);
+                }
                 Err(FirmwareCommandError::Rejected(error)) => {
-                    self.best_effort_firmware_abort(expected_board_device_id, transfer_id);
+                    self.best_effort_firmware_abort(
+                        expected_board_device_id,
+                        expected_connection_id,
+                        transfer_id,
+                    );
                     return Err(error);
                 }
                 Err(error) => {
@@ -2066,7 +2232,11 @@ impl UsbSerialManager {
                         "[usb-firmware-ota] begin delivery attempt={}/{} error={}",
                         attempt, P4_FIRMWARE_BEGIN_MAX_ATTEMPTS, last_error
                     );
-                    self.best_effort_firmware_abort(expected_board_device_id, transfer_id);
+                    self.best_effort_firmware_abort(
+                        expected_board_device_id,
+                        expected_connection_id,
+                        transfer_id,
+                    );
                     if attempt < P4_FIRMWARE_BEGIN_MAX_ATTEMPTS {
                         thread::sleep(Duration::from_millis(150));
                     }
@@ -2082,6 +2252,7 @@ impl UsbSerialManager {
     fn send_firmware_command_and_wait(
         &self,
         expected_board_device_id: &str,
+        expected_connection_id: u64,
         topic: &str,
         payload: &serde_json::Value,
         transfer_id: &str,
@@ -2098,7 +2269,12 @@ impl UsbSerialManager {
                 expected_received_bytes,
             )
             .map_err(FirmwareCommandError::Send)?;
-        if let Err(error) = self.send_firmware_to_board(expected_board_device_id, topic, payload) {
+        if let Err(error) = self.send_firmware_to_board(
+            expected_board_device_id,
+            expected_connection_id,
+            topic,
+            payload,
+        ) {
             self.remove_firmware_ack_waiter(
                 transfer_id,
                 phase,
@@ -7129,7 +7305,7 @@ mod tests {
         });
 
         manager
-            .send_firmware_to_board("p4-board-a", "firmware/chunk", &payload)
+            .send_firmware_to_board("p4-board-a", 1, "firmware/chunk", &payload)
             .unwrap();
 
         let recorded = recorded.lock().unwrap();
@@ -7144,6 +7320,116 @@ mod tests {
         let message: serde_json::Value = serde_json::from_slice(&line[..line.len() - 1]).unwrap();
         assert_eq!(message["topic"], "firmware/chunk");
         assert_eq!(message["payload"]["decodedSize"], P4_FIRMWARE_CHUNK_SIZE);
+    }
+
+    #[test]
+    fn firmware_command_refuses_to_cross_a_usb_reconnect() {
+        let manager = UsbSerialManager::new();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 2,
+            port_name: "COM15".to_string(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(SharedWriter(Arc::clone(&written))),
+            board_device_id: "p4-board-a".to_string(),
+            runtime: "esp-p4".to_string(),
+            device_model: "ESP32-P4".to_string(),
+            firmware: "1.0.0".to_string(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 5,
+            wire_protocol: "pet-usb-jsonl-v3".to_string(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+
+        let error = manager
+            .send_firmware_to_board(
+                "p4-board-a",
+                1,
+                "firmware/chunk",
+                &serde_json::json!({ "transferId": "old-transfer" }),
+            )
+            .unwrap_err();
+
+        assert!(error.contains("USB connection changed"));
+        assert!(written.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn firmware_preflight_aborts_the_transfer_left_by_a_disconnected_host() {
+        let manager = UsbSerialManager::new();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 7,
+            port_name: "COM15".to_string(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(SharedWriter(Arc::clone(&written))),
+            board_device_id: "p4-board-a".to_string(),
+            runtime: "esp-p4".to_string(),
+            device_model: "ESP32-P4".to_string(),
+            firmware: "1.0.0".to_string(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 5,
+            wire_protocol: "pet-usb-jsonl-v3".to_string(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+        let status_waiters = Arc::clone(&manager.firmware_status_waiters);
+        let ack_waiters = Arc::clone(&manager.firmware_ack_waiters);
+        let resolver = thread::spawn(move || {
+            for phase in 0..3 {
+                for _ in 0..200 {
+                    if phase == 1 && ack_waiters.lock().unwrap().len() == 1 {
+                        resolve_firmware_ack(
+                            &ack_waiters,
+                            "firmware/ack",
+                            &serde_json::json!({
+                                "transferId": "firmware-interrupted",
+                                "phase": "abort",
+                                "ok": true,
+                                "nextSequence": 7,
+                                "receivedBytes": 28644,
+                            }),
+                        );
+                        break;
+                    }
+                    if phase != 1 && status_waiters.lock().unwrap().len() == 1 {
+                        resolve_firmware_status(
+                            &status_waiters,
+                            "firmware/status",
+                            &if phase == 0 {
+                                serde_json::json!({
+                                    "active": true,
+                                    "transferId": "firmware-interrupted",
+                                    "nextSequence": 7,
+                                    "receivedBytes": 28644,
+                                })
+                            } else {
+                                serde_json::json!({ "active": false })
+                            },
+                        );
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
+            }
+        });
+
+        manager
+            .recover_stale_firmware_transfer("p4-board-a", 7)
+            .unwrap();
+        resolver.join().unwrap();
+
+        let output = String::from_utf8(written.lock().unwrap().clone()).unwrap();
+        assert_eq!(output.matches("firmware/query").count(), 2);
+        assert_eq!(output.matches("firmware/abort").count(), 1);
+        assert!(output.contains("firmware-interrupted"));
     }
 
     #[test]
@@ -7195,6 +7481,7 @@ mod tests {
         let error = manager
             .begin_firmware_transfer(
                 "p4-board-a",
+                1,
                 &serde_json::json!({
                     "transferId": "firmware-test",
                     "size": 4096,

@@ -43,6 +43,9 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
+- Firmware `0.7.36-p4` lets the desktop discover and abort an OTA transaction
+  retained after a cable pull, and replaces the formerly frozen frame during
+  firmware/appearance transfer with a lightweight transfer-only screen.
 - Firmware `0.7.35-p4` releases the render gate and discards only incomplete
   slot-1 staging when serial or native-USB appearance traffic is idle for 15
   seconds; the previously active appearance remains intact after a host crash

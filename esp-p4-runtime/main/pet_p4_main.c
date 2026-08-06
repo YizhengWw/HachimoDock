@@ -4,8 +4,8 @@
  *          protocol replies, non-destructive storage mounting, and independent
  *          render/RX health samples, plus post-OTA synchronization of the
  *          built-in component bundle carried inside the application image,
- *          idle appearance-transfer recovery, and a backlight-gated first
- *          complete frame.
+ *          idle appearance-transfer recovery, a lightweight live transfer
+ *          screen, and a backlight-gated first complete frame.
  * [Pos] ESP32-P4 firmware entry point and task coordinator.
  * [Sync] If this file changes, update esp-p4-runtime/.folder.md.
  */
@@ -544,9 +544,10 @@ void app_main(void) {
   unsigned long long last_logged_update = 0;
   unsigned long long last_hello_ms = 0;
   unsigned long long last_render_ms = 0;
+  unsigned long long last_transfer_render_ms = 0;
   unsigned long long last_lcd_keepalive_ms = 0;
   unsigned long long last_rx_health_warning_ms = 0;
-  bool asset_transfer_was_active = false;
+  bool transfer_was_active = false;
   bool runtime_render_healthy = false;
   char lcd_status[192];
   char i2c_devices[128];
@@ -695,6 +696,8 @@ void app_main(void) {
   while (true) {
     unsigned long long now_ms = (unsigned long long) (esp_timer_get_time() / 1000ULL);
     bool render_frame = false;
+    bool render_transfer_frame = false;
+    bool firmware_transfer_active = false;
     bool keep_lcd_awake = false;
     pet_p4_view_model_t render_view = {0};
     xSemaphoreTake(g_state_mutex, portMAX_DELAY);
@@ -707,10 +710,12 @@ void app_main(void) {
     pet_p4_touch_process(&g_state, transport_send_line, NULL);
     pet_p4_input_process(&g_state, transport_send_line, NULL);
     pet_p4_audio_process(&g_state, now_ms);
-    if (asset_transfer_was_active && !g_state.asset_transfer_active) {
+    firmware_transfer_active = pet_p4_ota_transfer_active();
+    bool transfer_active = g_state.asset_transfer_active || firmware_transfer_active;
+    if (transfer_was_active && !transfer_active) {
       pet_p4_renderer_reset_playback();
     }
-    asset_transfer_was_active = g_state.asset_transfer_active;
+    transfer_was_active = transfer_active;
     if (!g_state.desktop_device_id[0] && now_ms - last_hello_ms > 2000ULL) {
       pet_p4_send_hello(&g_state, transport_send_line, NULL);
       last_hello_ms = now_ms;
@@ -734,8 +739,11 @@ void app_main(void) {
       keep_lcd_awake = true;
       last_lcd_keepalive_ms = now_ms;
     }
-    if (lcd_err == ESP_OK && !g_state.asset_transfer_active
-        && !pet_p4_ota_transfer_active()
+    if (lcd_err == ESP_OK && transfer_active
+        && now_ms - last_transfer_render_ms >= 500ULL) {
+      render_transfer_frame = true;
+      last_transfer_render_ms = now_ms;
+    } else if (lcd_err == ESP_OK && !transfer_active
         && now_ms - last_render_ms >= PET_P4_MAIN_RENDER_INTERVAL_MS) {
       memcpy(g_render_state, &g_state, sizeof(*g_render_state));
       pet_p4_build_view_model(g_render_state, &render_view);
@@ -749,7 +757,15 @@ void app_main(void) {
         ESP_LOGW(TAG, "LCD keepalive failed: %s", esp_err_to_name(keepalive_err));
       }
     }
-    if (render_frame) {
+    if (render_transfer_frame) {
+      esp_err_t err;
+      xSemaphoreTake(g_render_mutex, portMAX_DELAY);
+      err = pet_p4_renderer_render_transfer_status(firmware_transfer_active, now_ms);
+      xSemaphoreGive(g_render_mutex);
+      if (err != ESP_OK) {
+        ESP_LOGW(TAG, "transfer status render failed: %s", esp_err_to_name(err));
+      }
+    } else if (render_frame) {
       esp_err_t err;
       xSemaphoreTake(g_render_mutex, portMAX_DELAY);
       err = pet_p4_renderer_render(g_render_state, &render_view, now_ms);

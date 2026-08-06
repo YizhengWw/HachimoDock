@@ -441,12 +441,20 @@ PC to board:
   2046-byte size. A transient Base64 rejection retries the same sequence at the
   current size; three repeated rejections reduce it through 2046, 1020, then
   510 bytes without restarting the transaction, and 32 successful chunks
-  restore the next larger size. Lost begin acknowledgements are aborted and
-  retried within the same update action. After reboot the backlight remains
+  restore the next larger size. Before a new update, Pet Manager queries
+  `firmware/status`; if a disconnected host left an active transaction, it
+  aborts that exact reported `transferId` before starting the replacement.
+  Every upload is also pinned to its original USB connection generation, so an
+  old worker cannot resume onto a newly opened serial connection. Lost begin
+  acknowledgements are aborted and retried within the same update action.
+  During firmware and appearance writes the renderer uses a lightweight
+  transfer-only screen that does not read changing assets, instead of leaving
+  the previous frame apparently frozen. After reboot the backlight remains
   hidden through built-in component migration and is revealed only after the
   first complete frame has rendered.
 - `firmware/query`: returns running, boot, and next partition metadata on
-  `firmware/status`.
+  `firmware/status`, including the active `transferId`, byte/sequence progress,
+  and an echoed optional `requestId` for exact desktop correlation.
 - `diagnostics/query`: returns boot/reset history, heap and PSRAM low-water
   marks, SPIFFS usage, task/GPIO/touch/audio health, joystick
   center/current/minimum/maximum ADC samples, current page,

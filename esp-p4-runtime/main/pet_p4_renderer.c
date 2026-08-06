@@ -2,7 +2,8 @@
  * [Input] Pet lifecycle/session state, decoded assets, and bounded mini-app view presets.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus current SW1-back/SW3-enter hints in the component catalog.
+ *          plus current SW1-back/SW3-enter hints in the component catalog and
+ *          a lightweight transfer screen that never reads changing assets.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and renderer tests.
  */
@@ -4098,6 +4099,55 @@ esp_err_t pet_p4_renderer_render(
     elapsed_us_clamped(lcd_started_us, render_ended_us)
   );
   return lcd_err;
+}
+
+esp_err_t pet_p4_renderer_render_transfer_status(
+  bool firmware_update,
+  unsigned long long now_ms
+) {
+  ESP_RETURN_ON_ERROR(pet_p4_renderer_init(), TAG, "allocate transfer render buffers");
+  g_native_framebuffer_index =
+    (g_native_framebuffer_index + 1U) % PET_P4_NATIVE_OUTPUT_BUFFER_COUNT;
+  g_native_framebuffer = g_native_framebuffers[g_native_framebuffer_index];
+
+  const uint16_t background = rgb565(5, 7, 6);
+  const uint16_t panel = rgb565(14, 18, 16);
+  const uint16_t outline = rgb565(52, 58, 53);
+  const uint16_t orange = rgb565(255, 163, 31);
+  const uint16_t ivory = rgb565(250, 241, 204);
+  const uint16_t muted = rgb565(126, 133, 126);
+  const char *title = firmware_update ? "固件更新中" : "形象同步中";
+  const char *detail = firmware_update
+    ? "正在写入并校验新固件"
+    : "正在传输并校验形象素材";
+
+  fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, background);
+  fill_round_rect_outline(64, 102, 512, 276, 20, panel, outline);
+  fill_ellipse(320, 170, 30, 30, orange);
+  fill_ellipse(320, 170, 15, 15, panel);
+  unsigned int active_dot = (unsigned int) ((now_ms / 300ULL) % 3ULL);
+  for (unsigned int index = 0; index < 3; index += 1) {
+    int dot_radius = index == active_dot ? 6 : 3;
+    fill_ellipse(
+      292 + (int) index * 28,
+      170,
+      dot_radius,
+      dot_radius,
+      index == active_dot ? ivory : muted
+    );
+  }
+  draw_text_center(title, 320, 222, 440, ivory, 3);
+  draw_text_center(detail, 320, 278, 440, muted, 1);
+  draw_text_center("请保持设备连接，不要拔出数据线", 320, 322, 440, orange, 1);
+  snprintf(g_last_render_page, sizeof(g_last_render_page), "%s", "transfer");
+  ESP_RETURN_ON_ERROR(rotate_landscape_to_panel(), TAG, "rotate transfer framebuffer");
+  return pet_p4_lcd_draw_rgb565(
+    0,
+    0,
+    BSP_LCD_H_RES,
+    BSP_LCD_V_RES,
+    g_native_framebuffer
+  );
 }
 
 const uint16_t *pet_p4_renderer_logical_framebuffer(int *width, int *height) {
