@@ -217,9 +217,10 @@ test("Short presses show voice input as a disabled long-press-only option", () =
   assert.match(source, /disabled=\{Boolean\(disabledReason\)\}/);
 });
 
-test("Actions already owned by another gesture are disabled with an owner hint", () => {
-  assert.match(source, /findButtonActionOwner/);
-  assert.match(source, /`已绑定：\$\{owner\.label\}`/);
+test("Every action remains available on multiple gestures", () => {
+  assert.doesNotMatch(source, /findButtonActionOwner/);
+  assert.doesNotMatch(source, /已绑定：/);
+  assert.match(source, /const disabledReason = requiresLongPress/);
   assert.match(source, /title=\{disabledReason \|\| undefined\}/);
 });
 

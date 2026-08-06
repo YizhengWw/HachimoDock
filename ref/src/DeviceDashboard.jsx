@@ -4,7 +4,7 @@
  *          twelve exposed P4 button/joystick gestures (SW1-SW3 short/long plus
  *          joystick center short/long and four directions), an internal hold transport for PTT,
  *          shared voice enablement across button and assistant surfaces,
- *          configurable SW1-back/SW3-confirm navigation with versioned default migration,
+ *          fully repeatable hardware actions with optional exit plus versioned default migration,
  *          bounded Agent prompt/session-switch bindings, ACK-gated USB config,
  *          exact-board identity on emergency appearance downlinks,
  *          board-authoritative button-config hydration with local caching,
@@ -19,7 +19,7 @@
  *          manual and focus-refreshed local Agent discovery with visible scan feedback,
  *          a default-open status-first voice console,
  *          immediate P4 voice rearming after saved ASR configuration changes,
- *          explicit-only Codex/Claude Desktop task navigation for selected P4 conversations,
+ *          exact-session-only Codex/Claude Desktop task navigation and voice input for selected P4 conversations,
  *          MiMoCode-only macOS final-text delivery plus Return at the captured current caret,
  *          app-shell/native-operation-owned macOS Accessibility consent,
  *          shared first-visit onboarding state with a reopenable page guide,
@@ -44,7 +44,6 @@ import { useToast } from "./shell/ToastStack.jsx";
 import DeviceStatusBar from "./dashboard/DeviceStatusBar.jsx";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
-import { enforceUniqueButtonActions } from "./dashboard/button-action-policy.js";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
 import { useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
 import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
@@ -119,7 +118,7 @@ export const VOICE_BUTTON_OPTIONS = P4_VOICE_BUTTON_OPTIONS;
 
 export const BUTTON_FUNCTION_OPTIONS = [
   { id: "agent_prompt", label: "发送自定义指令", detail: "按下对应手势后，将该按钮下方填写的指令直接发送给当前 Code Agent。" },
-  { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后提交；同一时间只允许一个长按手势作为语音触发。" },
+  { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后提交；可以绑定到多个长按手势。" },
   { id: "session_previous", label: "上一个", detail: "切换到当前 Agent 的上一个可用会话，并让状态和语音输入跟随它。" },
   { id: "session_next", label: "下一个", detail: "切换到当前 Agent 的下一个可用会话，并让状态和语音输入跟随它。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },
@@ -256,6 +255,12 @@ const P4_V6_DEFAULT_BUTTON_ACTIONS = {
 
 const ALL_BUTTON_CONTROL_ROWS = [...BOARD_BUTTON_CONTROL_ROWS, ...P4_BUTTON_CONTROL_ROWS];
 
+function preferredVoiceRow(rows, buttonActions, trigger) {
+  return rows.find((row) => (
+    row.voiceTriggerId === trigger && buttonActions[row.id] === "voice_ptt"
+  )) || rows.find((row) => row.voiceTriggerId && buttonActions[row.id] === "voice_ptt");
+}
+
 export function buttonControlRowsForRuntime(runtime) {
   const runtimeId = String(runtime || "").trim().toLowerCase();
   if (runtimeId === P4_RUNTIME_ID) return P4_BUTTON_CONTROL_ROWS;
@@ -281,10 +286,12 @@ export function clampButtonActionValue(value, maxBytes = 159) {
 
 export function buildBoardButtonConfigBindings(buttonActions = {}, buttonValues = {}, runtime = "", voiceEnabled = false) {
   const controlRows = buttonControlRowsForRuntime(runtime);
-  const runtimeId = String(runtime || "").trim().toLowerCase();
-  const normalizedButtonActions = runtimeId === P4_RUNTIME_ID
-    ? enforceUniqueButtonActions(controlRows, buttonActions)
-    : buttonActions;
+  const normalizedButtonActions = controlRows.reduce((next, row) => {
+    next[row.id] = row.actionOptions.includes(buttonActions[row.id])
+      ? buttonActions[row.id]
+      : row.defaultAction;
+    return next;
+  }, {});
   const bindings = controlRows.flatMap((row) => {
     const action = row.actionOptions.includes(normalizedButtonActions[row.id])
       ? normalizedButtonActions[row.id]
@@ -343,10 +350,7 @@ function normalizeVoiceConfig(value = {}) {
       : DEFAULT_BUTTON_ACTIONS[row.id] || row.defaultAction;
     return next;
   }, {});
-  const buttonActions = {
-    ...resolvedButtonActions,
-    ...enforceUniqueButtonActions(P4_BUTTON_CONTROL_ROWS, resolvedButtonActions),
-  };
+  const buttonActions = resolvedButtonActions;
   const buttonValues = ALL_BUTTON_CONTROL_ROWS.reduce((next, row) => {
     const incomingValue = incomingValues[row.id] ?? (row.legacyId ? incomingValues[row.legacyId] : undefined);
     if (row.supportsValue) next[row.id] = clampButtonActionValue(incomingValue || row.defaultValue || "");
@@ -413,9 +417,6 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
     }
   });
 
-  const voiceRow = rows.find((row) => (
-    row.voiceTriggerId && buttonActions[row.id] === "voice_ptt"
-  ));
   const runtimeId = String(runtime || "").trim().toLowerCase();
   const p4VoiceBindingEnabled = rows.some((row) => (
     row.voiceTriggerId
@@ -432,6 +433,11 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
   const boardVoiceButton = String(
     boardConfig?.voiceButton || boardConfig?.voice_button || "",
   ).trim();
+  const voiceRow = preferredVoiceRow(
+    rows,
+    buttonActions,
+    boardVoiceButton || current.trigger,
+  );
   const trigger = runtimeId === P4_RUNTIME_ID
     ? voiceRow?.voiceTriggerId
       || (P4_VOICE_BUTTON_OPTIONS.some((option) => option.id === boardVoiceButton)
@@ -458,17 +464,13 @@ export function applyVoiceEnabledForRuntime(value = {}, enabled = false, runtime
   const next = normalizeVoiceConfig({ ...value, enabled: enabled === true });
   if (String(runtime || "").trim().toLowerCase() === P4_RUNTIME_ID) {
     const voiceRows = P4_BUTTON_CONTROL_ROWS.filter((row) => row.voiceTriggerId);
-    const selectedRow = voiceRows.find((row) => next.buttonActions[row.id] === "voice_ptt")
-      || voiceRows.find((row) => row.voiceTriggerId === next.trigger)
+    const selectedRow = voiceRows.find(
+      (row) => row.voiceTriggerId === next.trigger && next.buttonActions[row.id] === "voice_ptt",
+    ) || voiceRows.find((row) => row.voiceTriggerId === next.trigger)
+      || voiceRows.find((row) => next.buttonActions[row.id] === "voice_ptt")
       || voiceRows[0];
     if (enabled) {
-      voiceRows.forEach((row) => {
-        next.buttonActions[row.id] = row.id === selectedRow.id
-          ? "voice_ptt"
-          : next.buttonActions[row.id] === "voice_ptt"
-            ? row.voiceFallbackAction || row.defaultAction || "disabled"
-            : next.buttonActions[row.id];
-      });
+      next.buttonActions[selectedRow.id] = "voice_ptt";
     }
     next.trigger = selectedRow?.voiceTriggerId || P4_DEFAULT_VOICE_TRIGGER;
     return next;
@@ -507,13 +509,7 @@ export function applyVoiceTriggerForRuntime(value = {}, trigger = "", runtime = 
     || voiceRows[0];
   if (!selectedRow) return next;
 
-  voiceRows.forEach((row) => {
-    if (row.id === selectedRow.id) {
-      next.buttonActions[row.id] = "voice_ptt";
-    } else if (next.buttonActions[row.id] === "voice_ptt") {
-      next.buttonActions[row.id] = row.voiceFallbackAction || row.defaultAction || "disabled";
-    }
-  });
+  next.buttonActions[selectedRow.id] = "voice_ptt";
   next.trigger = selectedRow.voiceTriggerId;
   return next;
 }
@@ -709,7 +705,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
   const isP4Runtime = String(usb.runtime || "").toLowerCase() === P4_RUNTIME_ID;
   const hasKnownRuntime = buttonControlRowsForRuntime(usb.runtime).length > 0;
   const p4VoiceRow = isP4Runtime
-    ? P4_BUTTON_CONTROL_ROWS.find((row) => row.voiceTriggerId && voiceConfig.buttonActions[row.id] === "voice_ptt")
+    ? preferredVoiceRow(P4_BUTTON_CONTROL_ROWS, voiceConfig.buttonActions, voiceConfig.trigger)
     : null;
   const runtimeVoiceEnabled = isP4Runtime
     ? voiceConfig.enabled && Boolean(p4VoiceRow)
@@ -818,8 +814,10 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
         tone: "",
         message: "检测到板端仍是旧版默认按键，正在自动迁移 SW1/SW3...",
       });
-      const migratedVoiceRow = P4_BUTTON_CONTROL_ROWS.find(
-        (row) => row.voiceTriggerId && persistedNext.buttonActions[row.id] === "voice_ptt",
+      const migratedVoiceRow = preferredVoiceRow(
+        P4_BUTTON_CONTROL_ROWS,
+        persistedNext.buttonActions,
+        persistedNext.trigger,
       );
       try {
         await dispatchBoardButtonConfig({
@@ -1007,8 +1005,10 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     setVoiceConfig((prev) => {
       let next = normalizeVoiceConfig({ ...prev, ...patch });
       if (isP4Runtime) {
-        const nextVoiceRow = P4_BUTTON_CONTROL_ROWS.find(
-          (row) => row.voiceTriggerId && next.buttonActions[row.id] === "voice_ptt",
+        const nextVoiceRow = preferredVoiceRow(
+          P4_BUTTON_CONTROL_ROWS,
+          next.buttonActions,
+          next.trigger,
         );
         next = {
           ...next,
@@ -1028,8 +1028,10 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
       ? normalizeVoiceConfig(configOverride)
       : voiceConfig;
     const requestedP4VoiceRow = isP4Runtime
-      ? P4_BUTTON_CONTROL_ROWS.find(
-        (row) => row.voiceTriggerId && requestedConfig.buttonActions[row.id] === "voice_ptt",
+      ? preferredVoiceRow(
+        P4_BUTTON_CONTROL_ROWS,
+        requestedConfig.buttonActions,
+        requestedConfig.trigger,
       )
       : null;
     const requestedRuntimeVoiceEnabled = isP4Runtime

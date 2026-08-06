@@ -670,6 +670,11 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     assert "commit_builtin_package" in miniapp
     assert '"falling-catch"' in miniapp
     assert "restore_active_after_builtin_sync" in miniapp
+    assert "reorder_catalog_for_builtin_bundle(components)" in miniapp
+    sync_start = miniapp.index("esp_err_t pet_p4_miniapp_sync_builtins(void)")
+    assert miniapp.index("reorder_catalog_for_builtin_bundle(components)", sync_start) < miniapp.index(
+        "MINIAPP_BUILTIN_MARKER_TMP_PATH", sync_start
+    )
     assert "Component ids outside the firmware-owned list are preserved" in protocol_doc
 
 
@@ -1517,7 +1522,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.37-p4")' in project
+    assert 'set(PROJECT_VER "0.7.38-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1597,7 +1602,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.37-p4")' in project
+    assert 'set(PROJECT_VER "0.7.38-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake

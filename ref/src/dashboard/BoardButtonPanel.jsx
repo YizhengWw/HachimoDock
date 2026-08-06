@@ -2,7 +2,8 @@
  * [Input] Connected runtime plus persisted button actions/values, OTA state, and update/apply callbacks.
  * [Output] Runtime-aware hardware-control workspace with the device map above
  *          physical-order SVG control cards, inline button/joystick gesture editors,
- *          per-gesture Code Agent prompts, voice-input row hints, and USB sync feedback.
+ *          repeatable actions across gestures, per-gesture Code Agent prompts,
+ *          multi-trigger voice-input row hints, and USB sync feedback.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -17,7 +18,6 @@ import {
   buttonControlRowsForRuntime,
 } from "../DeviceDashboard.jsx";
 import Button from "../shell/Button";
-import { findButtonActionOwner } from "./button-action-policy.js";
 
 const CONTROL_GROUP_META = {
   p4_sw1: { label: "SW1", detail: "左侧按键" },
@@ -175,11 +175,6 @@ export default function BoardButtonPanel({
       nextValues[row.id] = row.defaultValue || "继续当前任务。";
     }
     if (actionId === "voice_ptt" && row.voiceTriggerId) {
-      controlRows.forEach((item) => {
-        if (item.voiceTriggerId && item.id !== row.id && nextActions[item.id] === "voice_ptt") {
-          nextActions[item.id] = item.voiceFallbackAction || (item.defaultAction === "voice_ptt" ? "disabled" : item.defaultAction);
-        }
-      });
       patch.trigger = row.voiceTriggerId;
     } else if (row.voiceTriggerId && triggerId === row.voiceTriggerId) {
       const fallbackVoiceRow = controlRows.find(
@@ -402,19 +397,9 @@ export default function BoardButtonPanel({
                             >
                               {allowedOptions.map((option) => {
                                 const requiresLongPress = option.id === "voice_ptt" && isShortPress;
-                                const owner = requiresLongPress
-                                  ? null
-                                  : findButtonActionOwner(
-                                    controlRows,
-                                    buttonActions,
-                                    row.id,
-                                    option.id,
-                                  );
                                 const disabledReason = requiresLongPress
                                   ? "需要长按"
-                                  : owner
-                                    ? `已绑定：${owner.label}`
-                                    : "";
+                                  : "";
                                 return (
                                   <option
                                     key={option.id}

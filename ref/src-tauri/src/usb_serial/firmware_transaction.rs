@@ -136,6 +136,17 @@ pub(super) fn firmware_chunk_error_is_retryable(error: &FirmwareCommandError) ->
     }
 }
 
+pub(super) fn should_restart_firmware_transaction(
+    protocol_schema: u32,
+    error: &str,
+    transaction_attempt: usize,
+    max_transaction_attempts: usize,
+) -> bool {
+    protocol_schema == P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA
+        && error.contains("firmware transferId mismatch")
+        && transaction_attempt < max_transaction_attempts
+}
+
 pub(super) fn firmware_recovery_chunk_size(
     current_size: usize,
     preferred_size: usize,

@@ -321,7 +321,8 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /clampButtonActionValue/);
   assert.match(dashboard, /new TextEncoder\(\)\.encode/);
   assert.match(panel, /runtime[\s\S]*esp-p4/);
-  assert.match(panel, /voiceFallbackAction/);
+  assert.doesNotMatch(panel, /findButtonActionOwner|已绑定：/);
+  assert.doesNotMatch(panel, /nextActions\[item\.id\] = item\.voiceFallbackAction/);
   assert.match(panel, /maxLength=\{120\}/);
 });
 
@@ -749,6 +750,12 @@ test("macOS Codex conversation switching uses native accessibility foreground de
   assert.match(macComposer, /pub\(super\) fn update_voice/);
   assert.match(macComposer, /pub\(super\) fn submit_voice/);
   assert.match(macComposer, /当前会话与设备选中的会话不一致/);
+  const exactVoiceStart = macComposer.match(
+    /pub\(super\) fn begin_voice[\s\S]*?pub\(super\) fn begin_current_voice/,
+  );
+  assert.ok(exactVoiceStart, "expected macOS exact-session voice start block");
+  assert.match(exactVoiceStart[0], /find_exact_voice_target/);
+  assert.doesNotMatch(exactVoiceStart[0], /find_current_visible_target/);
   assert.match(composer, /macos::MacosAgent::Claude/);
   assert.match(macComposer, /com\.anthropic\.claudefordesktop/);
   assert.match(macComposer, /com\.openai\.codex/);

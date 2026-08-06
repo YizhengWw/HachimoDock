@@ -6,7 +6,7 @@
     "metricLabel": "食物",
     "metricValue": "0",
     "note": "READY",
-    "footer": "SW3开始 · 摇杆左右转向 · SW1退出",
+    "footer": "SW3开始 · 摇杆左右转向 · 全局键退出",
     "visualStyle": "pixel",
     "visualPalette": "mint",
     "visualLayout": "arcade",

@@ -3292,6 +3292,40 @@ static bool restore_active_after_builtin_sync(const char *preferred_widget_id) {
   return index < 0 || activate_catalog_index((size_t) index);
 }
 
+static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
+  miniapp_catalog_item_t ordered[PET_P4_MINIAPP_CATALOG_MAX] = {0};
+  bool used[PET_P4_MINIAPP_CATALOG_MAX] = {0};
+  size_t ordered_count = 0;
+  const cJSON *package;
+  if (!cJSON_IsArray(components)) return false;
+
+  // Updating an existing id preserves its previous catalog slot. Rebuild the
+  // visible order explicitly so upgraded devices match a fresh factory image:
+  // firmware-owned components first in bundle order, then user components.
+  cJSON_ArrayForEach(package, components) {
+    const int index = catalog_find(g_catalog, g_catalog_count, json_string(package, "id"));
+    if (index < 0 || used[index]) continue;
+    ordered[ordered_count++] = g_catalog[index];
+    used[index] = true;
+  }
+  for (size_t index = 0; index < g_catalog_count; index += 1) {
+    if (!used[index]) ordered[ordered_count++] = g_catalog[index];
+  }
+  if (ordered_count != g_catalog_count
+      || memcmp(ordered, g_catalog, g_catalog_count * sizeof(g_catalog[0])) == 0) {
+    return false;
+  }
+
+  portENTER_CRITICAL(&g_runtime_lock);
+  memcpy(g_catalog, ordered, sizeof(g_catalog));
+  int selected = g_runtime.active
+    ? catalog_find(g_catalog, g_catalog_count, g_runtime.widget_id)
+    : -1;
+  g_catalog_selected = selected >= 0 ? (size_t) selected : 0;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return true;
+}
+
 esp_err_t pet_p4_miniapp_sync_builtins(void) {
   char marker[128] = {0};
   char restore_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
@@ -3376,6 +3410,10 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
     cJSON_free(widget_json);
     cJSON_free(buttons_json);
     vTaskDelay(pdMS_TO_TICKS(1));
+  }
+
+  if (reorder_catalog_for_builtin_bundle(components)) {
+    catalog_changed = true;
   }
 
   if (catalog_changed && !restore_active_after_builtin_sync(restore_widget_id)) {

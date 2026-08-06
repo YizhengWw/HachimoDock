@@ -1,9 +1,8 @@
 /**
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
  * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
- *          exact shipped-v6 board-default migration, authoritative global-exit
- *          event resolution, button-config model-v7
- *          signaling, and compatibility-only complete-map and snapshot helpers.
+ *          exact shipped-v6 board-default migration, authoritative optional
+ *          global-exit event resolution, and button-config model-v7 signaling.
  *          Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -97,21 +96,46 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
   "joystick.down",
 ];
 
+const P4_GLOBAL_BUTTON_EVENTS = new Set([
+  ...P4_COMPONENT_BUTTON_EVENTS,
+  "button.sw1.long_press",
+  "button.sw1.hold",
+  "button.sw2.long_press",
+  "button.sw2.hold",
+  "button.sw3.long_press",
+  "button.sw3.hold",
+  "button.encoder.hold",
+]);
+
+const GLOBAL_EXIT_CONTROL_LABELS = {
+  "button.sw1.long_press": "SW1 长按",
+  "button.sw1.hold": "SW1 按住",
+  "button.sw2.long_press": "SW2 长按",
+  "button.sw2.hold": "SW2 按住",
+  "button.sw3.long_press": "SW3 长按",
+  "button.sw3.hold": "SW3 按住",
+  "button.encoder.hold": "中键按住",
+};
+
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
 export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 7;
-export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
-export const DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT = "button.sw1.short_press";
 
-export function resolveGlobalExitEvent(response = {}) {
+export function resolveGlobalExitEvents(response = {}) {
   const boardConfig = response?.config && typeof response.config === "object"
     ? response.config
     : response;
   const bindings = Array.isArray(boardConfig?.bindings) ? boardConfig.bindings : [];
-  const exitBinding = bindings.find((binding) => (
-    String(binding?.action || "").trim() === "page_back"
-    && P4_COMPONENT_BUTTON_EVENTS.includes(String(binding?.event || "").trim())
-  ));
-  return String(exitBinding?.event || "").trim() || DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT;
+  return [...new Set(bindings
+    .filter((binding) => String(binding?.action || "").trim() === "page_back")
+    .map((binding) => String(binding?.event || "").trim())
+    .filter((event) => P4_GLOBAL_BUTTON_EVENTS.has(event)))];
+}
+
+export function globalExitControlLabel(event) {
+  const normalized = String(event || "").trim();
+  return COMPONENT_CONTROL_OPTIONS.find((option) => option.event === normalized)?.shortLabel
+    || GLOBAL_EXIT_CONTROL_LABELS[normalized]
+    || normalized;
 }
 
 const P4_V6_SHIPPED_DEFAULT_BINDINGS = {
@@ -168,37 +192,6 @@ export function migrateP4V6ShippedBoardDefaults(response = {}, runtime = "") {
   };
 }
 
-const P4_COMPONENT_DOWNLINK_EVENTS = [
-  "button.sw1.short_press",
-  "button.sw1.long_press",
-  "button.sw1.hold",
-  "button.sw2.short_press",
-  "button.sw2.long_press",
-  "button.sw2.hold",
-  "button.sw3.short_press",
-  "button.sw3.long_press",
-  "button.sw3.hold",
-  "button.encoder.short_press",
-  "button.encoder.long_press",
-  "button.encoder.hold",
-  "knob.rotate_cw",
-  "knob.rotate_ccw",
-  "joystick.up",
-  "joystick.down",
-];
-
-const P4_COMPONENT_EVENT_ROW_IDS = {
-  "button.sw1.short_press": "p4_sw1_short",
-  "button.sw2.short_press": "p4_sw2_short",
-  "button.sw3.short_press": "p4_sw3_short",
-  "button.encoder.short_press": "p4_encoder_press",
-  "button.encoder.long_press": "p4_encoder_long",
-  "knob.rotate_cw": "p4_encoder_cw",
-  "knob.rotate_ccw": "p4_encoder_ccw",
-  "joystick.up": "p4_joystick_up",
-  "joystick.down": "p4_joystick_down",
-};
-
 export function defaultControlLabelForBinding(binding = {}) {
   const event = String(binding.event || "");
   const control = String(binding.control || "");
@@ -221,61 +214,4 @@ export function componentInputEventSlots(event) {
     return ["knob.rotate_cw", "knob.rotate_ccw"];
   }
   return event ? [event] : [];
-}
-
-export function buildComponentButtonConfigBindings(bindings = []) {
-  const desired = new Map();
-  for (const binding of bindings) {
-    for (const event of componentInputEventSlots(String(binding?.event || "").trim())) {
-      if (!P4_COMPONENT_BUTTON_EVENTS.includes(event)) continue;
-      desired.set(event, String(binding?.action || "").trim());
-    }
-  }
-  return P4_COMPONENT_DOWNLINK_EVENTS.map((event) => {
-    const action = desired.get(event);
-    if (!action) return { event, action: "disabled", value: "" };
-    if (action === COMPONENT_SYSTEM_ACTION_PAGE_MAIN) {
-      return { event, action: COMPONENT_SYSTEM_ACTION_PAGE_MAIN, value: "" };
-    }
-    return { event, action: "miniapp_action", value: action };
-  });
-}
-
-export function buildComponentButtonConfigSnapshot(bindings = [], currentConfig = {}) {
-  const buttonActions = { ...(currentConfig?.buttonActions || {}) };
-  const buttonValues = { ...(currentConfig?.buttonValues || {}) };
-  const buttonLabels = { ...(currentConfig?.buttonLabels || {}) };
-
-  for (const rowId of Object.values(P4_COMPONENT_EVENT_ROW_IDS)) {
-    buttonActions[rowId] = "disabled";
-    delete buttonValues[rowId];
-    delete buttonLabels[rowId];
-  }
-
-  for (const binding of bindings) {
-    const action = String(binding?.action || "").trim();
-    if (!action) continue;
-    for (const event of componentInputEventSlots(String(binding?.event || "").trim())) {
-      const rowId = P4_COMPONENT_EVENT_ROW_IDS[event];
-      if (!rowId) continue;
-      if (action === COMPONENT_SYSTEM_ACTION_PAGE_MAIN) {
-        buttonActions[rowId] = COMPONENT_SYSTEM_ACTION_PAGE_MAIN;
-        delete buttonValues[rowId];
-        delete buttonLabels[rowId];
-      } else {
-        buttonActions[rowId] = "miniapp_action";
-        buttonValues[rowId] = action;
-        buttonLabels[rowId] = String(binding?.label || action).trim() || action;
-      }
-    }
-  }
-
-  return {
-    ...currentConfig,
-    buttonModelVersion: DEVICE_BUTTON_CONFIG_MODEL_VERSION,
-    enabled: false,
-    buttonActions,
-    buttonValues,
-    buttonLabels,
-  };
 }

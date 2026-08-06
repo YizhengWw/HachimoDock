@@ -43,6 +43,9 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
+- Firmware `0.7.38-p4` keeps the `0.7.37-p4` idle-clock correction and also
+  migrates every upgraded device to the canonical built-in component order,
+  with 双键接球 first and user-installed components preserved afterward.
 - Firmware `0.7.37-p4` fixes an unsigned idle-clock underflow that could abort a
   healthy OTA transaction immediately after a chunk; protocol schema 6 tells
   the desktop that 4092-byte fast chunks are safe again.

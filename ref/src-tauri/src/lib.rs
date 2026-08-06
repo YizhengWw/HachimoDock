@@ -1,7 +1,8 @@
 /*
  * [Input] Tauri commands invoked by the React Pet Manager client.
  * [Output] Desktop runtime services for device pairing, single-instance bridge management,
- *          local agent discovery, Codex pet import, external/community help links,
+ *          local agent discovery, atomic all-Agent petui Skill replacement,
+ *          Codex pet import, external/community help links,
  *          controlled Codex Pets CLI installs, exact-board USB-only device
  *          follow-source binding,
  *          stale-state-safe, bounded local-file USB-first forwarding with SSH state fallback and
@@ -6667,8 +6668,39 @@ fn install_skill_into_agent(
         || LEGACY_SKILL_NAMES
             .iter()
             .any(|legacy_name| skills_root.join(legacy_name).exists());
+    let operation_id = uuid::Uuid::new_v4();
+    let staging = skills_root.join(format!(".{SKILL_NAME}.install-{operation_id}"));
+    let backup = skills_root.join(format!(".{SKILL_NAME}.backup-{operation_id}"));
+    let file_count = match copy_dir_recursive(src, &staging) {
+        Ok(count) => count,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("拷贝到临时目录失败: {error}"));
+        }
+    };
     if dst.exists() {
-        std::fs::remove_dir_all(&dst).map_err(|e| format!("清理旧 skill 目录失败: {}", e))?;
+        std::fs::rename(&dst, &backup).map_err(|error| {
+            let _ = std::fs::remove_dir_all(&staging);
+            format!("备份旧 skill 目录失败: {error}")
+        })?;
+    }
+    if let Err(error) = std::fs::rename(&staging, &dst) {
+        let restore_error = if backup.exists() {
+            std::fs::rename(&backup, &dst).err()
+        } else {
+            None
+        };
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(match restore_error {
+            Some(restore_error) => {
+                format!("切换新版 skill 失败: {error}；恢复旧版也失败: {restore_error}")
+            }
+            None => format!("切换新版 skill 失败，已保留旧版: {error}"),
+        });
+    }
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup)
+            .map_err(|error| format!("新版已安装，但清理旧 skill 备份失败: {error}"))?;
     }
     for legacy_name in LEGACY_SKILL_NAMES {
         let legacy = skills_root.join(legacy_name);
@@ -6677,7 +6709,6 @@ fn install_skill_into_agent(
                 .map_err(|e| format!("清理旧 skill 目录 {} 失败: {}", legacy.display(), e))?;
         }
     }
-    let file_count = copy_dir_recursive(src, &dst).map_err(|e| format!("拷贝失败: {}", e))?;
     Ok(SkillInstallEntry {
         agent: agent_label.to_string(),
         home_dir: agent_home
@@ -12442,6 +12473,15 @@ mod tests {
         );
         assert!(existing_skill.join("SKILL.md").exists(), "new file present");
         assert!(!legacy_skill.exists(), "legacy skill directory removed");
+        let hidden_install_artifacts = std::fs::read_dir(agent_home.join("skills"))
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| {
+                name.starts_with(".petui.install-") || name.starts_with(".petui.backup-")
+            })
+            .collect::<Vec<_>>();
+        assert!(hidden_install_artifacts.is_empty());
     }
 
     #[test]

@@ -2,7 +2,8 @@
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
  * [Output] Native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
- *          visible-composer submission with intentional draft replacement,
+ *          exact-session visible-composer submission with intentional draft replacement
+ *          and no unverified-current-window fallback,
  *          and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
@@ -1532,6 +1533,28 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
     }
 }
 
+fn find_exact_voice_target(
+    agent: MacosAgent,
+    session_id: &str,
+    session_title: &str,
+) -> Result<ComposerTarget, String> {
+    let deadline = Instant::now() + SESSION_CONFIRM_TIMEOUT;
+    loop {
+        match find_target(agent, session_id, session_title) {
+            Ok(target) => return Ok(target),
+            Err(error) => {
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "{} macOS 已打开目标会话，但无法确认该会话的输入框: {error}",
+                        agent.label()
+                    ));
+                }
+            }
+        }
+        thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+    }
+}
+
 fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, String> {
     let Some(pinned) = state.current_visible_target.as_ref() else {
         return find_target(state.agent, &state.session_id, &state.session_title);
@@ -1606,35 +1629,15 @@ pub(super) fn begin_voice(
 ) -> Result<MacosComposerState, String> {
     focus_session(agent, deep_link, session_id, session_title, workspace_label)?;
     let session_title = normalize_text(session_title);
-    match find_target(agent, session_id, &session_title) {
-        Ok(target) => {
-            focus_composer(&target)?;
-            Ok(MacosComposerState {
-                agent,
-                session_id: session_id.to_string(),
-                session_title,
-                last_value: String::new(),
-                current_visible_target: None,
-            })
-        }
-        Err(session_match_error) if !session_id.trim().is_empty() => {
-            // The exact deep link has already selected the requested session.
-            // If Codex temporarily omits its title from the AX tree, bind the
-            // now-visible composer directly instead of typing a global
-            // paste/delete probe into the user's input box.
-            let target = find_current_visible_target(agent)
-                .map_err(|focus_error| format!("{session_match_error}; {focus_error}"))?;
-            focus_composer(&target)?;
-            Ok(MacosComposerState {
-                agent,
-                session_id: session_id.to_string(),
-                session_title,
-                last_value: String::new(),
-                current_visible_target: Some(target),
-            })
-        }
-        Err(error) => Err(error),
-    }
+    let target = find_exact_voice_target(agent, session_id, &session_title)?;
+    focus_composer(&target)?;
+    Ok(MacosComposerState {
+        agent,
+        session_id: session_id.to_string(),
+        session_title,
+        last_value: String::new(),
+        current_visible_target: None,
+    })
 }
 
 pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerState, String> {

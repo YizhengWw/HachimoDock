@@ -60,16 +60,16 @@ import { isRoutedWidgetBinding } from "./component-center/binding-labels.js";
 import { sortComponentsByCreatedAt } from "./component-center/library-order.js";
 import {
   COMPONENT_CONTROL_OPTIONS,
-  DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT,
   componentInputEventSlots,
   defaultControlLabelForBinding,
+  globalExitControlLabel,
   optionForControlLabel,
-  resolveGlobalExitEvent,
+  resolveGlobalExitEvents,
 } from "./component-center/button-config.js";
 
 const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-overrides:v1";
 const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong";
-const FEATURED_BUILTIN_VERSION_HASH = "e2e24f8185433eae";
+const FEATURED_BUILTIN_VERSION_HASH = "1a6b9ab3eb423471";
 const EMPTY_DEVICE_INVENTORY = Object.freeze({
   freshness: "idle",
   runtime: "",
@@ -415,7 +415,12 @@ export default function ComponentCenter() {
   );
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [libraryKind, setLibraryKind] = useState("all");
-  const [globalExitEvent, setGlobalExitEvent] = useState(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+  const [globalExitBinding, setGlobalExitBinding] = useState({
+    boardDeviceId: "",
+    events: [],
+    status: "idle",
+  });
+  const globalExitEvents = globalExitBinding.events;
   const libraryRefreshRequestRef = useRef(0);
   const inventoryRefreshRequestRef = useRef(0);
   const componentActionDialogRef = useRef(null);
@@ -436,17 +441,24 @@ export default function ComponentCenter() {
   useEffect(() => {
     const boardDeviceId = String(usb.boardDeviceId || "").trim();
     if (!usb.connected || !boardDeviceId || String(usb.runtime || "").toLowerCase() !== "esp-p4") {
-      setGlobalExitEvent(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+      setGlobalExitBinding({ boardDeviceId: "", events: [], status: "idle" });
       return undefined;
     }
     let cancelled = false;
+    setGlobalExitBinding({ boardDeviceId, events: [], status: "loading" });
     invoke("usb_get_button_config", { expectedBoardDeviceId: boardDeviceId })
       .then((response) => {
-        if (!cancelled) setGlobalExitEvent(resolveGlobalExitEvent(response));
+        if (!cancelled) {
+          setGlobalExitBinding({
+            boardDeviceId,
+            events: resolveGlobalExitEvents(response),
+            status: "ready",
+          });
+        }
       })
       .catch((error) => {
         console.warn("[ComponentCenter] global exit binding query failed", error);
-        if (!cancelled) setGlobalExitEvent(DEFAULT_COMPONENT_GLOBAL_EXIT_EVENT);
+        if (!cancelled) setGlobalExitBinding({ boardDeviceId, events: [], status: "error" });
       });
     return () => {
       cancelled = true;
@@ -1061,13 +1073,31 @@ export default function ComponentCenter() {
   }
 
   function bindingConflictForComponent(component) {
+    const boardDeviceId = String(usb.boardDeviceId || "").trim();
+    if (
+      usb.connected
+      && String(usb.runtime || "").toLowerCase() === "esp-p4"
+      && boardDeviceId
+      && (globalExitBinding.boardDeviceId !== boardDeviceId || globalExitBinding.status === "loading")
+    ) {
+      return "正在读取设备的全局按键配置，请稍候";
+    }
+    if (
+      usb.connected
+      && String(usb.runtime || "").toLowerCase() === "esp-p4"
+      && boardDeviceId
+      && globalExitBinding.boardDeviceId === boardDeviceId
+      && globalExitBinding.status === "error"
+    ) {
+      return "读取设备的全局按键配置失败，请重新连接设备后再试";
+    }
     const seen = new Map();
     for (const binding of resolveComponentBindings(component)) {
       if (binding.event.startsWith("screen.") && !deviceTouchReady(usb)) {
         return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为未被全局退出占用的按键或摇杆`;
       }
       for (const eventSlot of componentInputEventSlots(binding.event)) {
-        if (eventSlot === globalExitEvent) {
+        if (globalExitEvents.includes(eventSlot)) {
           return `${binding.label} 占用了当前全局退出键，请改用其他按键`;
         }
         if (seen.has(eventSlot)) {
@@ -1114,14 +1144,14 @@ export default function ComponentCenter() {
       .map((option) => ({
         ...option,
         disabled: (
-          componentInputEventSlots(option.event).includes(globalExitEvent)
+          componentInputEventSlots(option.event).some((event) => globalExitEvents.includes(event))
           || (option.event.startsWith("screen.") && !deviceTouchReady(usb))
           || (
             option.event !== currentEvent
             && componentInputEventSlots(option.event).some((event) => usedEvents.has(event))
           )
         ),
-        disabledReason: componentInputEventSlots(option.event).includes(globalExitEvent)
+        disabledReason: componentInputEventSlots(option.event).some((event) => globalExitEvents.includes(event))
           ? "全局退出"
           : "已占用",
       }));
@@ -1522,8 +1552,10 @@ export default function ComponentCenter() {
           bindings={resolveComponentBindings(previewComponent)}
           bindingConflict={bindingConflictForComponent(previewComponent)}
           globalExitControl={
-            COMPONENT_CONTROL_OPTIONS.find((option) => option.event === globalExitEvent)?.control
-              || "当前全局按键"
+            globalExitEvents
+              .map(globalExitControlLabel)
+              .filter(Boolean)
+              .join("、") || "未设置"
           }
           getControlOptions={(binding) => controlOptionsForBinding(binding, previewComponent)}
           onBindingChange={(binding, nextControl) => updateBinding(binding, nextControl, previewComponent)}

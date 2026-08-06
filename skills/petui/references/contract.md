@@ -131,7 +131,8 @@ screen.region.long_press
 | 中键长按 | `button.encoder.long_press` | 只在用户明确要求时使用 |
 
 - 四个方向语义不同时使用独立 action。只使用玩法真正需要的方向，不为填满输入而制造无效动作。
-- 设备全局退出动作不属于组件包。默认是 SW1 短按，因此生成或更新组件时禁止绑定 `button.sw1.short_press`，也禁止声明 `page_main`、`page_back`、`page_enter`、`page_toggle`、`page_app` 或 `component_center` 等系统导航 action。
+- 设备全局退出动作不属于组件包。出厂默认是 SW1 短按，但用户可以把退出配置到多个键或完全不配置；因此生成或更新组件时禁止绑定 `button.sw1.short_press`，也禁止声明 `page_main`、`page_back`、`page_enter`、`page_toggle`、`page_app` 或 `component_center` 等系统导航 action。
+- 组件画面、footer、描述不得显示固定的“SW1 退出”，应使用“全局键退出”或“退出跟随设备全局设置”。
 - 游戏默认把方向动作放到摇杆，把 SW3 映射为开始/重新开始；SW2 可按玩法定义为射击、技能、暂停等次要动作，也可以不用。
 - 工具默认用 SW3 执行主操作、SW2 执行次操作；摇杆方向可用于切页、选择或数值调节。
 - 用户在 Pet Manager 中修改全局退出绑定后，固件会让新的全局按键优先于组件动作。组件无需、也不得复制这条绑定。

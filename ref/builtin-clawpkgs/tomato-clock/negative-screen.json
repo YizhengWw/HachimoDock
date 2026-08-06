@@ -8,7 +8,7 @@
     "metricUnit": "",
     "badge": "0",
     "note": "右上显示完成轮次",
-    "footer": "SW3暂停 · SW2跳过 · 摇杆下重置 · SW1退出",
+    "footer": "SW3暂停 · SW2跳过 · 摇杆下重置 · 全局键退出",
     "progress": {
       "value": 100,
       "label": "本轮剩余"

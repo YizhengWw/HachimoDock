@@ -393,7 +393,7 @@ test("component center preserves install, formal-library delete, and device-remo
   assert.match(component, /buildBindingOverridesForInstall/);
   assert.match(component, /isRoutedWidgetBinding/);
   assert.doesNotMatch(component, /applyComponentButtonConfig/);
-  assert.match(readFileSync(join(srcDir, "component-center/button-config.js"), "utf8"), /miniapp_action/);
+  assert.match(readFileSync(join(srcDir, "component-center/button-config.js"), "utf8"), /componentInputEventSlots/);
 
   // Formal local library pipeline
   assert.match(component, /localComponents\.map|list_component_library/);
@@ -508,7 +508,7 @@ test("component library pins 双键接球 first and keeps other user components 
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
   assert.match(component, /const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong"/);
-  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "e2e24f8185433eae"/);
+  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "1a6b9ab3eb423471"/);
   assert.match(component, /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
@@ -523,7 +523,7 @@ test("builtin catalog starts with the validated 双键接球 package", () => {
 
   assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
   assert.equal(componentManifest.id, "two-key-pong");
-  assert.equal(componentManifest.version, "1.1.3");
+  assert.equal(componentManifest.version, "1.1.4");
   assert.equal(widget.engine, "p4-bounded-runtime-v3");
   assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
   assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right"]);
@@ -886,6 +886,8 @@ test("component install keeps its button map package-owned without replacing dev
   assert.doesNotMatch(component, /invoke\("button_config_signal"/);
   assert.doesNotMatch(component, /applyComponentButtonConfig/);
   assert.doesNotMatch(component, /DEVICE_BUTTON_CONFIG_STORAGE_KEY/);
+  assert.match(component, /globalExitBinding\.status === "loading"/);
+  assert.match(component, /globalExitBinding\.status === "error"/);
   assert.match(component, /bindingOverrides: buildBindingOverridesForInstall\(component\)/);
   assert.match(firmware, /dispatch_component_binding_event/);
   assert.match(firmware, /active_global_exit_binding/);

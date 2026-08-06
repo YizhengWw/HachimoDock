@@ -444,6 +444,52 @@ test("collapses transient duplicate identities from event and snapshot feeds", (
   assert.equal(terminal[0].state, "done");
 });
 
+test("collapses one visible Session even when event and snapshot metadata paths differ", () => {
+  const nowMs = 7_600_000;
+  const next = reconcileDeviceSessionQueue(
+    [],
+    [
+      {
+        id: "snapshot-id",
+        state: "working",
+        name: "同一个任务",
+        displayContent: "正在执行",
+        cwd: "/tmp/snapshot-project",
+        transcriptPath: "/tmp/snapshot.jsonl",
+        statusUpdatedAt: nowMs,
+      },
+      {
+        id: "event-id",
+        state: "working",
+        displayTitle: "同一个任务",
+        displayContent: "正在执行",
+        cwd: "/tmp/event-project",
+        transcriptPath: "",
+        statusUpdatedAt: nowMs + 1,
+      },
+    ],
+    nowMs + 1,
+  );
+
+  assert.equal(next.length, 1);
+  assert.equal(next[0].id, "event-id");
+});
+
+test("deduplicates title-only cards using the lifecycle text rendered by firmware", () => {
+  const nowMs = 7_700_000;
+  const next = reconcileDeviceSessionQueue(
+    [],
+    [
+      { id: "snapshot-id", state: "working", name: "同一个任务", statusUpdatedAt: nowMs },
+      { id: "event-id", state: "working", displayTitle: "同一个任务", statusUpdatedAt: nowMs + 1 },
+    ],
+    nowMs + 1,
+  );
+
+  assert.equal(next.length, 1);
+  assert.equal(next[0].id, "event-id");
+});
+
 test("falls back safely when browser storage is unavailable", () => {
   const unavailableStorage = {
     getItem() {

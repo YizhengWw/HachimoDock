@@ -18,7 +18,7 @@
     "metricLabel": "连续接球",
     "metricValue": {"var":"score"},
     "metricUnit": "次",
-    "footer": {"switch_state":{"ready":"SW3开始 · 摇杆左右移动 · SW1退出","playing":"摇杆左右移动 · SW1退出","result":"SW3重开 · SW1退出"}},
+    "footer": {"switch_state":{"ready":"SW3开始 · 摇杆左右移动 · 全局键退出","playing":"摇杆左右移动 · 全局键退出","result":"SW3重开 · 全局键退出"}},
     "visualStyle": "pixel",
     "visualPalette": "mono",
     "visualLayout": "scoreboard",

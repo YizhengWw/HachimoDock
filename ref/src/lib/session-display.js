@@ -1,6 +1,6 @@
 /**
  * [Input] Persisted global visibility, ordered Agent lifecycle events plus periodic snapshots, and an optional storage adapter.
- * [Output] Cross-Agent show/hide plus explicit-transition active/terminal device-card visibility that tolerates incomplete snapshots and transient duplicate identities.
+ * [Output] Cross-Agent show/hide plus explicit-transition active/terminal device-card visibility that tolerates incomplete snapshots and collapses duplicate ids by the title/content actually rendered on-device.
  * [Pos] shared dashboard configuration helper in ref/src/lib
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -76,14 +76,14 @@ function deviceSessionVisualIdentity(session) {
   const content = normalizedSessionText(session?.displayContent)
     || (summary && summary !== title && !summary.startsWith("<recommended_plugins>")
       ? summary
-      : "");
-  if (!title || !content) return "";
-  return JSON.stringify([
-    normalizedSessionText(session?.transcriptPath),
-    normalizedSessionText(session?.cwd),
-    title,
-    content,
-  ]);
+      : normalizedSessionState(session));
+  if (!title) return "";
+  // Match the identity the device actually renders. Event and snapshot feeds
+  // can temporarily describe one Agent Session with different ids, cwd values,
+  // or transcript paths; none of those fields are visible on the board. When
+  // there is no body text the renderer falls back to the lifecycle state, so
+  // use that same fallback here instead of disabling deduplication.
+  return JSON.stringify([title, content]);
 }
 
 function deviceSessionSourceFreshness(session) {

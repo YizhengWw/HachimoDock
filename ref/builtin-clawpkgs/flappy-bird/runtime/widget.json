@@ -46,9 +46,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW3 拍翅 · SW1 退出",
-        "playing": "SW3 拍翅 · SW1 退出",
-        "result": "SW3 重开 · SW1 退出"
+        "ready": "SW3 拍翅 · 全局键退出",
+        "playing": "SW3 拍翅 · 全局键退出",
+        "result": "SW3 重开 · 全局键退出"
       }
     },
     "visualStyle": "pixel",

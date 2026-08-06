@@ -77,9 +77,10 @@ use connection_handle::{open_serial_pair_with_retry, ProbedSerialPort, UsbConnec
 use firmware_transaction::{
     evaluate_firmware_validation, firmware_chunk_error_is_retryable,
     firmware_corruption_fallback_size, firmware_recovery_chunk_size, initial_firmware_chunk_size,
-    parse_esp_idf_app_descriptor, preferred_firmware_chunk_size, FirmwareCommandError,
-    VerifiedFirmware, P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_BEGIN_MAX_ATTEMPTS,
-    P4_FIRMWARE_CHUNK_ACK_TIMEOUT, P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
+    parse_esp_idf_app_descriptor, preferred_firmware_chunk_size,
+    should_restart_firmware_transaction, FirmwareCommandError, VerifiedFirmware,
+    P4_FIRMWARE_ACK_TIMEOUT, P4_FIRMWARE_BEGIN_MAX_ATTEMPTS, P4_FIRMWARE_CHUNK_ACK_TIMEOUT,
+    P4_FIRMWARE_CHUNK_MAX_ATTEMPTS, P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
     P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK,
     P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA, P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
     P4_FIRMWARE_MAX_IMAGE_SIZE, P4_FIRMWARE_RECONNECT_TIMEOUT,
@@ -2006,9 +2007,12 @@ impl UsbSerialManager {
                 Ok::<u64, String>(sequence)
             })();
             let restart_for_idle_clock_race = attempt_result.as_ref().is_err_and(|error| {
-                status.protocol_schema == P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA
-                    && error.contains("firmware transferId mismatch")
-                    && transaction_attempt < max_transaction_attempts
+                should_restart_firmware_transaction(
+                    status.protocol_schema,
+                    error,
+                    transaction_attempt,
+                    max_transaction_attempts,
+                )
             });
             if !restart_for_idle_clock_race {
                 break attempt_result;
@@ -2815,9 +2819,14 @@ impl UsbSerialManager {
                 return Err("Connection lost".to_string());
             }
             let padding = vec![0u8; pending_size];
-            if let Err(error) = connection.writer.write_all(&padding) {
+            if let Err(error) = write_serial_bytes_paced(
+                connection.writer.as_mut(),
+                &padding,
+                P4_CH343_SERIAL_WRITE_SLICE_BYTES,
+                P4_CH343_SERIAL_WRITE_GAP,
+            ) {
                 connection.connected = false;
-                return Err(format!("Raw asset recovery write failed: {error}"));
+                return Err(format!("Raw asset paced recovery write failed: {error}"));
             }
             if let Err(error) = connection.writer.write_all(b"\n") {
                 connection.connected = false;
@@ -6287,6 +6296,43 @@ mod tests {
     }
 
     #[test]
+    fn raw_asset_recovery_padding_uses_the_same_short_serial_slices() {
+        let manager = UsbSerialManager::new();
+        let recorded = Arc::new(Mutex::new(PacedWriterState::default()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 1,
+            port_name: "COM15".to_string(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(PacedWriter(Arc::clone(&recorded))),
+            board_device_id: "p4-test".to_string(),
+            runtime: "esp-p4".to_string(),
+            device_model: "ESP32-P4".to_string(),
+            firmware: "0.7.11-p4".to_string(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 0,
+            wire_protocol: "pet-usb-jsonl-v3".to_string(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+
+        manager.recover_raw_asset_stream(4096).unwrap();
+
+        let recorded = recorded.lock().unwrap();
+        assert!(recorded.writes.len() > 2);
+        assert!(recorded.writes[..recorded.writes.len() - 1]
+            .iter()
+            .all(|write| write.len() <= P4_CH343_SERIAL_WRITE_SLICE_BYTES));
+        assert_eq!(
+            recorded.writes.last().map(Vec::as_slice),
+            Some(b"\n".as_slice())
+        );
+        assert_eq!(recorded.flushes, recorded.writes.len());
+    }
+
+    #[test]
     fn asset_chunk_ack_requires_the_current_index_when_firmware_provides_one() {
         let manager = UsbSerialManager::new();
         let receiver = manager
@@ -7292,7 +7338,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_five_uses_fast_chunks_with_transaction_restart_recovery() {
+    fn schema_five_starts_safely_then_recovers_to_fast_chunks() {
         let capabilities = serde_json::json!({
             "firmwareUpdate": { "chunkBytes": 4096 }
         });
@@ -7337,6 +7383,34 @@ mod tests {
         let line = serde_json::to_string(&payload).unwrap();
         assert_eq!(P4_FIRMWARE_FAST_CHUNK_SIZE % 3, 0);
         assert!(line.len() < 8 * 1024);
+    }
+
+    #[test]
+    fn only_schema_five_transfer_id_mismatches_restart_within_the_bound() {
+        assert!(should_restart_firmware_transaction(
+            5,
+            "firmware transferId mismatch",
+            1,
+            P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
+        ));
+        assert!(!should_restart_firmware_transaction(
+            6,
+            "firmware transferId mismatch",
+            1,
+            P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
+        ));
+        assert!(!should_restart_firmware_transaction(
+            5,
+            "firmware chunk base64 mismatch",
+            1,
+            P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
+        ));
+        assert!(!should_restart_firmware_transaction(
+            5,
+            "firmware transferId mismatch",
+            P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
+            P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS,
+        ));
     }
 
     #[test]

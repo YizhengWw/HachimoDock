@@ -91,9 +91,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW3开始 · 摇杆四向操作 · SW1退出",
-        "playing": "摇杆四向操作 · SW1退出",
-        "result": "SW3重开 · SW1退出"
+        "ready": "SW3开始 · 摇杆四向操作 · 全局键退出",
+        "playing": "摇杆四向操作 · 全局键退出",
+        "result": "SW3重开 · 全局键退出"
       }
     },
     "visualStyle": "pixel",

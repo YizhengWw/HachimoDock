@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.37-p4",
-    "buildId": "0.7.37-p4+290f402abcd1",
+    "fw": "0.7.38-p4",
+    "buildId": "0.7.38-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 6,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 6,
-    "buildId": "0.7.37-p4+0123456789ab"
+    "buildId": "0.7.38-p4+0123456789ab"
   }
 }
 ```
