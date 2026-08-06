@@ -187,14 +187,16 @@ pub(super) fn resolve_firmware_ack(
         })?;
         Some(waiters.remove(index).sender)
     });
-    eprintln!(
-        "[usb-firmware-ota] ack transfer_id={} phase={} next_sequence={} received_bytes={} matched={}",
-        transfer_id,
-        phase,
-        next_sequence.unwrap_or_default(),
-        received_bytes.unwrap_or_default(),
-        sender.is_some()
-    );
+    if phase != "chunk" || !ok || sender.is_none() {
+        eprintln!(
+            "[usb-firmware-ota] ack transfer_id={} phase={} next_sequence={} received_bytes={} matched={}",
+            transfer_id,
+            phase,
+            next_sequence.unwrap_or_default(),
+            received_bytes.unwrap_or_default(),
+            sender.is_some()
+        );
+    }
     if let Some(sender) = sender {
         let _ = sender.send(payload.clone());
     }

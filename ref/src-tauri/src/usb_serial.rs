@@ -202,8 +202,9 @@ const P4_DEVICE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 // Firmware travels over the board's 4 Mbaud CH343 control link on current
 // hardware. Force short, drained bursts so the macOS USB-serial stack cannot
 // hand the adapter one multi-kilobyte Base64 line that is silently damaged.
-const P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 256;
-const P4_FIRMWARE_SERIAL_WRITE_GAP: Duration = Duration::from_millis(1);
+const P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 64;
+const P4_FIRMWARE_SERIAL_WRITE_GAP: Duration = Duration::from_micros(100);
+const P4_FIRMWARE_CHUNK_RETRY_DELAY: Duration = Duration::from_millis(1);
 
 // native USB bulk is the high-speed ESP32-P4 OTG data plane. UART remains as a fallback.
 struct NativeUsbP4Transport {
@@ -1697,7 +1698,7 @@ impl UsbSerialManager {
                         chunk_result.as_ref().unwrap_err()
                     );
                     if attempt < P4_FIRMWARE_CHUNK_MAX_ATTEMPTS {
-                        thread::sleep(Duration::from_millis(80));
+                        thread::sleep(P4_FIRMWARE_CHUNK_RETRY_DELAY);
                     }
                 }
                 chunk_result?;
@@ -6585,7 +6586,7 @@ mod tests {
     }
 
     #[test]
-    fn firmware_chunk_json_stays_below_two_kibibytes() {
+    fn firmware_chunk_json_stays_below_four_kibibytes() {
         let encoded_len = P4_FIRMWARE_CHUNK_SIZE.div_ceil(3) * 4;
         let payload = serde_json::json!({
             "topic": "firmware/chunk",
@@ -6600,8 +6601,8 @@ mod tests {
 
         assert_eq!(P4_FIRMWARE_CHUNK_SIZE % 3, 0);
         assert!(
-            line.len() < 2 * 1024,
-            "firmware Base64 JSON must stay below the reliable CH343 burst size"
+            line.len() < 4 * 1024,
+            "firmware Base64 JSON must fit the legacy P4 line buffer"
         );
     }
 

@@ -10,17 +10,20 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
-// Keep the Base64 JSON below 2 KiB for the CH343 path. Some macOS CH343
-// driver/adapter combinations corrupt a long 4 Mbaud burst without failing
-// the write syscall, leaving valid JSON whose Base64 body no longer decodes.
-// 1020 is divisible by three, so every full chunk is also padding-free.
-pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 1_020;
+// Keep the Base64 JSON below 4 KiB for legacy receivers. The host drains the
+// line in much smaller physical writes, so 2046-byte chunks remain reliable
+// while finishing before older firmware's whole-transfer watchdog expires.
+// 2046 is divisible by three, so every full chunk is padding-free.
+pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
 pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
-pub(super) const P4_FIRMWARE_CHUNK_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+// A healthy 4 Mbaud board ACK arrives within a few milliseconds. A longer
+// timeout only lets a lost/corrupted ACK consume the old firmware's bounded
+// whole-transfer window before the duplicate chunk can be retried.
+pub(super) const P4_FIRMWARE_CHUNK_ACK_TIMEOUT: Duration = Duration::from_millis(150);
 pub(super) const P4_FIRMWARE_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(3);
 pub(super) const P4_FIRMWARE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
-pub(super) const P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 3;
+pub(super) const P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 20;
 pub(super) const P4_FIRMWARE_COMMIT_MAX_ATTEMPTS: usize = 3;
 pub(super) const P4_FIRMWARE_PROJECT_NAME: &str = "pet_manager_p4_runtime";
 pub(super) const ESP_IMAGE_HEADER_SIZE: usize = 24;
