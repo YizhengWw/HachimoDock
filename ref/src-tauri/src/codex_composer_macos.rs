@@ -1,12 +1,13 @@
 /*
- * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
+ * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
  * [Output] Native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
- *          exact-session visible-composer submission with intentional draft
- *          replacement, plus ID-deeplink-confirmed visible-composer recovery
+ *          exact-session visible-composer draft replacement, plus
+ *          ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
- *          Enter-first submission with a same-draft send-button fallback,
- *          and clipboard-preserving current-caret insertion plus Return.
+ *          nonempty-current-draft Confirm submission with an Enter-first and
+ *          unchanged-draft send-button fallback, and clipboard-preserving
+ *          current-caret insertion separated from the later Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -503,7 +504,7 @@ pub(super) fn capture_focused_text_target() -> Result<FocusedTextTarget, String>
     capture_focused_text_target_unchecked()
 }
 
-pub(super) fn insert_and_submit_at_focused_text_target(
+pub(super) fn insert_at_focused_text_target(
     captured: &FocusedTextTarget,
     text: &str,
 ) -> Result<(), String> {
@@ -530,18 +531,9 @@ pub(super) fn insert_and_submit_at_focused_text_target(
                 .to_string(),
         );
     }
-    let result = (|| {
+    let result: Result<(), String> = (|| {
         paste_focused_text(text)?;
-        let current = capture_focused_text_target_unchecked().map_err(|error| {
-            format!("MiMoCode 文字已写入，但提交前无法再次确认当前光标；未自动回车: {error}")
-        })?;
-        if !focused_text_target_matches(captured, &current) {
-            return Err(
-                "MiMoCode 文字已写入，但提交前焦点发生变化；为避免误操作，未自动回车".to_string(),
-            );
-        }
-        post_keyboard_event(KeyCode::RETURN, CGEventFlags::CGEventFlagNull)
-            .map_err(|error| format!("MiMoCode 文字已写入，但自动回车失败: {error}"))
+        Ok(())
     })();
     snapshot.restore();
     result.map_err(|error| {
@@ -551,6 +543,16 @@ pub(super) fn insert_and_submit_at_focused_text_target(
             format!("MiMoCode 当前光标输入失败: {error}")
         }
     })
+}
+
+pub(super) fn submit_at_focused_text_target(captured: &FocusedTextTarget) -> Result<(), String> {
+    ensure_accessibility_permission()?;
+    let current = capture_focused_text_target_unchecked()?;
+    if !focused_text_target_matches(captured, &current) {
+        return Err("MiMoCode 语音草稿写入后前台窗口或文本光标已变化，未执行确认键".to_string());
+    }
+    post_keyboard_event(KeyCode::RETURN, CGEventFlags::CGEventFlagNull)
+        .map_err(|error| format!("MiMoCode 确认键发送失败: {error}"))
 }
 
 fn ax_point_attribute(element: &AXUIElement, name: &str) -> Option<CGPoint> {
@@ -1853,10 +1855,20 @@ fn wait_for_submit_readback(
     }
 }
 
-pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
-    let text = update_voice(state, text)?;
-    thread::sleep(Duration::from_millis(80));
+pub(super) fn confirm_voice(
+    state: &mut MacosComposerState,
+    _staged_text: &str,
+) -> Result<String, String> {
     let target = find_voice_target(state)?;
+    if target.value.is_empty() {
+        return Err(format!(
+            "{} macOS 语音草稿已不在输入框中，未重复发送",
+            state.agent.label()
+        ));
+    }
+    let text = target.value.clone();
+    state.last_value = text.clone();
+    thread::sleep(Duration::from_millis(80));
     focus_composer(&target)?;
     press_enter(target.agent, &target.app)?;
 
@@ -1902,24 +1914,8 @@ pub(super) fn submit_voice(state: &mut MacosComposerState, text: &str) -> Result
         Ok(SubmitReadback::DraftUnchanged) | Err(_) => {}
     }
 
-    let cleanup = find_voice_target(state).and_then(|target| {
-        if target.value == text {
-            replace_composer_text(&target, "")
-        } else {
-            Err(format!(
-                "{} macOS 输入框已发生变化，未清理其它内容",
-                state.agent.label()
-            ))
-        }
-    });
-    state.last_value.clear();
-    if let Err(error) = cleanup {
-        return Err(format!(
-            "ChatGPT（Codex）macOS 提交结果未确认，且无法清理语音草稿: {error}"
-        ));
-    }
     Err(format!(
-        "{} macOS 提交结果未确认；为避免重复发送，本次不再尝试其他通道",
+        "{} macOS 提交结果未确认；语音草稿保留在输入框中",
         state.agent.label()
     ))
 }

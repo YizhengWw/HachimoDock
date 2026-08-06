@@ -480,9 +480,10 @@ test("board voice action injection status is surfaced in the voice panel", () =>
   assert.match(source, /composerMode === "focused-input"[\s\S]*?MiMoCode 当前光标/);
   assert.match(rust, /context\.target\.agent_id == "mimocode"/);
   assert.match(rust, /capture_focused_text_target/);
-  assert.match(rust, /insert_and_submit_at_focused_text_target/);
+  assert.match(rust, /insert_at_focused_text_target/);
+  assert.match(rust, /submit_at_focused_text_target/);
   assert.match(rust, /"composerMode": "focused-input"/);
-  assert.match(rust, /已写入 MiMoCode 当前光标位置并自动回车/);
+  assert.match(rust, /已通过设备确认键发送 MiMoCode 语音草稿/);
   assert.match(
     source,
     /if \(phase === "cancelled"\)[\s\S]*?设备录音已取消[\s\S]*?else if \(!ok\)[\s\S]*?板端录音处理失败/,
@@ -497,7 +498,7 @@ test("board voice action injection status is surfaced in the voice panel", () =>
   assert.match(rust, /"pending": true/);
   assert.match(rust, /等待模型回复/);
   assert.match(rust, /VISIBLE_COMPOSER_SUBMIT_TIMEOUT: Duration = Duration::from_secs\(8\)/);
-  assert.match(rust, /为避免重复发送，本次不再尝试其他通道/);
+  assert.match(rust, /bridge\.confirm\(revision, &text\)/);
   assert.doesNotMatch(source, /后台回退|后台会话桥接/);
   assert.match(source, /agentId: selectedAgentId/);
   assert.match(source, /sessionId: p4SessionSync\.sessionId \|\| "auto"/);
@@ -739,7 +740,7 @@ test("macOS Codex conversation switching uses native accessibility foreground de
   assert.match(macComposer, /pub\(super\) fn begin_voice/);
   assert.match(macComposer, /pub\(super\) fn begin_current_voice/);
   assert.match(macComposer, /pub\(super\) fn update_voice/);
-  assert.match(macComposer, /pub\(super\) fn submit_voice/);
+  assert.match(macComposer, /pub\(super\) fn confirm_voice/);
   assert.match(macComposer, /当前会话与设备选中的会话不一致/);
   const exactVoiceStart = macComposer.match(
     /pub\(super\) fn begin_voice[\s\S]*?pub\(super\) fn begin_current_voice/,

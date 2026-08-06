@@ -3,7 +3,7 @@
  * [Output] Priority-ordered four-region device dashboard with runtime-aware Linux/P4 control maps,
  *          twelve exposed P4 button/joystick gestures (SW1-SW3 short/long plus
  *          joystick center short/long and four directions), an internal hold transport for PTT,
- *          shared voice enablement across button and assistant surfaces,
+ *          shared draft-then-confirm voice enablement across button and assistant surfaces,
  *          fully repeatable hardware actions with optional exit plus versioned default migration,
  *          context-local previous/next selection and SW2 top-level page toggling,
  *          bounded Agent prompt bindings, ACK-gated USB config,
@@ -110,16 +110,16 @@ export const DEFAULT_BUTTON_ACTIONS = {
 };
 
 export const P4_VOICE_BUTTON_OPTIONS = [
-  { id: P4_DEFAULT_VOICE_TRIGGER, rowId: "p4_sw1_long", label: "SW1 长按", detail: "按住 SW1 开始录音，松开后提交。", event: "button.sw1.hold" },
-  { id: "sw2.hold", rowId: "p4_sw2_long", label: "SW2 长按", detail: "按住 SW2 开始录音，松开后提交。", event: "button.sw2.hold" },
-  { id: "sw3.hold", rowId: "p4_sw3_long", label: "SW3 长按", detail: "按住 SW3 开始录音，松开后提交。", event: "button.sw3.hold" },
-  { id: "encoder_button.hold", rowId: "p4_encoder_long", label: "摇杆中按长按", detail: "按住摇杆中键开始录音，松开后提交。", event: "button.encoder.hold" },
+  { id: P4_DEFAULT_VOICE_TRIGGER, rowId: "p4_sw1_long", label: "SW1 长按", detail: "按住 SW1 开始录音，松开后只写入草稿。", event: "button.sw1.hold" },
+  { id: "sw2.hold", rowId: "p4_sw2_long", label: "SW2 长按", detail: "按住 SW2 开始录音，松开后只写入草稿。", event: "button.sw2.hold" },
+  { id: "sw3.hold", rowId: "p4_sw3_long", label: "SW3 长按", detail: "按住 SW3 开始录音，松开后只写入草稿。", event: "button.sw3.hold" },
+  { id: "encoder_button.hold", rowId: "p4_encoder_long", label: "摇杆中按长按", detail: "按住摇杆中键开始录音，松开后只写入草稿。", event: "button.encoder.hold" },
 ];
 export const VOICE_BUTTON_OPTIONS = P4_VOICE_BUTTON_OPTIONS;
 
 export const BUTTON_FUNCTION_OPTIONS = [
   { id: "agent_prompt", label: "发送自定义指令", detail: "按下对应手势后，将该按钮下方填写的指令直接发送给当前 Code Agent。" },
-  { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后提交；可以绑定到多个长按手势。" },
+  { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后只写入草稿；短按全局确认键才发送。" },
   { id: "session_previous", label: "上一个", detail: "宠物界面切换到上一个会话气泡；组件中心切换到上一个组件。" },
   { id: "session_next", label: "下一个", detail: "宠物界面切换到下一个会话气泡；组件中心切换到下一个组件。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },

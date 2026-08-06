@@ -1,6 +1,6 @@
 /*
- * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus voice text.
- * [Output] Exact desktop-session navigation, pinned current-visible delivery, and macOS current-caret insertion plus Return.
+ * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
+ * [Output] Exact desktop-session navigation, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
  * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, and stale-focus recovery.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -21,11 +21,13 @@ pub fn capture_focused_text_target() -> Result<FocusedTextTarget, String> {
 }
 
 #[cfg(target_os = "macos")]
-pub fn insert_and_submit_at_focused_text_target(
-    target: &FocusedTextTarget,
-    text: &str,
-) -> Result<(), String> {
-    macos::insert_and_submit_at_focused_text_target(&target.0, text)
+pub fn insert_at_focused_text_target(target: &FocusedTextTarget, text: &str) -> Result<(), String> {
+    macos::insert_at_focused_text_target(&target.0, text)
+}
+
+#[cfg(target_os = "macos")]
+pub fn submit_at_focused_text_target(target: &FocusedTextTarget) -> Result<(), String> {
+    macos::submit_at_focused_text_target(&target.0)
 }
 
 #[cfg(windows)]
@@ -2089,6 +2091,17 @@ function Clear-ComposerVoiceText($state) {
   $state.LastValue = ''
 }
 
+function Assert-ComposerHasText($state) {
+  Assert-TargetCurrent $state (-not [bool]$state.CurrentVisible)
+  $currentInfo = Get-ComposerText $state.Composer
+  $currentValue = Normalize-Label ([string]$currentInfo[1])
+  if ([string]::IsNullOrEmpty($currentValue)) {
+    throw 'Visible composer voice draft is no longer present; it was not sent again'
+  }
+  $state.Pattern = $currentInfo[0]
+  $state.LastValue = $currentValue
+}
+
 function Invoke-SendButton($state) {
   $composerRect = $state.Composer.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $composerRect)) {
@@ -2128,8 +2141,7 @@ function Invoke-SendButton($state) {
   Start-Sleep -Milliseconds 180
   $afterSubmit = Get-ComposerText $state.Composer
   if (-not [string]::IsNullOrEmpty([string]$afterSubmit[1])) {
-    [CodexVoiceNative]::ReplaceFocusedText('')
-    throw 'Visible composer did not accept Enter submission while the send button was unavailable'
+    throw 'Visible composer did not accept Enter submission; the voice draft remains in the composer'
   }
 }
 $state = $null
@@ -2206,10 +2218,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         Set-ComposerText $state ([string]$command.text) $false
         Write-ComposerReply @{ ok = $true; phase = 'updated'; revision = $command.revision; mode = 'visible' }
       }
-      'submit' {
+      'confirm' {
         if ($null -eq $state) { throw 'Visible composer is not ready' }
-        Set-ComposerText $state ([string]$command.text) $true
-        Start-Sleep -Milliseconds 80
+        Assert-ComposerHasText $state
         Invoke-SendButton $state
         Write-ComposerReply @{ ok = $true; phase = 'submitted'; revision = $command.revision; mode = 'visible' }
         break
@@ -2470,7 +2481,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         self.send(json!({ "kind": "update", "revision": revision, "text": text }))
     }
 
-    pub fn submit(&self, revision: u64, text: &str) -> CodexComposerSubmission {
+    pub fn confirm(&self, revision: u64, text: &str) -> CodexComposerSubmission {
         use std::sync::atomic::Ordering;
         let (started_sender, started_receiver) = std::sync::mpsc::channel();
         let (completed_sender, completed_receiver) = std::sync::mpsc::channel();
@@ -2485,7 +2496,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         if self
             .sender
             .send(ComposerCommand {
-                payload: json!({ "kind": "submit", "revision": revision, "text": text }),
+                payload: json!({ "kind": "confirm", "revision": revision, "text": text }),
                 started: Some(started_sender.clone()),
                 response: Some(completed_sender.clone()),
             })
@@ -2742,10 +2753,10 @@ impl CodexComposerBridge {
                                     "composerValue": composer_value,
                                 })
                             }),
-                        "submit" => state
+                        "confirm" => state
                             .as_mut()
                             .ok_or_else(|| "Visible composer is not ready".to_string())
-                            .and_then(|state| macos::submit_voice(state, &text))
+                            .and_then(|state| macos::confirm_voice(state, &text))
                             .map(|composer_value| {
                                 json!({
                                     "ok": true,
@@ -2788,7 +2799,7 @@ impl CodexComposerBridge {
                     if let Some(response) = command.response {
                         let _ = response.send(result);
                     }
-                    if matches!(kind.as_str(), "submit" | "cancel")
+                    if matches!(kind.as_str(), "confirm" | "cancel")
                         || (kind == "begin" && purpose == "locate")
                     {
                         break;
@@ -2848,7 +2859,7 @@ impl CodexComposerBridge {
         self.send(json!({ "kind": "update", "revision": revision, "text": text }))
     }
 
-    pub fn submit(&self, revision: u64, text: &str) -> CodexComposerSubmission {
+    pub fn confirm(&self, revision: u64, text: &str) -> CodexComposerSubmission {
         use std::sync::atomic::Ordering;
         let (started_sender, started_receiver) = std::sync::mpsc::channel();
         let (completed_sender, completed_receiver) = std::sync::mpsc::channel();
@@ -2863,7 +2874,7 @@ impl CodexComposerBridge {
         if self
             .sender
             .send(ComposerCommand {
-                payload: json!({ "kind": "submit", "revision": revision, "text": text }),
+                payload: json!({ "kind": "confirm", "revision": revision, "text": text }),
                 started: Some(started_sender.clone()),
                 response: Some(completed_sender.clone()),
             })
@@ -2928,7 +2939,7 @@ impl CodexComposerBridge {
         Err("Visible Agent composer is currently available on Windows and macOS only".to_string())
     }
 
-    pub fn submit(&self, _revision: u64, _text: &str) -> CodexComposerSubmission {
+    pub fn confirm(&self, _revision: u64, _text: &str) -> CodexComposerSubmission {
         let (started_sender, started_receiver) = std::sync::mpsc::channel();
         let (completed_sender, completed_receiver) = std::sync::mpsc::channel();
         let _ = started_sender.send(());
@@ -2989,9 +3000,9 @@ mod tests {
     }
 
     #[test]
-    fn live_update_failure_does_not_disable_final_submission() {
+    fn live_update_failure_does_not_disable_explicit_confirmation() {
         assert!(!composer_command_failure_is_fatal(&command("update", 1)));
-        assert!(!composer_command_failure_is_fatal(&command("submit", 2)));
+        assert!(!composer_command_failure_is_fatal(&command("confirm", 2)));
         assert!(composer_command_failure_is_fatal(&command("begin", 0)));
     }
 
@@ -3332,21 +3343,21 @@ mod tests {
     }
 
     #[test]
-    fn live_updates_are_coalesced_before_the_pending_submit() {
+    fn live_updates_are_coalesced_before_the_pending_confirm() {
         let (sender, receiver) = std::sync::mpsc::channel();
         sender.send(command("update", 1)).unwrap();
         sender.send(command("update", 2)).unwrap();
         sender.send(command("update", 3)).unwrap();
-        sender.send(command("submit", 4)).unwrap();
+        sender.send(command("confirm", 4)).unwrap();
         let mut pending = None;
 
         let latest = receive_latest_composer_command(&receiver, &mut pending).unwrap();
         assert_eq!(composer_command_kind(&latest), "update");
         assert_eq!(latest.payload["revision"], 3);
 
-        let submit = receive_latest_composer_command(&receiver, &mut pending).unwrap();
-        assert_eq!(composer_command_kind(&submit), "submit");
-        assert_eq!(submit.payload["revision"], 4);
+        let confirm = receive_latest_composer_command(&receiver, &mut pending).unwrap();
+        assert_eq!(composer_command_kind(&confirm), "confirm");
+        assert_eq!(confirm.payload["revision"], 4);
     }
 
     #[test]

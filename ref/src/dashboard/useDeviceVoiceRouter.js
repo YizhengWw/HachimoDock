@@ -1,6 +1,6 @@
 /**
  * [Input] Tauri USB audio, transcript, and Agent-delivery events for device PTT utterances.
- * [Output] One monotonic, utterance-scoped voice flow plus audio relay activity callbacks.
+ * [Output] One monotonic, utterance-scoped draft-then-confirm voice flow plus audio relay activity callbacks.
  * [Pos] Dashboard device-voice routing state machine and event-listener boundary.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md` and `ref/src/.folder.md`.
  */
@@ -16,6 +16,7 @@ const PHASE_RANK = Object.freeze({
   partial: 2,
   recognizing: 3,
   finalizing: 3,
+  draft_ready: 4,
   injecting: 4,
   submitting: 4,
   waiting_reply: 5,
@@ -214,30 +215,39 @@ function transcriptMessage(payload, phase, composerMode) {
       return `正在聆听，识别文字会实时同步到 ${visibleAgentLabel} 输入框。`;
     }
     if (composerMode === "focused-input") {
-      return "正在聆听；松开后写入 MiMoCode 当前光标并自动回车。";
+      return "正在聆听；松开后只把文字写入 MiMoCode 当前光标。";
     }
     return "正在聆听并实时识别。";
   }
   if (phase === "partial") {
     if (composerMode === "visible") {
-      return `正在实时识别并同步到 ${visibleAgentLabel}；松开后只提交最终文本。`;
+      return `正在实时识别并同步到 ${visibleAgentLabel}；松开后保留为草稿，不自动发送。`;
     }
     if (composerMode === "focused-input") {
-      return "正在实时识别；松开后只把最终文本写入当前光标。";
+      return "正在实时识别；松开后保留为草稿，不自动发送。";
     }
-    return "正在实时识别；松开后只提交最终文本。";
+    return "正在实时识别；松开后保留为草稿，不自动发送。";
   }
   if (phase === "finalizing" || phase === "recognizing") {
-    return "正在确认最终识别文本...";
+    return "正在把最终识别文字写入输入框...";
+  }
+  if (phase === "draft_ready") {
+    if (composerMode === "focused-input") {
+      return "语音文字已写入 MiMoCode；请短按确认键发送（默认 SW3）。";
+    }
+    if (composerMode === "agent-bus") {
+      return "语音文字已识别为待发送草稿；请短按确认键发送（默认 SW3）。";
+    }
+    return `语音文字已写入 ${visibleAgentLabel} 输入框；请短按确认键发送（默认 SW3）。`;
   }
   if (phase === "submitting") {
-    if (composerMode === "visible") return `正在通过 ${visibleAgentLabel} 可见输入框提交...`;
-    if (composerMode === "focused-input") return "正在写入 MiMoCode 当前光标...";
-    return "正在发送到当前会话...";
+    if (composerMode === "visible") return `已收到确认键，正在通过 ${visibleAgentLabel} 输入框发送...`;
+    if (composerMode === "focused-input") return "已收到确认键，正在发送 MiMoCode 草稿...";
+    return "已收到确认键，正在发送到当前会话...";
   }
   if (phase === "submitted") {
     return composerMode === "focused-input"
-      ? "已写入 MiMoCode 当前光标并自动回车。"
+      ? "已通过设备确认键发送 MiMoCode 草稿。"
       : `已通过 ${visibleAgentLabel} 可见输入框发送到当前会话。`;
   }
   if (phase === "cancelled") {
@@ -271,7 +281,7 @@ function audioActivity(payload) {
   } else if (phase === "recognizing") {
     message = "正在识别设备麦克风录音...";
   } else if (phase === "recognized") {
-    message = "识别完成，正在发送到当前会话...";
+    message = "识别完成，正在写入输入框草稿...";
   }
   return message ? { phase, ok, message } : null;
 }
@@ -304,7 +314,7 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
           phase: "injecting",
           utteranceId: normalizeText(payload.voiceUtteranceId || payload.utteranceId),
           text,
-          message: "设备语音识别完成，正在发送到当前会话...",
+          message: "已收到确认键，正在发送语音草稿...",
         });
       });
 

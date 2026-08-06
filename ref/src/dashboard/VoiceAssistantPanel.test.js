@@ -87,13 +87,13 @@ test("Shows live P4 device microphone relay and recognition status", () => {
   assert.match(source, /实时识别文本/);
   assert.match(source, /\{visibleVoiceAgentLabel\} 可见同步/);
   assert.match(source, /visibleVoiceAgentId === "claude-code"[\s\S]*?"Claude"[\s\S]*?"ChatGPT（Codex）"/);
-  assert.match(source, /MiMoCode 光标提交/);
+  assert.match(source, /MiMoCode 光标草稿/);
   assert.doesNotMatch(source, /后台回退|会话桥接/);
   assert.match(source, /composerMode === "visible"/);
   assert.match(source, /composerMode === "focused-input"/);
   assert.match(source, /isMimocodeVoice/);
   assert.match(source, /保持 MiMoCode 终端在前台/);
-  assert.match(source, /自动回车/);
+  assert.match(source, /短按确认键（默认 SW3）才发送/);
 });
 
 test("Guides ChatGPT（Codex） and Claude foreground failures with macOS and Windows Dev tips", () => {
@@ -164,6 +164,8 @@ test("Combines primary status and actions while pairing settings and diagnostics
   assert.match(source, /voice-panel__advanced--diagnostics/);
   assert.match(source, /formatVoiceUserMessage/);
   assert.match(source, /设备未收到语音监听指令，请确认 USB 连接后重试/);
+  assert.match(source, /draft_ready: "草稿待确认"/);
+  assert.match(source, /短按确认键（默认 SW3）才发送/);
   assert.match(css, /\.voice-panel__command\s*\{/);
   assert.match(css, /\.voice-panel__advanced-grid\s*\{/);
   assert.match(css, /\.voice-panel__advanced-summary\s*\{/);

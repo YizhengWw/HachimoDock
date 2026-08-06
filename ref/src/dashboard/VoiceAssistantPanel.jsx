@@ -1,6 +1,6 @@
 /**
  * [Input] state (busStatus/busSessions/busSessionId/voiceRuntime/audioBridge{*}/mockInject/deviceVoiceFlow/selectedAgentId/deviceOnline) + dispatch + toggleAudioBridge/sendMockButtonInject + voiceConfig + selectedTrigger + onVoiceConfigChange/onVoiceEnabledChange + API-settings navigation.
- * [Output] Region 4: a compact voice console with immediate saved-ASR runtime rearming, ChatGPT（Codex）/Claude-visible and MiMoCode-caret delivery labels, non-prompting macOS trust checks, native system-consent retry, and foreground recovery tips.
+ * [Output] Region 4: a compact voice console with draft-only long-press recognition, explicit Confirm-key delivery, desktop composer labels, and permission/foreground recovery tips.
  * [Pos] component node in ref/src/dashboard
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -135,6 +135,7 @@ function voicePhaseLabel(phase) {
     partial: "实时识别中",
     recognizing: "确认文本中",
     finalizing: "确认文本中",
+    draft_ready: "草稿待确认",
     submitting: "发送中",
     injecting: "发送中",
     waiting_reply: "等待回复",
@@ -678,12 +679,12 @@ export default function VoiceAssistantPanel({
                     {isMimocodeVoice ? (
                       <p>
                         无需再进入系统设置。请保持 MiMoCode 终端在前台，并把光标停在输入位置；
-                        松开设备按键后会写入最终文字并自动回车。
+                        松开设备按键后只写入最终文字；短按确认键（默认 SW3）才发送。
                       </p>
                     ) : (
                       <p>
                         无需再进入系统设置。请保持设备选中的 {visibleVoiceAgentLabel} 任务处于可打开状态，
-                        并确保输入框没有用户草稿；客户端会继续自动定位和聚焦。
+                        识别文字会先保留在输入框；短按确认键（默认 SW3）后才发送。
                       </p>
                     )}
                   </>
@@ -728,7 +729,7 @@ export default function VoiceAssistantPanel({
                 )}
                 {state.deviceVoiceFlow.composerMode === "focused-input" && (
                   <span className="voice-panel__composer-mode is-visible">
-                    MiMoCode 光标提交
+                    MiMoCode 光标草稿
                   </span>
                 )}
               </div>

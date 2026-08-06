@@ -12,8 +12,8 @@
  *          persistent USB transfer diagnostics, and serialized, exact-board
  *          native-only appearance attempts,
  *          USB desktop identity propagation,
- *          visible-composer submission outcomes that preserve unconfirmed
- *          delivery semantics without falling through to another channel,
+ *          staged visible-composer voice drafts consumed only by an explicit
+ *          same-board global Confirm action,
  *          formal local component latest-version listing/deletion with game/tool kind
  *          and manifest descriptions for component-center card summaries, without a manual import command,
  *          .clawpkg USB/SSH installs with per-component button-function
@@ -32,10 +32,10 @@
  *          a version-guarded bundled-image update path, and desktop progress events,
  *          validated P4 device-microphone PCM with capture-start frozen
  *          Agent/Session routing, utterance-correlated delivery events,
- *          single-claim final submission, cloud speech recognition, and
+ *          single-claim final recognition, cloud speech recognition, and
  *          prompt-free owner-only macOS ASR credential-file initialization,
  *          activation-gated, draft-replacing, AX-node-rebindable live/final Codex/Claude visible-composer synchronization
- *          plus macOS MiMoCode current-caret voice insertion and Return without session switching,
+ *          plus macOS MiMoCode current-caret draft insertion, with Return/send reserved for the device Confirm action,
  *          with non-prompting macOS Accessibility diagnostics and native system-consent requests at startup and protected operations,
  *          without background fallback, managed bridge-only non-visible-agent voice injection, stale
  *          LaunchAgent/legacy bridge cleanup with install-relative Node resources
@@ -640,6 +640,8 @@ struct DeviceVoiceContext {
     use_current_visible_session: bool,
     final_requested: AtomicBool,
     final_handled: AtomicBool,
+    draft_ready: AtomicBool,
+    draft_submit_requested: AtomicBool,
     cancelled: AtomicBool,
     latest_revision: AtomicU64,
     latest_text: Mutex<String>,
@@ -1058,7 +1060,7 @@ fn report_device_voice_delivery_failure(
     complete_device_voice_context(context);
 }
 
-fn submit_device_voice_final(
+fn stage_device_voice_final(
     context: Arc<DeviceVoiceContext>,
     revision: u64,
     text: String,
@@ -1128,20 +1130,198 @@ fn submit_device_voice_final(
             );
             return;
         };
-        emit_device_voice_transcript(&context, "submitting", revision, &text, true, true, "");
         thread::spawn(move || {
             if !device_voice_target_is_current(&context) {
                 cancel_device_voice_context(
                     &context,
-                    "voice target changed before MiMoCode current-caret insertion",
+                    "voice target changed before MiMoCode draft insertion",
                 );
                 return;
             }
-            match codex_composer::insert_and_submit_at_focused_text_target(&target, &text) {
+            match codex_composer::insert_at_focused_text_target(&target, &text) {
                 Ok(()) => {
                     if let Ok(mut composer_error) = context.composer_error.lock() {
                         composer_error.clear();
                     }
+                    context.draft_ready.store(true, Ordering::SeqCst);
+                    emit_device_voice_transcript(
+                        &context,
+                        "draft_ready",
+                        revision,
+                        &text,
+                        true,
+                        true,
+                        "",
+                    );
+                }
+                Err(error) => report_device_voice_delivery_failure(
+                    &context,
+                    revision,
+                    &text,
+                    &error,
+                    "MiMoCode 当前光标草稿写入失败",
+                    "FOCUSED_TEXT_INPUT_FAILED",
+                ),
+            }
+        });
+        return;
+    }
+
+    if agent_uses_visible_composer(&context.target.agent_id) {
+        wait_for_visible_composer_startup(&context);
+        if !device_voice_target_is_current(&context) {
+            cancel_device_voice_context(
+                &context,
+                "voice target changed while preparing the visible composer",
+            );
+            return;
+        }
+    }
+
+    let composer_update = context.composer.lock().ok().and_then(|composer| {
+        composer
+            .as_ref()
+            .map(|bridge| bridge.update(revision, &text))
+    });
+    let Some(update_result) = composer_update else {
+        if agent_uses_visible_composer(&context.target.agent_id) {
+            let agent_label = visible_composer_agent_label(&context.target.agent_id);
+            let error = context
+                .composer_error
+                .lock()
+                .map(|value| value.clone())
+                .unwrap_or_default();
+            let unavailable = format!("{agent_label} 前台会话未定位，语音草稿未写入");
+            report_device_voice_delivery_failure(
+                &context,
+                revision,
+                &text,
+                if error.trim().is_empty() {
+                    unavailable.as_str()
+                } else {
+                    error.as_str()
+                },
+                &unavailable,
+                "VISIBLE_COMPOSER_UNAVAILABLE",
+            );
+        } else {
+            context.draft_ready.store(true, Ordering::SeqCst);
+            emit_device_voice_transcript(&context, "draft_ready", revision, &text, true, true, "");
+        }
+        return;
+    };
+    if let Err(error) = update_result {
+        let agent_label = visible_composer_agent_label(&context.target.agent_id);
+        report_device_voice_delivery_failure(
+            &context,
+            revision,
+            &text,
+            &error,
+            &format!("{agent_label} 语音草稿写入失败"),
+            "VISIBLE_COMPOSER_DRAFT_FAILED",
+        );
+        return;
+    }
+    context.draft_ready.store(true, Ordering::SeqCst);
+    emit_device_voice_transcript(&context, "draft_ready", revision, &text, true, true, "");
+}
+
+fn input_event_matches_device_voice_confirm(
+    topic: &str,
+    payload: &serde_json::Value,
+    board_device_id: &str,
+    draft_ready: bool,
+    cancelled: bool,
+) -> bool {
+    if topic != "input/event"
+        || payload.get("action").and_then(serde_json::Value::as_str) != Some("page_enter")
+        || payload
+            .get("handledLocally")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        || !draft_ready
+        || cancelled
+    {
+        return false;
+    }
+    payload
+        .get("boardDeviceId")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|payload_board_device_id| payload_board_device_id == board_device_id)
+}
+
+fn input_event_confirms_device_voice_draft(
+    context: &DeviceVoiceContext,
+    topic: &str,
+    payload: &serde_json::Value,
+) -> bool {
+    input_event_matches_device_voice_confirm(
+        topic,
+        payload,
+        &context.board_device_id,
+        context.draft_ready.load(Ordering::SeqCst),
+        context.cancelled.load(Ordering::SeqCst),
+    )
+}
+
+fn confirm_pending_device_voice_draft(topic: &str, payload: &serde_json::Value) -> bool {
+    let context = active_device_voice_context()
+        .lock()
+        .ok()
+        .and_then(|active| active.clone());
+    let Some(context) = context else {
+        return false;
+    };
+    if !input_event_confirms_device_voice_draft(&context, topic, payload) {
+        return false;
+    }
+    if context.draft_submit_requested.swap(true, Ordering::SeqCst) {
+        return true;
+    }
+    if !device_voice_target_is_current(&context) {
+        cancel_device_voice_context(&context, "voice target changed before draft confirmation");
+        return true;
+    }
+    let revision = context.latest_revision.load(Ordering::SeqCst);
+    let text = context
+        .latest_text
+        .lock()
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    if text.is_empty() {
+        report_device_voice_delivery_failure(
+            &context,
+            revision,
+            "",
+            "语音草稿为空",
+            "语音草稿为空，未执行确认发送",
+            "VOICE_DRAFT_EMPTY",
+        );
+        return true;
+    }
+    emit_device_voice_transcript(&context, "submitting", revision, &text, true, true, "");
+
+    #[cfg(target_os = "macos")]
+    if context.target.agent_id == "mimocode" {
+        let target = context
+            .focused_text_target
+            .lock()
+            .ok()
+            .and_then(|target| target.as_ref().cloned());
+        let Some(target) = target else {
+            report_device_voice_delivery_failure(
+                &context,
+                revision,
+                &text,
+                "MiMoCode 语音草稿的光标定位已丢失",
+                "MiMoCode 当前光标未定位，未执行确认发送",
+                "FOCUSED_TEXT_INPUT_UNAVAILABLE",
+            );
+            return true;
+        };
+        thread::spawn(
+            move || match codex_composer::submit_at_focused_text_target(&target) {
+                Ok(()) if device_voice_target_is_current(&context) => {
                     emit_device_voice_transcript(
                         &context,
                         "submitted",
@@ -1161,67 +1341,51 @@ fn submit_device_voice_final(
                             "text": text,
                             "agentId": context.target.agent_id,
                             "sessionId": device_voice_session_id(&context),
-                            "message": "已写入 MiMoCode 当前光标位置并自动回车",
+                            "message": "已通过设备确认键发送 MiMoCode 语音草稿",
                             "composerMode": "focused-input",
                             "composerError": "",
                         }),
                     );
                     complete_device_voice_context(&context);
                 }
+                Ok(()) => cancel_device_voice_context(
+                    &context,
+                    "voice target changed during MiMoCode draft confirmation",
+                ),
                 Err(error) => report_device_voice_delivery_failure(
                     &context,
                     revision,
                     &text,
                     &error,
-                    "MiMoCode 当前光标输入失败，本次语音未写入",
-                    "FOCUSED_TEXT_INPUT_FAILED",
+                    "MiMoCode 确认键发送失败，语音草稿未自动重发",
+                    "FOCUSED_TEXT_SUBMIT_FAILED",
                 ),
-            }
-        });
-        return;
+            },
+        );
+        return true;
     }
 
-    if agent_uses_visible_composer(&context.target.agent_id) {
-        wait_for_visible_composer_startup(&context);
-        if !device_voice_target_is_current(&context) {
-            cancel_device_voice_context(
-                &context,
-                "voice target changed while preparing the visible composer",
-            );
-            return;
-        }
+    if !agent_uses_visible_composer(&context.target.agent_id) {
+        submit_device_voice_via_agent_bus(context, text);
+        return true;
     }
 
     let composer_submission = context.composer.lock().ok().and_then(|composer| {
         composer
             .as_ref()
-            .map(|bridge| bridge.submit(revision, &text))
+            .map(|bridge| bridge.confirm(revision, &text))
     });
     let Some(submission) = composer_submission else {
-        if agent_uses_visible_composer(&context.target.agent_id) {
-            let agent_label = visible_composer_agent_label(&context.target.agent_id);
-            let error = context
-                .composer_error
-                .lock()
-                .map(|value| value.clone())
-                .unwrap_or_default();
-            let unavailable = format!("{agent_label} 前台会话未定位，本次语音未发送");
-            report_device_voice_delivery_failure(
-                &context,
-                revision,
-                &text,
-                if error.trim().is_empty() {
-                    unavailable.as_str()
-                } else {
-                    error.as_str()
-                },
-                &unavailable,
-                "VISIBLE_COMPOSER_UNAVAILABLE",
-            );
-        } else {
-            submit_device_voice_via_agent_bus(context, text);
-        }
-        return;
+        let agent_label = visible_composer_agent_label(&context.target.agent_id);
+        report_device_voice_delivery_failure(
+            &context,
+            revision,
+            &text,
+            &format!("{agent_label} 语音草稿桥接已关闭"),
+            &format!("{agent_label} 输入框已无法确认，本次未发送"),
+            "VISIBLE_COMPOSER_UNAVAILABLE",
+        );
+        return true;
     };
 
     thread::spawn(move || {
@@ -1254,7 +1418,7 @@ fn submit_device_voice_final(
                         "text": text,
                         "agentId": context.target.agent_id,
                         "sessionId": device_voice_session_id(&context),
-                        "message": format!("已通过 {agent_label} 可见输入框发送到当前会话"),
+                        "message": format!("已通过设备确认键发送到 {agent_label} 当前会话"),
                         "composerMode": "visible",
                         "composerError": "",
                     }),
@@ -1265,21 +1429,17 @@ fn submit_device_voice_final(
                 let agent_label = visible_composer_agent_label(&context.target.agent_id);
                 cancel_device_voice_context(
                     &context,
-                    &format!("voice target changed before {agent_label} submission"),
+                    &format!("voice target changed before {agent_label} draft confirmation"),
                 );
             }
             VisibleComposerSubmitOutcome::ExplicitFailure(error) => {
                 let agent_label = visible_composer_agent_label(&context.target.agent_id);
-                if let Ok(mut composer_error) = context.composer_error.lock() {
-                    *composer_error = error.clone();
-                }
-                context.composer_visible.store(false, Ordering::SeqCst);
                 report_device_voice_delivery_failure(
                     &context,
                     revision,
                     &text,
                     &error,
-                    &format!("{agent_label} 前台提交失败，本次语音未发送"),
+                    &format!("{agent_label} 确认键发送失败，语音草稿未自动重发"),
                     "VISIBLE_COMPOSER_FAILED",
                 );
             }
@@ -1290,14 +1450,13 @@ fn submit_device_voice_final(
                     revision,
                     &text,
                     &error,
-                    &format!(
-                        "{agent_label} 前台提交结果未确认；为避免重复发送，本次不再尝试其他通道"
-                    ),
+                    &format!("{agent_label} 确认键发送结果未确认，语音草稿不会重复发送"),
                     "VISIBLE_COMPOSER_UNCONFIRMED",
                 );
             }
         }
     });
+    true
 }
 
 fn fail_device_voice_context(context: &Arc<DeviceVoiceContext>, error: &str) {
@@ -1340,6 +1499,8 @@ fn start_device_voice_context(
         use_current_visible_session,
         final_requested: AtomicBool::new(false),
         final_handled: AtomicBool::new(false),
+        draft_ready: AtomicBool::new(false),
+        draft_submit_requested: AtomicBool::new(false),
         cancelled: AtomicBool::new(false),
         latest_revision: AtomicU64::new(0),
         latest_text: Mutex::new(String::new()),
@@ -1549,7 +1710,7 @@ fn start_device_voice_context(
                 if text.trim().is_empty() {
                     fail_device_voice_context(&context, "火山引擎云端识别未检测到有效语音");
                 } else {
-                    submit_device_voice_final(context, revision, text, confidence);
+                    stage_device_voice_final(context, revision, text, confidence);
                 }
             }
             pc_audio::StreamingSpeechEvent::Error(error) => {
@@ -2199,6 +2360,10 @@ fn handle_incoming_usb_message(
         "usb-message",
         serde_json::json!({"topic": topic, "payload": payload}),
     );
+
+    if confirm_pending_device_voice_draft(&topic, &payload) {
+        return;
+    }
 
     if topic == "availability" {
         if let Some(online) = payload.get("online").and_then(|v| v.as_bool()) {
@@ -7533,8 +7698,8 @@ async fn install_clawpkg_over_ssh(
                     }
                     let mut outfile = std::fs::File::create(&outpath).map_err(|e| e.to_string())?;
                     let mut limited = entry.take(crate::clawpkg::CLAWPKG_MAX_ENTRY_BYTES + 1);
-                    let copied = std::io::copy(&mut limited, &mut outfile)
-                        .map_err(|e| e.to_string())?;
+                    let copied =
+                        std::io::copy(&mut limited, &mut outfile).map_err(|e| e.to_string())?;
                     if copied > crate::clawpkg::CLAWPKG_MAX_ENTRY_BYTES {
                         return Err("clawpkg 文件解压后超过安全上限".to_string());
                     }
@@ -11911,10 +12076,57 @@ mod tests {
     }
 
     #[test]
-    fn device_voice_final_submission_can_only_be_claimed_once() {
+    fn device_voice_final_recognition_can_only_be_claimed_once() {
         let final_handled = AtomicBool::new(false);
         assert!(claim_device_voice_final(&final_handled));
         assert!(!claim_device_voice_final(&final_handled));
+    }
+
+    #[test]
+    fn only_unhandled_confirm_for_the_same_board_submits_a_ready_voice_draft() {
+        let confirm = serde_json::json!({
+            "action": "page_enter",
+            "handledLocally": false,
+            "boardDeviceId": "board-p4",
+        });
+        assert!(input_event_matches_device_voice_confirm(
+            "input/event",
+            &confirm,
+            "board-p4",
+            true,
+            false,
+        ));
+        assert!(!input_event_matches_device_voice_confirm(
+            "input/event",
+            &serde_json::json!({ "action": "page_enter", "handledLocally": true, "boardDeviceId": "board-p4" }),
+            "board-p4",
+            true,
+            false,
+        ));
+        assert!(!input_event_matches_device_voice_confirm(
+            "input/event",
+            &serde_json::json!({ "action": "page_enter", "handledLocally": false, "boardDeviceId": "other" }),
+            "board-p4",
+            true,
+            false,
+        ));
+        assert!(!input_event_matches_device_voice_confirm(
+            "input/event",
+            &serde_json::json!({ "action": "page_enter", "handledLocally": false, "boardDeviceId": "board-p4" }),
+            "board-p4",
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn asr_final_stages_a_draft_and_does_not_call_the_submit_bridge() {
+        let source = include_str!("lib.rs");
+        let composer = include_str!("codex_composer.rs");
+        assert!(source.contains("fn stage_device_voice_final("));
+        assert!(source.contains("\"draft_ready\""));
+        assert!(source.contains("bridge.confirm(revision, &text)"));
+        assert!(!composer.contains("pub fn submit(&self"));
     }
 
     #[test]
