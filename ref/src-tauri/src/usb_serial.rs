@@ -11,8 +11,9 @@
  *          audio-only patch commits, legacy full-sync fallback for boards that
  *          do not support per-file asset acks yet, short-id ACK-gated widget
  *          .clawpkg OTA plus capability-gated, expected-board-id removal with
- *          legacy unsupported-phase NACK correlation, request-id-matched live
- *          device widget inventory, and persisted input configuration reads;
+ *          legacy unsupported-phase NACK correlation, Base64-safe firmware
+ *          chunks below legacy line limits, request-id-matched live device
+ *          widget inventory, and persisted input configuration reads;
  *          transaction_waiters owns shared ACK/request matching;
  *          appearance_transaction owns appearance integrity, sync planning,
  *          slot fallback, ACK fallback, and deterministic pack-ID policy;
@@ -6519,6 +6520,27 @@ mod tests {
     #[test]
     fn firmware_image_limit_matches_the_current_ota_partition() {
         assert_eq!(P4_FIRMWARE_MAX_IMAGE_SIZE, 0x280000);
+    }
+
+    #[test]
+    fn firmware_chunk_json_stays_below_the_legacy_usb_line_limit() {
+        let encoded_len = P4_FIRMWARE_CHUNK_SIZE.div_ceil(3) * 4;
+        let payload = serde_json::json!({
+            "topic": "firmware/chunk",
+            "payload": {
+                "transferId": "firmware-00000000-0000-0000-0000-000000000000",
+                "seq": 9999,
+                "decodedSize": P4_FIRMWARE_CHUNK_SIZE,
+                "data": "A".repeat(encoded_len),
+            },
+        });
+        let line = serde_json::to_string(&payload).unwrap();
+
+        assert_eq!(P4_FIRMWARE_CHUNK_SIZE % 3, 0);
+        assert!(
+            line.len() < 4 * 1024,
+            "firmware Base64 JSON must fit legacy P4 USB line buffering"
+        );
     }
 
     #[test]

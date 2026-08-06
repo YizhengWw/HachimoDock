@@ -1,6 +1,7 @@
 /*
  * [Input] ESP-IDF application images plus post-reboot P4 diagnostics.
- * [Output] Firmware image metadata/preflight, OTA limits/errors, and validated reboot results.
+ * [Output] Firmware image metadata/preflight, sub-4-KiB Base64 wire chunks,
+ *          OTA limits/errors, and validated reboot results.
  * [Pos] Pure firmware transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -9,7 +10,10 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
-pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 4 * 1024;
+// Keep the Base64 JSON line below 4 KiB for reliable transfer through every
+// supported P4 USB serial runtime. The size is divisible by three so full
+// chunks do not require Base64 padding.
+pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
 pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) const P4_FIRMWARE_CHUNK_ACK_TIMEOUT: Duration = Duration::from_secs(5);

@@ -80,6 +80,7 @@ export {
 import {
   DEVICE_BUTTON_CONFIG_MODEL_VERSION,
   DEVICE_BUTTON_CONFIG_STORAGE_KEY,
+  migrateP4V6ShippedBoardDefaults,
 } from "./component-center/button-config.js";
 
 // ---------- Voice config storage + constants (re-exported for BoardButtonPanel) ----------
@@ -367,9 +368,11 @@ function normalizeVoiceConfig(value = {}) {
 }
 
 export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtime = "") {
-  const boardConfig = response?.config && typeof response.config === "object"
-    ? response.config
-    : response;
+  const boardMigration = migrateP4V6ShippedBoardDefaults(response, runtime);
+  const migratedResponse = boardMigration.response;
+  const boardConfig = migratedResponse?.config && typeof migratedResponse.config === "object"
+    ? migratedResponse.config
+    : migratedResponse;
   const bindings = Array.isArray(boardConfig?.bindings) ? boardConfig.bindings : [];
   const bindingsByEvent = new Map(
     bindings
@@ -438,7 +441,7 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
     ? boardVoiceButton
     : voiceRow?.voiceTriggerId || current.trigger;
 
-  return normalizeVoiceConfig({
+  const normalized = normalizeVoiceConfig({
     ...current,
     enabled: boardVoiceEnabled,
     trigger,
@@ -446,6 +449,9 @@ export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtim
     buttonValues,
     buttonLabels,
   });
+  return boardMigration.migrated
+    ? { ...normalized, boardDefaultsMigrated: true }
+    : normalized;
 }
 
 export function applyVoiceEnabledForRuntime(value = {}, enabled = false, runtime = "") {
@@ -684,6 +690,8 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     onAudioActivity: onDeviceVoiceAudioActivity,
   });
   const [voiceConfig, setVoiceConfig] = useState(loadVoiceConfigFromStorage);
+  const voiceConfigRef = useRef(voiceConfig);
+  voiceConfigRef.current = voiceConfig;
   const [sessionDisplayEnabled, setSessionDisplayEnabled] = useState(
     loadSessionDisplayEnabled,
   );
@@ -787,17 +795,59 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
       ) {
         return null;
       }
-      setVoiceConfig((current) => {
-        const next = mergeBoardButtonConfig(current, boardConfig, usb.runtime);
-        saveVoiceConfigToStorage(next);
-        return next;
-      });
-      setVoiceConfigDirty(false);
+      const next = mergeBoardButtonConfig(voiceConfigRef.current, boardConfig, usb.runtime);
+      const boardDefaultsMigrated = next.boardDefaultsMigrated === true;
+      const persistedNext = normalizeVoiceConfig(next);
+      voiceConfigRef.current = persistedNext;
+      saveVoiceConfigToStorage(persistedNext);
+      setVoiceConfig(persistedNext);
+      if (!boardDefaultsMigrated) {
+        setVoiceConfigDirty(false);
+        setVoiceConfigOtaState({
+          pending: false,
+          tone: "success",
+          message: "已从板端读取按钮配置并更新客户端缓存。",
+        });
+        return boardConfig;
+      }
+
+      const migrationRevision = ++buttonConfigRevisionRef.current;
+      setVoiceConfigDirty(true);
       setVoiceConfigOtaState({
-        pending: false,
-        tone: "success",
-        message: "已从板端读取按钮配置并更新客户端缓存。",
+        pending: true,
+        tone: "",
+        message: "检测到板端仍是旧版默认按键，正在自动迁移 SW1/SW3...",
       });
+      const migratedVoiceRow = P4_BUTTON_CONTROL_ROWS.find(
+        (row) => row.voiceTriggerId && persistedNext.buttonActions[row.id] === "voice_ptt",
+      );
+      try {
+        await dispatchBoardButtonConfig({
+          boardDeviceId: buttonConfigTargetBoardDeviceId,
+          buttonActions: persistedNext.buttonActions,
+          buttonValues: persistedNext.buttonValues,
+          runtime: usb.runtime,
+          voiceButton: migratedVoiceRow?.voiceTriggerId || P4_DEFAULT_VOICE_TRIGGER,
+          voiceEnabled: persistedNext.enabled && Boolean(migratedVoiceRow),
+        });
+        if (buttonConfigRevisionRef.current === migrationRevision) {
+          setVoiceConfigDirty(false);
+          setVoiceConfigOtaState({
+            pending: false,
+            tone: "success",
+            message: "旧版默认按键已自动迁移：SW1 返回，SW3 确认。",
+          });
+        }
+      } catch (migrationError) {
+        if (buttonConfigRevisionRef.current === migrationRevision) {
+          setVoiceConfigDirty(true);
+          setVoiceConfigOtaState({
+            pending: false,
+            tone: "warning",
+            message: `SW1/SW3 已在客户端迁移；自动同步设备失败，请点击“同步到设备”：${migrationError}`,
+          });
+        }
+      }
       return boardConfig;
     } catch (error) {
       if (queryToken !== buttonConfigQueryTokenRef.current) return null;

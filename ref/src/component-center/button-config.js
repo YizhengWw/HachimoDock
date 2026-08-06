@@ -1,8 +1,9 @@
 /**
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
  * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
- *          button-config model-v7 migration signaling, and compatibility-only complete-map
- *          and snapshot helpers. Current installs keep bindings package-owned.
+ *          exact shipped-v6 board-default migration, button-config model-v7
+ *          signaling, and compatibility-only complete-map and snapshot helpers.
+ *          Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -98,6 +99,60 @@ export const P4_COMPONENT_BUTTON_EVENTS = [
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
 export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 7;
 export const COMPONENT_SYSTEM_ACTION_PAGE_MAIN = "page_main";
+
+const P4_V6_SHIPPED_DEFAULT_BINDINGS = {
+  "button.sw1.short_press": "page_enter",
+  "button.sw1.long_press": "disabled",
+  "button.sw1.hold": "voice_ptt",
+  "button.sw2.short_press": "component_center",
+  "button.sw2.long_press": "disabled",
+  "button.sw2.hold": "disabled",
+  "button.sw3.short_press": "page_back",
+  "button.sw3.long_press": "disabled",
+  "button.sw3.hold": "disabled",
+  "button.encoder.short_press": "page_enter",
+  "button.encoder.long_press": "disabled",
+  "button.encoder.hold": "disabled",
+  "knob.rotate_cw": "session_next",
+  "knob.rotate_ccw": "session_previous",
+  "joystick.up": "disabled",
+  "joystick.down": "disabled",
+};
+
+export function migrateP4V6ShippedBoardDefaults(response = {}, runtime = "") {
+  if (String(runtime || "").trim().toLowerCase() !== "esp-p4") {
+    return { response, migrated: false };
+  }
+  const wrapped = response?.config && typeof response.config === "object";
+  const boardConfig = wrapped ? response.config : response;
+  const bindings = Array.isArray(boardConfig?.bindings) ? boardConfig.bindings : [];
+  const actionsByEvent = new Map(bindings.map((binding) => [
+    String(binding?.event || "").trim(),
+    String(binding?.action || "").trim(),
+  ]));
+  const matchesShippedV6Defaults = Object.entries(P4_V6_SHIPPED_DEFAULT_BINDINGS)
+    .every(([event, action]) => actionsByEvent.get(event) === action);
+  if (!matchesShippedV6Defaults) return { response, migrated: false };
+
+  const migratedBindings = bindings.map((binding) => {
+    if (binding?.event === "button.sw1.short_press") {
+      return { ...binding, action: "page_back", value: "" };
+    }
+    if (binding?.event === "button.sw3.short_press") {
+      return { ...binding, action: "page_enter", value: "" };
+    }
+    return binding;
+  });
+  const migratedConfig = {
+    ...boardConfig,
+    version: DEVICE_BUTTON_CONFIG_MODEL_VERSION,
+    bindings: migratedBindings,
+  };
+  return {
+    response: wrapped ? { ...response, config: migratedConfig } : migratedConfig,
+    migrated: true,
+  };
+}
 
 const P4_COMPONENT_DOWNLINK_EVENTS = [
   "button.sw1.short_press",

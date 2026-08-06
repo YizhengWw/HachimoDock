@@ -216,8 +216,10 @@ test("dashboard hydrates the button cache from the connected board before restor
   const linuxBoard = readRepoFile("..", "legacy", "board-runtime", "src", "board_server.c");
 
   assert.match(dashboard, /invoke\("usb_get_button_config"/);
-  assert.match(dashboard, /mergeBoardButtonConfig\(current, boardConfig, usb\.runtime\)/);
-  assert.match(dashboard, /saveVoiceConfigToStorage\(next\)/);
+  assert.match(dashboard, /mergeBoardButtonConfig\(voiceConfigRef\.current, boardConfig, usb\.runtime\)/);
+  assert.match(dashboard, /saveVoiceConfigToStorage\(persistedNext\)/);
+  assert.match(dashboard, /boardDefaultsMigrated/);
+  assert.match(dashboard, /旧版默认按键已自动迁移：SW1 返回，SW3 确认/);
   assert.match(dashboard, /buttonConfigHydratedFor !== p4TargetBoardDeviceId/);
   assert.match(dashboard, /startingRevision !== buttonConfigRevisionRef\.current/);
   assert.match(dashboard, /已从板端读取按钮配置并更新客户端缓存/);

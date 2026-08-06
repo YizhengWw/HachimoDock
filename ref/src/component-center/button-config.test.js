@@ -1,7 +1,7 @@
 /**
  * [Input] component-center/button-config.js pure option and P4 downlink helpers.
- * [Output] Regression coverage for model-v7 signaling, unique component controls,
- *          and retained legacy full-map helpers.
+ * [Output] Regression coverage for model-v7 signaling, exact-default-only board
+ *          migration, unique component controls, and retained legacy full-map helpers.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -17,10 +17,53 @@ import {
   buildComponentButtonConfigSnapshot,
   componentInputEventSlots,
   defaultControlLabelForBinding,
+  migrateP4V6ShippedBoardDefaults,
 } from "./button-config.js";
 
 test("device button config model advances for the SW1-back/SW3-confirm defaults", () => {
   assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 7);
+});
+
+test("the exact shipped v6 board map migrates SW1/SW3 without changing custom maps", () => {
+  const bindings = [
+    ["button.sw1.short_press", "page_enter"],
+    ["button.sw1.long_press", "disabled"],
+    ["button.sw1.hold", "voice_ptt"],
+    ["button.sw2.short_press", "component_center"],
+    ["button.sw2.long_press", "disabled"],
+    ["button.sw2.hold", "disabled"],
+    ["button.sw3.short_press", "page_back"],
+    ["button.sw3.long_press", "disabled"],
+    ["button.sw3.hold", "disabled"],
+    ["button.encoder.short_press", "page_enter"],
+    ["button.encoder.long_press", "disabled"],
+    ["button.encoder.hold", "disabled"],
+    ["knob.rotate_cw", "session_next"],
+    ["knob.rotate_ccw", "session_previous"],
+    ["joystick.up", "disabled"],
+    ["joystick.down", "disabled"],
+  ].map(([event, action]) => ({ event, action, value: "" }));
+  const migration = migrateP4V6ShippedBoardDefaults(
+    { config: { version: 6, bindings } },
+    "esp-p4",
+  );
+
+  assert.equal(migration.migrated, true);
+  assert.equal(migration.response.config.version, 7);
+  assert.equal(
+    migration.response.config.bindings.find((binding) => binding.event === "button.sw1.short_press")?.action,
+    "page_back",
+  );
+  assert.equal(
+    migration.response.config.bindings.find((binding) => binding.event === "button.sw3.short_press")?.action,
+    "page_enter",
+  );
+
+  const customized = structuredClone({ config: { version: 7, bindings } });
+  customized.config.bindings.find((binding) => binding.event === "joystick.up").action = "session_previous";
+  const preserved = migrateP4V6ShippedBoardDefaults(customized, "esp-p4");
+  assert.equal(preserved.migrated, false);
+  assert.equal(preserved.response, customized);
 });
 
 test("component controls expose screen, switches, and joystick events without duplicates", () => {
