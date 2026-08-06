@@ -255,7 +255,7 @@ test("Tauri release resources are target-specific, install-relative, and reprodu
   assertTauriResourceSourceExists("bridge/packages/agent-session-bus/src");
   assertTauriResourceSourceExists("bridge/agents");
   assertTauriResourceSourceExists("bridge/hooks");
-  assertTauriResourceSourceExists("src-tauri/firmware/esp32-p4/firmware.bin");
+  assertTauriResourceSourceExists("firmware/esp32-p4/firmware.bin");
   assertTauriResourceSourceExists("../../skills/petui");
   assert.ok(existsSync(join(refRoot, "src-tauri/bridge/packages/clawd-backend-service/package-lock.json")));
 
