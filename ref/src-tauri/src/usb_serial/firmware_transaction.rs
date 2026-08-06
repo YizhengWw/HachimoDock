@@ -10,10 +10,11 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
-// Keep the Base64 JSON line below 4 KiB for reliable transfer through every
-// supported P4 USB serial runtime. The size is divisible by three so full
-// chunks do not require Base64 padding.
-pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
+// Keep the Base64 JSON below 2 KiB for the CH343 path. Some macOS CH343
+// driver/adapter combinations corrupt a long 4 Mbaud burst without failing
+// the write syscall, leaving valid JSON whose Base64 body no longer decodes.
+// 1020 is divisible by three, so every full chunk is also padding-free.
+pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 1_020;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
 pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) const P4_FIRMWARE_CHUNK_ACK_TIMEOUT: Duration = Duration::from_secs(5);

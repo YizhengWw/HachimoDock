@@ -199,6 +199,11 @@ const P4_NATIVE_USB_IO_TIMEOUT: Duration = Duration::from_secs(5);
 const P4_NATIVE_USB_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 const P4_NATIVE_USB_IDENTITY_TIMEOUT: Duration = Duration::from_secs(2);
 const P4_DEVICE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+// Firmware travels over the board's 4 Mbaud CH343 control link on current
+// hardware. Force short, drained bursts so the macOS USB-serial stack cannot
+// hand the adapter one multi-kilobyte Base64 line that is silently damaged.
+const P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 256;
+const P4_FIRMWARE_SERIAL_WRITE_GAP: Duration = Duration::from_millis(1);
 
 // native USB bulk is the high-speed ESP32-P4 OTG data plane. UART remains as a fallback.
 struct NativeUsbP4Transport {
@@ -1325,12 +1330,12 @@ impl UsbSerialManager {
 
     /// Send a message to the device
     pub fn send(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
-        self.send_inner(topic, payload, true, None)
+        self.send_inner(topic, payload, true, None, None)
     }
 
     /// Send without flush - for streaming bulk data.
     fn send_no_flush(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
-        self.send_inner(topic, payload, false, None)
+        self.send_inner(topic, payload, false, None, None)
     }
 
     pub(crate) fn send_to_board(
@@ -1339,7 +1344,22 @@ impl UsbSerialManager {
         topic: &str,
         payload: &serde_json::Value,
     ) -> Result<(), String> {
-        self.send_inner(topic, payload, true, Some(expected_board_device_id))
+        self.send_inner(topic, payload, true, Some(expected_board_device_id), None)
+    }
+
+    fn send_firmware_to_board(
+        &self,
+        expected_board_device_id: &str,
+        topic: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), String> {
+        self.send_inner(
+            topic,
+            payload,
+            true,
+            Some(expected_board_device_id),
+            Some(P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES),
+        )
     }
 
     fn send_inner(
@@ -1348,6 +1368,7 @@ impl UsbSerialManager {
         payload: &serde_json::Value,
         flush: bool,
         expected_board_device_id: Option<&str>,
+        write_slice_bytes: Option<usize>,
     ) -> Result<(), String> {
         let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
         let conn = conn.as_mut().ok_or("Not connected")?;
@@ -1377,14 +1398,35 @@ impl UsbSerialManager {
         let mut line = serde_json::to_string(&msg).map_err(|e| e.to_string())?;
         line.push('\n');
 
-        if let Err(error) = conn.writer.write_all(line.as_bytes()) {
-            conn.connected = false;
-            return Err(format!("Write failed: {}", error));
-        }
-        if flush {
-            if let Err(error) = conn.writer.flush() {
+        let bytes = line.as_bytes();
+        if let Some(write_slice_bytes) = write_slice_bytes.filter(|size| *size > 0) {
+            let chunks = bytes.chunks(write_slice_bytes);
+            let chunk_count = chunks.len();
+            for (index, chunk) in chunks.enumerate() {
+                if let Err(error) = conn.writer.write_all(chunk) {
+                    conn.connected = false;
+                    return Err(format!("Write failed: {}", error));
+                }
+                // The writer is buffered. Flush every slice, not only the full
+                // JSON line, otherwise the intended UART pacing is lost.
+                if let Err(error) = conn.writer.flush() {
+                    conn.connected = false;
+                    return Err(format!("Flush failed: {}", error));
+                }
+                if index + 1 < chunk_count {
+                    thread::sleep(P4_FIRMWARE_SERIAL_WRITE_GAP);
+                }
+            }
+        } else {
+            if let Err(error) = conn.writer.write_all(bytes) {
                 conn.connected = false;
-                return Err(format!("Flush failed: {}", error));
+                return Err(format!("Write failed: {}", error));
+            }
+            if flush {
+                if let Err(error) = conn.writer.flush() {
+                    conn.connected = false;
+                    return Err(format!("Flush failed: {}", error));
+                }
             }
         }
 
@@ -1899,7 +1941,7 @@ impl UsbSerialManager {
                 expected_received_bytes,
             )
             .map_err(FirmwareCommandError::Send)?;
-        if let Err(error) = self.send_to_board(expected_board_device_id, topic, payload) {
+        if let Err(error) = self.send_firmware_to_board(expected_board_device_id, topic, payload) {
             self.remove_firmware_ack_waiter(
                 transfer_id,
                 phase,
@@ -5179,6 +5221,14 @@ mod tests {
     #[derive(Clone)]
     struct SharedWriter(Arc<Mutex<Vec<u8>>>);
 
+    #[derive(Default)]
+    struct PacedWriterState {
+        writes: Vec<Vec<u8>>,
+        flushes: usize,
+    }
+
+    struct PacedWriter(Arc<Mutex<PacedWriterState>>);
+
     fn p4_test_wav() -> Vec<u8> {
         let pcm = [0x00, 0x00, 0xff, 0x7f];
         let mut wav = Vec::with_capacity(44 + pcm.len());
@@ -5205,6 +5255,18 @@ mod tests {
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Write for PacedWriter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().writes.push(buffer.to_vec());
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.0.lock().unwrap().flushes += 1;
             Ok(())
         }
     }
@@ -6523,7 +6585,7 @@ mod tests {
     }
 
     #[test]
-    fn firmware_chunk_json_stays_below_the_legacy_usb_line_limit() {
+    fn firmware_chunk_json_stays_below_two_kibibytes() {
         let encoded_len = P4_FIRMWARE_CHUNK_SIZE.div_ceil(3) * 4;
         let payload = serde_json::json!({
             "topic": "firmware/chunk",
@@ -6538,9 +6600,56 @@ mod tests {
 
         assert_eq!(P4_FIRMWARE_CHUNK_SIZE % 3, 0);
         assert!(
-            line.len() < 4 * 1024,
-            "firmware Base64 JSON must fit legacy P4 USB line buffering"
+            line.len() < 2 * 1024,
+            "firmware Base64 JSON must stay below the reliable CH343 burst size"
         );
+    }
+
+    #[test]
+    fn firmware_commands_are_flushed_in_short_serial_slices() {
+        let manager = UsbSerialManager::new();
+        let recorded = Arc::new(Mutex::new(PacedWriterState::default()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 1,
+            port_name: "COM15".to_string(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(PacedWriter(Arc::clone(&recorded))),
+            board_device_id: "p4-board-a".to_string(),
+            runtime: "esp-p4".to_string(),
+            device_model: "ESP32-P4".to_string(),
+            firmware: "1.0.0".to_string(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 0,
+            wire_protocol: "pet-usb-jsonl-v2".to_string(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+        let payload = serde_json::json!({
+            "transferId": "firmware-1",
+            "seq": 0,
+            "decodedSize": P4_FIRMWARE_CHUNK_SIZE,
+            "data": "A".repeat(P4_FIRMWARE_CHUNK_SIZE.div_ceil(3) * 4),
+        });
+
+        manager
+            .send_firmware_to_board("p4-board-a", "firmware/chunk", &payload)
+            .unwrap();
+
+        let recorded = recorded.lock().unwrap();
+        assert!(recorded.writes.len() > 1);
+        assert!(recorded
+            .writes
+            .iter()
+            .all(|write| write.len() <= P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES));
+        assert_eq!(recorded.flushes, recorded.writes.len());
+        let line = recorded.writes.concat();
+        assert!(line.ends_with(b"\n"));
+        let message: serde_json::Value = serde_json::from_slice(&line[..line.len() - 1]).unwrap();
+        assert_eq!(message["topic"], "firmware/chunk");
+        assert_eq!(message["payload"]["decodedSize"], P4_FIRMWARE_CHUNK_SIZE);
     }
 
     #[test]

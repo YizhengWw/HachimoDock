@@ -1583,7 +1583,10 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "pet_p4_ota_runtime_ready" in main
     assert "pet_p4_ota_runtime_failed" in main
     assert "runtime_render_healthy" in main
-    assert "P4_FIRMWARE_CHUNK_SIZE: usize = 4 * 1024" in desktop
+    assert "P4_FIRMWARE_CHUNK_SIZE: usize = 1_020" in desktop
+    assert "P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 256" in read_workspace(
+        "ref/src-tauri/src/usb_serial.rs"
+    )
     assert "P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 3" in desktop
     assert "P4_FIRMWARE_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(3)" in desktop
     assert "sequence + 1 == g_next_sequence" in ota
