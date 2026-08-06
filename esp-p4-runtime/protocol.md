@@ -430,11 +430,15 @@ PC to board:
   are rejected explicitly.
 - `firmware/begin`, `firmware/chunk`, `firmware/commit`, `firmware/abort`:
   writes a SHA-256-verified ESP-IDF image to the inactive 2.5MiB OTA slot. The
-  desktop starts with 2046-byte decoded chunks and, without restarting the
-  transaction or advancing its sequence, reduces a device-rejected Base64
-  chunk to 1020 and then 510 bytes. After reboot the backlight remains hidden
-  through built-in component migration and is revealed only after the first
-  complete frame has rendered.
+  desktop uses 4092-byte padding-free decoded chunks when schema 5 and the
+  advertised 4KiB receiver are both present, otherwise it starts at the legacy
+  2046-byte size. A transient Base64 rejection retries the same sequence at the
+  current size; three repeated rejections reduce it through 2046, 1020, then
+  510 bytes without restarting the transaction, and 32 successful chunks
+  restore the next larger size. Lost begin acknowledgements are aborted and
+  retried within the same update action. After reboot the backlight remains
+  hidden through built-in component migration and is revealed only after the
+  first complete frame has rendered.
 - `firmware/query`: returns running, boot, and next partition metadata on
   `firmware/status`.
 - `diagnostics/query`: returns boot/reset history, heap and PSRAM low-water

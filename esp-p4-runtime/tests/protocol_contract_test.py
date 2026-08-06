@@ -1511,7 +1511,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.33-p4")' in project
+    assert 'set(PROJECT_VER "0.7.34-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1591,7 +1591,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.33-p4")' in project
+    assert 'set(PROJECT_VER "0.7.34-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1625,6 +1625,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "pet_p4_ota_runtime_ready" in main
     assert "pet_p4_ota_runtime_failed" in main
     assert "runtime_render_healthy" in main
+    assert "P4_FIRMWARE_FAST_CHUNK_SIZE: usize = 4_092" in desktop
     assert "P4_FIRMWARE_CHUNK_SIZE: usize = 2_046" in desktop
     assert "P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 64" in read_workspace(
         "ref/src-tauri/src/usb_serial.rs"
@@ -1632,6 +1633,9 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 20" in desktop
     assert "P4_FIRMWARE_FALLBACK_CHUNK_SIZE: usize = 1_020" in desktop
     assert "P4_FIRMWARE_SAFE_CHUNK_SIZE: usize = 510" in desktop
+    assert "P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK: usize = 3" in desktop
+    assert "preferred_firmware_chunk_size" in desktop
+    assert "firmware_recovery_chunk_size" in desktop
     assert "firmware_corruption_fallback_size" in desktop
     assert "payload corruption at seq=" in read_workspace("ref/src-tauri/src/usb_serial.rs")
     assert "P4_FIRMWARE_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(3)" in desktop

@@ -1,7 +1,7 @@
 /*
  * [Input] ESP-IDF application images plus post-reboot P4 diagnostics.
- * [Output] Firmware image metadata/preflight, adaptive sub-4-KiB Base64 wire
- *          chunks, OTA limits/errors, and validated reboot results.
+ * [Output] Firmware image metadata/preflight, capability-sized adaptive Base64
+ *          wire chunks, OTA limits/errors, and validated reboot results.
  * [Pos] Pure firmware transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -10,21 +10,26 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
 
-// Keep the Base64 JSON below 4 KiB for legacy receivers. The host drains the
-// line in much smaller physical writes, so 2046-byte chunks remain reliable
-// while finishing before older firmware's whole-transfer watchdog expires.
-// 2046 is divisible by three, so every full chunk is padding-free.
+// Protocol-schema-5 firmware advertises a decoded 4 KiB receiver and uses a
+// 32 KiB JSON line buffer. Keep three bytes below that decoded ceiling so full
+// Base64 chunks have no padding. Legacy receivers retain the sub-4-KiB wire
+// line below; both sizes are drained through short physical serial writes.
+pub(super) const P4_FIRMWARE_FAST_CHUNK_SIZE: usize = 4_092;
 pub(super) const P4_FIRMWARE_CHUNK_SIZE: usize = 2_046;
 pub(super) const P4_FIRMWARE_FALLBACK_CHUNK_SIZE: usize = 1_020;
 pub(super) const P4_FIRMWARE_SAFE_CHUNK_SIZE: usize = 510;
+pub(super) const P4_FIRMWARE_FAST_PROTOCOL_SCHEMA: u32 = 5;
+pub(super) const P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK: usize = 3;
+pub(super) const P4_FIRMWARE_RECOVERY_SUCCESS_STREAK: usize = 32;
 pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
-pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 // A healthy 4 Mbaud board ACK arrives within a few milliseconds. A longer
 // timeout only lets a lost/corrupted ACK consume the old firmware's bounded
 // whole-transfer window before the duplicate chunk can be retried.
 pub(super) const P4_FIRMWARE_CHUNK_ACK_TIMEOUT: Duration = Duration::from_millis(150);
 pub(super) const P4_FIRMWARE_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(3);
 pub(super) const P4_FIRMWARE_RECONNECT_TIMEOUT: Duration = Duration::from_secs(90);
+pub(super) const P4_FIRMWARE_BEGIN_MAX_ATTEMPTS: usize = 3;
 pub(super) const P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 20;
 pub(super) const P4_FIRMWARE_COMMIT_MAX_ATTEMPTS: usize = 3;
 pub(super) const P4_FIRMWARE_PROJECT_NAME: &str = "pet_manager_p4_runtime";
@@ -78,13 +83,48 @@ pub(super) fn firmware_corruption_fallback_size(
     ) {
         return None;
     }
-    if current_size > P4_FIRMWARE_FALLBACK_CHUNK_SIZE {
+    if current_size > P4_FIRMWARE_CHUNK_SIZE {
+        Some(P4_FIRMWARE_CHUNK_SIZE)
+    } else if current_size > P4_FIRMWARE_FALLBACK_CHUNK_SIZE {
         Some(P4_FIRMWARE_FALLBACK_CHUNK_SIZE)
     } else if current_size > P4_FIRMWARE_SAFE_CHUNK_SIZE {
         Some(P4_FIRMWARE_SAFE_CHUNK_SIZE)
     } else {
         None
     }
+}
+
+pub(super) fn preferred_firmware_chunk_size(protocol_schema: u32, capabilities: &Value) -> usize {
+    let advertised_max = capabilities
+        .pointer("/firmwareUpdate/chunkBytes")
+        .and_then(Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .unwrap_or_default();
+    if protocol_schema >= P4_FIRMWARE_FAST_PROTOCOL_SCHEMA
+        && advertised_max >= P4_FIRMWARE_FAST_CHUNK_SIZE
+    {
+        P4_FIRMWARE_FAST_CHUNK_SIZE
+    } else {
+        P4_FIRMWARE_CHUNK_SIZE
+    }
+}
+
+pub(super) fn firmware_recovery_chunk_size(
+    current_size: usize,
+    preferred_size: usize,
+    successful_chunks: usize,
+) -> Option<usize> {
+    if current_size >= preferred_size || successful_chunks < P4_FIRMWARE_RECOVERY_SUCCESS_STREAK {
+        return None;
+    }
+    let next_size = if current_size < P4_FIRMWARE_FALLBACK_CHUNK_SIZE {
+        P4_FIRMWARE_FALLBACK_CHUNK_SIZE
+    } else if current_size < P4_FIRMWARE_CHUNK_SIZE {
+        P4_FIRMWARE_CHUNK_SIZE
+    } else {
+        P4_FIRMWARE_FAST_CHUNK_SIZE
+    };
+    Some(next_size.min(preferred_size))
 }
 
 impl std::fmt::Display for FirmwareCommandError {
