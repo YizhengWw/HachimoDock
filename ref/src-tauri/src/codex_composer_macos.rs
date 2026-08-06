@@ -2,8 +2,9 @@
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus device speech text.
  * [Output] Native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
- *          exact-session visible-composer submission with intentional draft replacement
- *          and no unverified-current-window fallback,
+ *          exact-session visible-composer submission with intentional draft
+ *          replacement, plus unique-sidebar-row recovery when a Codex build
+ *          omits the active title, without an unverified-current-window fallback,
  *          and clipboard-preserving current-caret insertion plus Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
@@ -1276,6 +1277,52 @@ fn find_session_rows(
     rows
 }
 
+fn press_unique_session_row(
+    agent: MacosAgent,
+    session_title: &str,
+    workspace_label: &str,
+) -> Result<(), String> {
+    let session_title = normalize_text(session_title);
+    if session_title.is_empty() {
+        return Err(format!("当前 {} 会话没有可定位的标题", agent.label()));
+    }
+    let mut windows = agent_windows(agent)?;
+    for target in &windows {
+        show_sidebar(target);
+    }
+    windows = agent_windows(agent)?;
+    let mut rows = find_session_rows(&windows, &session_title, workspace_label);
+    if rows.len() > 1 && !workspace_label.is_empty() {
+        rows.retain(|row| row.workspace_matches);
+    }
+    if rows.is_empty() {
+        return Err(format!(
+            "在 {} macOS 侧边栏中没有找到绑定会话",
+            agent.label()
+        ));
+    }
+    if rows.len() > 1 {
+        return Err(format!(
+            "{} macOS 侧边栏中有多个同名会话，无法安全定位",
+            agent.label()
+        ));
+    }
+    let row = rows.remove(0);
+    let target = CodexWindow {
+        app: row.app,
+        window: row.window,
+    };
+    focus_window(&target)?;
+    let scroll_to_visible = CFString::new("AXScrollToVisible");
+    if element_supports_action(&row.target, "AXScrollToVisible") {
+        let _ = row.target.perform_action(&scroll_to_visible);
+        thread::sleep(Duration::from_millis(80));
+    }
+    row.target
+        .press()
+        .map_err(|error| format!("无法打开 {} macOS 会话: {error}", agent.label()))
+}
+
 pub(super) fn focus_session(
     agent: MacosAgent,
     deep_link: &str,
@@ -1314,47 +1361,14 @@ pub(super) fn focus_session(
     if session_title.is_empty() {
         return Err(format!("当前 {} 会话没有可定位的标题", agent.label()));
     }
-    let mut windows = agent_windows(agent)?;
+    let windows = agent_windows(agent)?;
     if windows
         .iter()
         .any(|target| active_title_matches(&target.window, &session_title))
     {
         return Ok(());
     }
-    for target in &windows {
-        show_sidebar(target);
-    }
-    windows = agent_windows(agent)?;
-    let mut rows = find_session_rows(&windows, &session_title, workspace_label);
-    if rows.len() > 1 && !workspace_label.is_empty() {
-        rows.retain(|row| row.workspace_matches);
-    }
-    if rows.is_empty() {
-        return Err(format!(
-            "在 {} macOS 侧边栏中没有找到绑定会话",
-            agent.label()
-        ));
-    }
-    if rows.len() > 1 {
-        return Err(format!(
-            "{} macOS 侧边栏中有多个同名会话，无法安全定位",
-            agent.label()
-        ));
-    }
-    let row = rows.remove(0);
-    let target = CodexWindow {
-        app: row.app,
-        window: row.window,
-    };
-    focus_window(&target)?;
-    let scroll_to_visible = CFString::new("AXScrollToVisible");
-    if element_supports_action(&row.target, "AXScrollToVisible") {
-        let _ = row.target.perform_action(&scroll_to_visible);
-        thread::sleep(Duration::from_millis(80));
-    }
-    row.target
-        .press()
-        .map_err(|error| format!("无法打开 {} macOS 会话: {error}", agent.label()))?;
+    press_unique_session_row(agent, &session_title, workspace_label)?;
 
     let deadline = Instant::now() + SESSION_CONFIRM_TIMEOUT;
     while Instant::now() < deadline {
@@ -1629,14 +1643,31 @@ pub(super) fn begin_voice(
 ) -> Result<MacosComposerState, String> {
     focus_session(agent, deep_link, session_id, session_title, workspace_label)?;
     let session_title = normalize_text(session_title);
-    let target = find_exact_voice_target(agent, session_id, &session_title)?;
+    let (target, pin_visible_target) =
+        match find_exact_voice_target(agent, session_id, &session_title) {
+            Ok(target) => (target, false),
+            Err(exact_error) if agent == MacosAgent::Codex && !session_title.is_empty() => {
+                press_unique_session_row(agent, &session_title, workspace_label).map_err(
+                    |row_error| {
+                        format!("{exact_error}; 无法通过唯一侧边栏会话恢复定位: {row_error}")
+                    },
+                )?;
+                let target = find_current_visible_target(agent).map_err(|composer_error| {
+                    format!(
+                    "{exact_error}; 已重新选择唯一侧边栏会话，但输入框仍不可用: {composer_error}"
+                )
+                })?;
+                (target, true)
+            }
+            Err(error) => return Err(error),
+        };
     focus_composer(&target)?;
     Ok(MacosComposerState {
         agent,
         session_id: session_id.to_string(),
         session_title,
         last_value: String::new(),
-        current_visible_target: None,
+        current_visible_target: pin_visible_target.then_some(target),
     })
 }
 
