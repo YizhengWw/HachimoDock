@@ -1,8 +1,11 @@
 /*
- * [Input] Bounded widget/button JSON, mini-app install/delete actions, periodic ticks, and validated stats.
+ * [Input] Bounded widget/button JSON, firmware-embedded built-ins, mini-app
+ *         install/delete actions, periodic ticks, and validated stats.
  * [Output] Persisted declarative mini-app catalog, active state, context-resolvable
- *          buttons, and fixed-size dashboard/component-center views for the renderer.
+ *          buttons, post-OTA built-in package migration, and fixed-size
+ *          dashboard/component-center views for the renderer.
  * [Pos] ESP32-P4 negative-screen runtime and transactional multi-widget installer.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
 
 #include "pet_p4_miniapp.h"
@@ -41,10 +44,18 @@
 #define MINIAPP_ID_PATH "/spiffs/p4-miniapp-id.txt"
 #define MINIAPP_ID_TMP_PATH "/spiffs/p4-miniapp-id.tmp"
 #define MINIAPP_CATALOG_PATH "/spiffs/p4-miniapps.json"
+#define MINIAPP_BUILTIN_MARKER_PATH "/spiffs/p4-builtins.txt"
+#define MINIAPP_BUILTIN_MARKER_TMP_PATH "/spiffs/p4-builtins.tmp"
 #define MINIAPP_CATALOG_GENERATION_COUNT 2
 #define MINIAPP_PACKAGE_GENERATION_COUNT 2
 #define MINIAPP_CATALOG_VERSION 2
 #define MINIAPP_CATALOG_JSON_MAX 4096
+
+#ifndef PET_P4_BUILD_ID
+#define PET_P4_BUILD_ID "unknown-build"
+#endif
+
+extern const unsigned char pet_p4_builtin_components_json[];
 
 typedef enum {
   MINIAPP_VAR_INT,
@@ -228,6 +239,10 @@ static size_t g_catalog_selected;
 static int g_catalog_file_generation = -1;
 static uint32_t g_catalog_sequence;
 static portMUX_TYPE g_runtime_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static const char *const g_retired_builtin_ids[] = {
+  "falling-catch",
+};
 
 static bool remove_file_if_present(const char *path);
 static bool parse_bounded_scene(
@@ -3233,6 +3248,160 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
            (unsigned int) g_runtime.tick_count);
   memset(&g_staging, 0, sizeof(g_staging));
   return true;
+}
+
+static bool commit_builtin_package(
+  const char *widget_id,
+  const char *widget_json,
+  const char *buttons_json,
+  char *error,
+  size_t error_size
+) {
+  static const char *const transfer_id = "firmware-builtins";
+  cJSON *payload;
+  if (!safe_widget_id(widget_id) || !widget_json || !buttons_json) return false;
+  memset(&g_staging, 0, sizeof(g_staging));
+  g_staging.active = true;
+  copy_utf8(g_staging.transfer_id, sizeof(g_staging.transfer_id), transfer_id);
+  copy_utf8(g_staging.widget_id, sizeof(g_staging.widget_id), widget_id);
+  g_staging.widget_len = strlen(widget_json);
+  g_staging.buttons_len = strlen(buttons_json);
+  memcpy(g_staging.widget_json, widget_json, g_staging.widget_len + 1);
+  memcpy(g_staging.buttons_json, buttons_json, g_staging.buttons_len + 1);
+
+  payload = cJSON_CreateObject();
+  if (!payload
+      || !cJSON_AddStringToObject(payload, "transferId", transfer_id)
+      || !cJSON_AddStringToObject(payload, "widgetId", widget_id)) {
+    cJSON_Delete(payload);
+    memset(&g_staging, 0, sizeof(g_staging));
+    set_error(error, error_size, "not enough memory to stage built-in component");
+    return false;
+  }
+  bool committed = pet_p4_miniapp_install_commit(payload, error, error_size);
+  cJSON_Delete(payload);
+  return committed;
+}
+
+static bool restore_active_after_builtin_sync(const char *preferred_widget_id) {
+  int index = preferred_widget_id && preferred_widget_id[0]
+    ? catalog_find(g_catalog, g_catalog_count, preferred_widget_id)
+    : -1;
+  if (index < 0) index = catalog_find(g_catalog, g_catalog_count, "two-key-pong");
+  if (index < 0 && g_catalog_count > 0) index = 0;
+  return index < 0 || activate_catalog_index((size_t) index);
+}
+
+esp_err_t pet_p4_miniapp_sync_builtins(void) {
+  char marker[128] = {0};
+  char restore_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
+  char error[160] = {0};
+  cJSON *bundle = NULL;
+  const cJSON *bundle_version;
+  const cJSON *components;
+  bool catalog_changed = false;
+  size_t updated = 0;
+
+  if (read_file(MINIAPP_BUILTIN_MARKER_PATH, marker, sizeof(marker))
+      && strcmp(marker, PET_P4_BUILD_ID) == 0) {
+    return ESP_OK;
+  }
+  bundle = cJSON_Parse((const char *) pet_p4_builtin_components_json);
+  bundle_version = cJSON_GetObjectItemCaseSensitive(bundle, "version");
+  components = cJSON_GetObjectItemCaseSensitive(bundle, "components");
+  if (!cJSON_IsObject(bundle)
+      || !cJSON_IsNumber(bundle_version)
+      || bundle_version->valueint != 1
+      || !cJSON_IsArray(components)
+      || cJSON_GetArraySize(components) != 7) {
+    cJSON_Delete(bundle);
+    ESP_LOGW(TAG, "embedded built-in component bundle is invalid");
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+  (void) pet_p4_miniapp_active_id(restore_widget_id, sizeof(restore_widget_id));
+
+  for (size_t i = 0;
+       i < sizeof(g_retired_builtin_ids) / sizeof(g_retired_builtin_ids[0]);
+       i += 1) {
+    if (catalog_find(g_catalog, g_catalog_count, g_retired_builtin_ids[i]) < 0) continue;
+    error[0] = '\0';
+    if (!pet_p4_miniapp_remove(g_retired_builtin_ids[i], error, sizeof(error))) {
+      ESP_LOGW(TAG, "failed to retire built-in id=%s: %s", g_retired_builtin_ids[i], error);
+      (void) restore_active_after_builtin_sync(restore_widget_id);
+      cJSON_Delete(bundle);
+      return ESP_FAIL;
+    }
+    catalog_changed = true;
+  }
+
+  const cJSON *package;
+  cJSON_ArrayForEach(package, components) {
+    const char *widget_id = json_string(package, "id");
+    const cJSON *widget = cJSON_GetObjectItemCaseSensitive(package, "widget");
+    const cJSON *buttons = cJSON_GetObjectItemCaseSensitive(package, "buttons");
+    char *widget_json = cJSON_IsObject(widget) ? cJSON_PrintUnformatted(widget) : NULL;
+    char *buttons_json = cJSON_IsArray(buttons) ? cJSON_PrintUnformatted(buttons) : NULL;
+    if (!safe_widget_id(widget_id)
+        || !widget_json
+        || strlen(widget_json) >= MINIAPP_WIDGET_JSON_MAX
+        || !buttons_json
+        || strlen(buttons_json) >= MINIAPP_BUTTONS_JSON_MAX) {
+      cJSON_free(widget_json);
+      cJSON_free(buttons_json);
+      ESP_LOGW(TAG, "embedded built-in id=%s exceeds runtime JSON limits", widget_id);
+      (void) restore_active_after_builtin_sync(restore_widget_id);
+      cJSON_Delete(bundle);
+      return ESP_ERR_INVALID_SIZE;
+    }
+
+    const uint32_t widget_checksum = miniapp_checksum(widget_json, strlen(widget_json));
+    const uint32_t buttons_checksum = miniapp_checksum(buttons_json, strlen(buttons_json));
+    const int existing = catalog_find(g_catalog, g_catalog_count, widget_id);
+    const bool current = existing >= 0
+      && g_catalog[existing].widget_checksum == widget_checksum
+      && g_catalog[existing].buttons_checksum == buttons_checksum;
+    if (!current) {
+      error[0] = '\0';
+      if (!commit_builtin_package(widget_id, widget_json, buttons_json, error, sizeof(error))) {
+        cJSON_free(widget_json);
+        cJSON_free(buttons_json);
+        ESP_LOGW(TAG, "failed to sync built-in id=%s: %s", widget_id, error);
+        (void) restore_active_after_builtin_sync(restore_widget_id);
+        cJSON_Delete(bundle);
+        return ESP_FAIL;
+      }
+      catalog_changed = true;
+      updated += 1;
+    }
+    cJSON_free(widget_json);
+    cJSON_free(buttons_json);
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+
+  if (catalog_changed && !restore_active_after_builtin_sync(restore_widget_id)) {
+    ESP_LOGW(TAG, "built-in components synced but active component could not be restored");
+    cJSON_Delete(bundle);
+    return ESP_ERR_INVALID_STATE;
+  }
+  if (!write_file_atomic(
+        MINIAPP_BUILTIN_MARKER_TMP_PATH,
+        MINIAPP_BUILTIN_MARKER_PATH,
+        PET_P4_BUILD_ID,
+        strlen(PET_P4_BUILD_ID)
+      )) {
+    ESP_LOGW(TAG, "built-in component marker could not be committed");
+    cJSON_Delete(bundle);
+    return ESP_FAIL;
+  }
+  ESP_LOGI(
+    TAG,
+    "firmware built-ins ready build=%s updated=%u catalog=%u",
+    PET_P4_BUILD_ID,
+    (unsigned int) updated,
+    (unsigned int) g_catalog_count
+  );
+  cJSON_Delete(bundle);
+  return ESP_OK;
 }
 
 static bool remove_file_if_present(const char *path) {

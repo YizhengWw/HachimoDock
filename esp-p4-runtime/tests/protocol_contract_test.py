@@ -2,8 +2,8 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including authoritative NVS input-config readback and desktop/device widget
-visual-preset parity, including SW1-back/SW3-confirm global defaults and
-global-exit-first SW3/joystick component controls.
+visual-preset parity, including SW1-back/SW3-confirm global defaults,
+global-exit-first component controls, and firmware-embedded built-ins.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
 Also verifies the installable native Flappy Bird package and its one-button contract.
 Also locks logical RGB565 to the matching RGB element order used by the panel.
@@ -624,6 +624,50 @@ def test_p4_component_packages_commit_through_validated_ab_catalog_snapshots():
     assert '"packageGeneration": 0' in factory
     assert "fnv1a32_bytes(widget_bytes)" in factory
     assert "componentCatalogGeneration=true" in protocol_doc
+
+
+def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
+    cmake = read_required("main/CMakeLists.txt")
+    bundle = json.loads(read_required("main/pet_p4_builtin_components.json"))
+    miniapp = read_required("main/pet_p4_miniapp.c")
+    miniapp_header = read_required("main/pet_p4_miniapp.h")
+    main = read_required("main/pet_p4_main.c")
+    protocol_doc = read("protocol.md")
+
+    builtin_ids = [
+        "two-key-pong",
+        "flappy-bird",
+        "block-combo",
+        "snake-turn",
+        "tomato-clock",
+        "drink-reminder",
+        "token-usage",
+    ]
+    assert bundle["version"] == 1
+    assert [item["id"] for item in bundle["components"]] == builtin_ids
+    for item in bundle["components"]:
+        component_id = item["id"]
+        assert item["widget"] == json.loads(
+            read_workspace(f"ref/builtin-clawpkgs/{component_id}/runtime/widget.json")
+        )
+        assert item["buttons"] == json.loads(
+            read_workspace(f"ref/builtin-clawpkgs/{component_id}/buttons.json")
+        )
+
+    assert '"pet_p4_builtin_components_data.c"' in cmake
+    assert "build_builtin_bundle.py" in cmake
+    assert '"--check"' in cmake
+    assert "extern const unsigned char pet_p4_builtin_components_json[]" in miniapp
+    assert "pet_p4_miniapp_sync_builtins" in miniapp_header
+    assert "esp_err_t pet_p4_miniapp_sync_builtins(void)" in miniapp
+    assert "pet_p4_miniapp_sync_builtins()" in main
+    assert "MINIAPP_BUILTIN_MARKER_PATH" in miniapp
+    assert "strcmp(marker, PET_P4_BUILD_ID) == 0" in miniapp
+    assert "cJSON_Parse((const char *) pet_p4_builtin_components_json)" in miniapp
+    assert "commit_builtin_package" in miniapp
+    assert '"falling-catch"' in miniapp
+    assert "restore_active_after_builtin_sync" in miniapp
+    assert "Component ids outside the firmware-owned list are preserved" in protocol_doc
 
 
 def test_builtin_pixel_games_use_bounded_native_game_presets():
@@ -1467,7 +1511,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.30-p4")' in project
+    assert 'set(PROJECT_VER "0.7.31-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1546,7 +1590,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.30-p4")' in project
+    assert 'set(PROJECT_VER "0.7.31-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2203,6 +2247,7 @@ if __name__ == "__main__":
         test_p4_widget_delete_clears_persistence_and_returns_to_main,
         test_p4_widget_inventory_is_request_matched_and_capacity_bounded,
         test_p4_component_packages_commit_through_validated_ab_catalog_snapshots,
+        test_p4_ab_firmware_embeds_and_migrates_all_builtin_components,
         test_builtin_pixel_games_use_bounded_native_game_presets,
         test_generic_scene_runtime_is_shared_by_games_and_tools,
         test_p4_identity_and_protocol_nack_are_explicit,

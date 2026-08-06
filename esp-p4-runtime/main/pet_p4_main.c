@@ -2,7 +2,8 @@
  * [Input] UART/native USB protocol traffic, display/input state, and assets.
  * [Output] initialized P4 runtime with serialized state access, origin-aware
  *          protocol replies, non-destructive storage mounting, and independent
- *          render/RX health samples.
+ *          render/RX health samples, plus post-OTA synchronization of the
+ *          built-in component bundle carried inside the application image.
  * [Pos] ESP32-P4 firmware entry point and task coordinator.
  * [Sync] If this file changes, update esp-p4-runtime/.folder.md.
  */
@@ -596,6 +597,10 @@ void app_main(void) {
   esp_err_t miniapp_err = pet_p4_miniapp_init();
   if (miniapp_err != ESP_OK && miniapp_err != ESP_ERR_INVALID_STATE) {
     ESP_LOGW(TAG, "mini-app init failed: %s", esp_err_to_name(miniapp_err));
+  }
+  esp_err_t builtin_sync_err = pet_p4_miniapp_sync_builtins();
+  if (builtin_sync_err != ESP_OK) {
+    ESP_LOGW(TAG, "built-in component sync failed: %s", esp_err_to_name(builtin_sync_err));
   }
   // Parse the large appearance manifest before any USB/UART receive task can
   // concurrently parse command JSON during boot.

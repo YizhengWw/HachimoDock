@@ -512,6 +512,15 @@ normal rendering. The board keeps the committed runtime alive for 5 seconds
 before restart, leaving enough time for the desktop's 3-second commit timeout
 and one idempotent retry to receive the cached commit result.
 
+The A/B application image contains the canonical runtime/button JSON for all
+seven built-in components. On first boot of each clean firmware build,
+`pet_p4_miniapp_sync_builtins` compares compacted package checksums with the
+existing A/B component catalog, replaces changed same-id built-ins, adds missing
+ones if slots are available, removes retired `falling-catch`, and restores the
+previous active component (or defaults to `two-key-pong`). A build-id marker is
+written only after the migration completes, so an interrupted migration retries
+on the next boot. Component ids outside the firmware-owned list are preserved.
+
 Firmware OTA, asset OTA, and delayed reboot are mutually exclusive. Once an
 OTA commit or diagnostic reboot is pending, new asset/native transfers are
 rejected until the board restarts. Boot validation samples LCD/render and both

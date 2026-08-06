@@ -158,6 +158,10 @@ cd ref
 npm run pack-builtins
 ```
 
+这七个内置组件的 runtime/button JSON 同时嵌入 PC 所携带的 P4 A/B 固件镜像。
+通过 PC 完成固件升级并重启后，设备会按同一 id 刷新内置组件、补齐缺失项并移除
+已退役的接住星星，同时保留用户自建组件和升级前正在使用的组件选择。
+
 P4 只安装 `p4-bounded-runtime-v3` 受限声明式运行时，仍拒绝任意 reader/fetcher。内置
 `token-usage` 是受控例外：桌面端下发前移除 Linux 文件 reader，P4 再用已经
 校验的 `stats/update` 数据更新总量、输入、输出和缓存变量，不在设备上开放

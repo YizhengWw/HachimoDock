@@ -1,3 +1,10 @@
+/*
+ * [Input] Persisted/embedded component packages and runtime input actions.
+ * [Output] Bounded component catalog, firmware-builtin synchronization, and active views.
+ * [Pos] Public contract for the ESP32-P4 component runtime.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
+ */
+
 #pragma once
 
 #include <stdbool.h>
@@ -48,6 +55,7 @@ typedef struct {
 } pet_p4_miniapp_catalog_entry_t;
 
 esp_err_t pet_p4_miniapp_init(void);
+esp_err_t pet_p4_miniapp_sync_builtins(void);
 bool pet_p4_miniapp_active(void);
 bool pet_p4_miniapp_active_id(char *out, size_t out_size);
 bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out);

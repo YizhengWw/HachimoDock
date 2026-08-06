@@ -1,3 +1,8 @@
+# [Input] ESP-IDF component sources, build identity, and canonical PC built-in component JSON.
+# [Output] P4 runtime component with all seven built-ins embedded in the A/B application image.
+# [Pos] ESP32-P4 main firmware component build definition.
+# [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
+
 idf_component_register(
   SRCS
     "pet_p4_main.c"
@@ -11,6 +16,7 @@ idf_component_register(
     "pet_p4_input.c"
     "pet_p4_input_core.c"
     "pet_p4_miniapp.c"
+    "pet_p4_builtin_components_data.c"
     "pet_p4_ota.c"
     "pet_p4_protocol.c"
     "pet_p4_raw_assets.c"
@@ -45,6 +51,18 @@ idf_component_register(
     spiffs
     tinyusb
 )
+
+execute_process(
+  COMMAND
+    "${PYTHON}"
+    "${CMAKE_CURRENT_LIST_DIR}/../tools/build_builtin_bundle.py"
+    "--check"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+  RESULT_VARIABLE PET_P4_BUILTIN_BUNDLE_STATUS
+)
+if(NOT PET_P4_BUILTIN_BUNDLE_STATUS EQUAL 0)
+  message(FATAL_ERROR "Embedded built-in component bundle is stale; run tools/build_builtin_bundle.py")
+endif()
 
 target_compile_definitions(
   ${COMPONENT_LIB}

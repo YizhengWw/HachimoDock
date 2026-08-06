@@ -111,6 +111,10 @@ Implemented:
   Codex/Claude Session. P4 voice input never falls back to the Windows microphone.
 - A/B firmware OTA with two 2.5MiB slots, retry-safe 4KB acknowledged chunks, SHA-256 and
   ESP-IDF project validation, sustained 8-second health confirmation, and boot rollback.
+  The application image also embeds all seven canonical components. On the
+  first boot of a new build, firmware transactionally replaces same-id built-ins,
+  adds missing built-ins when capacity permits, removes retired Falling Catch,
+  restores the previous active component, and preserves unrelated user packages.
 - Debug screenshot command over JSON Lines for framebuffer self-test.
 - Persistent boot/fault-reset diagnostics with live heap, PSRAM, SPIFFS,
   GPIO/touch drop counts, touch/audio readiness, plus asset-preserving reboot/input reset tools.
@@ -191,8 +195,11 @@ page; Two-key Pong is the initial component selected inside Component Center.
 at `0x0`, it resets NVS, the inactive OTA slot, previous components, and both
 appearance slots before provisioning the built-in Terrier into slot 0 and the
 built-in component catalog. Use it for blank devices or factory recovery.
-Normal Pet Manager OTA and the app-only rescue command below update only the
-app partition and preserve SPIFFS appearance and component data.
+Normal Pet Manager OTA and the app-only rescue command below write only the app
+partition and preserve SPIFFS appearance and user component data. After the new
+app boots, its embedded component bundle performs same-id built-in migration in
+the existing SPIFFS catalog; this is why a normal PC firmware update also updates
+the seven built-in components without replacing the filesystem partition.
 
 Release policy: every P4 firmware artifact distributed for a fresh install or
 factory recovery must use the `pet-manager-p4-factory-v1` format and the
