@@ -40,7 +40,7 @@ dependencies:
     - name: idf
       version: '>=5.4'
     source:
-      path: D:\niumaji\claw-pet-manager-p4-integration\esp-p4-runtime\components\esp_lcd_st7701
+      path: $PET_P4_PROJECT_DIR/components/esp_lcd_st7701
       type: local
     targets:
     - esp32s3
@@ -76,7 +76,7 @@ dependencies:
     - name: idf
       version: '>=5.5'
     source:
-      path: D:\niumaji\claw-pet-manager-p4-integration\esp-p4-runtime\components\esp_lvgl_adapter
+      path: $PET_P4_PROJECT_DIR/components/esp_lvgl_adapter
       type: local
     version: 0.0.0
   espressif/tinyusb:
@@ -125,7 +125,7 @@ dependencies:
     - name: espressif/esp_lcd_st7701
       version: '*'
     source:
-      path: D:\niumaji\claw-pet-manager-p4-integration\esp-p4-runtime\components\esp32_p4_wifi6_touch_lcd_4_3
+      path: $PET_P4_PROJECT_DIR/components/esp32_p4_wifi6_touch_lcd_4_3
       type: local
     targets:
     - esp32p4

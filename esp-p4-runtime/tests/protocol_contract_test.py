@@ -1647,6 +1647,16 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
     assert "buildId" in runtime_readme
 
 
+def test_p4_component_lock_uses_platformio_exported_portable_root():
+    dependency_lock = read("dependencies.lock")
+    platformio_hook = read("scripts/platformio_add_p4_toolchain.py")
+
+    assert dependency_lock.count("$PET_P4_PROJECT_DIR/components/") == 3
+    assert "D:\\" not in dependency_lock
+    assert 'env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir' in platformio_hook
+    assert 'env.subst("$PROJECT_DIR")' in platformio_hook
+
+
 def test_p4_runtime_pauses_rendering_during_asset_transfer():
     header = read("main/pet_p4_protocol.h")
     source = read("main/pet_p4_protocol.c")
