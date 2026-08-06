@@ -9,6 +9,7 @@ Also verifies the installable native Flappy Bird package and its one-button cont
 Also locks logical RGB565 to the matching RGB element order used by the panel.
 Also locks completed conversation visibility to 60 seconds before returning idle.
 Also locks deterministic H.264 appearance pack IDs and protected slot roles.
+Also locks paced CH343 writes for both firmware and raw appearance payloads.
 [Pos] Fast host-side contract suite run before firmware build and hardware smoke tests.
 """
 
@@ -1172,6 +1173,9 @@ def test_pc_uses_high_baud_for_p4_ch343_usb_uart():
     assert "P4_APPEARANCE_ASSET_CHUNK_SIZE: usize = 20_478" in usb
     assert "P4_RAW_APPEARANCE_ASSET_CHUNK_SIZE: usize = 8 * 1024" in usb
     assert "P4_RAW_APPEARANCE_CHUNK_MAX_ATTEMPTS: u32 = 4" in usb
+    assert "P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64" in usb
+    assert "P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(100)" in usb
+    assert usb.count("write_serial_bytes_paced(") >= 3
     assert "recover_raw_asset_stream" in usb
     assert "send_asset_raw_chunk_checked" in usb
 
@@ -1628,7 +1632,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "runtime_render_healthy" in main
     assert "P4_FIRMWARE_FAST_CHUNK_SIZE: usize = 4_092" in desktop
     assert "P4_FIRMWARE_CHUNK_SIZE: usize = 2_046" in desktop
-    assert "P4_FIRMWARE_SERIAL_WRITE_SLICE_BYTES: usize = 64" in read_workspace(
+    assert "P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64" in read_workspace(
         "ref/src-tauri/src/usb_serial.rs"
     )
     assert "P4_FIRMWARE_CHUNK_MAX_ATTEMPTS: usize = 20" in desktop
@@ -2286,7 +2290,7 @@ if __name__ == "__main__":
         test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe,
         test_p4_token_widget_uses_bounded_stats_instead_of_host_readers,
         test_builtin_tool_widgets_declare_bounded_completion_cycles,
-        test_builtin_tool_widgets_use_three_keys_and_fit_p4_limits,
+        test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits,
         test_p4_widget_delete_clears_persistence_and_returns_to_main,
         test_p4_widget_inventory_is_request_matched_and_capacity_bounded,
         test_p4_component_packages_commit_through_validated_ab_catalog_snapshots,
