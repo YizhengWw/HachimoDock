@@ -19,6 +19,8 @@
  *          exact visible-card encoder selection isolated from background routing,
  *          manual and focus-refreshed local Agent discovery with visible scan feedback,
  *          a default-open status-first voice console,
+ *          default-enabled first-run voice input that preserves an explicit user opt-out,
+ *          model-v9 P4 defaults that map joystick up/down to Previous/Next,
  *          immediate P4 voice rearming after saved ASR configuration changes,
  *          exact-session-only Codex/Claude Desktop task navigation and voice input for selected P4 conversations,
  *          MiMoCode-only macOS final-text delivery plus Return at the captured current caret,
@@ -86,7 +88,7 @@ import {
 // ---------- Voice config storage + constants (re-exported for BoardButtonPanel) ----------
 
 export const VOICE_CONFIG_STORAGE_KEY = DEVICE_BUTTON_CONFIG_STORAGE_KEY;
-export const DEFAULT_VOICE_CONFIG = { enabled: false, trigger: "encoder_button.hold" };
+export const DEFAULT_VOICE_CONFIG = { enabled: true, trigger: "encoder_button.hold" };
 export const P4_RUNTIME_ID = "esp-p4";
 export const P4_DEFAULT_VOICE_TRIGGER = "sw1.hold";
 export const P4_DEFAULT_PROMPT = "继续当前任务并给出下一步。";
@@ -105,8 +107,8 @@ export const DEFAULT_BUTTON_ACTIONS = {
   p4_encoder_long: "disabled",
   p4_encoder_cw: "session_next",
   p4_encoder_ccw: "session_previous",
-  p4_joystick_up: "disabled",
-  p4_joystick_down: "disabled",
+  p4_joystick_up: "session_previous",
+  p4_joystick_down: "session_next",
 };
 
 export const P4_VOICE_BUTTON_OPTIONS = [
@@ -167,8 +169,8 @@ export const P4_BUTTON_CONTROL_ROWS = [
   { id: "p4_sw2_long", controlId: "p4_sw2", label: "SW2 长按", event: "button.sw2.long_press", holdEvent: "button.sw2.hold", voiceTriggerId: "sw2.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_sw3_short", controlId: "p4_sw3", label: "SW3 短按", event: "button.sw3.short_press", defaultAction: "page_back", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw3_long", controlId: "p4_sw3", label: "SW3 长按", event: "button.sw3.long_press", holdEvent: "button.sw3.hold", voiceTriggerId: "sw3.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
-  { id: "p4_joystick_up", controlId: "p4_joystick", label: "摇杆向上", event: "joystick.up", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
-  { id: "p4_joystick_down", controlId: "p4_joystick", label: "摇杆向下", event: "joystick.down", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_joystick_up", controlId: "p4_joystick", label: "摇杆向上", event: "joystick.up", defaultAction: "session_previous", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_joystick_down", controlId: "p4_joystick", label: "摇杆向下", event: "joystick.down", defaultAction: "session_next", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_encoder_ccw", controlId: "p4_joystick", label: "摇杆向左", event: "knob.rotate_ccw", defaultAction: "session_previous", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_encoder_cw", controlId: "p4_joystick", label: "摇杆向右", event: "knob.rotate_cw", defaultAction: "session_next", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_encoder_press", controlId: "p4_joystick", label: "摇杆中按短按", event: "button.encoder.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
@@ -269,6 +271,21 @@ const P4_V7_DEFAULT_BUTTON_ACTIONS = {
   p4_joystick_down: "disabled",
 };
 
+const P4_V8_DEFAULT_BUTTON_ACTIONS = {
+  p4_sw1_short: "page_enter",
+  p4_sw1_long: "voice_ptt",
+  p4_sw2_short: "component_center",
+  p4_sw2_long: "disabled",
+  p4_sw3_short: "page_back",
+  p4_sw3_long: "disabled",
+  p4_encoder_press: "page_enter",
+  p4_encoder_long: "disabled",
+  p4_encoder_cw: "session_next",
+  p4_encoder_ccw: "session_previous",
+  p4_joystick_up: "disabled",
+  p4_joystick_down: "disabled",
+};
+
 const ALL_BUTTON_CONTROL_ROWS = [...BOARD_BUTTON_CONTROL_ROWS, ...P4_BUTTON_CONTROL_ROWS];
 
 function preferredVoiceRow(rows, buttonActions, trigger) {
@@ -341,7 +358,9 @@ function normalizeVoiceConfig(value = {}) {
   const storedButtonModelVersion = Number(value.buttonModelVersion || 0);
   const migrateLegacyP4Defaults = storedButtonModelVersion !== DEVICE_BUTTON_CONFIG_MODEL_VERSION
     && Object.keys(incoming).some((key) => key.startsWith("p4_"));
-  const previousP4Defaults = storedButtonModelVersion === 7
+  const previousP4Defaults = storedButtonModelVersion === 8
+    ? P4_V8_DEFAULT_BUTTON_ACTIONS
+    : storedButtonModelVersion === 7
     ? P4_V7_DEFAULT_BUTTON_ACTIONS
     : storedButtonModelVersion === 6
     ? P4_V6_DEFAULT_BUTTON_ACTIONS
@@ -381,7 +400,9 @@ function normalizeVoiceConfig(value = {}) {
   }, {});
   return {
     buttonModelVersion: DEVICE_BUTTON_CONFIG_MODEL_VERSION,
-    enabled: value.enabled === true,
+    enabled: typeof value.enabled === "boolean"
+      ? value.enabled
+      : DEFAULT_VOICE_CONFIG.enabled,
     trigger,
     buttonActions,
     buttonValues,

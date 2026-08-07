@@ -5,7 +5,8 @@
  * two-page joystick routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
  * MiMoCode current-caret voice delivery, client-authoritative ACK-gated board
  * configuration, ID-deeplink-confirmed macOS Session recovery, and stale bridge/USB
- * guards, SW1-confirm/SW3-back defaults and migration,
+ * guards, SW1-confirm/SW3-back and joystick-up/down defaults and migration,
+ * default-enabled first-run voice input with explicit opt-out persistence,
  * immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -180,6 +181,18 @@ test("follow changes clear the prior Agent sessions before loading the new snaps
 
 // ---- PORTED: voice button configuration now in BoardButtonPanel ----
 
+test("voice input starts enabled for new installs while preserving an explicit opt-out", () => {
+  const source = readSource("DeviceDashboard.jsx");
+
+  assert.match(source, /DEFAULT_VOICE_CONFIG = \{ enabled: true,/);
+  assert.match(
+    source,
+    /enabled: typeof value\.enabled === "boolean"[\s\S]*\? value\.enabled[\s\S]*: DEFAULT_VOICE_CONFIG\.enabled/,
+  );
+  assert.match(source, /if \(raw\) return normalizeVoiceConfig\(JSON\.parse\(raw\)\)/);
+  assert.match(source, /return normalizeVoiceConfig\(\{\}\)/);
+});
+
 test("voice button configuration groups physical controls before device sync", () => {
   const source = readSource("dashboard/BoardButtonPanel.jsx");
   const dashboard = readSource("DeviceDashboard.jsx");
@@ -273,8 +286,8 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /p4_encoder_long:\s*"disabled"/);
   assert.match(dashboard, /p4_encoder_cw:\s*"session_next"/);
   assert.match(dashboard, /p4_encoder_ccw:\s*"session_previous"/);
-  assert.match(dashboard, /p4_joystick_up:\s*"disabled"/);
-  assert.match(dashboard, /p4_joystick_down:\s*"disabled"/);
+  assert.match(dashboard, /p4_joystick_up:\s*"session_previous"/);
+  assert.match(dashboard, /p4_joystick_down:\s*"session_next"/);
   assert.match(dashboard, /event:\s*"button\.sw1\.short_press"/);
   assert.match(dashboard, /event:\s*"button\.sw1\.long_press"/);
   assert.match(dashboard, /holdEvent:\s*"button\.sw1\.hold"/);
@@ -308,6 +321,9 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /P4_V4_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V5_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /P4_V6_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /P4_V7_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /P4_V8_DEFAULT_BUTTON_ACTIONS/);
+  assert.match(dashboard, /storedButtonModelVersion === 8[\s\S]*P4_V8_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /storedButtonModelVersion === 6[\s\S]*P4_V6_DEFAULT_BUTTON_ACTIONS/);
   assert.match(dashboard, /action === "agent_prompt" \|\| action === "miniapp_action"/);
   assert.match(dashboard, /buttonLabels/);

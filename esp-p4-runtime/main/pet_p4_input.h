@@ -1,6 +1,6 @@
 /*
  * [Input] Physical-input runtime lifecycle and desktop input-config commands.
- * [Output] Version-8 P4 input configuration API with 16 persisted bindings
+ * [Output] Version-9 P4 input configuration API with 16 persisted bindings
  *          plus a lock-free joystick ADC diagnostic snapshot.
  * [Pos] Public interface for the ESP32-P4 input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define PET_P4_INPUT_CONFIG_VERSION 8
+#define PET_P4_INPUT_CONFIG_VERSION 9
 #define PET_P4_INPUT_MAX_BINDINGS 16
 #define PET_P4_INPUT_EVENT_MAX 40
 #define PET_P4_INPUT_ACTION_MAX 24

@@ -10,7 +10,7 @@ Also verifies the installable native Flappy Bird package and its one-button cont
 Also locks logical RGB565 to the matching RGB element order used by the panel.
 Also locks completed conversation visibility to 60 seconds before returning idle.
 Also locks deterministic H.264 appearance pack IDs and protected slot roles.
-Also locks paced CH343 writes for both firmware and raw appearance payloads.
+Also locks paced CH343 writes for firmware, raw appearance, and JSON control frames.
 Also locks interrupted OTA recovery and visible transfer feedback on the device.
 [Pos] Fast host-side contract suite run before firmware build and hardware smoke tests.
 """
@@ -1181,8 +1181,9 @@ def test_pc_uses_high_baud_for_p4_ch343_usb_uart():
     assert "P4_RAW_APPEARANCE_ASSET_CHUNK_SIZE: usize = 8 * 1024" in usb
     assert "P4_RAW_APPEARANCE_CHUNK_MAX_ATTEMPTS: u32 = 4" in usb
     assert "P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64" in usb
-    assert "P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(100)" in usb
-    assert usb.count("write_serial_bytes_paced(") >= 3
+    assert "P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(250)" in usb
+    assert usb.count("write_serial_bytes_paced(") >= 4
+    assert 'conn.runtime.eq_ignore_ascii_case("esp-p4")' in usb
     assert "recover_raw_asset_stream" in usb
     assert "send_asset_raw_chunk_checked" in usb
 
@@ -1523,7 +1524,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.41-p4")' in project
+    assert 'set(PROJECT_VER "0.7.42-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1603,7 +1604,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.41-p4")' in project
+    assert 'set(PROJECT_VER "0.7.42-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2053,8 +2054,8 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert '"button.encoder.hold", "disabled"' in input_source
     assert '"knob.rotate_cw", "session_next"' in input_source
     assert '"knob.rotate_ccw", "session_previous"' in input_source
-    assert '"joystick.up", "disabled"' in input_source
-    assert '"joystick.down", "disabled"' in input_source
+    assert '"joystick.up", "session_previous"' in input_source
+    assert '"joystick.down", "session_next"' in input_source
     assert 'strcmp(binding->action, "session_next") == 0' in input_source
     assert 'strcmp(binding->action, "session_previous") == 0' in input_source
     assert 'center_open ? "main" : "components"' in input_source
@@ -2069,8 +2070,9 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "migrate_v5_config" in input_source
     assert "migrate_v6_config" in input_source
     assert "migrate_v7_config" in input_source
+    assert "migrate_v8_config" in input_source
     assert "migrate_input_config" in input_source
-    assert "PET_P4_INPUT_CONFIG_VERSION 8" in read_required("main/pet_p4_input.h")
+    assert "PET_P4_INPUT_CONFIG_VERSION 9" in read_required("main/pet_p4_input.h")
     assert "center_binding" not in input_source
     assert '"page_toggle"' in input_source
     assert '"page_enter"' in input_source

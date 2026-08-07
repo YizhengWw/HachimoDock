@@ -2,7 +2,7 @@
  * [Input] serialport-enumerated CDC USB ports plus JSON-line OTA/state payloads.
  * [Output] USB serial manager for device handshake, state/speech forwarding,
  *          persistent prebuilt P4 H.264 Annex-B/WAV ready packs plus paced
- *          4 Mbaud 8KiB raw-chunk
+ *          4 Mbaud JSON control frames and 8KiB raw chunks
  *          transactional OTA with checksum acks and deterministic pack IDs
  *          with bounded app-data JSONL diagnostics and failure-path aborts
  *          that instantly reactivate either cached P4 A/B slot,
@@ -220,7 +220,7 @@ const P4_FIRMWARE_STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 // link. Force short, drained bursts so the macOS USB-serial stack cannot hand
 // the adapter one multi-kilobyte payload that is silently damaged.
 const P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64;
-const P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(100);
+const P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(250);
 const P4_FIRMWARE_CHUNK_RETRY_DELAY: Duration = Duration::from_millis(1);
 
 // native USB bulk is the high-speed ESP32-P4 OTG data plane. UART remains as a fallback.
@@ -1503,7 +1503,17 @@ impl UsbSerialManager {
         line.push('\n');
 
         let bytes = line.as_bytes();
-        if let Some(write_slice_bytes) = write_slice_bytes.filter(|size| *size > 0) {
+        // The P4 CH343 link has no hardware flow control. Pace every outbound
+        // frame at high baud, not only firmware/raw bodies: button-config JSON
+        // and asset transaction headers can otherwise be truncated before the
+        // board parser sees a newline, which presents to the UI as a missing
+        // ACK and makes an identical second attempt appear to fix itself.
+        let paced_slice_bytes = write_slice_bytes.filter(|size| *size > 0).or_else(|| {
+            (conn.baud_rate >= P4_USB_UART_LEGACY_BAUD
+                && conn.runtime.eq_ignore_ascii_case("esp-p4"))
+            .then_some(P4_CH343_SERIAL_WRITE_SLICE_BYTES)
+        });
+        if let Some(write_slice_bytes) = paced_slice_bytes {
             if let Err(error) = write_serial_bytes_paced(
                 conn.writer.as_mut(),
                 bytes,
@@ -2683,13 +2693,14 @@ impl UsbSerialManager {
             if !connection.connected {
                 return Err("Connection lost".to_string());
             }
-            if let Err(error) = connection.writer.write_all(&line) {
+            if let Err(error) = write_serial_bytes_paced(
+                connection.writer.as_mut(),
+                &line,
+                P4_CH343_SERIAL_WRITE_SLICE_BYTES,
+                P4_CH343_SERIAL_WRITE_GAP,
+            ) {
                 connection.connected = false;
-                return Err(format!("Raw asset header write failed: {error}"));
-            }
-            if let Err(error) = connection.writer.flush() {
-                connection.connected = false;
-                return Err(format!("Raw asset header flush failed: {error}"));
+                return Err(format!("Raw asset paced header write failed: {error}"));
             }
             if let Some(ready_receiver) = ready_receiver.as_ref() {
                 let ready = ready_receiver
@@ -6322,8 +6333,8 @@ mod tests {
 
         let recorded = recorded.lock().unwrap();
         assert!(recorded.writes.len() > 2);
-        assert!(recorded.writes[0].ends_with(b"\n"));
-        assert!(recorded.writes[1..]
+        assert!(recorded
+            .writes
             .iter()
             .all(|write| write.len() <= P4_CH343_SERIAL_WRITE_SLICE_BYTES));
         assert_eq!(recorded.flushes, recorded.writes.len());
@@ -7286,6 +7297,60 @@ mod tests {
         manager
             .send_to_board("p4-board-a", "diagnostics/query", &serde_json::json!({}))
             .unwrap();
+    }
+
+    #[test]
+    fn high_speed_p4_control_frames_are_flushed_in_short_serial_slices() {
+        let manager = UsbSerialManager::new();
+        let recorded = Arc::new(Mutex::new(PacedWriterState::default()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 1,
+            port_name: "COM15".to_string(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(PacedWriter(Arc::clone(&recorded))),
+            board_device_id: "p4-board-a".to_string(),
+            runtime: "esp-p4".to_string(),
+            device_model: "ESP32-P4".to_string(),
+            firmware: "1.0.0".to_string(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 0,
+            wire_protocol: "pet-usb-jsonl-v3".to_string(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+        let bindings = (0..16)
+            .map(|index| {
+                serde_json::json!({
+                    "event": format!("button.test.{index}"),
+                    "action": "disabled",
+                    "value": "",
+                })
+            })
+            .collect::<Vec<_>>();
+
+        manager
+            .send_to_board(
+                "p4-board-a",
+                "input/config",
+                &serde_json::json!({ "requestId": "config-1", "bindings": bindings }),
+            )
+            .unwrap();
+
+        let recorded = recorded.lock().unwrap();
+        assert!(recorded.writes.len() > 1);
+        assert!(recorded
+            .writes
+            .iter()
+            .all(|write| write.len() <= P4_CH343_SERIAL_WRITE_SLICE_BYTES));
+        assert_eq!(recorded.flushes, recorded.writes.len());
+        let line = recorded.writes.concat();
+        assert!(line.ends_with(b"\n"));
+        let message: serde_json::Value = serde_json::from_slice(&line[..line.len() - 1]).unwrap();
+        assert_eq!(message["topic"], "input/config");
+        assert_eq!(message["payload"]["bindings"].as_array().unwrap().len(), 16);
     }
 
     #[test]

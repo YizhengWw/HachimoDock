@@ -1,6 +1,6 @@
 /**
  * [Input] component-center/button-config.js pure option and P4 downlink helpers.
- * [Output] Regression coverage for model-v8 signaling, exact-default-only board
+ * [Output] Regression coverage for model-v9 signaling, exact-default-only board
  *          migration, unique component controls, and repeatable optional global-exit resolution.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -18,8 +18,8 @@ import {
   resolveGlobalExitEvents,
 } from "./button-config.js";
 
-test("device button config model advances for the SW1-confirm/SW3-back defaults", () => {
-  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 8);
+test("device button config model advances for joystick up/down navigation defaults", () => {
+  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 9);
 });
 
 test("the exact shipped v7 board map migrates SW1/SW3 without changing custom maps", () => {
@@ -47,7 +47,7 @@ test("the exact shipped v7 board map migrates SW1/SW3 without changing custom ma
   );
 
   assert.equal(migration.migrated, true);
-  assert.equal(migration.response.config.version, 8);
+  assert.equal(migration.response.config.version, 9);
   assert.equal(
     migration.response.config.bindings.find((binding) => binding.event === "button.sw1.short_press")?.action,
     "page_enter",

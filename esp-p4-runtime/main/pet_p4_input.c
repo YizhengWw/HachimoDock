@@ -9,7 +9,8 @@
  *          open, while the persisted global page-back gesture always wins and
  *          every other unmapped system-navigation gesture is suppressed, and
  *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
- *          input configuration with versioned SW1-confirm/SW3-back defaults.
+ *          input configuration with versioned SW1-confirm/SW3-back and
+ *          joystick-up/down Previous/Next defaults.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -258,8 +259,8 @@ static void load_default_config(pet_p4_input_config_t *config) {
   add_default_binding(config, "button.encoder.hold", "disabled", "");
   add_default_binding(config, "knob.rotate_cw", "session_next", "");
   add_default_binding(config, "knob.rotate_ccw", "session_previous", "");
-  add_default_binding(config, "joystick.up", "disabled", "");
-  add_default_binding(config, "joystick.down", "disabled", "");
+  add_default_binding(config, "joystick.up", "session_previous", "");
+  add_default_binding(config, "joystick.down", "session_next", "");
 }
 
 static bool config_bindings_are_valid(const pet_p4_input_config_t *config) {
@@ -439,6 +440,32 @@ static bool migrate_v7_config(pet_p4_input_config_t *config) {
     "page_back",
     ""
   );
+  config->version = 8;
+  return true;
+}
+
+static bool migrate_v8_config(pet_p4_input_config_t *config) {
+  if (!config || config->version != 8 || !config_bindings_are_valid(config)) return false;
+
+  // Version 9 makes the two vertical joystick directions useful in the
+  // top-level UI. Only the shipped Unbound values are rewritten; an existing
+  // custom action on either direction is preserved.
+  migrate_default_binding(
+    config,
+    "joystick.up",
+    "disabled",
+    "",
+    "session_previous",
+    ""
+  );
+  migrate_default_binding(
+    config,
+    "joystick.down",
+    "disabled",
+    "",
+    "session_next",
+    ""
+  );
   config->version = PET_P4_INPUT_CONFIG_VERSION;
   return true;
 }
@@ -450,7 +477,8 @@ static bool migrate_input_config(pet_p4_input_config_t *config) {
   if (config->version == 4 && !migrate_v4_config(config)) return false;
   if (config->version == 5 && !migrate_v5_config(config)) return false;
   if (config->version == 6 && !migrate_v6_config(config)) return false;
-  return config->version == 7 && migrate_v7_config(config);
+  if (config->version == 7 && !migrate_v7_config(config)) return false;
+  return config->version == 8 && migrate_v8_config(config);
 }
 
 static esp_err_t persist_config(const pet_p4_input_config_t *config) {

@@ -2,7 +2,7 @@
  * [Input] Per-component buttons.json bindings and install-time control-label overrides.
  * [Output] Shared screen/SW1-SW3/joystick option catalog, label resolution,
  *          exact shipped-v7 board-default migration, authoritative optional
- *          global-exit event resolution, and button-config model-v8 signaling.
+ *          global-exit event resolution, and button-config model-v9 signaling.
  *          Current installs keep bindings package-owned.
  * [Pos] component-center contract helper in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -118,7 +118,7 @@ const GLOBAL_EXIT_CONTROL_LABELS = {
 };
 
 export const DEVICE_BUTTON_CONFIG_STORAGE_KEY = "pet-manager.board-voice-config";
-export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 8;
+export const DEVICE_BUTTON_CONFIG_MODEL_VERSION = 9;
 
 export function resolveGlobalExitEvents(response = {}) {
   const boardConfig = response?.config && typeof response.config === "object"

@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.41-p4",
-    "buildId": "0.7.41-p4+290f402abcd1",
+    "fw": "0.7.42-p4",
+    "buildId": "0.7.42-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 6,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 6,
-    "buildId": "0.7.41-p4+0123456789ab"
+    "buildId": "0.7.42-p4+0123456789ab"
   }
 }
 ```
@@ -579,7 +579,7 @@ PC to board:
   "topic": "input/config",
   "payload": {
     "requestId": "input-42",
-    "version": 8,
+    "version": 9,
     "bindings": [
       {"event":"button.sw1.short_press","action":"page_enter","value":""},
       {"event":"button.sw1.long_press","action":"disabled","value":""},
@@ -595,8 +595,8 @@ PC to board:
       {"event":"button.encoder.hold","action":"disabled","value":""},
       {"event":"knob.rotate_ccw","action":"session_previous","value":""},
       {"event":"knob.rotate_cw","action":"session_next","value":""},
-      {"event":"joystick.up","action":"disabled","value":""},
-      {"event":"joystick.down","action":"disabled","value":""}
+      {"event":"joystick.up","action":"session_previous","value":""},
+      {"event":"joystick.down","action":"session_next","value":""}
     ]
   }
 }
@@ -614,9 +614,10 @@ and unbound.
 SW1 short press and joystick center short press both default to `page_enter`:
 they activate the selection and open `app` only from `components`; they do not
 open the catalog from `main`. SW3 short press defaults to the global
-`page_back` path. Center long press and the new up/down directions default to
-`disabled`; all remain editable and are persisted with the rest of the input
-map. SW2 short press toggles `main` and `components` in both directions. Other SW short/long gestures
+`page_back` path. Center long press defaults to `disabled`; joystick Up/Down
+default to `session_previous`/`session_next`. All remain editable and are
+persisted with the rest of the input map. SW2 short press toggles `main` and
+`components` in both directions. Other SW short/long gestures
 default to `disabled`, except SW1 long
 press, whose hidden `.hold` transport defaults to `voice_ptt`. Joystick left
 and right deliberately retain `knob.rotate_ccw` / `knob.rotate_cw` event names,
