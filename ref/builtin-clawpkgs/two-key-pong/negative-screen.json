@@ -2,11 +2,11 @@
   "dashboard": {
     "title": "双键接球",
     "eyebrow": "经典电子乒乓",
-    "headline": "按 SW3 开始",
+    "headline": "按 SW1 开始",
     "metricLabel": "连续接球",
     "metricValue": "0",
     "metricUnit": "次",
-    "footer": "SW3开始 · 摇杆左右移动 · 全局键退出",
+    "footer": "SW1开始 · 摇杆左右移动 · 全局键退出",
     "visualStyle": "pixel",
     "visualPalette": "mono",
     "visualLayout": "scoreboard",

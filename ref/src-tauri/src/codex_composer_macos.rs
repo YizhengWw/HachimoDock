@@ -2,7 +2,8 @@
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
  * [Output] Native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
- *          exact-session visible-composer draft replacement, plus
+ *          exact-session visible-composer draft replacement, including
+ *          no-op-safe Claude focus confirmation across CLI/desktop metadata aliases, plus
  *          ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
  *          nonempty-current-draft Confirm submission with an Enter-first and
@@ -56,6 +57,8 @@ use std::{
 const MAX_TREE_ELEMENTS: usize = 12_000;
 const MAX_TREE_DEPTH: usize = 64;
 const MAX_ANCESTOR_DEPTH: usize = 20;
+const MAX_CLAUDE_SESSION_METADATA_DEPTH: usize = 4;
+const MAX_CLAUDE_SESSION_METADATA_BYTES: u64 = 2 * 1024 * 1024;
 const SESSION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_READBACK_TIMEOUT: Duration = Duration::from_millis(500);
 const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(3_000);
@@ -659,6 +662,12 @@ struct ClaudeDesktopFocusMarker {
     modified_at: Option<SystemTime>,
 }
 
+#[derive(Clone, Debug)]
+struct ClaudeDesktopFocusSnapshot {
+    target: Option<ClaudeDesktopFocusMarker>,
+    target_is_latest: bool,
+}
+
 fn claude_desktop_sessions_root() -> Option<PathBuf> {
     if let Some(configured) = std::env::var_os("CLAUDE_DESKTOP_SESSIONS_DIR") {
         let configured = PathBuf::from(configured);
@@ -675,10 +684,30 @@ fn claude_desktop_sessions_root() -> Option<PathBuf> {
     })
 }
 
-fn claude_desktop_focus_marker(session_id: &str) -> Option<ClaudeDesktopFocusMarker> {
-    let root = claude_desktop_sessions_root()?;
-    let expected_name = format!("local_{}.json", session_id.trim());
-    let mut pending = vec![(root, 0usize)];
+fn claude_metadata_timestamp(value: Option<&serde_json::Value>) -> u64 {
+    value
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_f64().map(|number| number.max(0.0) as u64))
+        })
+        .unwrap_or_default()
+}
+
+fn claude_desktop_focus_snapshot_from_root(
+    root: &std::path::Path,
+    session_id: &str,
+) -> ClaudeDesktopFocusSnapshot {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return ClaudeDesktopFocusSnapshot {
+            target: None,
+            target_is_latest: false,
+        };
+    }
+    let mut target = None;
+    let mut newest_last_focused_at = 0_u64;
+    let mut pending = vec![(root.to_path_buf(), 0usize)];
     while let Some((directory, depth)) = pending.pop() {
         let Ok(entries) = fs::read_dir(directory) else {
             continue;
@@ -689,28 +718,98 @@ fn claude_desktop_focus_marker(session_id: &str) -> Option<ClaudeDesktopFocusMar
                 continue;
             };
             if file_type.is_dir() {
-                if depth < 4 {
+                if depth < MAX_CLAUDE_SESSION_METADATA_DEPTH {
                     pending.push((path, depth + 1));
                 }
                 continue;
             }
-            if !file_type.is_file() || entry.file_name() != expected_name.as_str() {
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if !file_type.is_file()
+                || !file_name.starts_with("local_")
+                || !file_name.ends_with(".json")
+            {
                 continue;
             }
-            let metadata = fs::metadata(&path).ok();
-            let last_focused_at = fs::read(&path)
+            let Ok(metadata) = fs::metadata(&path) else {
+                continue;
+            };
+            if metadata.len() > MAX_CLAUDE_SESSION_METADATA_BYTES {
+                continue;
+            }
+            let Some(value) = fs::read(&path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .and_then(|value| value.get("lastFocusedAt").and_then(|value| value.as_u64()))
+            else {
+                continue;
+            };
+            if value
+                .get("isArchived")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let last_focused_at = claude_metadata_timestamp(value.get("lastFocusedAt"));
+            newest_last_focused_at = newest_last_focused_at.max(last_focused_at);
+            let file_session_id = file_name
+                .strip_prefix("local_")
+                .and_then(|value| value.strip_suffix(".json"))
                 .unwrap_or_default();
-            return Some(ClaudeDesktopFocusMarker {
+            let cli_session_id = value
+                .get("cliSessionId")
+                .or_else(|| value.get("cli_session_id"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            let raw_desktop_session_id = value
+                .get("sessionId")
+                .or_else(|| value.get("session_id"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .trim();
+            let desktop_session_id = raw_desktop_session_id
+                .strip_prefix("local_")
+                .unwrap_or(raw_desktop_session_id);
+            if !file_session_id.eq_ignore_ascii_case(session_id)
+                && !cli_session_id.eq_ignore_ascii_case(session_id)
+                && !desktop_session_id.eq_ignore_ascii_case(session_id)
+            {
+                continue;
+            }
+            let candidate = ClaudeDesktopFocusMarker {
                 path,
                 last_focused_at,
-                modified_at: metadata.and_then(|metadata| metadata.modified().ok()),
-            });
+                modified_at: metadata.modified().ok(),
+            };
+            let replace = target
+                .as_ref()
+                .is_none_or(|current: &ClaudeDesktopFocusMarker| {
+                    candidate.last_focused_at > current.last_focused_at
+                        || (candidate.last_focused_at == current.last_focused_at
+                            && candidate.modified_at > current.modified_at)
+                });
+            if replace {
+                target = Some(candidate);
+            }
         }
     }
-    None
+    let target_is_latest = target.as_ref().is_some_and(|target| {
+        target.last_focused_at > 0 && target.last_focused_at == newest_last_focused_at
+    });
+    ClaudeDesktopFocusSnapshot {
+        target,
+        target_is_latest,
+    }
+}
+
+fn claude_desktop_focus_snapshot(session_id: &str) -> ClaudeDesktopFocusSnapshot {
+    claude_desktop_sessions_root()
+        .map(|root| claude_desktop_focus_snapshot_from_root(&root, session_id))
+        .unwrap_or(ClaudeDesktopFocusSnapshot {
+            target: None,
+            target_is_latest: false,
+        })
 }
 
 fn claude_focus_marker_advanced(
@@ -725,43 +824,17 @@ fn claude_focus_marker_advanced(
         || after.modified_at > before.modified_at
 }
 
+fn claude_focus_snapshot_confirms_session(
+    before: &ClaudeDesktopFocusSnapshot,
+    after: &ClaudeDesktopFocusSnapshot,
+) -> bool {
+    after.target.as_ref().is_some_and(|after_marker| {
+        claude_focus_marker_advanced(before.target.as_ref(), after_marker)
+    }) || (before.target.is_some() && before.target_is_latest && after.target_is_latest)
+}
+
 fn claude_session_is_latest_focused(session_id: &str) -> bool {
-    let Some(target) = claude_desktop_focus_marker(session_id) else {
-        return false;
-    };
-    let Some(root) = claude_desktop_sessions_root() else {
-        return false;
-    };
-    let mut newest = target.last_focused_at;
-    let mut pending = vec![(root, 0usize)];
-    while let Some((directory, depth)) = pending.pop() {
-        let Ok(entries) = fs::read_dir(directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Ok(file_type) = entry.file_type() else {
-                continue;
-            };
-            if file_type.is_dir() {
-                if depth < 4 {
-                    pending.push((path, depth + 1));
-                }
-                continue;
-            }
-            if !file_type.is_file() || !entry.file_name().to_string_lossy().starts_with("local_") {
-                continue;
-            }
-            if let Some(last_focused_at) = fs::read(&path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-                .and_then(|value| value.get("lastFocusedAt").and_then(|value| value.as_u64()))
-            {
-                newest = newest.max(last_focused_at);
-            }
-        }
-    }
-    target.last_focused_at > 0 && target.last_focused_at == newest
+    claude_desktop_focus_snapshot(session_id).target_is_latest
 }
 
 fn cf_string(result: Result<CFString, accessibility::Error>) -> Option<String> {
@@ -1335,19 +1408,21 @@ pub(super) fn focus_session(
     workspace_label: &str,
 ) -> Result<(), String> {
     if !session_id.trim().is_empty() {
-        let claude_marker_before = (agent == MacosAgent::Claude)
-            .then(|| claude_desktop_focus_marker(session_id))
-            .flatten();
+        let claude_focus_before =
+            (agent == MacosAgent::Claude).then(|| claude_desktop_focus_snapshot(session_id));
         focus_session_deeplink(agent, session_id, deep_link)?;
         if agent != MacosAgent::Claude {
             return Ok(());
         }
+        let claude_focus_before = claude_focus_before.unwrap_or(ClaudeDesktopFocusSnapshot {
+            target: None,
+            target_is_latest: false,
+        });
         let session_title = normalize_text(session_title);
         let deadline = Instant::now() + SESSION_CONFIRM_TIMEOUT;
         while Instant::now() < deadline {
-            if claude_desktop_focus_marker(session_id).is_some_and(|marker| {
-                claude_focus_marker_advanced(claude_marker_before.as_ref(), &marker)
-            }) {
+            let claude_focus_after = claude_desktop_focus_snapshot(session_id);
+            if claude_focus_snapshot_confirms_session(&claude_focus_before, &claude_focus_after) {
                 return Ok(());
             }
             if !session_title.is_empty()
@@ -2261,5 +2336,102 @@ mod tests {
         assert!(!claude_focus_marker_advanced(Some(&before), &unchanged));
         assert!(claude_focus_marker_advanced(Some(&before), &advanced));
         assert!(claude_focus_marker_advanced(None, &before));
+    }
+
+    #[test]
+    fn claude_focus_snapshot_accepts_an_already_current_target_without_a_new_focus_edge() {
+        let marker = ClaudeDesktopFocusMarker {
+            path: PathBuf::from("/tmp/local_session.json"),
+            last_focused_at: 100,
+            modified_at: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(1)),
+        };
+        let already_current = ClaudeDesktopFocusSnapshot {
+            target: Some(marker.clone()),
+            target_is_latest: true,
+        };
+        assert!(claude_focus_snapshot_confirms_session(
+            &already_current,
+            &already_current
+        ));
+
+        let stale = ClaudeDesktopFocusSnapshot {
+            target: Some(marker.clone()),
+            target_is_latest: false,
+        };
+        assert!(!claude_focus_snapshot_confirms_session(&stale, &stale));
+
+        let advanced = ClaudeDesktopFocusSnapshot {
+            target: Some(ClaudeDesktopFocusMarker {
+                last_focused_at: 101,
+                ..marker
+            }),
+            target_is_latest: true,
+        };
+        assert!(claude_focus_snapshot_confirms_session(&stale, &advanced));
+    }
+
+    #[test]
+    fn claude_focus_snapshot_resolves_cli_and_desktop_metadata_aliases() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("account").join("workspace");
+        fs::create_dir_all(&nested).unwrap();
+        let cli_session_id = "c7755ed6-cf18-45e9-b84b-980fad6c1070";
+        let mapped = nested.join("local_a7c981ce-c24d-4619-ae42-2c75e11e1f96.json");
+        fs::write(
+            &mapped,
+            serde_json::to_vec(&serde_json::json!({
+                "cliSessionId": cli_session_id,
+                "sessionId": "local_a7c981ce-c24d-4619-ae42-2c75e11e1f96",
+                "lastFocusedAt": 100,
+                "isArchived": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let direct = nested.join(format!("local_{cli_session_id}.json"));
+        fs::write(
+            &direct,
+            serde_json::to_vec(&serde_json::json!({
+                "cliSessionId": cli_session_id,
+                "sessionId": format!("local_{cli_session_id}"),
+                "lastFocusedAt": 200,
+                "isArchived": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            nested.join("local_other.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "cliSessionId": "other",
+                "sessionId": "local_other",
+                "lastFocusedAt": 150,
+                "isArchived": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            nested.join("local_archived.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "cliSessionId": "archived",
+                "sessionId": "local_archived",
+                "lastFocusedAt": 300,
+                "isArchived": true
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let snapshot = claude_desktop_focus_snapshot_from_root(root.path(), cli_session_id);
+        assert_eq!(snapshot.target.unwrap().path, direct);
+        assert!(snapshot.target_is_latest);
+
+        let mapped_only = claude_desktop_focus_snapshot_from_root(
+            root.path(),
+            "a7c981ce-c24d-4619-ae42-2c75e11e1f96",
+        );
+        assert_eq!(mapped_only.target.unwrap().path, mapped);
+        assert!(!mapped_only.target_is_latest);
     }
 }

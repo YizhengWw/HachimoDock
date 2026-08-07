@@ -2,7 +2,7 @@
   "id": "flappy-bird",
   "name": "Flappy Bird",
   "kind": "game",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "author": "openclaw",
-  "description": "正统 Flappy Bird 玩法：SW3 拍翅、开始或重开，退出跟随设备全局设置，碰撞结束，穿管得分。"
+  "description": "正统 Flappy Bird 玩法：SW1 拍翅、开始或重开，退出跟随设备全局设置，碰撞结束，穿管得分。"
 }

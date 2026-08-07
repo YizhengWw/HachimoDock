@@ -35,7 +35,7 @@
     "title": "像素飞鸟",
     "headline": {
       "switch_state": {
-        "ready": "SW3 拍翅开始",
+        "ready": "SW1 拍翅开始",
         "playing": "穿过管道",
         "result": "撞到了！"
       }
@@ -46,9 +46,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW3 拍翅 · 全局键退出",
-        "playing": "SW3 拍翅 · 全局键退出",
-        "result": "SW3 重开 · 全局键退出"
+        "ready": "SW1 拍翅 · 全局键退出",
+        "playing": "SW1 拍翅 · 全局键退出",
+        "result": "SW1 重开 · 全局键退出"
       }
     },
     "visualStyle": "pixel",

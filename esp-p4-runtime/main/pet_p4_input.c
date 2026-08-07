@@ -9,7 +9,7 @@
  *          open, while the persisted global page-back gesture always wins and
  *          every other unmapped system-navigation gesture is suppressed, and
  *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
- *          input configuration with versioned SW1-back/SW3-confirm defaults.
+ *          input configuration with versioned SW1-confirm/SW3-back defaults.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -244,13 +244,13 @@ static void add_default_binding(
 static void load_default_config(pet_p4_input_config_t *config) {
   memset(config, 0, sizeof(*config));
   config->version = PET_P4_INPUT_CONFIG_VERSION;
-  add_default_binding(config, "button.sw1.short_press", "page_back", "");
+  add_default_binding(config, "button.sw1.short_press", "page_enter", "");
   add_default_binding(config, "button.sw1.long_press", "disabled", "");
   add_default_binding(config, "button.sw1.hold", "voice_ptt", "");
   add_default_binding(config, "button.sw2.short_press", "component_center", "");
   add_default_binding(config, "button.sw2.long_press", "disabled", "");
   add_default_binding(config, "button.sw2.hold", "disabled", "");
-  add_default_binding(config, "button.sw3.short_press", "page_enter", "");
+  add_default_binding(config, "button.sw3.short_press", "page_back", "");
   add_default_binding(config, "button.sw3.long_press", "disabled", "");
   add_default_binding(config, "button.sw3.hold", "disabled", "");
   add_default_binding(config, "button.encoder.short_press", "page_enter", "");
@@ -413,6 +413,32 @@ static bool migrate_v6_config(pet_p4_input_config_t *config) {
     "page_enter",
     ""
   );
+  config->version = 7;
+  return true;
+}
+
+static bool migrate_v7_config(pet_p4_input_config_t *config) {
+  if (!config || config->version != 7 || !config_bindings_are_valid(config)) return false;
+
+  // Version 8 restores SW1 as Confirm and moves the global Back action to
+  // SW3. Rewrite only the shipped version-7 values so unrelated user
+  // mappings remain untouched.
+  migrate_default_binding(
+    config,
+    "button.sw1.short_press",
+    "page_back",
+    "",
+    "page_enter",
+    ""
+  );
+  migrate_default_binding(
+    config,
+    "button.sw3.short_press",
+    "page_enter",
+    "",
+    "page_back",
+    ""
+  );
   config->version = PET_P4_INPUT_CONFIG_VERSION;
   return true;
 }
@@ -423,7 +449,8 @@ static bool migrate_input_config(pet_p4_input_config_t *config) {
   if (config->version == 3 && !migrate_v3_config(config)) return false;
   if (config->version == 4 && !migrate_v4_config(config)) return false;
   if (config->version == 5 && !migrate_v5_config(config)) return false;
-  return config->version == 6 && migrate_v6_config(config);
+  if (config->version == 6 && !migrate_v6_config(config)) return false;
+  return config->version == 7 && migrate_v7_config(config);
 }
 
 static esp_err_t persist_config(const pet_p4_input_config_t *config) {

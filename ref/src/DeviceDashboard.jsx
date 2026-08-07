@@ -80,7 +80,7 @@ export {
 import {
   DEVICE_BUTTON_CONFIG_MODEL_VERSION,
   DEVICE_BUTTON_CONFIG_STORAGE_KEY,
-  migrateP4V6ShippedBoardDefaults,
+  migrateP4V7ShippedBoardDefaults,
 } from "./component-center/button-config.js";
 
 // ---------- Voice config storage + constants (re-exported for BoardButtonPanel) ----------
@@ -95,11 +95,11 @@ export const DEFAULT_BUTTON_ACTIONS = {
   encoder_button_short: "system_page",
   encoder_button: "system_reset",
   encoder_rotate: "volume_adjust",
-  p4_sw1_short: "page_back",
+  p4_sw1_short: "page_enter",
   p4_sw1_long: "voice_ptt",
   p4_sw2_short: "component_center",
   p4_sw2_long: "disabled",
-  p4_sw3_short: "page_enter",
+  p4_sw3_short: "page_back",
   p4_sw3_long: "disabled",
   p4_encoder_press: "page_enter",
   p4_encoder_long: "disabled",
@@ -161,11 +161,11 @@ const P4_CUSTOM_ACTION_OPTIONS = [
   "disabled",
 ];
 export const P4_BUTTON_CONTROL_ROWS = [
-  { id: "p4_sw1_short", controlId: "p4_sw1", label: "SW1 短按", event: "button.sw1.short_press", defaultAction: "page_back", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_sw1_short", controlId: "p4_sw1", label: "SW1 短按", event: "button.sw1.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw1_long", controlId: "p4_sw1", label: "SW1 长按", event: "button.sw1.long_press", holdEvent: "button.sw1.hold", voiceTriggerId: P4_DEFAULT_VOICE_TRIGGER, defaultAction: "voice_ptt", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_sw2_short", controlId: "p4_sw2", label: "SW2 短按", event: "button.sw2.short_press", defaultAction: "component_center", defaultValue: P4_DEFAULT_PROMPT, actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw2_long", controlId: "p4_sw2", label: "SW2 长按", event: "button.sw2.long_press", holdEvent: "button.sw2.hold", voiceTriggerId: "sw2.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
-  { id: "p4_sw3_short", controlId: "p4_sw3", label: "SW3 短按", event: "button.sw3.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
+  { id: "p4_sw3_short", controlId: "p4_sw3", label: "SW3 短按", event: "button.sw3.short_press", defaultAction: "page_back", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw3_long", controlId: "p4_sw3", label: "SW3 长按", event: "button.sw3.long_press", holdEvent: "button.sw3.hold", voiceTriggerId: "sw3.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_joystick_up", controlId: "p4_joystick", label: "摇杆向上", event: "joystick.up", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_joystick_down", controlId: "p4_joystick", label: "摇杆向下", event: "joystick.down", defaultAction: "disabled", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
@@ -254,6 +254,21 @@ const P4_V6_DEFAULT_BUTTON_ACTIONS = {
   p4_joystick_down: "disabled",
 };
 
+const P4_V7_DEFAULT_BUTTON_ACTIONS = {
+  p4_sw1_short: "page_back",
+  p4_sw1_long: "voice_ptt",
+  p4_sw2_short: "component_center",
+  p4_sw2_long: "disabled",
+  p4_sw3_short: "page_enter",
+  p4_sw3_long: "disabled",
+  p4_encoder_press: "page_enter",
+  p4_encoder_long: "disabled",
+  p4_encoder_cw: "session_next",
+  p4_encoder_ccw: "session_previous",
+  p4_joystick_up: "disabled",
+  p4_joystick_down: "disabled",
+};
+
 const ALL_BUTTON_CONTROL_ROWS = [...BOARD_BUTTON_CONTROL_ROWS, ...P4_BUTTON_CONTROL_ROWS];
 
 function preferredVoiceRow(rows, buttonActions, trigger) {
@@ -326,7 +341,9 @@ function normalizeVoiceConfig(value = {}) {
   const storedButtonModelVersion = Number(value.buttonModelVersion || 0);
   const migrateLegacyP4Defaults = storedButtonModelVersion !== DEVICE_BUTTON_CONFIG_MODEL_VERSION
     && Object.keys(incoming).some((key) => key.startsWith("p4_"));
-  const previousP4Defaults = storedButtonModelVersion === 6
+  const previousP4Defaults = storedButtonModelVersion === 7
+    ? P4_V7_DEFAULT_BUTTON_ACTIONS
+    : storedButtonModelVersion === 6
     ? P4_V6_DEFAULT_BUTTON_ACTIONS
     : storedButtonModelVersion === 5
     ? P4_V5_DEFAULT_BUTTON_ACTIONS
@@ -373,7 +390,7 @@ function normalizeVoiceConfig(value = {}) {
 }
 
 export function mergeBoardButtonConfig(currentConfig = {}, response = {}, runtime = "") {
-  const boardMigration = migrateP4V6ShippedBoardDefaults(response, runtime);
+  const boardMigration = migrateP4V7ShippedBoardDefaults(response, runtime);
   const migratedResponse = boardMigration.response;
   const boardConfig = migratedResponse?.config && typeof migratedResponse.config === "object"
     ? migratedResponse.config

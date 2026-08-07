@@ -69,7 +69,7 @@ import {
 
 const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-overrides:v1";
 const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong";
-const FEATURED_BUILTIN_VERSION_HASH = "1a6b9ab3eb423471";
+const FEATURED_BUILTIN_VERSION_HASH = "883340b2c2ebeb40";
 const EMPTY_DEVICE_INVENTORY = Object.freeze({
   freshness: "idle",
   runtime: "",

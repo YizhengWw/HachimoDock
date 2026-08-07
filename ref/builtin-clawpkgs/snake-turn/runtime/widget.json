@@ -63,7 +63,7 @@
     },
     "headline": {
       "switch_state": {
-        "ready": "按 SW3 开始",
+        "ready": "按 SW1 开始",
         "playing": "寻找食物",
         "result": "碰撞结束"
       }
@@ -81,9 +81,9 @@
     },
     "footer": {
       "switch_state": {
-        "ready": "SW3开始 · 摇杆左右转向 · 全局键退出",
+        "ready": "SW1开始 · 摇杆左右转向 · 全局键退出",
         "playing": "摇杆左右转向 · 全局键退出",
-        "result": "SW3重开 · 全局键退出"
+        "result": "SW1重开 · 全局键退出"
       }
     },
     "visualStyle": "pixel",

@@ -23,8 +23,8 @@ Board to PC:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "runtime": "esp-p4",
     "deviceModel": "ESP32-P4 RISC-V Dual-Core + ESP32-C6",
-    "fw": "0.7.40-p4",
-    "buildId": "0.7.40-p4+290f402abcd1",
+    "fw": "0.7.41-p4",
+    "buildId": "0.7.41-p4+290f402abcd1",
     "gitSha": "290f402abcd1",
     "buildDirty": false,
     "protocolSchema": 6,
@@ -231,7 +231,7 @@ Kinds:
     "boardDeviceId": "p4-a1b2c3d4e5f6",
     "nonce": "<host challenge>",
     "protocolSchema": 6,
-    "buildId": "0.7.40-p4+0123456789ab"
+    "buildId": "0.7.41-p4+0123456789ab"
   }
 }
 ```
@@ -579,15 +579,15 @@ PC to board:
   "topic": "input/config",
   "payload": {
     "requestId": "input-42",
-    "version": 7,
+    "version": 8,
     "bindings": [
-      {"event":"button.sw1.short_press","action":"page_back","value":""},
+      {"event":"button.sw1.short_press","action":"page_enter","value":""},
       {"event":"button.sw1.long_press","action":"disabled","value":""},
       {"event":"button.sw1.hold","action":"voice_ptt","value":""},
       {"event":"button.sw2.short_press","action":"component_center","value":""},
       {"event":"button.sw2.long_press","action":"disabled","value":""},
       {"event":"button.sw2.hold","action":"disabled","value":""},
-      {"event":"button.sw3.short_press","action":"page_enter","value":""},
+      {"event":"button.sw3.short_press","action":"page_back","value":""},
       {"event":"button.sw3.long_press","action":"disabled","value":""},
       {"event":"button.sw3.hold","action":"disabled","value":""},
       {"event":"button.encoder.short_press","action":"page_enter","value":""},
@@ -611,9 +611,9 @@ Pet Manager's P4 button menu exposes only custom prompt, voice input,
 previous/next item, clear sessions, pet/component page toggle, confirm, back/cancel,
 and unbound.
 
-SW3 short press and joystick center short press both default to `page_enter`:
+SW1 short press and joystick center short press both default to `page_enter`:
 they activate the selection and open `app` only from `components`; they do not
-open the catalog from `main`. SW1 short press defaults to the global
+open the catalog from `main`. SW3 short press defaults to the global
 `page_back` path. Center long press and the new up/down directions default to
 `disabled`; all remain editable and are persisted with the rest of the input
 map. SW2 short press toggles `main` and `components` in both directions. Other SW short/long gestures
@@ -633,7 +633,7 @@ legacy `page_main/page_back` records, and firmware ignores any such records that
 remain in an already-installed package. While `app` is open, whichever persisted
 global event currently maps to `page_back` is resolved before component gameplay
 bindings, so changing the global exit key immediately changes every component.
-The default remains SW1 short press; SW1 long-press PTT is unaffected. The two
+The default remains SW3 short press; SW1 long-press PTT is unaffected. The two
 legacy-named session actions now select content within the current peer page. The two mini-app proxy actions only run while
 the app page is open and dispatch its existing `screen.region.tap` or
 `screen.region.long_press` binding. Custom values are limited to 159 UTF-8 bytes.

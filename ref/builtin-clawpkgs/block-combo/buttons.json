@@ -1,8 +1,8 @@
 [
   {
     "action": "blocks.start",
-    "control": "SW3",
-    "event": "button.sw3.short_press",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
     "label": "开始/重开"
   },
   {

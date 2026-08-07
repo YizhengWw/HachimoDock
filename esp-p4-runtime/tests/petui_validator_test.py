@@ -23,7 +23,7 @@ SPEC.loader.exec_module(VALIDATOR)
 def shooter_fixture() -> dict[str, object]:
     dashboard = {
         "title": "校验战机",
-        "headline": "按SW3开始",
+        "headline": "按SW1开始",
         "visualStyle": "clean",
         "visualPalette": "ocean",
         "visualLayout": "arcade",
@@ -41,8 +41,8 @@ def shooter_fixture() -> dict[str, object]:
         "buttons.json": [
             {
                 "action": "play.start",
-                "control": "SW3",
-                "event": "button.sw3.short_press",
+                "control": "SW1",
+                "event": "button.sw1.short_press",
                 "label": "开始或重开",
             },
             {
@@ -235,12 +235,12 @@ class ClaimedMechanicsTests(unittest.TestCase):
         )
         self.assertEqual(self.validate_values(values), [])
 
-    def test_default_global_sw1_exit_is_reserved_from_components(self) -> None:
+    def test_default_global_sw3_exit_is_reserved_from_components(self) -> None:
         values = copy.deepcopy(self.values)
         buttons = values["buttons.json"]
         assert isinstance(buttons, list)
-        buttons[0]["control"] = "SW1"
-        buttons[0]["event"] = "button.sw1.short_press"
+        buttons[0]["control"] = "SW3"
+        buttons[0]["event"] = "button.sw3.short_press"
         errors = self.validate_values(values)
         self.assertTrue(any("默认全局退出键" in error for error in errors), errors)
 

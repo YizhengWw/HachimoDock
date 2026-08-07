@@ -93,14 +93,14 @@
     "note": {
       "switch_page": {
         "next": "每 60 分钟提醒一次",
-        "today": "SW3 记录一次喝水"
+        "today": "SW1 记录一次喝水"
       }
     },
     "footer": {
       "switch_state": {
-        "counting": "SW3我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出",
-        "paused": "SW3我喝了 · SW2恢复 · 摇杆右切换 · 全局键退出",
-        "due": "SW3我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出"
+        "counting": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出",
+        "paused": "SW1我喝了 · SW2恢复 · 摇杆右切换 · 全局键退出",
+        "due": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出"
       }
     },
     "progress": {

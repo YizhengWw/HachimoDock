@@ -5,7 +5,7 @@
  *          session-scoped device-inventory caching and formal-library file watching, while verifying
  *          first-visit component onboarding,
  *          the featured 双键接球 builtin first, newest-first user components next, complete built-in Flappy package wiring,
- *          global SW1 exit plus SW3/joystick gameplay mappings across every builtin,
+ *          global SW3 exit plus SW1/joystick gameplay mappings across every builtin,
  *          per-component buttons.json, editable component bindings, explicit component-scope guidance,
  *          P4 button-map downlink, semantic enabled state, card-owned device sync/removal,
  *          device-first dual deletion, exact target identity, focus-safe confirmation,
@@ -508,7 +508,7 @@ test("component library pins 双键接球 first and keeps other user components 
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
   assert.match(component, /const FEATURED_BUILTIN_COMPONENT_ID = "two-key-pong"/);
-  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "1a6b9ab3eb423471"/);
+  assert.match(component, /const FEATURED_BUILTIN_VERSION_HASH = "883340b2c2ebeb40"/);
   assert.match(component, /\.\.\.featuredBuiltins,[\s\S]*\.\.\.sortComponentsByCreatedAt\(publishedItems\),[\s\S]*\.\.\.remainingBuiltins/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
@@ -523,13 +523,13 @@ test("builtin catalog starts with the validated 双键接球 package", () => {
 
   assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
   assert.equal(componentManifest.id, "two-key-pong");
-  assert.equal(componentManifest.version, "1.1.4");
+  assert.equal(componentManifest.version, "1.1.5");
   assert.equal(widget.engine, "p4-bounded-runtime-v3");
   assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
   assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right"]);
 });
 
-test("all builtin components omit exit actions, reserve SW1 globally, and use SW3 for primary actions", () => {
+test("all builtin components omit exit actions, reserve SW3 globally, and use SW1 for primary actions", () => {
   const packageRoot = join(srcDir, "../builtin-clawpkgs");
   const packageIds = [
     "two-key-pong",
@@ -552,15 +552,15 @@ test("all builtin components omit exit actions, reserve SW1 globally, and use SW
       readFileSync(join(packageRoot, packageId, "buttons.json"), "utf8"),
     );
     assert.equal(buttons.some((binding) => binding.action.startsWith("page_")), false);
-    assert.equal(buttons.some((binding) => binding.event === "button.sw1.short_press"), false);
+    assert.equal(buttons.some((binding) => binding.event === "button.sw3.short_press"), false);
     assert.equal(
-      buttons.filter((binding) => binding.event === "button.sw3.short_press").length,
+      buttons.filter((binding) => binding.event === "button.sw1.short_press").length,
       1,
     );
     if (gameStartActions[packageId]) {
       assert.equal(
         buttons.find((binding) => binding.action === gameStartActions[packageId])?.event,
-        "button.sw3.short_press",
+        "button.sw1.short_press",
       );
     }
   }
@@ -571,7 +571,7 @@ test("all builtin components omit exit actions, reserve SW1 globally, and use SW
   assert.deepEqual(
     Object.fromEntries(blocks.map((binding) => [binding.action, binding.event])),
     {
-      "blocks.start": "button.sw3.short_press",
+      "blocks.start": "button.sw1.short_press",
       "blocks.left": "knob.rotate_ccw",
       "blocks.right": "knob.rotate_cw",
       "blocks.rotate": "joystick.up",
@@ -683,7 +683,7 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(contract, /joystick\.down/);
   assert.match(contract, /左.*`knob\.rotate_ccw`/);
   assert.match(contract, /右.*`knob\.rotate_cw`/);
-  assert.match(contract, /SW3.*开始\/重新开始/);
+  assert.match(contract, /SW1.*开始\/重新开始/);
   assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
   assert.match(contract, /knob\.rotate_cw/);
   assert.match(contract, /\.staging.*不是“草稿库”/);
@@ -806,9 +806,9 @@ test("fixtures expose 双键接球 first, three remaining games, and three tools
   assert.equal((data.match(/kind: "tool"/g) || []).length, 3);
   assert.equal((data.match(/visualStyle: "pixel"/g) || []).length, 7);
   assert.equal((data.match(/visualLayout: "tool"/g) || []).length, 3);
-  assert.doesNotMatch(data, /event: "button\.sw1\.short_press"/);
+  assert.match(data, /event: "button\.sw1\.short_press"/);
   assert.match(data, /button\.sw2\.short_press/);
-  assert.match(data, /button\.sw3\.short_press/);
+  assert.doesNotMatch(data, /event: "button\.sw3\.short_press"/);
   assert.match(data, /joystick\.up/);
   assert.match(data, /joystick\.down/);
   assert.match(data, /shift_left/);

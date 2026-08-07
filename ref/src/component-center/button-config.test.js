@@ -1,6 +1,6 @@
 /**
  * [Input] component-center/button-config.js pure option and P4 downlink helpers.
- * [Output] Regression coverage for model-v7 signaling, exact-default-only board
+ * [Output] Regression coverage for model-v8 signaling, exact-default-only board
  *          migration, unique component controls, and repeatable optional global-exit resolution.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -14,23 +14,23 @@ import {
   componentInputEventSlots,
   defaultControlLabelForBinding,
   globalExitControlLabel,
-  migrateP4V6ShippedBoardDefaults,
+  migrateP4V7ShippedBoardDefaults,
   resolveGlobalExitEvents,
 } from "./button-config.js";
 
-test("device button config model advances for the SW1-back/SW3-confirm defaults", () => {
-  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 7);
+test("device button config model advances for the SW1-confirm/SW3-back defaults", () => {
+  assert.equal(DEVICE_BUTTON_CONFIG_MODEL_VERSION, 8);
 });
 
-test("the exact shipped v6 board map migrates SW1/SW3 without changing custom maps", () => {
+test("the exact shipped v7 board map migrates SW1/SW3 without changing custom maps", () => {
   const bindings = [
-    ["button.sw1.short_press", "page_enter"],
+    ["button.sw1.short_press", "page_back"],
     ["button.sw1.long_press", "disabled"],
     ["button.sw1.hold", "voice_ptt"],
     ["button.sw2.short_press", "component_center"],
     ["button.sw2.long_press", "disabled"],
     ["button.sw2.hold", "disabled"],
-    ["button.sw3.short_press", "page_back"],
+    ["button.sw3.short_press", "page_enter"],
     ["button.sw3.long_press", "disabled"],
     ["button.sw3.hold", "disabled"],
     ["button.encoder.short_press", "page_enter"],
@@ -41,25 +41,25 @@ test("the exact shipped v6 board map migrates SW1/SW3 without changing custom ma
     ["joystick.up", "disabled"],
     ["joystick.down", "disabled"],
   ].map(([event, action]) => ({ event, action, value: "" }));
-  const migration = migrateP4V6ShippedBoardDefaults(
-    { config: { version: 6, bindings } },
+  const migration = migrateP4V7ShippedBoardDefaults(
+    { config: { version: 7, bindings } },
     "esp-p4",
   );
 
   assert.equal(migration.migrated, true);
-  assert.equal(migration.response.config.version, 7);
+  assert.equal(migration.response.config.version, 8);
   assert.equal(
     migration.response.config.bindings.find((binding) => binding.event === "button.sw1.short_press")?.action,
-    "page_back",
+    "page_enter",
   );
   assert.equal(
     migration.response.config.bindings.find((binding) => binding.event === "button.sw3.short_press")?.action,
-    "page_enter",
+    "page_back",
   );
 
   const customized = structuredClone({ config: { version: 7, bindings } });
   customized.config.bindings.find((binding) => binding.event === "joystick.up").action = "session_previous";
-  const preserved = migrateP4V6ShippedBoardDefaults(customized, "esp-p4");
+  const preserved = migrateP4V7ShippedBoardDefaults(customized, "esp-p4");
   assert.equal(preserved.migrated, false);
   assert.equal(preserved.response, customized);
 });

@@ -129,7 +129,7 @@ SHOOTER_CLAIMS = (
     "射击", "开火", "子弹", "敌机", "战机", "飞机大战",
     "shoot", "firing", "bullet", "enemy fighter", "lane fighter", "shooter",
 )
-DEFAULT_GLOBAL_EXIT_EVENT = "button.sw1.short_press"
+DEFAULT_GLOBAL_EXIT_EVENT = "button.sw3.short_press"
 SYSTEM_ACTIONS = {
     "page_toggle",
     "page_enter",
@@ -1005,7 +1005,7 @@ def validate_buttons(
             errors.append(f"buttons.json[{index}].label 超过 30 UTF-8 字节")
         if isinstance(event, str):
             if event == DEFAULT_GLOBAL_EXIT_EVENT:
-                errors.append("button.sw1.short_press 是默认全局退出键，组件不得占用")
+                errors.append("button.sw3.short_press 是默认全局退出键，组件不得占用")
             if SW_HOLD_PATTERN.fullmatch(event):
                 errors.append(f"SW1/SW2/SW3 不支持长按或 hold: {event}")
             if event not in ALLOWED_EVENTS:

@@ -1,8 +1,8 @@
 {
   "id": "two-key-pong",
   "name": "双键接球",
-  "version": "1.1.4",
-  "description": "经典单人挡板接球：SW3 开始或重开，摇杆左右移动挡板；退出跟随设备全局设置。",
+  "version": "1.1.5",
+  "description": "经典单人挡板接球：SW1 开始或重开，摇杆左右移动挡板；退出跟随设备全局设置。",
   "kind": "game",
   "engine": "p4-bounded-runtime-v3"
 }

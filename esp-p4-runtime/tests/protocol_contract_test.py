@@ -2,7 +2,7 @@
 [Input] ESP32-P4 source, protocol docs, desktop counterparts, and built-in widget manifests.
 [Output] Static cross-module regression coverage for the P4 firmware contract,
 including client-authoritative NVS input-config reconciliation and desktop/device
-widget visual-preset parity, including SW1-back/SW2-page-toggle/SW3-confirm
+widget visual-preset parity, including SW1-confirm/SW2-page-toggle/SW3-back
 global defaults, page-local previous/next selection, global-exit-first component
 controls, and firmware-embedded built-ins.
 Also locks GPIO20/GPIO21 four-direction joystick decoding and legacy aliases.
@@ -471,16 +471,16 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
             binding for binding in buttons
             if binding["control"] in {"SW1", "SW2", "SW3"}
         ]
-        assert [binding["control"] for binding in switch_bindings] == ["SW3", "SW2"]
+        assert [binding["control"] for binding in switch_bindings] == ["SW1", "SW2"]
         assert [binding["event"] for binding in switch_bindings] == [
-            "button.sw3.short_press",
+            "button.sw1.short_press",
             "button.sw2.short_press",
         ]
         assert [binding["action"] for binding in switch_bindings] == [
             actions[0],
             actions[1],
         ]
-        assert not any(binding["event"] == "button.sw1.short_press" for binding in buttons)
+        assert not any(binding["event"] == "button.sw3.short_press" for binding in buttons)
         assert not any(binding["action"].startswith("page_") for binding in buttons)
         assert next(
             binding["event"]
@@ -745,7 +745,7 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             for binding in buttons
             if binding["event"].endswith(".short_press")
         }
-        assert switch_controls == {"SW3"}
+        assert switch_controls == {"SW1"}
         actions = [binding["action"] for binding in buttons]
         assert len(actions) == len(set(actions))
     block_buttons = json.loads(
@@ -754,7 +754,7 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
     assert {
         binding["action"]: binding["event"] for binding in block_buttons
     } == {
-        "blocks.start": "button.sw3.short_press",
+        "blocks.start": "button.sw1.short_press",
         "blocks.left": "knob.rotate_ccw",
         "blocks.right": "knob.rotate_cw",
         "blocks.rotate": "joystick.up",
@@ -767,7 +767,7 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
         "flappy.flap",
     ]
     assert [binding["event"] for binding in flappy_buttons] == [
-        "button.sw3.short_press",
+        "button.sw1.short_press",
     ]
 
 
@@ -1523,7 +1523,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.40-p4")' in project
+    assert 'set(PROJECT_VER "0.7.41-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1603,7 +1603,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.40-p4")' in project
+    assert 'set(PROJECT_VER "0.7.41-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2045,8 +2045,8 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "PET_P4_INPUT_GESTURE_HOLD_END" in input_source
     assert '"button.sw1.hold", "voice_ptt"' in input_source
     assert '"button.sw2.short_press", "component_center"' in input_source
-    assert '"button.sw1.short_press", "page_back"' in input_source
-    assert '"button.sw3.short_press", "page_enter"' in input_source
+    assert '"button.sw1.short_press", "page_enter"' in input_source
+    assert '"button.sw3.short_press", "page_back"' in input_source
     assert '"button.sw3.long_press", "disabled"' in input_source
     assert '"button.encoder.short_press", "page_enter"' in input_source
     assert '"button.encoder.long_press", "disabled"' in input_source
@@ -2068,8 +2068,9 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "migrate_v4_config" in input_source
     assert "migrate_v5_config" in input_source
     assert "migrate_v6_config" in input_source
+    assert "migrate_v7_config" in input_source
     assert "migrate_input_config" in input_source
-    assert "PET_P4_INPUT_CONFIG_VERSION 7" in read_required("main/pet_p4_input.h")
+    assert "PET_P4_INPUT_CONFIG_VERSION 8" in read_required("main/pet_p4_input.h")
     assert "center_binding" not in input_source
     assert '"page_toggle"' in input_source
     assert '"page_enter"' in input_source
@@ -2103,7 +2104,7 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"SW1返回，SW3进入"' in renderer
+    assert '"SW3返回，SW1进入"' in renderer
     assert "int count = 2;" in renderer
     assert 'strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0' in renderer
     assert "dispatch_component_binding_event" in input_source

@@ -43,11 +43,12 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
-- Firmware `0.7.40-p4` keeps `main` and `components` as two peer pages with two
+- Firmware `0.7.41-p4` keeps `main` and `components` as two peer pages with two
   indicator dots, but SW2 short press is now their sole default hardware toggle.
   Previous/next selects Session bubbles on `main` and catalog entries on
   `components`; the running `app` remains a child of Component Center and owns
-  SW2 whenever its package binds that event.
+  SW2 whenever its package binds that event. Its input-config v8 defaults use
+  SW1 short for Confirm and SW3 short for Back.
 - Firmware `0.7.39-p4` introduced the two-dot peer-page renderer; its temporary
   left/right page-switch policy is superseded by `0.7.40-p4`.
 - Firmware `0.7.38-p4` keeps the `0.7.37-p4` idle-clock correction and also
@@ -341,9 +342,9 @@ All controls are active-low to GND and use internal pull-ups:
 
 | Control | GPIO | Default behavior |
 | --- | ---: | --- |
-| SW1 | 50 | Short press returns/cancels; long press defaults to voice input |
+| SW1 | 50 | Short press confirms/enters; long press defaults to voice input |
 | SW2 | 49 | Short press opens Component Center; long press is unbound |
-| SW3 | 5 | Short press confirms/enters; long press is unbound |
+| SW3 | 5 | Short press returns/cancels; long press is unbound |
 | Joystick key | 4 | Short press confirms; long press is unbound |
 | Joystick left/right compatibility | 3/2 | Left/right retain the legacy encoder event names |
 
@@ -354,7 +355,7 @@ Pet Manager exposes SW1/SW2/SW3 short and long press plus joystick-center short
 press, long press, and four directions. Joystick-center short press defaults to
 `page_enter` (“确认”), while encoder long press defaults to `disabled`.
 SW2 short press defaults to `component_center`, SW1 short press defaults to
-`page_back` (“返回（取消）”), and SW3 short press defaults to `page_enter`.
+`page_enter` (“确认”), and SW3 short press defaults to `page_back` (“返回（取消）”).
 Every gesture remains editable and persists in NVS
 after downlink.
 The global `page_back` binding always wins while `app` is open. Component

@@ -2,7 +2,7 @@
   "id": "snake-turn",
   "name": "像素贪吃蛇",
   "kind": "game",
-  "version": "2.1.3",
+  "version": "2.1.4",
   "author": "openclaw",
-  "description": "持续移动、SW3 开始或重开、摇杆左右转向；退出跟随设备全局设置。"
+  "description": "持续移动、SW1 开始或重开、摇杆左右转向；退出跟随设备全局设置。"
 }

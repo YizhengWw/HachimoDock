@@ -82,7 +82,7 @@
     },
     "metricUnit": "TOKEN",
     "note": { "var": "cache_display" },
-    "footer": "SW3总量 · SW2输入 · 摇杆右输出 · 全局键退出",
+    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · 全局键退出",
     "visualStyle": "pixel",
     "visualPalette": {
       "switch_page": {

@@ -1,7 +1,7 @@
 [
   {
-    "control": "SW3",
-    "event": "button.sw3.short_press",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
     "action": "tomato.start_pause",
     "label": "暂停 / 继续"
   },

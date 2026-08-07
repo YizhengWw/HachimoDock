@@ -5,7 +5,7 @@
  * two-page joystick routing, cursor lifecycle delivery, serialized USB follow switching, Codex-visible and
  * MiMoCode current-caret voice delivery, client-authoritative ACK-gated board
  * configuration, ID-deeplink-confirmed macOS Session recovery, and stale bridge/USB
- * guards, SW1-back/SW3-confirm defaults and migration,
+ * guards, SW1-confirm/SW3-back defaults and migration,
  * immediate saved-ASR voice rearming, and exact-board appearance recovery.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -263,11 +263,11 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.ok(rows, "expected P4_BUTTON_CONTROL_ROWS");
   assert.ok(visibleOptions, "expected BUTTON_FUNCTION_OPTIONS");
   assert.ok(p4Options, "expected P4_CUSTOM_ACTION_OPTIONS");
-  assert.match(dashboard, /p4_sw1_short:\s*"page_back"/);
+  assert.match(dashboard, /export const DEFAULT_BUTTON_ACTIONS = \{[\s\S]*?p4_sw1_short:\s*"page_enter"/);
   assert.match(dashboard, /p4_sw1_long:\s*"voice_ptt"/);
   assert.match(dashboard, /p4_sw2_short:\s*"component_center"/);
   assert.match(dashboard, /p4_sw2_long:\s*"disabled"/);
-  assert.match(dashboard, /p4_sw3_short:\s*"page_enter"/);
+  assert.match(dashboard, /export const DEFAULT_BUTTON_ACTIONS = \{[\s\S]*?p4_sw3_short:\s*"page_back"/);
   assert.match(dashboard, /p4_sw3_long:\s*"disabled"/);
   assert.match(dashboard, /p4_encoder_press:\s*"page_enter"/);
   assert.match(dashboard, /p4_encoder_long:\s*"disabled"/);

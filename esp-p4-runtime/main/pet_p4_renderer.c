@@ -2,7 +2,7 @@
  * [Input] Pet lifecycle/session state, decoded assets, and bounded mini-app view presets.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus a two-dot main/components indicator, current SW1-back/SW3-enter
+ *          plus a two-dot main/components indicator, current SW3-back/SW1-enter
  *          hints in the component catalog, and
  *          a lightweight transfer screen that never reads changing assets.
  * [Pos] ESP32-P4 display renderer.
@@ -2473,7 +2473,7 @@ static void render_component_center_page(void) {
   }
 
   fill_round_rect_outline(28, 408, 584, 44, 9, panel, panel_outline);
-  const char *hint = "SW1返回，SW3进入";
+  const char *hint = "SW3返回，SW1进入";
   draw_text_center(
     hint,
     320,
