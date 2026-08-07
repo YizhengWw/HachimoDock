@@ -689,6 +689,9 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(contract, /右.*`knob\.rotate_cw`/);
   assert.match(contract, /SW1.*开始\/重新开始/);
   assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
+  assert.match(widgetSkill, /先完成素材再写 runtime 引用/);
+  assert.match(widgetSkill, /不是把 JPEG\/WebP 改扩展名/);
+  assert.match(contract, /每个 PNG 必须被 `runtime\/widget\.json scene\.sprites` 精确引用/);
   assert.match(widgetSkill, /`component\.json\.description` 用 1-2 句说明游戏目标、核心规则和结束条件/);
   assert.match(contract, /组件中心会根据 `buttons\.json` 另行展示实际操作方法/);
   assert.match(contract, /新游戏核心元素 PNG 优先/);

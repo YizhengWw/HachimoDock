@@ -52,6 +52,7 @@
 - `negative-screen.json.dashboard` 是初始预览，必须与 runtime 的初始 state/page/vars 相符。
 - `share.json` 必须是 JSON 对象，至少包含非空 `title`。
 - 允许在 `assets/` 放运行时支持的静态 PNG 资源；单个 sprite sheet 不超过 128 KiB。禁止 JS、Python、HTML、CSS、SVG、shell、PowerShell、批处理和可执行文件。
+- `assets/` 只允许 `.keep` 与最终发布用 PNG。每个 PNG 必须被 `runtime/widget.json scene.sprites` 精确引用；不得遗留未使用的候选图、单帧临时图、提示词或把 JPEG/WebP 改为 `.png`。
 - 包内不得包含符号链接。
 
 ## 3. Dashboard 槽位
@@ -220,6 +221,7 @@ screen.region.long_press
 - 最多 4 个精灵；每个 1-8 帧；单帧宽高各 8-64；动画 1-20 fps。
 - 所有精灵的全部解码帧合计最多 4096 像素；单个源 PNG 不超过 128 KiB。
 - `id` 为 1-15 个安全 ASCII 字符；`asset` 只能是 `assets/<safe-name>.png`。
+- 路径按大小写精确匹配。生成流程必须先把真实 PNG 写入 `assets/`，再声明 `scene.sprites`；禁止先写一个尚不存在的素材引用后直接发布。
 - PC 预览直接读取源 PNG；下发时会编译为 RGB565+alpha 并作为同一组件事务安装，固件重启后仍会从组件双代存储恢复。
 - 不要为装饰性细节滥用精灵。简单球、胶囊、心形、云、金币、子弹和平台可优先使用内置 shape，以节省包体和运行内存；这条节省规则不能覆盖“玩家/主角和主要题材对象 PNG 优先”的要求。
 

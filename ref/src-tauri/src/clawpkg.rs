@@ -8,7 +8,7 @@
  */
 
 use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
 
 #[derive(Debug, Clone, Serialize)]
@@ -1332,21 +1332,91 @@ fn build_manifest_preview(
     }
 }
 
+fn collect_clawpkg_directory_files(
+    root: &std::path::Path,
+) -> Result<HashMap<String, Vec<u8>>, String> {
+    let mut files = HashMap::new();
+    let mut pending = VecDeque::from([root.to_path_buf()]);
+    let mut entry_count = 0usize;
+    let mut expanded_bytes = 0u64;
+
+    while let Some(directory) = pending.pop_front() {
+        let mut entries = std::fs::read_dir(&directory)
+            .map_err(|error| format!("read directory {}: {}", directory.display(), error))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("read directory {}: {}", directory.display(), error))?;
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+
+        for entry in entries {
+            entry_count += 1;
+            if entry_count > CLAWPKG_MAX_ENTRIES {
+                return Err(format!("clawpkg 文件数超过 {} 个上限", CLAWPKG_MAX_ENTRIES));
+            }
+            let path = entry.path();
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| format!("clawpkg 含不安全路径: {}", path.display()))?;
+            let name = relative
+                .to_str()
+                .ok_or_else(|| "clawpkg 路径必须是 UTF-8".to_string())?
+                .replace('\\', "/");
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("stat {}: {}", path.display(), error))?;
+            if file_type.is_symlink() {
+                return Err(format!("clawpkg 不允许符号链接: {}", name));
+            }
+            if file_type.is_dir() {
+                pending.push_back(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                return Err(format!("clawpkg 不允许特殊文件: {}", name));
+            }
+
+            let size = entry
+                .metadata()
+                .map_err(|error| format!("stat {}: {}", path.display(), error))?
+                .len();
+            if size > CLAWPKG_MAX_ENTRY_BYTES {
+                return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
+            }
+            expanded_bytes = expanded_bytes
+                .checked_add(size)
+                .ok_or_else(|| "clawpkg 解压大小溢出".to_string())?;
+            if expanded_bytes > CLAWPKG_MAX_EXPANDED_BYTES {
+                return Err("clawpkg 解压后总大小超过上限".to_string());
+            }
+
+            let mut bytes = Vec::new();
+            std::fs::File::open(&path)
+                .map_err(|error| format!("read {}: {}", path.display(), error))?
+                .take(CLAWPKG_MAX_ENTRY_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("read {}: {}", path.display(), error))?;
+            if bytes.len() as u64 > CLAWPKG_MAX_ENTRY_BYTES {
+                return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
+            }
+            if files.insert(name.clone(), bytes).is_some() {
+                return Err(format!("clawpkg 含重复路径: {}", name));
+            }
+        }
+    }
+
+    Ok(files)
+}
+
 pub fn validate_clawpkg_at_path(path: &std::path::Path) -> Result<ValidateClawpkgResult, String> {
     /* Skill-generated drafts land as directories (the agent's working copy);
     distributed clawpkgs land as .zip / .clawpkg files. Dispatch on metadata
     so both shapes feed the same validator. */
-    let meta = std::fs::metadata(path).map_err(|e| format!("stat {}: {}", path.display(), e))?;
+    let meta =
+        std::fs::symlink_metadata(path).map_err(|e| format!("stat {}: {}", path.display(), e))?;
+    if meta.file_type().is_symlink() {
+        return Err(format!("clawpkg 不允许符号链接: {}", path.display()));
+    }
     if meta.is_dir() {
-        let mut files: HashMap<String, Vec<u8>> = HashMap::new();
-        for f in REQUIRED_FILES {
-            let fp = path.join(f);
-            if fp.exists() {
-                let bytes =
-                    std::fs::read(&fp).map_err(|e| format!("read {}: {}", fp.display(), e))?;
-                files.insert((*f).to_string(), bytes);
-            }
-        }
+        let files = collect_clawpkg_directory_files(path)?;
         validate_clawpkg_collected(files, |dir| path.join(dir).is_dir())
     } else {
         if meta.len() > CLAWPKG_MAX_ARCHIVE_BYTES as u64 {
@@ -1822,6 +1892,77 @@ mod tests {
             manifest.dashboard.get("title").map(String::as_str),
             Some("会议")
         );
+    }
+
+    #[test]
+    fn validate_at_path_loads_png_sprite_assets_from_directories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("sprite-widget");
+        std::fs::create_dir_all(dir.join("runtime")).unwrap();
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(
+            dir.join("component.json"),
+            br#"{"id":"sprite-widget","name":"Sprite Widget","version":"1.0.0","kind":"game"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("negative-screen.json"),
+            br#"{"dashboard":{"title":"Sprite Widget"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("buttons.json"),
+            br#"[{"action":"play.start","control":"SW1","event":"button.sw1.short_press","label":"Start"}]"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("share.json"), br#"{"title":"Sprite Widget"}"#).unwrap();
+        std::fs::write(
+            dir.join("runtime/widget.json"),
+            br#"{
+              "schema_version":1,
+              "engine":"p4-bounded-runtime-v4",
+              "vars":{},
+              "states":["ready","playing"],
+              "initial_state":"ready",
+              "transitions":[{"from":"ready","on":"play.start","to":"playing"}],
+              "tick":[],
+              "dashboard":{"title":"Sprite Widget"},
+              "scene":{
+                "tick_ms":200,
+                "active_state":"playing",
+                "grid":{"width":4,"height":4},
+                "sprites":[{"id":"hero","asset":"assets/hero.png","frame_width":8,"frame_height":8,"frames":2,"fps":8}],
+                "entities":[{"id":"hero","x":0,"y":0,"width":1,"height":1,"sprite":"hero"}],
+                "rules":[{"on":"play.start","do":[{"op":"run"}]}]
+              }
+            }"#,
+        )
+        .unwrap();
+        let sprite = image::RgbaImage::from_pixel(16, 8, image::Rgba([255, 128, 32, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(sprite)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(dir.join("assets/hero.png"), png.into_inner()).unwrap();
+
+        let result = validate_clawpkg_at_path(&dir).expect("validate should run");
+        assert!(result.ok, "expected valid; errors={:?}", result.errors);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_at_path_rejects_symlinked_directory_assets() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("symlink-widget");
+        std::fs::create_dir_all(dir.join("runtime")).unwrap();
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(dir.join("assets/real.png"), b"not important").unwrap();
+        symlink(dir.join("assets/real.png"), dir.join("assets/linked.png")).unwrap();
+
+        let error = validate_clawpkg_at_path(&dir).unwrap_err();
+        assert!(error.contains("符号链接"), "unexpected error: {error}");
     }
 
     #[test]

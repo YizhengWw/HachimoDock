@@ -747,6 +747,53 @@ mod tests {
     }
 
     #[test]
+    fn formal_directory_sprite_packages_validate_and_expose_preview_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let source = temp.path().join("source");
+        write_package(&source, "sprite-tool");
+        fs::write(
+            source.join("runtime/widget.json"),
+            br#"{
+              "schema_version":1,
+              "engine":"p4-bounded-runtime-v4",
+              "vars":{},
+              "states":["idle"],
+              "initial_state":"idle",
+              "transitions":[],
+              "tick":[],
+              "dashboard":{"title":"Timer"},
+              "scene":{
+                "tick_ms":200,
+                "active_state":"idle",
+                "auto_start":true,
+                "grid":{"width":4,"height":4},
+                "sprites":[{"id":"hero","asset":"assets/hero.png","frame_width":8,"frame_height":8,"frames":2,"fps":8}],
+                "entities":[{"id":"hero","x":0,"y":0,"width":1,"height":1,"sprite":"hero"}],
+                "rules":[{"on":"tick","do":[{"op":"move","entity":"hero","dx":1,"dy":0}]}]
+              }
+            }"#,
+        )
+        .unwrap();
+        let sprite = image::RgbaImage::from_pixel(16, 8, image::Rgba([255, 128, 32, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(sprite)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        fs::write(source.join("assets/hero.png"), png.into_inner()).unwrap();
+
+        let published = publish_source(&home, &source).unwrap();
+        assert!(published.valid, "{:?}", published.validation_errors);
+        let snapshot = list(&home).unwrap();
+        assert_eq!(snapshot.components.len(), 1);
+        assert_eq!(snapshot.components[0].scene_sprites.len(), 1);
+        assert_eq!(snapshot.components[0].scene_sprites[0].id, "hero");
+        assert!(snapshot.components[0].scene_sprites[0]
+            .data_url
+            .starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
     fn legacy_migration_copies_valid_packages_without_deleting_sources() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");

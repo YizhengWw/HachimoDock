@@ -114,6 +114,9 @@ SCENE_SPRITE_MAX_DIMENSION = 64
 SCENE_SPRITE_MIN_FPS = 1
 SCENE_SPRITE_MAX_FPS = 20
 SCENE_SPRITE_MAX_SOURCE_BYTES = 128 * 1024
+CLAWPKG_MAX_ENTRIES = 128
+CLAWPKG_MAX_ENTRY_BYTES = 4 * 1024 * 1024
+CLAWPKG_MAX_EXPANDED_BYTES = 16 * 1024 * 1024
 WIDGET_MAX_VARS = 8
 VAR_NAME_MAX_BYTES = 31
 STRING_VAR_MAX_BYTES = 63
@@ -414,23 +417,60 @@ def validate_package_files(widget_dir: Path, errors: list[str]) -> None:
     if not widget_dir.is_dir():
         errors.append(f"组件目录不存在: {widget_dir}")
         return
-    for path in widget_dir.rglob("*"):
+    entries = list(widget_dir.rglob("*"))
+    if len(entries) > CLAWPKG_MAX_ENTRIES:
+        errors.append(f"组件包文件数超过 {CLAWPKG_MAX_ENTRIES} 个上限")
+    expanded_bytes = 0
+    present: set[str] = set()
+    for path in entries:
+        relative = path.relative_to(widget_dir)
+        relative_name = relative.as_posix()
         if path.is_symlink():
-            errors.append(f"组件包不允许符号链接: {path.relative_to(widget_dir).as_posix()}")
+            errors.append(f"组件包不允许符号链接: {relative_name}")
             continue
-        if path.is_file() and path.suffix.lower() in FORBIDDEN_SUFFIXES:
-            errors.append(f"组件包不允许可执行或脚本文件: {path.relative_to(widget_dir).as_posix()}")
-    present = {
-        path.relative_to(widget_dir).as_posix()
-        for path in widget_dir.rglob("*")
-        if path.is_file()
-    }
+        if not path.is_file():
+            continue
+        present.add(relative_name)
+        try:
+            size = path.stat().st_size
+        except OSError as error:
+            errors.append(f"无法读取组件文件大小: {relative_name}: {error}")
+            continue
+        expanded_bytes += size
+        if size > CLAWPKG_MAX_ENTRY_BYTES:
+            errors.append(f"组件文件超过 4 MiB 上限: {relative_name}")
+        if path.suffix.lower() in FORBIDDEN_SUFFIXES:
+            errors.append(f"组件包不允许可执行或脚本文件: {relative_name}")
+        if relative.parts and relative.parts[0] == "assets":
+            if len(relative.parts) != 2 or (path.name != ".keep" and path.suffix != ".png"):
+                errors.append(f"assets/ 只允许根目录下的 .keep 与最终 PNG: {relative_name}")
+    if expanded_bytes > CLAWPKG_MAX_EXPANDED_BYTES:
+        errors.append("组件包总大小超过 16 MiB 上限")
     for required in sorted(REQUIRED_FILES - present):
         errors.append(f"缺少文件: {required}")
     if not (widget_dir / "assets").is_dir():
         errors.append("缺少目录: assets/")
     if not (widget_dir / "runtime").is_dir():
         errors.append("缺少目录: runtime/")
+
+
+def validate_png_asset_inventory(widget_dir: Path, runtime: Any, errors: list[str]) -> None:
+    present = {
+        path.relative_to(widget_dir).as_posix()
+        for path in (widget_dir / "assets").glob("*.png")
+        if path.is_file() and not path.is_symlink()
+    }
+    scene = runtime.get("scene") if isinstance(runtime, dict) else None
+    sprites = scene.get("sprites") if isinstance(scene, dict) else None
+    referenced = set()
+    if isinstance(sprites, list):
+        referenced = {
+            sprite["asset"]
+            for sprite in sprites
+            if isinstance(sprite, dict) and isinstance(sprite.get("asset"), str)
+        }
+    for asset in sorted(present - referenced):
+        errors.append(f"PNG 素材未被 runtime/widget.json.scene.sprites 引用: {asset}")
 
 
 def validate_manifest(manifest: Any, errors: list[str]) -> str | None:
@@ -1159,6 +1199,7 @@ def validate_widget(
     buttons = load_json(widget_dir / "buttons.json", errors)
     share = load_json(widget_dir / "share.json", errors)
     kind = validate_manifest(manifest, errors)
+    validate_png_asset_inventory(widget_dir, runtime, errors)
     if not isinstance(negative, dict):
         if negative is not None:
             errors.append("negative-screen.json 必须是对象")

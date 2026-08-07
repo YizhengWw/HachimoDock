@@ -369,6 +369,38 @@ class ClaimedMechanicsTests(unittest.TestCase):
         errors = self.validate_values(values)
         self.assertTrue(any("PNG 尺寸应为 16x8" in error for error in errors), errors)
 
+    def test_v4_sprite_sheet_requires_the_referenced_png_file(self) -> None:
+        values = copy.deepcopy(self.values)
+        runtime = values["runtime/widget.json"]
+        assert isinstance(runtime, dict)
+        runtime["engine"] = "p4-bounded-runtime-v4"
+        scene = runtime["scene"]
+        assert isinstance(scene, dict)
+        scene["sprites"] = [
+            {
+                "id": "hero",
+                "asset": "assets/hero.png",
+                "frame_width": 8,
+                "frame_height": 8,
+                "frames": 2,
+                "fps": 8,
+            }
+        ]
+        errors = self.validate_values(values)
+        self.assertTrue(any("不是有效 PNG 或不存在" in error for error in errors), errors)
+
+    def test_unreferenced_png_candidate_is_rejected(self) -> None:
+        values = copy.deepcopy(self.values)
+        values["assets/unused.png"] = rgba_png(8, 8)
+        errors = self.validate_values(values)
+        self.assertTrue(any("PNG 素材未被" in error for error in errors), errors)
+
+    def test_assets_reject_non_png_generation_artifacts(self) -> None:
+        values = copy.deepcopy(self.values)
+        values["assets/hero.webp"] = b"not a png"
+        errors = self.validate_values(values)
+        self.assertTrue(any("assets/ 只允许" in error for error in errors), errors)
+
 
 class GameplaySmokeTests(unittest.TestCase):
     def smoke_values(self, values: dict[str, object]) -> dict[str, object]:
