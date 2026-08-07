@@ -1,7 +1,7 @@
 interface:
   display_name: "petui"
   short_description: "生成、校验并发布 ESP32-P4 桌搭子工具与小游戏组件"
-  default_prompt: "Use $petui to generate, validate, and publish a new P4 desktop-pet component."
+  default_prompt: "Use $petui to generate, validate, and publish a new P4 desktop-pet component with a concise library description that explains how it works."
 
 policy:
   allow_implicit_invocation: true

@@ -1,7 +1,7 @@
 /**
  * [Input] component, explicit kind, local/installed/enabled state, and select/device/delete actions.
  * [Output] Compact card used in the component library grid: adaptive complete device-screen mini preview,
- *          source + game/tool metadata, full goal blurb without preview overlays,
+ *          source + game/tool metadata, full goal blurb plus mapping-aware game instructions,
  *          one two-state device action, and formal-local dual-delete access.
  * [Pos] component node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
@@ -10,6 +10,7 @@
 import React from "react";
 import { Download, PackageCheck, Trash2 } from "lucide-react";
 import Button from "../shell/Button";
+import { buildComponentPlayGuide } from "./binding-labels";
 import DeviceScreenPreview from "./DeviceScreenPreview";
 
 export function resolveComponentKind(kind, gameType) {
@@ -34,6 +35,9 @@ export default function CandidateCard({
   onDelete,
 }) {
   const resolvedKind = resolveComponentKind(kind, component.gameType);
+  const playGuide = resolvedKind === "game"
+    ? buildComponentPlayGuide(component.defaultBindings)
+    : "";
   const sourceKind = component.isDeviceOnly ? "device" : isLocal ? "custom" : "builtin";
   const sourceLabel = component.isDeviceOnly ? "仅设备" : isLocal ? "正式本地" : "内置";
   const cardClass = [
@@ -62,6 +66,11 @@ export default function CandidateCard({
             </div>
           </header>
           {component.goal && <p className="candidate-card__goal">{component.goal}</p>}
+          {playGuide && (
+            <p className="candidate-card__play-guide">
+              <strong>怎么玩：</strong>{playGuide}
+            </p>
+          )}
         </div>
       </button>
       <footer className="candidate-card__actions">

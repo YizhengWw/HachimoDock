@@ -3,7 +3,8 @@
  * [Output] Static Node coverage: default export, prop signature, explicit game/tool kind
  *          resolution, state-driven card variants without preview status overlays,
  *          two-state device action and dual deletion,
- *          device-screen reuse, complete component copy, and adaptive card geometry CSS.
+ *          device-screen reuse, complete component copy, mapping-aware play guidance,
+ *          and adaptive card geometry CSS.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -109,6 +110,17 @@ test("CandidateCard imports and uses DeviceScreenPreview for the mini preview", 
   assert.match(source, /import DeviceScreenPreview from ['"]\.\/DeviceScreenPreview['"]/);
   assert.match(source, /DeviceScreenPreview/);
   assert.match(source, /candidate-card__screen/);
+});
+
+test("CandidateCard explains how to play games from their actual default bindings", () => {
+  assert.match(source, /import \{ buildComponentPlayGuide \} from "\.\/binding-labels"/);
+  assert.match(source, /resolvedKind === "game"/);
+  assert.match(source, /buildComponentPlayGuide\(component\.defaultBindings\)/);
+  assert.match(source, /candidate-card__play-guide/);
+  assert.match(source, /怎么玩：/);
+  const guideRule = extractCssRule(".candidate-card__play-guide");
+  assert.match(guideRule, /border-top:/);
+  assert.match(guideRule, /overflow-wrap:\s*anywhere/);
 });
 
 test("CandidateCard CSS keeps builtin, local, and create cards on one adaptive preview rhythm", () => {

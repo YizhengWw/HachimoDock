@@ -11,7 +11,7 @@
  *          boardDeviceId selection across multiple native-USB candidates,
  *          audio-only patch commits, legacy full-sync fallback for boards that
  *          do not support per-file asset acks yet, short-id ACK-gated widget
- *          .clawpkg OTA with bounded PNG-to-RGB565-alpha sprite compilation,
+ *          .clawpkg OTA with frame-contiguous PNG-to-RGB565-alpha sprite compilation,
  *          plus capability-gated, expected-board-id removal with
  *          legacy unsupported-phase NACK correlation, capability-sized,
  *          retry-before-downshift Base64 firmware chunks with stale-transfer
@@ -8464,8 +8464,12 @@ mod tests {
         let assets = temporary.path().join("assets");
         std::fs::create_dir_all(&assets).unwrap();
         let mut sheet = image::RgbaImage::new(16, 8);
-        for pixel in sheet.pixels_mut() {
-            *pixel = image::Rgba([255, 0, 0, 128]);
+        for (x, _, pixel) in sheet.enumerate_pixels_mut() {
+            *pixel = if x < 8 {
+                image::Rgba([255, 0, 0, 128])
+            } else {
+                image::Rgba([0, 255, 0, 255])
+            };
         }
         sheet.save(assets.join("hero.png")).unwrap();
         let widget = serde_json::to_vec(&serde_json::json!({
@@ -8489,6 +8493,15 @@ mod tests {
         assert_eq!(&compiled[0].1[..8], b"P4S1\x08\x08\x02\x06");
         assert_eq!(compiled[0].1.len(), 8 + 16 * 8 * 3);
         assert_eq!(&compiled[0].1[8..11], &[0x00, 0xf8, 128]);
+        let frame_bytes = 8 * 8 * 3;
+        assert_eq!(
+            &compiled[0].1[8 + frame_bytes - 3..8 + frame_bytes],
+            &[0x00, 0xf8, 128],
+        );
+        assert_eq!(
+            &compiled[0].1[8 + frame_bytes..8 + frame_bytes + 3],
+            &[0xe0, 0x07, 255],
+        );
     }
 
     #[test]

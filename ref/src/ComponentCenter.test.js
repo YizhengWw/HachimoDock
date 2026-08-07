@@ -9,7 +9,7 @@
  *          per-component buttons.json, editable component bindings, explicit component-scope guidance,
  *          P4 button-map downlink, semantic enabled state, card-owned device sync/removal,
  *          device-first dual deletion, exact target identity, focus-safe confirmation,
- *          critical install pipelines, and
+ *          concise generated-game descriptions, critical install pipelines, and
  *          bridge-authoritative live Agent following plus cross-page contracts remain.
  * [Pos] test node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
@@ -685,6 +685,8 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(contract, /右.*`knob\.rotate_cw`/);
   assert.match(contract, /SW1.*开始\/重新开始/);
   assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
+  assert.match(widgetSkill, /`component\.json\.description` 用 1-2 句说明游戏目标、核心规则和结束条件/);
+  assert.match(contract, /组件中心会根据 `buttons\.json` 另行展示实际操作方法/);
   assert.match(contract, /knob\.rotate_cw/);
   assert.match(contract, /\.staging.*不是“草稿库”/);
   assert.match(publisher, /os\.replace\(staged_package, destination\)/);

@@ -1,6 +1,6 @@
 /*
  * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
- * [Output] Exact desktop-session navigation, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
+ * [Output] Exact desktop-session navigation, bounded running-task composer lookup, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
  * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, and stale-focus recovery.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -31,7 +31,7 @@ pub fn submit_at_focused_text_target(target: &FocusedTextTarget) -> Result<(), S
 }
 
 #[cfg(windows)]
-const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 7;
+const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 10;
 
 #[cfg(windows)]
 const WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
@@ -1694,6 +1694,10 @@ function Get-ComposerText($element) {
 }
 
 function Test-AllowedComposerValue([string]$value, [string[]]$allowedValues) {
+  # A null allow-list is used only for the initial semantic bind. Product
+  # policy permits the first speech draft to replace an existing user draft;
+  # every later rebind still requires the exact last voice-controlled value.
+  if ($null -eq $allowedValues) { return $true }
   $normalizedValue = Normalize-Label $value
   foreach ($allowedValue in @($allowedValues)) {
     if ($normalizedValue -eq (Normalize-Label ([string]$allowedValue))) { return $true }
@@ -1701,47 +1705,97 @@ function Test-AllowedComposerValue([string]$value, [string[]]$allowedValues) {
   return $false
 }
 
-function Find-BoundedComposerFallbackElements($root) {
+function Add-UniqueComposerElement($element, $elements, $seen) {
+  if ($null -eq $element) { return }
+  try {
+    $runtimeId = @($element.GetRuntimeId()) -join '.'
+    $rect = $element.Current.BoundingRectangle
+    $key = if ($runtimeId) {
+      "runtime:$runtimeId"
+    } elseif (Test-FiniteWindowRectangle $rect) {
+      "bounds:$([int]$rect.Left),$([int]$rect.Top),$([int]$rect.Width),$([int]$rect.Height):$([int]$element.Current.ControlType.Id)"
+    } else {
+      ''
+    }
+    if (-not $key -or $seen.ContainsKey($key)) { return }
+    $seen[$key] = $true
+    [void]$elements.Add($element)
+  } catch {}
+}
+
+function Find-PointComposerElements($root) {
+  $rootRect = $root.Current.BoundingRectangle
+  if (-not (Test-FiniteWindowRectangle $rootRect)) { return @() }
   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-  $pending = [System.Collections.Generic.Stack[object]]::new()
   $elements = [System.Collections.Generic.List[object]]::new()
+  $seen = @{}
+  # The active Codex transcript can expose thousands of streaming UIA nodes.
+  # Probe the stable lower composer surface first so a running turn never needs
+  # an unbounded descendant materialization before voice can stage its draft.
+  foreach ($yRatio in @(0.76, 0.83, 0.89, 0.94)) {
+    foreach ($xRatio in @(0.42, 0.60, 0.76, 0.89)) {
+      try {
+        $x = [double]($rootRect.Left + ($rootRect.Width * $xRatio))
+        $y = [double]($rootRect.Top + ($rootRect.Height * $yRatio))
+        $element = [System.Windows.Automation.AutomationElement]::FromPoint(
+          [System.Windows.Point]::new($x, $y)
+        )
+        for ($depth = 0; $depth -lt 16 -and $null -ne $element; $depth += 1) {
+          if ($element.Current.NativeWindowHandle -eq $root.Current.NativeWindowHandle) { break }
+          Add-UniqueComposerElement $element $elements $seen
+          $element = $walker.GetParent($element)
+        }
+      } catch {}
+    }
+  }
+  return @($elements.ToArray())
+}
+
+function Find-BoundedComposerElements($root) {
+  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $pending = [System.Collections.Generic.Queue[object]]::new()
+  $elements = [System.Collections.Generic.List[object]]::new()
+  $seen = @{}
   $deadline = (Get-MonotonicMilliseconds) + 1800
   $visited = 0
+  $discovered = 0
   try {
-    $first = $walker.GetFirstChild($root)
-    if ($null -ne $first) {
-      $pending.Push([pscustomobject]@{ Element = $first; Depth = 1 })
+    $child = $walker.GetFirstChild($root)
+    while ($null -ne $child -and $discovered -lt 3500) {
+      $pending.Enqueue([pscustomobject]@{ Element = $child; Depth = 1 })
+      $discovered += 1
+      $child = $walker.GetNextSibling($child)
     }
   } catch {}
 
   while ($pending.Count -gt 0 -and
          $visited -lt 3500 -and
          (Get-MonotonicMilliseconds) -lt $deadline) {
-    $node = $pending.Pop()
+    $node = $pending.Dequeue()
     $element = $node.Element
     $depth = [int]$node.Depth
     $visited += 1
     try {
       $typeId = $element.Current.ControlType.Id
-      if ($typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
+      if ($typeId -eq [System.Windows.Automation.ControlType]::Edit.Id -or
+          $typeId -eq [System.Windows.Automation.ControlType]::Button.Id -or
+          $typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Custom.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Document.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Pane.Id) {
-        [void]$elements.Add($element)
+        Add-UniqueComposerElement $element $elements $seen
       }
     } catch {}
 
-    try {
-      $next = $walker.GetNextSibling($element)
-      if ($null -ne $next) {
-        $pending.Push([pscustomobject]@{ Element = $next; Depth = $depth })
-      }
-    } catch {}
-    if ($depth -ge 48) { continue }
+    if ($depth -ge 48 -or $discovered -ge 3500) { continue }
     try {
       $child = $walker.GetFirstChild($element)
-      if ($null -ne $child) {
-        $pending.Push([pscustomobject]@{ Element = $child; Depth = $depth + 1 })
+      while ($null -ne $child -and
+             $discovered -lt 3500 -and
+             (Get-MonotonicMilliseconds) -lt $deadline) {
+        $pending.Enqueue([pscustomobject]@{ Element = $child; Depth = $depth + 1 })
+        $discovered += 1
+        $child = $walker.GetNextSibling($child)
       }
     } catch {}
   }
@@ -1809,20 +1863,13 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues) {
 }
 
 function Find-Composer($root, [string[]]$allowedValues) {
-  $editCondition = [System.Windows.Automation.PropertyCondition]::new(
-    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-    [System.Windows.Automation.ControlType]::Edit
-  )
-  $editElements = $root.FindAll(
-    [System.Windows.Automation.TreeScope]::Descendants,
-    $editCondition
-  )
-  $candidateSet = Get-ComposerCandidates $root $editElements $allowedValues
+  $pointElements = @(Find-PointComposerElements $root)
+  $candidateSet = Get-ComposerCandidates $root $pointElements $allowedValues
   $candidates = @($candidateSet.Candidates)
   $unexpectedCandidates = @($candidateSet.UnexpectedCandidates)
   if ($candidates.Count -eq 0 -and $unexpectedCandidates.Count -eq 0) {
-    $fallbackElements = @(Find-BoundedComposerFallbackElements $root)
-    $candidateSet = Get-ComposerCandidates $root $fallbackElements $allowedValues
+    $boundedElements = @(Find-BoundedComposerElements $root)
+    $candidateSet = Get-ComposerCandidates $root $boundedElements $allowedValues
     $candidates = @($candidateSet.Candidates)
     $unexpectedCandidates = @($candidateSet.UnexpectedCandidates)
   }
@@ -2102,21 +2149,38 @@ function Assert-ComposerHasText($state) {
   $state.LastValue = $currentValue
 }
 
+function Get-ComposerSubmitLabelScore([string]$value) {
+  $label = (Normalize-Label $value).ToLowerInvariant()
+  if (@('send', 'submit', '发送', '提交') -contains $label) { return 0 }
+  # A running Codex task relabels the same composer-adjacent button to Queue or
+  # Steer. Match only these exact labels; never accept Stop or queue-management
+  # controls through a broad substring rule.
+  if (@(
+      'queue', 'steer', '排队', '引导',
+      '加入队列', '排入队列', '加入佇列', '排入佇列'
+    ) -contains $label) { return 1 }
+  foreach ($phrase in @('send message', 'submit message', '发送消息', '提交消息')) {
+    if ($label.Contains($phrase)) { return 2 }
+  }
+  return -1
+}
+
 function Invoke-SendButton($state) {
   $composerRect = $state.Composer.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $composerRect)) {
     throw 'Visible composer geometry is unavailable for submission'
   }
-  $all = Find-DescendantsByControlTypes $state.Root @(
-    [System.Windows.Automation.ControlType]::Button
-  )
+  # Reuse the bounded breadth-first surface walk. A live task transcript can
+  # make an unbounded descendant Button query stall just like the old Edit
+  # query did during startup; Enter remains the verified fallback.
+  $all = @(Find-BoundedComposerElements $state.Root)
   $buttons = @()
   for ($index = 0; $index -lt $all.Count; $index += 1) {
-    $element = $all.Item($index)
+    $element = $all[$index]
     if ($element.Current.ControlType.Id -ne [System.Windows.Automation.ControlType]::Button.Id -or
         -not $element.Current.IsEnabled -or $element.Current.IsOffscreen) { continue }
-    $name = Normalize-Label $element.Current.Name
-    if ($name -notmatch '(?i)send|submit|发送|提交') { continue }
+    $labelScore = Get-ComposerSubmitLabelScore ([string]$element.Current.Name)
+    if ($labelScore -lt 0) { continue }
     $rect = $element.Current.BoundingRectangle
     if (-not (Test-FiniteWindowRectangle $rect)) { continue }
     if ($rect.Bottom -lt ($composerRect.Top - 12) -or $rect.Top -gt ($composerRect.Bottom + 80)) { continue }
@@ -2126,9 +2190,17 @@ function Invoke-SendButton($state) {
         [System.Windows.Automation.InvokePattern]::Pattern,
         [ref]$invoke
     )) { continue }
-    $buttons += [pscustomobject]@{ Pattern = $invoke; Left = [double]$rect.Left }
+    $buttons += [pscustomobject]@{
+      Pattern = $invoke
+      Score = [int]$labelScore
+      Left = [double]$rect.Left
+    }
   }
-  if ($buttons.Count -eq 1) {
+  $buttons = @($buttons | Sort-Object `
+    @{ Expression = 'Score'; Ascending = $true }, `
+    @{ Expression = 'Left'; Descending = $true })
+  if ($buttons.Count -eq 1 -or
+      ($buttons.Count -gt 1 -and $buttons[0].Score -lt $buttons[1].Score)) {
     $buttons[0].Pattern.Invoke()
     return
   }
@@ -2177,16 +2249,16 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
           break
         }
         $target = if ($currentVisible) {
-          Get-CurrentVisibleTarget $agent @('')
+          Get-CurrentVisibleTarget $agent $null
         } elseif ($agent -eq 'claude') {
-          Get-ClaudeTarget $sessionId $desktopSessionId $title @('')
+          Get-ClaudeTarget $sessionId $desktopSessionId $title $null
         } elseif ($null -ne $locatedCodexRoot) {
           [pscustomobject]@{
             Root = $locatedCodexRoot
-            Composer = Find-Composer $locatedCodexRoot @('')
+            Composer = Find-Composer $locatedCodexRoot $null
           }
         } else {
-          Get-CodexTarget $title @('')
+          Get-CodexTarget $title $null
         }
         $root = $target.Root
         $composer = $target.Composer
@@ -3094,7 +3166,7 @@ mod tests {
         let source = include_str!("codex_composer.rs");
         assert!(source.contains("function Find-DescendantsByControlTypes"));
         assert!(source.contains("$locatedCodexRoot = Open-CodexSessionById"));
-        assert!(source.contains("Composer = Find-Composer $locatedCodexRoot @('')"));
+        assert!(source.contains("Composer = Find-Composer $locatedCodexRoot $null"));
         assert!(source.contains("[System.Windows.Automation.ControlType]::Edit"));
         assert!(source.contains("[System.Windows.Automation.ControlType]::ListItem"));
         assert!(source.contains("[System.Windows.Automation.ControlType]::Button"));
@@ -3156,7 +3228,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_composer_helper_is_bounded_and_owned_by_the_desktop_process() {
-        assert_eq!(CODEX_COMPOSER_STARTUP_TIMEOUT_SECS, 7);
+        assert_eq!(CODEX_COMPOSER_STARTUP_TIMEOUT_SECS, 10);
         assert_eq!(
             WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES,
             512 * 1024 * 1024
@@ -3165,7 +3237,9 @@ mod tests {
         let source = include_str!("codex_composer.rs");
         assert!(source.contains("function Get-OrLaunchCodexWindows"));
         assert!(source.contains("OpenAI.Codex_2p2nqsd0c76g0!App"));
-        assert!(source.contains("function Find-BoundedComposerFallbackElements"));
+        assert!(source.contains("function Find-PointComposerElements"));
+        assert!(source.contains("AutomationElement]::FromPoint"));
+        assert!(source.contains("function Find-BoundedComposerElements"));
         assert!(source.contains("$visited -lt 3500"));
         assert!(source.contains("(Get-MonotonicMilliseconds) + 1800"));
         assert!(source.contains("$depth -ge 48"));
@@ -3175,14 +3249,17 @@ mod tests {
         assert!(source.contains("let _worker_job = worker_job;"));
 
         let fallback_start = source
-            .find("function Find-BoundedComposerFallbackElements")
+            .find("function Find-BoundedComposerElements")
             .unwrap();
         let fallback_end = source[fallback_start..]
             .find("function Get-ComposerCandidates")
             .map(|offset| fallback_start + offset)
             .unwrap();
         let fallback = &source[fallback_start..fallback_end];
-        assert!(fallback.find("GetNextSibling").unwrap() < fallback.find("$depth -ge 48").unwrap());
+        assert!(fallback.contains("Queue[object]"));
+        assert!(fallback.contains("ControlType]::Edit.Id"));
+        assert!(fallback.contains("ControlType]::Button.Id"));
+        assert!(!fallback.contains("Stack[object]"));
 
         let locator_start = source.find("function Find-Composer(").unwrap();
         let locator_end = source[locator_start..]
@@ -3190,8 +3267,29 @@ mod tests {
             .map(|offset| locator_start + offset)
             .unwrap();
         let locator = &source[locator_start..locator_end];
-        assert!(locator.contains("[System.Windows.Automation.ControlType]::Edit"));
+        assert!(locator.contains("Find-PointComposerElements"));
+        assert!(locator.contains("Find-BoundedComposerElements"));
+        assert!(!locator.contains("TreeScope]::Descendants"));
         assert!(!locator.contains("Find-DescendantsByControlTypes"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_running_task_confirm_accepts_queue_and_steer_but_not_stop() {
+        let source = include_str!("codex_composer.rs");
+        let labels_start = source
+            .find("function Get-ComposerSubmitLabelScore")
+            .unwrap();
+        let labels_end = source[labels_start..]
+            .find("function Invoke-SendButton")
+            .map(|offset| labels_start + offset)
+            .unwrap();
+        let labels = &source[labels_start..labels_end];
+        assert!(labels.contains("'queue', 'steer'"));
+        assert!(!labels.contains("'stop'"));
+        assert!(!labels.contains("'停止'"));
+        assert!(!labels.contains("clear queue"));
+        assert!(!labels.contains("清空队列"));
     }
 
     #[cfg(windows)]
@@ -3210,7 +3308,7 @@ mod tests {
         let source = include_str!("codex_composer.rs");
         assert!(source.contains("$currentVisible = $purpose -eq 'current_voice'"));
         assert!(source.contains("if (-not $currentVisible)"));
-        assert!(source.contains("Get-CurrentVisibleTarget $agent @('')"));
+        assert!(source.contains("Get-CurrentVisibleTarget $agent $null"));
         assert!(source.contains("function Get-OrLaunchCodexWindows"));
         assert!(source.contains("function Get-OrLaunchClaudeWindows"));
         assert!(source.contains("com.squirrel.AnthropicClaude.claude"));
@@ -3240,7 +3338,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "requires a running, visible Codex window with an empty composer"]
+    #[ignore = "requires a running, visible Codex window"]
     fn windows_current_visible_composer_smoke_test() {
         let bridge = CodexComposerBridge::start_current("codex", |_| {})
             .expect("current visible Codex composer should be addressable");
@@ -3249,7 +3347,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "requires an installed Claude Desktop client with an empty current composer"]
+    #[ignore = "requires an installed Claude Desktop client with a current composer"]
     fn windows_current_visible_claude_composer_smoke_test() {
         let bridge = CodexComposerBridge::start_current("claude-code", |_| {})
             .expect("current visible Claude composer should be addressable");
@@ -3258,7 +3356,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    #[ignore = "requires CODEX_TEST_SESSION_ID/TITLE and a running Codex window with an empty composer"]
+    #[ignore = "requires CODEX_TEST_SESSION_ID/TITLE and a running Codex window"]
     fn windows_bound_codex_composer_smoke_test() {
         let session_id =
             std::env::var("CODEX_TEST_SESSION_ID").expect("CODEX_TEST_SESSION_ID is required");

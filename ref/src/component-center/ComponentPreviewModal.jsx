@@ -1,7 +1,8 @@
 /**
  * [Input] component metadata, exact-source current state, resolved gameplay bindings,
  *         board-authoritative global-exit control, component-scope/conflict state, live-device state, and actions.
- * [Output] Structured preview/sync confirmation with a device-preview overview,
+ * [Output] Structured preview/sync confirmation with a device-preview overview and
+ *          mapping-aware game instructions,
  *          dedicated button-mapping workspace, duplicate-input guard, consolidated
  *          sync-impact panel without ambiguous current-component replacement copy,
  *          dynamic global-return guidance, and context-aware confirmation footer.
@@ -12,6 +13,7 @@
 import React, { useEffect, useRef } from "react";
 import { AlertTriangle, Download, RotateCcw, Save, Settings2, Trash2, Unplug, X } from "lucide-react";
 import Button from "../shell/Button";
+import { buildComponentPlayGuide } from "./binding-labels";
 import { componentKindLabel, resolveComponentKind } from "./CandidateCard";
 import DeviceScreenPreview from "./DeviceScreenPreview";
 
@@ -47,6 +49,9 @@ export default function ComponentPreviewModal({
   const switchControls = ["SW1", "SW2", "SW3"];
   const resolvedKind = resolveComponentKind(kind, component.gameType);
   const componentKind = componentKindLabel(resolvedKind);
+  const playGuide = resolvedKind === "game"
+    ? buildComponentPlayGuide(bindings.length > 0 ? bindings : component.defaultBindings)
+    : "";
   const dialogRef = useRef(null);
   const returnFocusRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -142,6 +147,11 @@ export default function ComponentPreviewModal({
                   <span className="component-preview-modal__kind">{componentKind}</span>
                 </div>
                 {component.goal && <p>{component.goal}</p>}
+                {playGuide && (
+                  <p className="component-preview-modal__play-guide">
+                    <strong>怎么玩：</strong>{playGuide}
+                  </p>
+                )}
               </div>
             </aside>
             <div className="component-preview-modal__workspace">

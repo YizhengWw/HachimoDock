@@ -23,6 +23,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
    - 画面中的实体或数据，以及它们如何变化。
    - 每个可用输入产生的即时、可见结果。
    - 开始、进行、成功/失败、重开或复位条件。
+   - `component.json.description` 用 1-2 句说明游戏目标、核心规则和结束条件，让用户在组件库里不进入游戏也知道要做什么；具体物理按键仍由 `buttons.json` 提供，避免用户改键后描述失真。
    - 每一项需求分别由哪个 runtime 原语实现。
    - 哪些动作适合摇杆上/下/左/右，游戏的 SW1 开始/重开动作，以及 SW2 的题材专属动作；退出由设备全局设置负责（出厂默认 SW3，但用户可以改绑或不绑定），组件不得定义退出动作或占用出厂默认退出键。
    - 先确定一套与题材匹配的现代视觉语言：主要轮廓、层级、留白、配色和动效。除非用户明确要求复古、像素或街机风，新组件默认使用 `clean`，不得把网格方块当作默认美术风格。
@@ -55,6 +56,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - 不存在“选一个最接近的游戏再改名”的步骤。必须从当前需求的机制清单推导状态、实体、规则、参数和文案。
 - 禁止复制后改名、替换文案、微调速度/数量或换色来冒充新组件。若状态结构、实体布局和规则组合没有来自用户需求的理由，视为未完成。
 - `component.json.kind` 必须明确为 `game` 或 `tool`。
+- 游戏的 `component.json.description` 不是宣传口号：必须简要说明怎么玩、怎样得分或完成、何时结束。组件中心会在它下方根据 `buttons.json` 自动补充当前操作方法，因此描述不得写死可被用户重新映射的物理键位。
 - 所有新组件都声明顶层 `engine: "p4-bounded-runtime-v4"`。`game/tool` 只是产品分类，底层运行时相同；v3 只用于读取和维护历史包。
 - 先用变量、状态、transition、tick 和 dashboard 表达需求；只有确实需要坐标、移动、碰撞或边界行为时才增加 `scene`。
 - 新小游戏使用通用 `scene`，不得声明旧版 `game.type=blocks|snake|flappy`；旧版 `game` 仅用于读取和维护兼容包。
@@ -79,6 +81,7 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - `game/tool` 路由符合用户目标。
 - 逐项对照生成前的机制清单；用户要求的每个核心行为都能在 runtime 中找到对应实现，且没有无来源的模板机制。
 - 默认画面无需操作也有明确含义，且与 runtime 初始 state/page/vars 一致。
+- 游戏在组件库中的 description 已经说明目标、核心规则与结束条件；按钮说明可由组件中心根据真实映射生成，不在 description 中写死 SW1/SW2/SW3。
 - 默认现代视觉不是“把格子间距去掉”：主体应优先使用语义形状或小型精灵，卡片/HUD 要有层级和留白；只有明确的复古需求才允许可见像素网格和方块化主体。
 - 每个 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。组件不得声明 `page_main/page_back` 等系统导航 action；退出由设备全局绑定统一处理，摇杆中键长按默认不绑定。
 - 出厂默认 SW3 短按是设备全局退出键，用户可以改绑或不绑定；生成或更新组件时仍不得占用 SW3，也不得自行声明退出动作。游戏优先将方向动作放到四向摇杆，将 SW1 用作开始/重新开始，将 SW2 留给射击、技能、暂停等题材专属动作。工具以 SW1 为主操作、SW2 为次操作，并可按语义使用摇杆方向切页或调节。

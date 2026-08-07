@@ -1,6 +1,6 @@
 /*
  * [Input] Consume the sidebar shell in `ref/src/App.jsx`[Pos], plus the setup and dashboard flows rendered below it.
- * [Output] Provide the token-driven Pet Manager visual language, including unified page/card/control/modal primitives, a semantic shared Button hierarchy, USB-only first-run and dashboard status surfaces without Wi-Fi configuration chrome, first-visit page onboarding with compact reopenable quick-start dialogs, a unified Component Center library whose cards own device sync/removal state while pixel styling remains inside widget previews, a compact step-based device guide with hardware-shaped cues, a responsive centralized API-configuration workspace and provider-readiness strips, the preview-first appearance workspace, editable per-component button mappings with compact/mobile layouts, image-first grouped Linux/P4 hardware controls with shared voice enablement, compact Agent rows with global active-session controls, responsive shell/context navigation with inline firmware-update states, and a high-density voice command bar with API readiness, diagnostics, and platform-specific foreground-input recovery tips.
+ * [Output] Provide the token-driven Pet Manager visual language, including unified page/card/control/modal primitives, a semantic shared Button hierarchy, USB-only first-run and dashboard status surfaces without Wi-Fi configuration chrome, first-visit page onboarding with compact reopenable quick-start dialogs, a unified Component Center library whose cards own device sync/removal state and show concise mapping-aware game instructions while pixel styling remains inside widget previews, a compact step-based device guide with hardware-shaped cues, a responsive centralized API-configuration workspace and provider-readiness strips, the preview-first appearance workspace, editable per-component button mappings with compact/mobile layouts, image-first grouped Linux/P4 hardware controls with shared voice enablement, compact Agent rows with global active-session controls, responsive shell/context navigation with inline firmware-update states, and a high-density voice command bar with API readiness, diagnostics, and platform-specific foreground-input recovery tips.
  * [Pos] style node in ref/src
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -12891,6 +12891,21 @@ select:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.candidate-card__play-guide {
+  margin: 2px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.candidate-card__play-guide strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .candidate-card__action {
   display: inline-flex;
   align-items: center;
@@ -13015,6 +13030,18 @@ select:focus-visible {
   color: var(--text-soft);
   font-size: var(--font-size-md);
   line-height: var(--line-height-relaxed);
+}
+
+.component-preview-modal__summary .component-preview-modal__play-guide {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.component-preview-modal__play-guide strong {
+  color: var(--text);
+  font-weight: var(--font-weight-semibold);
 }
 
 .component-preview-modal__workspace {

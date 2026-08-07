@@ -2,7 +2,8 @@
  * [Input] Read ComponentPreviewModal.jsx source.
  * [Output] Static Node coverage: default export, explicit game/tool type, button editor,
  *          component-scope/conflict guidance, single-slot replacement warning, current-device removal,
- *          dynamic global-return guidance, and install-button disabled states.
+ *          dynamic global-return guidance, mapping-aware game instructions,
+ *          and install-button disabled states.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -127,6 +128,14 @@ test("ComponentPreviewModal uses explicit kind metadata and labels game/tool com
   assert.match(source, /resolveComponentKind\(kind, component\.gameType\)/);
   assert.match(source, /componentKindLabel\(resolvedKind\)/);
   assert.match(source, /component-preview-modal__kind/);
+});
+
+test("ComponentPreviewModal keeps the game instructions aligned with edited bindings", () => {
+  assert.match(source, /import \{ buildComponentPlayGuide \} from "\.\/binding-labels"/);
+  assert.match(source, /buildComponentPlayGuide\(bindings\.length > 0 \? bindings : component\.defaultBindings\)/);
+  assert.match(source, /component-preview-modal__play-guide/);
+  assert.match(source, /怎么玩：/);
+  assert.match(styles, /\.component-preview-modal__summary \.component-preview-modal__play-guide/);
 });
 
 test("ComponentPreviewModal offers device removal for enabled items and exact device-only packages", () => {

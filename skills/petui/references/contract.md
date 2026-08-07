@@ -48,6 +48,7 @@
 
 - `component.json.id` 匹配 `^[a-z][a-z0-9_-]{0,46}$`。
 - `component.json` 必须包含非空 `id`、`name`、`version`、`description`，以及 `kind: "game" | "tool"`。
+- 游戏 `description` 使用 1-2 个简短句子说明目标、核心规则和结束条件，不能只写题材或宣传语。组件中心会根据 `buttons.json` 另行展示实际操作方法，所以 description 不写死允许用户改绑的物理键位。
 - `negative-screen.json.dashboard` 是初始预览，必须与 runtime 的初始 state/page/vars 相符。
 - `share.json` 必须是 JSON 对象，至少包含非空 `title`。
 - 允许在 `assets/` 放运行时支持的静态 PNG 资源；单个 sprite sheet 不超过 128 KiB。禁止 JS、Python、HTML、CSS、SVG、shell、PowerShell、批处理和可执行文件。

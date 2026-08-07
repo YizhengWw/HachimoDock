@@ -1,7 +1,8 @@
 /*
  * [Input] Widget package paths/JSON bytes, bounded PNG sprite sheets, device capabilities, and chunk metadata.
  * [Output] P4-safe widget payloads with legacy package-navigation bindings removed,
- *          RGB565-alpha sprite compilation, capability gates, path checks, and OTA timing policy.
+ *          frame-contiguous RGB565-alpha sprite compilation, capability gates, path checks,
+ *          and OTA timing policy.
  * [Pos] Pure component/widget transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -199,13 +200,23 @@ pub(super) fn prepare_p4_widget_sprite_files(
         let mut encoded = Vec::with_capacity(8 + pixels * 3);
         encoded.extend_from_slice(P4_SCENE_SPRITE_MAGIC);
         encoded.extend_from_slice(&[frame_width, frame_height, frames, fps]);
-        for pixel in image.pixels() {
-            let red = u16::from(pixel[0]);
-            let green = u16::from(pixel[1]);
-            let blue = u16::from(pixel[2]);
-            let rgb565 = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
-            encoded.extend_from_slice(&rgb565.to_le_bytes());
-            encoded.push(pixel[3]);
+        // Source sheets are horizontal, but firmware advances frames as
+        // contiguous frame-sized blocks. Repack frame-by-frame instead of
+        // preserving whole-sheet scanline order, which would interleave all
+        // frame columns on every row and render each animation frame as a
+        // flickering mixture of its neighbours.
+        for frame in 0..u32::from(frames) {
+            for y in 0..u32::from(frame_height) {
+                for x in 0..u32::from(frame_width) {
+                    let pixel = image.get_pixel(frame * u32::from(frame_width) + x, y);
+                    let red = u16::from(pixel[0]);
+                    let green = u16::from(pixel[1]);
+                    let blue = u16::from(pixel[2]);
+                    let rgb565 = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
+                    encoded.extend_from_slice(&rgb565.to_le_bytes());
+                    encoded.push(pixel[3]);
+                }
+            }
         }
         compiled.push((format!("runtime/sprites/{id}.p4s"), encoded));
     }

@@ -635,7 +635,7 @@ test("Codex conversation switching locates the desktop task without background v
     /function Invoke-CodexSessionRow\([\s\S]*?function Open-CodexSession/,
   );
   assert.ok(navigation, "expected Codex session navigation block");
-  assert.match(composer, /const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 7/);
+  assert.match(composer, /const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 10/);
   assert.match(composer, /WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES/);
   assert.match(composer, /JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE/);
   assert.match(composer, /JOB_OBJECT_LIMIT_PROCESS_MEMORY/);
@@ -677,6 +677,20 @@ test("Codex conversation switching locates the desktop task without background v
   assert.ok(currentVisible, "expected current-visible Agent lookup block");
   assert.match(currentVisible[0], /foreach \(\$window in \$windows\)/);
   assert.match(currentVisible[0], /AppActivate\(\[int\]\$window\.ProcessId\)/);
+  const composerLookup = composer.match(
+    /function Find-PointComposerElements\([\s\S]*?function Get-CodexTarget/,
+  );
+  assert.ok(composerLookup, "expected bounded Windows composer lookup");
+  assert.match(composerLookup[0], /AutomationElement\]::FromPoint/);
+  assert.match(composerLookup[0], /function Find-BoundedComposerElements/);
+  assert.match(composerLookup[0], /\$visited -lt 3500/);
+  assert.doesNotMatch(composerLookup[0], /TreeScope\]::Descendants/);
+  const submitLabels = composer.match(
+    /function Get-ComposerSubmitLabelScore\([\s\S]*?function Invoke-SendButton/,
+  );
+  assert.ok(submitLabels, "expected Windows running-task submit labels");
+  assert.match(submitLabels[0], /'queue', 'steer'/);
+  assert.doesNotMatch(submitLabels[0], /'stop'|'停止'|clear queue|清空队列/i);
   const explicitFailure = rust.match(
     /VisibleComposerSubmitOutcome::ExplicitFailure\(error\)([\s\S]*?)VisibleComposerSubmitOutcome::Unconfirmed/,
   );
