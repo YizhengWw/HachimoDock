@@ -6,7 +6,7 @@
  *          ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
  *          nonempty-current-draft Confirm submission with an Enter-first and
- *          unchanged-draft send-button fallback, and clipboard-preserving
+ *          unchanged-draft Send/Queue/Steer-button fallback, and clipboard-preserving
  *          current-caret insertion separated from the later Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update ref/.folder.md.
@@ -1691,9 +1691,9 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
     ))
 }
 
-fn send_button_score(element: &AXUIElement) -> Option<u8> {
-    let labels = element_labels(element)
-        .into_iter()
+fn send_button_label_score(labels: &[String]) -> Option<u8> {
+    let labels = labels
+        .iter()
         .map(|label| label.to_lowercase())
         .collect::<Vec<_>>();
     if labels
@@ -1702,14 +1702,30 @@ fn send_button_score(element: &AXUIElement) -> Option<u8> {
     {
         return Some(0);
     }
+    // Codex changes the same composer-adjacent submit control from “Send” to
+    // “Queue” or “Steer” while a turn is running. These exact labels are safe
+    // to accept because geometry and unchanged-draft guards are still applied;
+    // deliberately do not accept “Stop” or broad queue substrings.
+    if labels.iter().any(|label| {
+        matches!(
+            label.as_str(),
+            "queue" | "steer" | "排队" | "引导" | "加入队列" | "排入队列" | "加入佇列" | "排入佇列"
+        )
+    }) {
+        return Some(1);
+    }
     if labels.iter().any(|label| {
         ["send message", "submit message", "发送消息", "提交消息"]
             .iter()
             .any(|needle| label.contains(needle))
     }) {
-        return Some(1);
+        return Some(2);
     }
     None
+}
+
+fn send_button_score(element: &AXUIElement) -> Option<u8> {
+    send_button_label_score(&element_labels(element))
 }
 
 fn send_button_bounds_match_composer(
@@ -2162,6 +2178,33 @@ mod tests {
             composer,
             (80, 824, 48, 48)
         ));
+    }
+
+    #[test]
+    fn running_task_submit_labels_match_without_accepting_stop_controls() {
+        for label in [
+            "Send",
+            "Submit",
+            "Queue",
+            "Steer",
+            "发送",
+            "提交",
+            "排队",
+            "引导",
+            "加入队列",
+        ] {
+            assert!(
+                send_button_label_score(&[label.to_string()]).is_some(),
+                "expected submit label to match: {label}"
+            );
+        }
+        for label in ["Stop", "停止", "Clear queue", "清空队列", "Resume"] {
+            assert_eq!(
+                send_button_label_score(&[label.to_string()]),
+                None,
+                "unsafe non-submit control matched: {label}"
+            );
+        }
     }
 
     #[test]
