@@ -2,7 +2,7 @@
 
 /*
  * [Input] Synthetic Codex rollout directories and append events.
- * [Output] Regression coverage for low-cost discovery, arbitrary-age active recovery, and prompt live updates.
+ * [Output] Regression coverage for low-cost discovery, arbitrary-age active recovery, prompt live updates, and current-day Token aggregation.
  * [Pos] Unit tests for the managed bridge's Codex rollout monitor.
  */
 
@@ -44,6 +44,192 @@ test("CodexLogMonitor keeps non-Windows fallback discovery at the polling cadenc
       ? 30_000
       : codexDefaults.POLL_INTERVAL_MS,
   );
+});
+
+test("CodexLogMonitor aggregates today's token totals across sessions", () => {
+  const events = [];
+  const monitor = new CodexLogMonitor({
+    SESSION_DIR: "/tmp/unused-codex-sessions",
+    SESSION_INDEX_PATH: "",
+    LOG_EVENT_MAP: {},
+  }, (sessionId, state, event, extra) => {
+    events.push({ sessionId, state, event, extra });
+  });
+  const first = monitor.createEntry("codex:daily-a", 0, false);
+  const second = monitor.createEntry("codex:daily-b", 0, false);
+  const timestamp = new Date().toISOString();
+
+  monitor.processLine(JSON.stringify({
+    timestamp,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {
+          total_tokens: 100,
+          input_tokens: 70,
+          output_tokens: 30,
+        },
+      },
+    },
+  }), first);
+  monitor.processLine(JSON.stringify({
+    timestamp,
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {
+          total_tokens: 250,
+          input_tokens: 180,
+          output_tokens: 70,
+        },
+      },
+    },
+  }), second);
+
+  const daily = events.at(-1).extra.dailyTokenUsage;
+  assert.equal(daily.totalTokens, 350);
+  assert.equal(daily.inputTokens, 250);
+  assert.equal(daily.outputTokens, 100);
+});
+
+test("CodexLogMonitor reports only today's delta for a session resumed across midnight", () => {
+  const events = [];
+  const monitor = new CodexLogMonitor({
+    SESSION_DIR: "/tmp/unused-codex-sessions",
+    SESSION_INDEX_PATH: "",
+    LOG_EVENT_MAP: {},
+  }, (_sessionId, _state, _event, extra) => events.push(extra));
+  const entry = monitor.createEntry("codex:resumed", 0, false);
+  entry.sessionStartDayKey = "2000-01-01";
+  entry.latestCumulativeTokenUsage = {
+    totalTokens: 1000,
+    inputTokens: 800,
+    outputTokens: 200,
+  };
+
+  monitor.processLine(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    type: "event_msg",
+    payload: {
+      type: "token_count",
+      info: {
+        total_token_usage: {
+          total_tokens: 1120,
+          input_tokens: 890,
+          output_tokens: 230,
+        },
+      },
+    },
+  }), entry);
+
+  const daily = events.at(-1).dailyTokenUsage;
+  assert.equal(daily.totalTokens, 120);
+  assert.equal(daily.inputTokens, 90);
+  assert.equal(daily.outputTokens, 30);
+});
+
+test("CodexLogMonitor emits a non-visible daily snapshot during startup", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-log-monitor-daily-start-"));
+  try {
+    const root = path.join(home, "sessions");
+    const dir = dayDir(root);
+    const filePath = path.join(dir, rolloutName(77));
+    const events = [];
+    writeJsonl(filePath, [{
+      timestamp: new Date().toISOString(),
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: { total_tokens: 42, input_tokens: 30, output_tokens: 12 },
+        },
+      },
+    }]);
+    const monitor = new CodexLogMonitor({
+      SESSION_DIR: root,
+      SESSION_INDEX_PATH: "",
+      WATCH_FILES: false,
+      NEW_FILE_MAX_AGE_MS: 120000,
+    }, (sessionId, state, event, extra) => events.push({ sessionId, state, event, extra }));
+
+    monitor.baselineExistingSessions();
+
+    const snapshot = events.find((event) => event.event === "token_usage:daily_snapshot");
+    assert.equal(snapshot.state, "idle");
+    assert.equal(snapshot.extra.dailyTokenUsage.totalTokens, 42);
+    assert.equal(snapshot.extra.display, undefined);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("CodexLogMonitor finds the midnight baseline outside its bounded tail", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "codex-log-monitor-midnight-"));
+  try {
+    const root = path.join(home, "sessions");
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const dir = dayDir(root, yesterday);
+    const filePath = path.join(dir, rolloutName(78));
+    const events = [];
+    const oldTimestamp = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const timestamp = new Date().toISOString();
+    writeJsonl(filePath, [
+      {
+        timestamp: oldTimestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: { total_tokens: 1000, input_tokens: 800, output_tokens: 200 },
+            last_token_usage: { total_tokens: 100, input_tokens: 80, output_tokens: 20 },
+          },
+        },
+      },
+      { timestamp: oldTimestamp, type: "event_msg", payload: { type: "user_message", message: "x".repeat(600_000) } },
+      {
+        timestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: { total_tokens: 1120, input_tokens: 890, output_tokens: 230 },
+            last_token_usage: { total_tokens: 120, input_tokens: 90, output_tokens: 30 },
+          },
+        },
+      },
+      {
+        timestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            total_token_usage: { total_tokens: 1175, input_tokens: 930, output_tokens: 245 },
+            last_token_usage: { total_tokens: 55, input_tokens: 40, output_tokens: 15 },
+          },
+        },
+      },
+    ]);
+    const monitor = new CodexLogMonitor({
+      SESSION_DIR: root,
+      SESSION_INDEX_PATH: "",
+      WATCH_FILES: false,
+      NEW_FILE_MAX_AGE_MS: 120000,
+    }, (_sessionId, _state, event, extra) => {
+      if (event === "token_usage:daily_snapshot") events.push(extra);
+    });
+
+    monitor.baselineExistingSessions();
+
+    const daily = events.at(-1).dailyTokenUsage;
+    assert.equal(daily.totalTokens, 175);
+    assert.equal(daily.inputTokens, 130);
+    assert.equal(daily.outputTokens, 45);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test("CodexLogMonitor fast polls only tracked files instead of restatting history", () => {

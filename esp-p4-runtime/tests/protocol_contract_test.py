@@ -72,8 +72,11 @@ def test_protocol_doc_declares_usb_only_p4_runtime():
     assert '"flash": "32MB QSPI NOR Flash"' in doc
     assert '"version": 1' in doc
     assert '"widgets": true' in doc
-    assert '"widgetRuntime": "p4-bounded-runtime-v3"' in doc
-    assert '"widgetScene": "p4-grid-scene-v1"' in doc
+    assert '"widgetRuntime": "p4-bounded-runtime-v4"' in doc
+    assert '"widgetRuntimes": ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"]' in doc
+    assert '"widgetScene": "p4-grid-scene-v2"' in doc
+    assert '"widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"]' in doc
+    assert '"widgetSprites": true' in doc
     assert '"widgetGames": ["blocks", "snake", "flappy"]' in doc
     assert '"widgetGamePresets": ["blocks", "snake", "flappy"]' in doc
     assert '"voice": true' in doc
@@ -182,8 +185,9 @@ def test_firmware_contract_accepts_p4_assets_and_rejects_linux_mp4_ota():
     assert 'cJSON_AddBoolToObject(capabilities, "mp4", false)' in source
     assert 'cJSON_AddNumberToObject(capabilities, "version", 1)' in source
     assert 'cJSON_AddBoolToObject(capabilities, "widgets", true)' in source
-    assert 'cJSON_AddStringToObject(capabilities, "widgetRuntime", "p4-bounded-runtime-v3")' in source
-    assert 'cJSON_AddStringToObject(capabilities, "widgetScene", "p4-grid-scene-v1")' in source
+    assert 'cJSON_AddStringToObject(capabilities, "widgetRuntime", "p4-bounded-runtime-v4")' in source
+    assert 'cJSON_AddStringToObject(capabilities, "widgetScene", "p4-grid-scene-v2")' in source
+    assert 'cJSON_AddBoolToObject(capabilities, "widgetSprites", true)' in source
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"))' in source
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"))' in source
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("flappy"))' in source
@@ -360,6 +364,10 @@ def test_p4_token_widget_uses_bounded_stats_instead_of_host_readers():
     miniapp_header = read_required("main/pet_p4_miniapp.h")
     protocol = read("main/pet_p4_protocol.c")
     desktop = read_usb_serial_contract()
+    desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
+    codex_monitor = read_workspace("ref/src-tauri/bridge/agents/codex-log-monitor.js")
+    claude_monitor = read_workspace("ref/src-tauri/bridge/agents/claude-log-monitor.js")
+    stats = read_required("main/pet_p4_stats.c")
 
     assert 'widget_id == "token-usage"' in desktop
     assert 'path == "runtime/widget.json"' in desktop
@@ -368,6 +376,12 @@ def test_p4_token_widget_uses_bounded_stats_instead_of_host_readers():
     assert '"P4 mini-apps do not allow fetchers or readers"' in miniapp
     assert "pet_p4_miniapp_sync_stats" in miniapp_header
     assert 'strcmp(g_runtime.widget_id, "token-usage") == 0' in miniapp
+    assert 'set_string_var(&g_runtime, "headline_text", "今日消耗")' in miniapp
+    assert '["dailyTokenUsage", "tokenUsage", "token_usage", "usage"]' in desktop_lib
+    assert '"tokenUsagePeriod".to_string()' in desktop_lib
+    assert "dailyUsageBySession" in codex_monitor
+    assert "dailyUsageBySession" in claude_monitor
+    assert "strcmp(model->source, text) != 0" in stats
     for variable in [
         "agent_label",
         "headline_text",
@@ -603,7 +617,8 @@ def test_p4_component_packages_commit_through_validated_ab_catalog_snapshots():
 
     assert "MINIAPP_CATALOG_GENERATION_COUNT 2" in miniapp
     assert "MINIAPP_PACKAGE_GENERATION_COUNT 2" in miniapp
-    assert "MINIAPP_CATALOG_VERSION 2" in miniapp
+    assert "MINIAPP_CATALOG_VERSION 3" in miniapp
+    assert "version->valueint != 2 && version->valueint != MINIAPP_CATALOG_VERSION" in miniapp
     assert '"sequence"' in miniapp
     assert '"activeWidgetId"' in miniapp
     assert '"packageGeneration"' in miniapp
@@ -797,14 +812,16 @@ def test_generic_scene_runtime_is_shared_by_games_and_tools():
     assert "parse_bounded_rules" in miniapp
     assert "PET_P4_GAME_MAX_ENTITIES 12" in header
     assert "PET_P4_GAME_MAX_RULES 20" in header
-    assert '"bounds", "shape", "active", "collidable"' in miniapp
+    assert '"bounds", "shape", "sprite", "active", "collidable"' in miniapp
     assert "frame->entities[frame->entity_count++] = *entity" in game
     assert "pet_p4_game_configure_bounded" in game
     assert "bounded_process_trigger" in game
     assert "PET_P4_GAME_TRIGGER_COLLISION" in game
     assert "PET_P4_GAME_TRIGGER_EDGE" in game
     assert '"p4-bounded-runtime-v3"' in protocol
+    assert '"p4-bounded-runtime-v4"' in protocol
     assert '"p4-grid-scene-v1"' in protocol
+    assert '"p4-grid-scene-v2"' in protocol
 
 
 def test_petui_skill_contains_no_copyable_component_packages():
@@ -1524,7 +1541,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.42-p4")' in project
+    assert 'set(PROJECT_VER "0.7.43-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1604,7 +1621,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("ref/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.42-p4")' in project
+    assert 'set(PROJECT_VER "0.7.43-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1701,7 +1718,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
     desktop_lib = read_workspace("ref/src-tauri/src/lib.rs")
     desktop_ui = read_workspace("ref/src/dashboard/DeviceDiagnosticsModal.jsx")
 
-    assert "set(PET_P4_PROTOCOL_SCHEMA 6)" in project
+    assert "set(PET_P4_PROTOCOL_SCHEMA 7)" in project
     assert "rev-parse --short=12 HEAD" in project
     assert 'PET_P4_BUILD_ID="${PET_P4_BUILD_ID}"' in main_cmake
     assert "PET_P4_PROTOCOL_SCHEMA=${PET_P4_PROTOCOL_SCHEMA}" in main_cmake
@@ -1712,7 +1729,7 @@ def test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics():
         assert f'"{field}"' in protocol
         assert f'"{field}"' in diagnostics
 
-    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 6" in desktop_build
+    assert "const PET_MANAGER_PROTOCOL_SCHEMA: u32 = 7" in desktop_build
     assert '"rev-parse", "--short=12", "HEAD"' in desktop_build
     assert "PET_MANAGER_BUILD_ID" in desktop_build
     assert "pub build_id: String" in desktop_serial

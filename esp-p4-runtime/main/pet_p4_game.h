@@ -1,3 +1,10 @@
+/*
+ * [Input] Validated legacy presets or declarative v1/v2 scene configuration.
+ * [Output] Heap-free fixed-grid game state with semantic shapes and sprite references.
+ * [Pos] Shared bounded gameplay model for mini-app parsing and rendering.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
+ */
+
 #pragma once
 
 #include <stdbool.h>
@@ -58,6 +65,14 @@ typedef enum {
   PET_P4_GAME_SHAPE_STAR,
   PET_P4_GAME_SHAPE_PADDLE,
   PET_P4_GAME_SHAPE_BALL,
+  PET_P4_GAME_SHAPE_CIRCLE,
+  PET_P4_GAME_SHAPE_CAPSULE,
+  PET_P4_GAME_SHAPE_TRIANGLE,
+  PET_P4_GAME_SHAPE_DIAMOND,
+  PET_P4_GAME_SHAPE_HEART,
+  PET_P4_GAME_SHAPE_CLOUD,
+  PET_P4_GAME_SHAPE_COIN,
+  PET_P4_GAME_SHAPE_CHARACTER,
 } pet_p4_game_shape_t;
 
 typedef struct {
@@ -71,6 +86,7 @@ typedef struct {
   int8_t vy;
   pet_p4_game_bounds_t bounds;
   pet_p4_game_shape_t shape;
+  int8_t sprite_index;
   bool active;
   bool collidable;
 } pet_p4_game_entity_t;

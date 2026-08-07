@@ -43,6 +43,10 @@ Implemented:
 - USB-UART asset transfer at 4 Mbaud with capability-gated 8KiB raw binary
   chunks. Legacy firmware remains compatible through 3 Mbaud/921600/115200
   probing and Base64 JSON chunks.
+- Firmware `0.7.43-p4` adds the compatible v4/v2 component runtime, fifteen
+  semantic shapes, bounded PNG sprite-sheet compilation/persistence/animation,
+  and a layered modern `clean` renderer. Protocol schema 7 advertises the new
+  capability arrays and sprite limits while v3/v1 packages remain supported.
 - Firmware `0.7.42-p4` keeps `main` and `components` as two peer pages with two
   indicator dots, but SW2 short press is now their sole default hardware toggle.
   Previous/next selects Session bubbles on `main` and catalog entries on
@@ -209,7 +213,9 @@ cd esp-p4-runtime
 ```
 
 The preloaded component catalog contains Two-key Pong first, followed by Flappy
-Bird, Blocks, Snake, Tomato Clock, Drink Reminder, and Token Usage. The removed
+Bird, Blocks, Snake, Tomato Clock, Drink Reminder, and Token Usage. Token Usage
+shows the current followed Agent's local-calendar-day aggregate rather than one
+foreground Session's instantaneous count. The removed
 Falling Catch package is not provisioned. The firmware starts on the normal pet
 page; Two-key Pong is the initial component selected inside Component Center.
 

@@ -1,7 +1,8 @@
 /**
  * [Input] 设备端 fb_speech_overlay.c 的 STATS_DASHBOARD_V1 版式与 br_stats_dashboard_model 字节上限。
  * [Output] .clawpkg 包结构常量、game/tool 类型、可选 COMPONENT_DASHBOARD_V1 内容与视觉槽位、
- *          每组件按钮数量/事件/标签尺寸（含四向摇杆和旧旋钮别名）、P4 vars 对象与单条规则 effect 约束，以及清单校验函数。
+ *          v3/v4 scene、现代轮廓与受控 PNG 精灵动画约束、每组件按钮数量/事件/标签尺寸
+ *          （含四向摇杆和旧旋钮别名）、P4 vars 对象与单条规则 effect 约束，以及清单校验函数。
  * [Pos] lib node in ref/src
  * [Sync] If this file changes, update `ref/src/.folder.md`.
  */
@@ -44,8 +45,9 @@ export const COMPONENT_VISUAL_PRESETS = {
   ],
 };
 
-export const COMPONENT_RUNTIME_ENGINES = ["p4-bounded-runtime-v3"];
-export const COMPONENT_SCENE_ENGINE = "p4-grid-scene-v1";
+export const COMPONENT_RUNTIME_ENGINES = ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"];
+export const COMPONENT_SCENE_ENGINES = ["p4-grid-scene-v1", "p4-grid-scene-v2"];
+export const COMPONENT_SCENE_ENGINE = COMPONENT_SCENE_ENGINES[1];
 export const COMPONENT_GAME_PRESETS = ["blocks", "snake", "flappy"];
 // Backward-compatible export for callers that still label native presets as game types.
 export const COMPONENT_GAME_TYPES = COMPONENT_GAME_PRESETS;
@@ -58,7 +60,15 @@ export const COMPONENT_SCENE_MAX_RULES = 20;
 export const COMPONENT_SCENE_MAX_OPS = 4;
 export const COMPONENT_SCENE_SHAPES = [
   "rect", "player-ship", "enemy-ship", "bullet", "star", "paddle", "ball",
+  "circle", "capsule", "triangle", "diamond", "heart", "cloud", "coin", "character",
 ];
+export const COMPONENT_SCENE_MAX_SPRITES = 4;
+export const COMPONENT_SCENE_MAX_SPRITE_FRAMES = 8;
+export const COMPONENT_SCENE_MAX_SPRITE_PIXELS = 4096;
+export const COMPONENT_SCENE_SPRITE_MIN_DIMENSION = 8;
+export const COMPONENT_SCENE_SPRITE_MAX_DIMENSION = 64;
+export const COMPONENT_SCENE_SPRITE_MIN_FPS = 1;
+export const COMPONENT_SCENE_SPRITE_MAX_FPS = 20;
 export const P4_WIDGET_MAX_VARS = 8;
 export const P4_WIDGET_VAR_NAME_MAX_BYTES = 31;
 export const P4_WIDGET_STRING_VAR_MAX_BYTES = 63;
@@ -260,15 +270,51 @@ function validateSceneOp(op, entityIds, errors, label) {
 function validateBoundedScene(widget, buttons, errors) {
   const scene = widget?.scene;
   if (scene === undefined) return;
-  if (widget.engine !== COMPONENT_RUNTIME_ENGINES[0]) {
-    errors.push(`runtime/widget.json scene 需要 engine=${COMPONENT_RUNTIME_ENGINES[0]}`);
+  if (!COMPONENT_RUNTIME_ENGINES.includes(widget.engine)) {
+    errors.push(`runtime/widget.json scene 需要受支持的 engine`);
   }
   if (!hasOnlyKeys(scene, [
     "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-    "grid", "entities", "rules",
+    "grid", "sprites", "entities", "rules",
   ])) {
     errors.push("runtime/widget.json scene 含未知字段或不是对象");
     return;
+  }
+  const sprites = scene.sprites === undefined ? [] : scene.sprites;
+  const spriteIds = new Set();
+  let spritePixels = 0;
+  if (!Array.isArray(sprites) || sprites.length > COMPONENT_SCENE_MAX_SPRITES) {
+    errors.push(`runtime/widget.json scene.sprites 最多允许 ${COMPONENT_SCENE_MAX_SPRITES} 项`);
+  } else {
+    if (sprites.length > 0 && widget.engine !== "p4-bounded-runtime-v4") {
+      errors.push("runtime/widget.json scene.sprites 需要 engine=p4-bounded-runtime-v4");
+    }
+    sprites.forEach((sprite, index) => {
+      const label = `runtime/widget.json scene.sprites[${index}]`;
+      if (!hasOnlyKeys(sprite, ["id", "asset", "frame_width", "frame_height", "frames", "fps"])) {
+        errors.push(`${label} 含未知字段或不是对象`);
+        return;
+      }
+      if (typeof sprite.id !== "string" || !/^[A-Za-z0-9_.-]{1,15}$/.test(sprite.id)
+          || spriteIds.has(sprite.id)) {
+        errors.push(`${label}.id 无效或重复`);
+      } else spriteIds.add(sprite.id);
+      if (typeof sprite.asset !== "string"
+          || !/^assets\/[A-Za-z0-9_.-]+\.png$/.test(sprite.asset)) {
+        errors.push(`${label}.asset 必须是 assets/ 下的安全 PNG 路径`);
+      }
+      if (!isBoundedInt(sprite.frame_width, COMPONENT_SCENE_SPRITE_MIN_DIMENSION, COMPONENT_SCENE_SPRITE_MAX_DIMENSION)
+          || !isBoundedInt(sprite.frame_height, COMPONENT_SCENE_SPRITE_MIN_DIMENSION, COMPONENT_SCENE_SPRITE_MAX_DIMENSION)
+          || !isBoundedInt(sprite.frames, 1, COMPONENT_SCENE_MAX_SPRITE_FRAMES)
+          || !isBoundedInt(sprite.fps, COMPONENT_SCENE_SPRITE_MIN_FPS, COMPONENT_SCENE_SPRITE_MAX_FPS)) {
+        errors.push(`${label} 的帧尺寸、帧数或 fps 超出 P4 上限`);
+      } else {
+        spritePixels += sprite.frame_width * sprite.frame_height * sprite.frames;
+      }
+    });
+  }
+  if (spritePixels > COMPONENT_SCENE_MAX_SPRITE_PIXELS) {
+    errors.push(`runtime/widget.json scene.sprites 总像素超过 ${COMPONENT_SCENE_MAX_SPRITE_PIXELS}`);
   }
   if (!isBoundedInt(scene.tick_ms, COMPONENT_GAME_TICK_MIN_MS, COMPONENT_GAME_TICK_MAX_MS)) {
     errors.push(`runtime/widget.json scene.tick_ms 必须在 ${COMPONENT_GAME_TICK_MIN_MS}-${COMPONENT_GAME_TICK_MAX_MS}`);
@@ -314,7 +360,7 @@ function validateBoundedScene(widget, buttons, errors) {
     const label = `runtime/widget.json scene.entities[${index}]`;
     if (!hasOnlyKeys(entity, [
       "id", "x", "y", "width", "height", "tone", "vx", "vy",
-      "bounds", "shape", "active", "collidable",
+      "bounds", "shape", "sprite", "active", "collidable",
     ])) {
       errors.push(`${label} 含未知字段或不是对象`);
       return;
@@ -340,6 +386,9 @@ function validateBoundedScene(widget, buttons, errors) {
     }
     if (entity.shape !== undefined && !COMPONENT_SCENE_SHAPES.includes(entity.shape)) {
       errors.push(`${label}.shape 不受支持`);
+    }
+    if (entity.sprite !== undefined && !spriteIds.has(entity.sprite)) {
+      errors.push(`${label}.sprite 引用了未知精灵`);
     }
     if ((entity.active !== undefined && typeof entity.active !== "boolean")
         || (entity.collidable !== undefined && typeof entity.collidable !== "boolean")) {

@@ -3,9 +3,11 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import struct
 import sys
 import tempfile
 import unittest
+import zlib
 from pathlib import Path
 
 
@@ -18,6 +20,24 @@ assert SPEC and SPEC.loader
 VALIDATOR = importlib.util.module_from_spec(SPEC)
 sys.dont_write_bytecode = True
 SPEC.loader.exec_module(VALIDATOR)
+
+
+def rgba_png(width: int, height: int) -> bytes:
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+        )
+
+    rows = b"".join(b"\0" + bytes((255, 128, 32, 255)) * width for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(rows))
+        + chunk(b"IEND", b"")
+    )
 
 
 def shooter_fixture() -> dict[str, object]:
@@ -179,9 +199,12 @@ class ClaimedMechanicsTests(unittest.TestCase):
             for relative, value in values.items():
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(
-                    json.dumps(value, ensure_ascii=False), encoding="utf-8"
-                )
+                if isinstance(value, bytes):
+                    path.write_bytes(value)
+                else:
+                    path.write_text(
+                        json.dumps(value, ensure_ascii=False), encoding="utf-8"
+                    )
             return VALIDATOR.validate_widget(root)
 
     def test_shooter_fixture_has_real_mechanics(self) -> None:
@@ -310,6 +333,33 @@ class ClaimedMechanicsTests(unittest.TestCase):
         entities[0]["shape"] = "copied-game-sprite"
         errors = self.validate_values(values)
         self.assertTrue(any("shape" in error for error in errors), errors)
+
+    def test_v4_sprite_sheet_is_validated_with_exact_dimensions(self) -> None:
+        values = copy.deepcopy(self.values)
+        runtime = values["runtime/widget.json"]
+        assert isinstance(runtime, dict)
+        runtime["engine"] = "p4-bounded-runtime-v4"
+        scene = runtime["scene"]
+        assert isinstance(scene, dict)
+        scene["sprites"] = [
+            {
+                "id": "hero",
+                "asset": "assets/hero.png",
+                "frame_width": 8,
+                "frame_height": 8,
+                "frames": 2,
+                "fps": 8,
+            }
+        ]
+        entities = scene["entities"]
+        assert isinstance(entities, list)
+        entities[0]["sprite"] = "hero"
+        values["assets/hero.png"] = rgba_png(16, 8)
+        self.assertEqual(self.validate_values(values), [])
+
+        values["assets/hero.png"] = rgba_png(8, 8)
+        errors = self.validate_values(values)
+        self.assertTrue(any("PNG 尺寸应为 16x8" in error for error in errors), errors)
 
 
 if __name__ == "__main__":

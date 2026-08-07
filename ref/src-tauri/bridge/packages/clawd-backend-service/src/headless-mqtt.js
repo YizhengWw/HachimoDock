@@ -3,7 +3,7 @@
 
 /*
  * [Input] Local agent state monitors, cumulative/per-turn token metadata, bridge profile env, MQTT broker events, device availability, and mock/board voice inject requests.
- * [Output] Parent-bound Bridge lifecycle plus per-source retained MQTT status with session-stable token usage, hook/plugin-enriched Claude and MiMoCode session cards, atomically committed USB-forwarder state files, and agent-session injections with fresh-session recovery for stale Codex metadata.
+ * [Output] Parent-bound Bridge lifecycle plus per-source retained MQTT status with session-stable and current-day Agent token usage, hook/plugin-enriched Claude and MiMoCode session cards, atomically committed USB-forwarder state files, and agent-session injections with fresh-session recovery for stale Codex metadata.
  * [Pos] Headless status bridge for the Tauri Pet Manager runtime.
  * [Sync] If state-file, follow-source, or voice-injection recovery semantics change, update `ref/.folder.md`.
  */
@@ -2204,6 +2204,7 @@ function startCodexMonitor(config) {
     "event_msg:context_compacted",
     "event_msg:turn_aborted",
     "event_msg:token_count",
+    "token_usage:daily_snapshot",
   ]);
   try {
     monitor = startAgentLogMonitorWorker("codex", (sessionId, state, event, extra) => {
@@ -2231,6 +2232,9 @@ function startCodexMonitor(config) {
         messages: isVisibleEvent && extra && extra.messages && typeof extra.messages === "object" ? extra.messages : undefined,
         tokenUsage: extra && extra.tokenUsage && typeof extra.tokenUsage === "object"
           ? extra.tokenUsage
+          : undefined,
+        dailyTokenUsage: extra && extra.dailyTokenUsage && typeof extra.dailyTokenUsage === "object"
+          ? extra.dailyTokenUsage
           : undefined,
         ts: nowIso(),
         tsMs: Date.now(),
@@ -2303,6 +2307,9 @@ function startClaudeLogMonitor(config) {
         messages: extra && extra.messages && typeof extra.messages === "object" ? extra.messages : undefined,
         tokenUsage: extra && extra.tokenUsage && typeof extra.tokenUsage === "object"
           ? extra.tokenUsage
+          : undefined,
+        dailyTokenUsage: extra && extra.dailyTokenUsage && typeof extra.dailyTokenUsage === "object"
+          ? extra.dailyTokenUsage
           : undefined,
         ts: nowIso(),
         tsMs: Date.now(),

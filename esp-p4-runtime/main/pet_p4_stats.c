@@ -1,3 +1,10 @@
+/*
+ * [Input] Followed-Agent lifecycle payloads with per-Session or current-day Token usage.
+ * [Output] Bounded P4 stats model that resets safely when the Agent source changes.
+ * [Pos] Shared telemetry parser feeding declarative tools such as Token 仪表盘.
+ * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and protocol tests.
+ */
+
 #include "pet_p4_stats.h"
 
 #include <stdbool.h>
@@ -147,6 +154,9 @@ void pet_p4_stats_update(
 
   text = first_string(payload, source_keys, sizeof(source_keys) / sizeof(source_keys[0]));
   if (!text[0]) text = fallback_source ? fallback_source : "";
+  if (text[0] && model->source[0] && strcmp(model->source, text) != 0) {
+    pet_p4_stats_init(model);
+  }
   if (text[0]) copy_text(model->source, sizeof(model->source), text);
   text = first_string(payload, state_keys, sizeof(state_keys) / sizeof(state_keys[0]));
   if (text[0]) copy_text(model->state, sizeof(model->state), text);

@@ -2,11 +2,12 @@
  * [Input] Content-addressed petui publications plus ~/.claw-pet legacy draft roots.
  * [Output] Content-addressed formal local component library with one-time lossless
  *          legacy migration, atomic staging/publish, latest-version discovery,
- *          strict deletion guards, and preview metadata for Component Center.
+ *          strict deletion guards, and scene/sprite preview metadata for Component Center.
  * [Pos] Local component-library ownership node in ref/src-tauri/src
  * [Sync] If this file changes, update ref/.folder.md.
  */
 
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -44,9 +45,21 @@ pub struct ComponentLibraryEntry {
     pub scene_engine: Option<String>,
     pub game_preset: Option<String>,
     pub scene: Option<serde_json::Value>,
+    pub scene_sprites: Vec<ComponentSceneSpritePreview>,
     pub kind: Option<String>,
     pub valid: bool,
     pub validation_errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComponentSceneSpritePreview {
+    pub id: String,
+    pub data_url: String,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub frames: u32,
+    pub fps: u32,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -287,6 +300,35 @@ fn read_json_from_dir(path: &Path, relative: &str) -> Option<serde_json::Value> 
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
 }
 
+fn scene_sprite_previews(
+    path: &Path,
+    runtime: Option<&serde_json::Value>,
+) -> Vec<ComponentSceneSpritePreview> {
+    runtime
+        .and_then(|value| value.get("scene"))
+        .and_then(|value| value.get("sprites"))
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|sprite| {
+            let id = sprite.get("id")?.as_str()?.to_string();
+            let asset = sprite.get("asset")?.as_str()?;
+            let bytes = fs::read(path.join(asset)).ok()?;
+            Some(ComponentSceneSpritePreview {
+                id,
+                data_url: format!(
+                    "data:image/png;base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                ),
+                frame_width: u32::try_from(sprite.get("frame_width")?.as_u64()?).ok()?,
+                frame_height: u32::try_from(sprite.get("frame_height")?.as_u64()?).ok()?,
+                frames: u32::try_from(sprite.get("frames")?.as_u64()?).ok()?,
+                fps: u32::try_from(sprite.get("fps")?.as_u64()?).ok()?,
+            })
+        })
+        .collect()
+}
+
 fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
     let metadata = fs::metadata(path)
         .map_err(|error| format!("读取组件目录失败 {}: {}", path.display(), error))?;
@@ -342,11 +384,22 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
     let scene_engine = runtime
         .as_ref()
         .filter(|value| value.get("scene").is_some())
-        .map(|_| "p4-grid-scene-v1".to_string());
+        .map(|_| {
+            if runtime_engine.as_deref() == Some("p4-bounded-runtime-v4") {
+                "p4-grid-scene-v2".to_string()
+            } else {
+                "p4-grid-scene-v1".to_string()
+            }
+        });
     let scene = runtime
         .as_ref()
         .and_then(|value| value.get("scene"))
         .cloned();
+    let scene_sprites = if validation.ok {
+        scene_sprite_previews(path, runtime.as_ref())
+    } else {
+        Vec::new()
+    };
     let game_preset = game_type.clone();
     let buttons = if validation.ok {
         read_json_from_dir(path, "buttons.json")
@@ -376,6 +429,7 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
         scene_engine,
         game_preset,
         scene,
+        scene_sprites,
         kind,
         valid: validation.ok,
         validation_errors: validation.errors,

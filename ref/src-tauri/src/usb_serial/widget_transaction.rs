@@ -1,7 +1,7 @@
 /*
- * [Input] Widget package paths/JSON bytes, device capabilities, and chunk metadata.
+ * [Input] Widget package paths/JSON bytes, bounded PNG sprite sheets, device capabilities, and chunk metadata.
  * [Output] P4-safe widget payloads with legacy package-navigation bindings removed,
- *          capability gates, path checks, and OTA timing policy.
+ *          RGB565-alpha sprite compilation, capability gates, path checks, and OTA timing policy.
  * [Pos] Pure component/widget transaction contract beneath usb_serial.rs.
  * [Sync] If this file changes, update `ref/.folder.md`.
  */
@@ -21,6 +21,10 @@ pub(super) const WIDGET_DELETE_ACK_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const WIDGET_CHUNK_MAX_ATTEMPTS: usize = 3;
 pub(super) const P4_WIDGET_JSON_MAX_BYTES: usize = 4095;
 const P4_BUTTONS_JSON_MAX_BYTES: usize = 2047;
+const P4_SCENE_MAX_SPRITES: usize = 4;
+const P4_SCENE_MAX_SPRITE_PIXELS: usize = 4096;
+const P4_SCENE_MAX_SPRITE_SOURCE_BYTES: usize = 128 * 1024;
+const P4_SCENE_SPRITE_MAGIC: &[u8; 4] = b"P4S1";
 const WIDGET_DELETE_CAPABILITY: &str = "widgetDelete";
 const WIDGET_INVENTORY_CAPABILITY: &str = "widgetInventory";
 
@@ -109,6 +113,103 @@ pub(super) fn widget_ota_relative_path(root: &Path, path: &Path) -> Result<Strin
 
 pub(super) fn widget_ota_should_skip_path(path: &str) -> bool {
     path.split('/').next_back() == Some(".keep")
+}
+
+pub(super) fn prepare_p4_widget_sprite_files(
+    widget_root: &Path,
+    widget_bytes: &[u8],
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let widget: Value = serde_json::from_slice(widget_bytes)
+        .map_err(|error| format!("runtime/widget.json is invalid JSON: {error}"))?;
+    let Some(sprites) = widget
+        .get("scene")
+        .and_then(|scene| scene.get("sprites"))
+        .and_then(Value::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+    if sprites.len() > P4_SCENE_MAX_SPRITES {
+        return Err(format!(
+            "runtime/widget.json scene.sprites exceeds {} entries",
+            P4_SCENE_MAX_SPRITES
+        ));
+    }
+    let mut total_pixels = 0usize;
+    let mut compiled = Vec::with_capacity(sprites.len());
+    for sprite in sprites {
+        let id = sprite
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "scene sprite is missing id".to_string())?;
+        let asset = sprite
+            .get("asset")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("scene sprite {id} is missing asset"))?;
+        let frame_width = sprite
+            .get("frame_width")
+            .and_then(Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| format!("scene sprite {id} has invalid frame_width"))?;
+        let frame_height = sprite
+            .get("frame_height")
+            .and_then(Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| format!("scene sprite {id} has invalid frame_height"))?;
+        let frames = sprite
+            .get("frames")
+            .and_then(Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| format!("scene sprite {id} has invalid frames"))?;
+        let fps = sprite
+            .get("fps")
+            .and_then(Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+            .ok_or_else(|| format!("scene sprite {id} has invalid fps"))?;
+        let source = widget_root.join(asset);
+        let source_bytes = std::fs::read(&source)
+            .map_err(|error| format!("read scene sprite {} failed: {error}", source.display()))?;
+        if source_bytes.len() > P4_SCENE_MAX_SPRITE_SOURCE_BYTES {
+            return Err(format!(
+                "scene sprite {id} exceeds the 128 KiB source limit"
+            ));
+        }
+        let image = image::load_from_memory_with_format(&source_bytes, image::ImageFormat::Png)
+            .map_err(|error| format!("decode scene sprite {id} failed: {error}"))?
+            .to_rgba8();
+        let expected_width = u32::from(frame_width) * u32::from(frames);
+        if image.width() != expected_width || image.height() != u32::from(frame_height) {
+            return Err(format!(
+                "scene sprite {id} must be {}x{}, got {}x{}",
+                expected_width,
+                frame_height,
+                image.width(),
+                image.height()
+            ));
+        }
+        let pixels = usize::from(frame_width) * usize::from(frame_height) * usize::from(frames);
+        total_pixels = total_pixels
+            .checked_add(pixels)
+            .ok_or_else(|| "scene sprite pixel count overflow".to_string())?;
+        if total_pixels > P4_SCENE_MAX_SPRITE_PIXELS {
+            return Err(format!(
+                "scene sprites exceed {} decoded pixels",
+                P4_SCENE_MAX_SPRITE_PIXELS
+            ));
+        }
+        let mut encoded = Vec::with_capacity(8 + pixels * 3);
+        encoded.extend_from_slice(P4_SCENE_SPRITE_MAGIC);
+        encoded.extend_from_slice(&[frame_width, frame_height, frames, fps]);
+        for pixel in image.pixels() {
+            let red = u16::from(pixel[0]);
+            let green = u16::from(pixel[1]);
+            let blue = u16::from(pixel[2]);
+            let rgb565 = ((red >> 3) << 11) | ((green >> 2) << 5) | (blue >> 3);
+            encoded.extend_from_slice(&rgb565.to_le_bytes());
+            encoded.push(pixel[3]);
+        }
+        compiled.push((format!("runtime/sprites/{id}.p4s"), encoded));
+    }
+    Ok(compiled)
 }
 
 pub(super) fn prepare_p4_widget_file(

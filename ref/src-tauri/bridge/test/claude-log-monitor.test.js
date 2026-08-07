@@ -2,7 +2,7 @@
 
 /*
  * [Input] Synthetic Claude transcript JSONL files with lifecycle, tool, and usage records.
- * [Output] Regression coverage for Claude session cards, cumulative token accounting, deduplication, and non-blocking process probes.
+ * [Output] Regression coverage for Claude session cards, per-Session/current-day token accounting, deduplication, and non-blocking process probes.
  * [Pos] Unit tests for the managed bridge's Claude transcript monitor.
  * [Sync] If Claude transcript monitor behavior changes, update `ref/.folder.md`.
  */
@@ -155,6 +155,116 @@ test("ClaudeLogMonitor accumulates session usage and deduplicates repeated messa
     assert.equal(completed.extra.tokenUsage.outputTokens, 35);
     assert.equal(completed.extra.tokenUsage.lastInputTokens, 5);
     assert.equal(completed.extra.tokenUsage.lastTotalTokens, 20);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("ClaudeLogMonitor aggregates today's token totals across sessions", () => {
+  const events = [];
+  const monitor = new ClaudeLogMonitor({
+    PROJECTS_ROOT: "/tmp/unused-claude-projects",
+    PROCESS_NAMES_UNIX: [],
+    PROCESS_NAMES_WIN: [],
+  }, (sessionId, state, event, extra) => {
+    events.push({ sessionId, state, event, extra });
+  });
+  const first = monitor.createEntry("daily-a.jsonl", 0, false);
+  const second = monitor.createEntry("daily-b.jsonl", 0, false);
+  const timestamp = new Date().toISOString();
+
+  monitor.processLine(JSON.stringify({
+    timestamp,
+    type: "assistant",
+    sessionId: "daily-a",
+    uuid: "daily-a-message",
+    message: {
+      id: "daily-a-message",
+      role: "assistant",
+      content: "第一条",
+      usage: { input_tokens: 40, output_tokens: 10 },
+    },
+  }), first);
+  monitor.processLine(JSON.stringify({
+    timestamp,
+    type: "assistant",
+    sessionId: "daily-b",
+    uuid: "daily-b-message",
+    message: {
+      id: "daily-b-message",
+      role: "assistant",
+      content: "第二条",
+      usage: { input_tokens: 60, output_tokens: 20 },
+    },
+  }), second);
+
+  const daily = events.at(-1).extra.dailyTokenUsage;
+  assert.equal(daily.totalTokens, 130);
+  assert.equal(daily.inputTokens, 100);
+  assert.equal(daily.outputTokens, 30);
+});
+
+test("ClaudeLogMonitor resets per-session daily totals after the local day changes", () => {
+  const events = [];
+  const monitor = new ClaudeLogMonitor({
+    PROJECTS_ROOT: "/tmp/unused-claude-projects",
+    PROCESS_NAMES_UNIX: [],
+    PROCESS_NAMES_WIN: [],
+  }, (_sessionId, _state, _event, extra) => events.push(extra));
+  const entry = monitor.createEntry("daily-rollover.jsonl", 0, false);
+  entry.dailyUsageDayKey = "2000-01-01";
+  entry.dailyTokenUsage = { totalTokens: 900, inputTokens: 700, outputTokens: 200 };
+  entry.dailyTokenUsageEventIds.add("old-event");
+
+  monitor.processLine(JSON.stringify({
+    timestamp: new Date().toISOString(),
+    type: "assistant",
+    sessionId: "daily-rollover",
+    uuid: "new-event",
+    message: {
+      id: "new-event",
+      role: "assistant",
+      content: "新一天",
+      usage: { input_tokens: 8, output_tokens: 2 },
+    },
+  }), entry);
+
+  const daily = events.at(-1).dailyTokenUsage;
+  assert.equal(daily.totalTokens, 10);
+  assert.equal(daily.inputTokens, 8);
+  assert.equal(daily.outputTokens, 2);
+});
+
+test("ClaudeLogMonitor emits a non-visible daily snapshot during startup", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "claude-log-monitor-daily-start-"));
+  try {
+    const root = path.join(home, "projects");
+    const filePath = path.join(root, "project-a", "daily.jsonl");
+    const events = [];
+    writeJsonl(filePath, [{
+      timestamp: new Date().toISOString(),
+      type: "assistant",
+      sessionId: "daily-start",
+      uuid: "daily-start-message",
+      message: {
+        id: "daily-start-message",
+        role: "assistant",
+        content: "今天",
+        usage: { input_tokens: 20, output_tokens: 5 },
+      },
+    }]);
+    const monitor = new ClaudeLogMonitor({
+      PROJECTS_ROOT: root,
+      PROCESS_NAMES_UNIX: [],
+      PROCESS_NAMES_WIN: [],
+    }, (sessionId, state, event, extra) => events.push({ sessionId, state, event, extra }));
+
+    monitor.baselineExistingSessions();
+
+    const snapshot = events.find((event) => event.event === "claude:daily_token_snapshot");
+    assert.equal(snapshot.state, "idle");
+    assert.equal(snapshot.extra.dailyTokenUsage.totalTokens, 25);
+    assert.equal(snapshot.extra.display, undefined);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

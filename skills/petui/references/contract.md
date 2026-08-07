@@ -7,8 +7,8 @@
 ## 1. 目标设备
 
 - 逻辑画布：`640x480` 横向。
-- 统一组件运行时：`p4-bounded-runtime-v3`。`game` 与 `tool` 共用变量、状态、计时、Dashboard 和输入解释器。
-- 可选通用场景子系统：`p4-grid-scene-v1`，用于网格、实体、移动、碰撞和边界玩法。
+- 新组件统一运行时：`p4-bounded-runtime-v4`。`game` 与 `tool` 共用变量、状态、计时、Dashboard、输入解释器和受控精灵资源；v3 继续兼容历史包。
+- 可选通用场景子系统：`p4-grid-scene-v2`，用于网格、语义形状、受控精灵、移动、碰撞和边界玩法；v1 继续兼容历史包。
 - `blocks`、`snake`、`flappy` 仅是历史原生预设，供旧包兼容，不是新组件可选的三种引擎。
 - 默认不假设触控可用。只有能力文件明确给出 `touchInput.ready=true` 时才允许触屏事件。
 - 第三方组件不能执行任意代码，也不能自行访问网络或本地文件。
@@ -17,8 +17,11 @@
 
 ```json
 {
-  "widgetRuntime": "p4-bounded-runtime-v3",
-  "widgetScene": "p4-grid-scene-v1",
+  "widgetRuntime": "p4-bounded-runtime-v4",
+  "widgetRuntimes": ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"],
+  "widgetScene": "p4-grid-scene-v2",
+  "widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"],
+  "widgetSprites": true,
   "widgetGamePresets": ["blocks", "snake", "flappy"],
   "touchInput": { "ready": false }
 }
@@ -38,7 +41,8 @@
 ├── runtime/
 │   └── widget.json
 ├── assets/
-│   └── .keep
+│   ├── .keep
+│   └── <optional-horizontal-sprite-sheet>.png
 └── share.json
 ```
 
@@ -46,7 +50,7 @@
 - `component.json` 必须包含非空 `id`、`name`、`version`、`description`，以及 `kind: "game" | "tool"`。
 - `negative-screen.json.dashboard` 是初始预览，必须与 runtime 的初始 state/page/vars 相符。
 - `share.json` 必须是 JSON 对象，至少包含非空 `title`。
-- 允许在 `assets/` 放运行时支持的静态资源；禁止 JS、Python、HTML、CSS、SVG、shell、PowerShell、批处理和可执行文件。
+- 允许在 `assets/` 放运行时支持的静态 PNG 资源；单个 sprite sheet 不超过 128 KiB。禁止 JS、Python、HTML、CSS、SVG、shell、PowerShell、批处理和可执行文件。
 - 包内不得包含符号链接。
 
 ## 3. Dashboard 槽位
@@ -65,7 +69,7 @@
 | `note` | 156 | 必要的补充事实 |
 | `footer` | 156 | 当前可执行的 1-3 个动作 |
 | `progress` | 64 | `{value,label}` 或 runtime `pct_of` |
-| `visualStyle` | 16 | 新包使用 `pixel|clean`；`classic` 仅兼容旧包 |
+| `visualStyle` | 16 | 新包默认 `clean`；用户明确要求复古/像素/街机时才用 `pixel`；`classic` 仅兼容旧包 |
 | `visualPalette` | 16 | `candy|sunset|mint|arcade|ocean|forest|ember|mono` |
 | `visualLayout` | 16 | `arcade|scoreboard|tool` |
 | `visualSprite` | 16 | 见下方安全图标 |
@@ -81,6 +85,7 @@ blocks snake flappy mole-ready mole-left mole-center mole-right
 
 - `tool` 使用 `visualLayout: "tool"`，黑色 LCD 底与单一强调色，通常只突出一个大指标。
 - `game` 使用 `arcade` 或 `scoreboard`，主视觉服务玩法局面，而不是数据看板。
+- `clean` 必须体现现代卡片层级、留白、圆角和语义轮廓；不能只是隐藏格子缝隙。可见像素网格、方块化主体和 8-bit 装饰只属于用户明确要求的 `pixel` 风格。
 - 不在多个槽位重复同一事实。没有真实含义就省略 `eyebrow`、`note` 或 `badge`。
 - CJK 通常每字 3 字节，emoji 通常 4 字节；所有上限按 UTF-8 字节计算。
 - 动态值必须绑定 runtime var/formatter，不得把看似实时的数字硬编码进初始画面。
@@ -145,7 +150,7 @@ screen.region.long_press
 ```json
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
+  "engine": "p4-bounded-runtime-v4",
   "vars": {},
   "states": ["idle"],
   "initial_state": "idle",
@@ -156,7 +161,7 @@ screen.region.long_press
 ```
 
 - `schema_version` 固定为 `1`。
-- `engine` 固定为 `p4-bounded-runtime-v3`；工具和游戏都必须声明，不按 `kind` 切换底层引擎。
+- 新组件 `engine` 固定为 `p4-bounded-runtime-v4`；工具和游戏都必须声明，不按 `kind` 切换底层引擎。v3 仅用于读取或修复历史包。
 - `vars` 必须始终是对象；无变量时写 `{}`，不得省略、写成数组或 `null`。
 - 最多 8 个变量；变量名为 1-31 个 ASCII 字母、数字、`_`、`-`、`.`。
 - 每个变量声明必须且只能含 `type` 与可选 `init`。禁止 `min`、`max`、`default`、`label` 或其他描述字段。
@@ -182,12 +187,40 @@ screen.region.long_press
 - `grid.width/height` 各为 4-16。可选 `rows` 必须与高度一致，每行与宽度一致，只含色阶字符 `0..4`。
 - `grid.solid_tones` 最多声明 4 个唯一色阶；移动实体不能穿过这些底图单元。
 - 最多 12 个实体。实体 `id` 为 1-15 个安全 ASCII 字符；`x/y` 为 0-15，`width/height` 为 1-8，初始边界框必须在网格内。
-- 可选 `shape` 为 `rect|player-ship|enemy-ship|bullet|star|paddle|ball`，省略时为 `rect`。形状在实体边界框内原生绘制，碰撞仍按完整边界框计算。
-- `shape` 不是任意 sprite、SVG 或逐帧位图入口。题材需要固定列表之外的关键轮廓时，必须报告能力缺口，不得用 `rect` 或不相干形状冒充。
+- 可选 `shape` 为 `rect|player-ship|enemy-ship|bullet|star|paddle|ball|circle|capsule|triangle|diamond|heart|cloud|coin|character`，省略时为 `rect`。形状在实体边界框内原生绘制，碰撞仍按完整边界框计算。
+- 固定形状无法准确表达核心对象时，可在实体上用 `sprite` 引用本 scene 声明的受控 PNG sprite sheet。`sprite` 只影响显示，碰撞仍按实体完整边界框计算；它不是 SVG、脚本或任意代码入口。
 - 实体色阶 `tone` 为 1-4，速度 `vx/vy` 为 -4..4；`active`、`collidable` 为布尔值。
 - 边界策略 `bounds`：`clamp|wrap|bounce|hide|stop`。默认 `clamp`。
 - 最多 20 条 scene rule，每条 `do` 最多 4 个操作。所有数组和对象都按声明顺序执行。
-- Scene 使用固定数组、受控形状和受控操作，不接受 JS、H5、脚本、表达式、逐帧位图、任意内存或网络访问。
+- Scene 使用固定数组、受控形状、受限 PNG 精灵和受控操作，不接受 JS、H5、脚本、表达式、任意内存或网络访问。
+
+### 受控 Sprite sheet
+
+只有语义形状无法清楚表达题材主体时才增加 `scene.sprites`。PNG 必须是透明背景横向帧带，画布宽度严格等于 `frame_width * frames`，高度严格等于 `frame_height`：
+
+```json
+{
+  "sprites": [
+    {
+      "id": "hero",
+      "asset": "assets/hero.png",
+      "frame_width": 24,
+      "frame_height": 24,
+      "frames": 4,
+      "fps": 8
+    }
+  ],
+  "entities": [
+    { "id": "player", "x": 4, "y": 6, "width": 2, "height": 2, "sprite": "hero" }
+  ]
+}
+```
+
+- 最多 4 个精灵；每个 1-8 帧；单帧宽高各 8-64；动画 1-20 fps。
+- 所有精灵的全部解码帧合计最多 4096 像素；单个源 PNG 不超过 128 KiB。
+- `id` 为 1-15 个安全 ASCII 字符；`asset` 只能是 `assets/<safe-name>.png`。
+- PC 预览直接读取源 PNG；下发时会编译为 RGB565+alpha 并作为同一组件事务安装，固件重启后仍会从组件双代存储恢复。
+- 不要为装饰性细节滥用精灵。简单球、胶囊、心形、云、金币和人物轮廓应优先使用内置 shape，以节省包体和运行内存。
 
 ### Rule 触发器
 
@@ -221,7 +254,7 @@ screen.region.long_press
 
 ## 7. Tool 路由
 
-工具与小游戏使用同一个 `p4-bounded-runtime-v3`；通常只需 vars/state/transition/tick/dashboard，不要为了“使用引擎”而添加空 scene。工具必须回答：默认展示什么、数据从哪里来、空/断连时显示什么、每个动作带来什么可见变化。
+工具与小游戏使用同一个 `p4-bounded-runtime-v4`；通常只需 vars/state/transition/tick/dashboard，不要为了“使用引擎”而添加空 scene。工具必须回答：默认展示什么、数据从哪里来、空/断连时显示什么、每个动作带来什么可见变化。
 
 - 计时器：用 `fmt_mmss/fmt_hms`；用户未给目标时可做正计时，不擅自编倒计时。
 - 提醒器：区分计时、到点、暂停；确认完成后更新真实计数并重置间隔。

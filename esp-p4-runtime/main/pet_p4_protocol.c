@@ -2,7 +2,8 @@
  * [Input] JSON-line control/state envelopes from USB-UART and native USB.
  * [Output] validated runtime updates, ACK/NACK responses, persisted input
  *          configuration snapshots, transfer routing, deterministic appearance
- *          pack discovery/reactivation across both flash slots, restart-safe
+ *          pack discovery/reactivation across both flash slots, compatible
+ *          v3/v4 component capabilities with bounded sprite limits, restart-safe
  *          slot cleanup, idle-transfer recovery and legacy-pack migration, 60-second per-session
  *          terminal conversation visibility across active-queue refreshes,
  *          stable first-seen card ordering, and exact retained-card selection
@@ -1704,6 +1705,8 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON *widget_limits = cJSON_CreateObject();
   cJSON *widget_games = cJSON_CreateArray();
   cJSON *widget_game_presets = cJSON_CreateArray();
+  cJSON *widget_runtimes = cJSON_CreateArray();
+  cJSON *widget_scenes = cJSON_CreateArray();
   cJSON *audio_capture = cJSON_CreateObject();
   cJSON *firmware_update = cJSON_CreateObject();
   cJSON *screen_pages = cJSON_CreateArray();
@@ -1749,8 +1752,15 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(capabilities, "widgetDelete", true);
   cJSON_AddBoolToObject(capabilities, "widgetInventory", true);
   cJSON_AddBoolToObject(capabilities, "componentCatalogGeneration", true);
-  cJSON_AddStringToObject(capabilities, "widgetRuntime", "p4-bounded-runtime-v3");
-  cJSON_AddStringToObject(capabilities, "widgetScene", "p4-grid-scene-v1");
+  cJSON_AddStringToObject(capabilities, "widgetRuntime", "p4-bounded-runtime-v4");
+  cJSON_AddItemToArray(widget_runtimes, cJSON_CreateString("p4-bounded-runtime-v3"));
+  cJSON_AddItemToArray(widget_runtimes, cJSON_CreateString("p4-bounded-runtime-v4"));
+  cJSON_AddItemToObject(capabilities, "widgetRuntimes", widget_runtimes);
+  cJSON_AddStringToObject(capabilities, "widgetScene", "p4-grid-scene-v2");
+  cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v1"));
+  cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v2"));
+  cJSON_AddItemToObject(capabilities, "widgetScenes", widget_scenes);
+  cJSON_AddBoolToObject(capabilities, "widgetSprites", true);
   cJSON_AddNumberToObject(capabilities, "componentCatalogMax", PET_P4_MINIAPP_CATALOG_MAX);
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"));
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"));
@@ -1769,6 +1779,8 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(widget_limits, "maxSceneEntities", PET_P4_GAME_MAX_ENTITIES);
   cJSON_AddNumberToObject(widget_limits, "maxSceneRules", PET_P4_GAME_MAX_RULES);
   cJSON_AddNumberToObject(widget_limits, "maxSceneOpsPerRule", PET_P4_GAME_MAX_OPS_PER_RULE);
+  cJSON_AddNumberToObject(widget_limits, "maxSceneSprites", PET_P4_MINIAPP_SPRITE_MAX);
+  cJSON_AddNumberToObject(widget_limits, "maxSceneSpritePixels", 4096);
   cJSON_AddNumberToObject(widget_limits, "maxWidgetJsonBytes", 4095);
   cJSON_AddNumberToObject(widget_limits, "maxButtonsJsonBytes", 2047);
   cJSON_AddBoolToObject(widget_limits, "fetchers", false);

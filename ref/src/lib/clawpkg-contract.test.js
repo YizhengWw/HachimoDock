@@ -431,8 +431,11 @@ test("runtime vars 在传输前拒绝固件不支持的声明字段和越界初�
 });
 
 test("统一运行时接受不依赖旧预设的通用 scene 游戏", () => {
-  assert.deepEqual(COMPONENT_RUNTIME_ENGINES, ["p4-bounded-runtime-v3"]);
-  assert.equal(COMPONENT_SCENE_ENGINE, "p4-grid-scene-v1");
+  assert.deepEqual(COMPONENT_RUNTIME_ENGINES, [
+    "p4-bounded-runtime-v3",
+    "p4-bounded-runtime-v4",
+  ]);
+  assert.equal(COMPONENT_SCENE_ENGINE, "p4-grid-scene-v2");
   const buttons = [
     { action: "catch.start", control: "旋钮", event: "button.encoder.short_press", label: "开始" },
     { action: "catch.left", control: "旋钮", event: "knob.rotate_ccw", label: "左移" },
@@ -510,4 +513,63 @@ test("统一运行时接受不依赖旧预设的通用 scene 游戏", () => {
   });
   assert.equal(invalidShape.valid, false);
   assert.match(invalidShape.errors.join(" "), /shape/);
+});
+
+test("v4 scene 接受有界精灵声明并拒绝 v3 或未知引用", () => {
+  const runtime = {
+    schema_version: 1,
+    engine: "p4-bounded-runtime-v4",
+    vars: {},
+    states: ["playing"],
+    initial_state: "playing",
+    transitions: [],
+    tick: [],
+    scene: {
+      tick_ms: 120,
+      active_state: "playing",
+      auto_start: true,
+      grid: { width: 16, height: 12 },
+      sprites: [{
+        id: "hero",
+        asset: "assets/hero.png",
+        frame_width: 16,
+        frame_height: 16,
+        frames: 4,
+        fps: 8,
+      }],
+      entities: [{ id: "hero", x: 4, y: 4, sprite: "hero", shape: "character" }],
+      rules: [{ on: "tick", do: [{ op: "tone", entity: "hero", tone: 2 }] }],
+    },
+    dashboard: { visualStyle: "clean" },
+  };
+  const base = {
+    "component.json": { id: "sprite-scene", name: "Sprite", version: "1.0.0", kind: "game" },
+    "negative-screen.json": { dashboard: { title: "Sprite", visualStyle: "clean" } },
+    "buttons.json": [],
+    "runtime/": {},
+    "runtime/widget.json": runtime,
+    "assets/": { "hero.png": true },
+    "share.json": { title: "Sprite" },
+  };
+
+  const valid = validateClawpkgManifest(base);
+  assert.equal(valid.valid, true, valid.errors.join(" "));
+  const legacy = validateClawpkgManifest({
+    ...base,
+    "runtime/widget.json": { ...runtime, engine: "p4-bounded-runtime-v3" },
+  });
+  assert.equal(legacy.valid, false);
+  assert.match(legacy.errors.join(" "), /需要 engine=p4-bounded-runtime-v4/);
+  const missing = validateClawpkgManifest({
+    ...base,
+    "runtime/widget.json": {
+      ...runtime,
+      scene: {
+        ...runtime.scene,
+        entities: [{ ...runtime.scene.entities[0], sprite: "missing" }],
+      },
+    },
+  });
+  assert.equal(missing.valid, false);
+  assert.match(missing.errors.join(" "), /未知精灵/);
 });

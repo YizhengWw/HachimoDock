@@ -1,9 +1,9 @@
 /*
- * [Input] Bounded widget/button JSON, firmware-embedded built-ins, mini-app
- *         install/delete actions, periodic ticks, and validated stats.
+ * [Input] Bounded v3/v4 widget/button JSON, compiled RGB565-alpha sprites,
+ *         firmware-embedded built-ins, install/delete actions, ticks, and stats.
  * [Output] Persisted declarative mini-app catalog, active state, context-resolvable
  *          buttons, post-OTA built-in package migration, and fixed-size
- *          dashboard/component-center views for the renderer.
+ *          dashboard/component-center views plus generation-safe sprite packs.
  * [Pos] ESP32-P4 negative-screen runtime and transactional multi-widget installer.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -33,6 +33,12 @@
 #define MINIAPP_VALUE_MAX 160
 #define MINIAPP_WIDGET_JSON_MAX 4096
 #define MINIAPP_BUTTONS_JSON_MAX 2048
+#define MINIAPP_SPRITE_FILE_HEADER_SIZE 8
+#define MINIAPP_SPRITE_FILE_MAX (MINIAPP_SPRITE_FILE_HEADER_SIZE + PET_P4_MINIAPP_SPRITE_PIXEL_BYTES_MAX)
+#define MINIAPP_SPRITE_FRAME_MIN 8
+#define MINIAPP_SPRITE_FRAME_MAX 64
+#define MINIAPP_SPRITE_FRAMES_MAX 8
+#define MINIAPP_SPRITE_FPS_MAX 20
 #define MINIAPP_TICK_MIN_MS 100
 #define MINIAPP_INT_MIN (-1000000000)
 #define MINIAPP_INT_MAX 1000000000
@@ -48,7 +54,7 @@
 #define MINIAPP_BUILTIN_MARKER_TMP_PATH "/spiffs/p4-builtins.tmp"
 #define MINIAPP_CATALOG_GENERATION_COUNT 2
 #define MINIAPP_PACKAGE_GENERATION_COUNT 2
-#define MINIAPP_CATALOG_VERSION 2
+#define MINIAPP_CATALOG_VERSION 3
 #define MINIAPP_CATALOG_JSON_MAX 4096
 
 #ifndef PET_P4_BUILD_ID
@@ -194,6 +200,7 @@ typedef struct {
   uint8_t button_count;
   miniapp_button_t buttons[MINIAPP_MAX_BUTTONS];
   miniapp_game_t game;
+  pet_p4_miniapp_sprite_pack_t sprites;
   miniapp_rule_t rules[MINIAPP_SLOT_COUNT];
   pet_p4_miniapp_view_t view;
 } miniapp_runtime_t;
@@ -208,6 +215,7 @@ typedef struct {
   char buttons_json[MINIAPP_BUTTONS_JSON_MAX];
   size_t buttons_len;
   uint32_t buttons_next_index;
+  pet_p4_miniapp_sprite_pack_t sprites;
 } miniapp_staging_t;
 
 typedef struct {
@@ -217,6 +225,7 @@ typedef struct {
   uint8_t package_generation;
   uint32_t widget_checksum;
   uint32_t buttons_checksum;
+  uint32_t sprites_checksum;
 } miniapp_catalog_item_t;
 
 typedef struct {
@@ -248,6 +257,7 @@ static bool remove_file_if_present(const char *path);
 static bool parse_bounded_scene(
   miniapp_runtime_t *runtime,
   const cJSON *scene,
+  bool runtime_v4,
   char *error,
   size_t error_size
 );
@@ -1200,6 +1210,7 @@ static bool parse_runtime(
   const char *widget_id,
   const char *widget_json,
   const char *buttons_json,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
   char *error,
   size_t error_size
 ) {
@@ -1249,7 +1260,8 @@ static bool parse_runtime(
     set_error(error, error_size, "P4 mini-apps do not allow fetchers or readers");
     goto fail;
   }
-  if ((engine[0] && strcmp(engine, "p4-bounded-runtime-v3") != 0)
+  const bool runtime_v4 = strcmp(engine, "p4-bounded-runtime-v4") == 0;
+  if ((engine[0] && strcmp(engine, "p4-bounded-runtime-v3") != 0 && !runtime_v4)
       || (scene && !engine[0]) || (scene && legacy_game)) {
     set_error(error, error_size, "engine/scene declaration is unsupported or conflicts with legacy game");
     goto fail;
@@ -1277,7 +1289,8 @@ static bool parse_runtime(
   if (!parse_dashboard(parsed, cJSON_GetObjectItemCaseSensitive(root, "dashboard"), error, error_size)) goto fail;
   if (!parse_buttons(parsed, buttons_json, error, error_size)) goto fail;
   if (!parse_game(parsed, legacy_game, error, error_size)) goto fail;
-  if (!parse_bounded_scene(parsed, scene, error, error_size)) goto fail;
+  if (sprites) parsed->sprites = *sprites;
+  if (!parse_bounded_scene(parsed, scene, runtime_v4, error, error_size)) goto fail;
   parsed->active = true;
   refresh_view(parsed);
   *runtime = *parsed;
@@ -1541,6 +1554,14 @@ bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out) {
   return true;
 }
 
+bool pet_p4_miniapp_get_sprites(pet_p4_miniapp_sprite_pack_t *out) {
+  if (!out) return false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  *out = g_runtime.sprites;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return out->count > 0;
+}
+
 bool pet_p4_miniapp_sync_stats(const pet_p4_stats_model_t *stats) {
   char total[24];
   char input[24];
@@ -1548,7 +1569,7 @@ bool pet_p4_miniapp_sync_stats(const pet_p4_stats_model_t *stats) {
   char cache[24];
   char cache_label[40];
   char breakdown[64];
-  const char *headline;
+  const char *agent_label;
   bool changed = false;
   if (!stats || (stats->valid == 0 && !stats->source[0] && !stats->session_title[0])) return false;
 
@@ -1566,18 +1587,26 @@ bool pet_p4_miniapp_sync_stats(const pet_p4_stats_model_t *stats) {
   } else {
     snprintf(breakdown, sizeof(breakdown), "IN %s  OUT %s", input, output);
   }
-  headline = stats->session_title[0]
-    ? stats->session_title
-    : (stats->state[0] ? stats->state : "Agent stats");
+  if (strcmp(stats->source, "codex") == 0) {
+    agent_label = "ChatGPT (Codex)";
+  } else if (strcmp(stats->source, "claude-code") == 0 || strcmp(stats->source, "claude") == 0) {
+    agent_label = "Claude";
+  } else if (strcmp(stats->source, "mimocode") == 0 || strcmp(stats->source, "mimo-code") == 0) {
+    agent_label = "MiMoCode";
+  } else if (strcmp(stats->source, "openclaw") == 0) {
+    agent_label = "OpenClaw";
+  } else {
+    agent_label = stats->source[0] ? stats->source : "Agent";
+  }
 
   portENTER_CRITICAL(&g_runtime_lock);
   if (g_runtime.active && strcmp(g_runtime.widget_id, "token-usage") == 0) {
-    changed |= set_string_var(&g_runtime, "agent_label", stats->source[0] ? stats->source : "agent");
+    changed |= set_string_var(&g_runtime, "agent_label", agent_label);
     changed |= set_string_var(&g_runtime, "total_display", total);
     changed |= set_string_var(&g_runtime, "input_display", input);
     changed |= set_string_var(&g_runtime, "output_display", output);
     changed |= set_string_var(&g_runtime, "cache_display", cache_label);
-    changed |= set_string_var(&g_runtime, "headline_text", headline);
+    changed |= set_string_var(&g_runtime, "headline_text", "今日消耗");
     changed |= set_string_var(&g_runtime, "breakdown_text", breakdown);
     if (changed) refresh_view(&g_runtime);
   }
@@ -1594,6 +1623,26 @@ static bool read_file(const char *path, char *buffer, size_t capacity) {
   fclose(file);
   if (overflow) return false;
   buffer[len] = '\0';
+  return true;
+}
+
+static bool read_binary_file(
+  const char *path,
+  uint8_t *buffer,
+  size_t capacity,
+  size_t *out_length
+) {
+  FILE *file;
+  size_t length;
+  bool overflow;
+  if (!path || !buffer || capacity == 0 || !out_length) return false;
+  file = fopen(path, "rb");
+  if (!file) return false;
+  length = fread(buffer, 1, capacity, file);
+  overflow = length == capacity && fgetc(file) != EOF;
+  fclose(file);
+  if (overflow) return false;
+  *out_length = length;
   return true;
 }
 
@@ -1631,6 +1680,31 @@ static uint32_t miniapp_checksum(const char *data, size_t len) {
     checksum ^= (uint8_t) data[i];
     checksum *= 16777619U;
   }
+  return checksum;
+}
+
+static uint32_t sprite_pack_checksum(const pet_p4_miniapp_sprite_pack_t *pack) {
+  uint32_t checksum = 2166136261U;
+  if (!pack || pack->count == 0) return 0;
+#define SPRITE_CHECKSUM_BYTES(pointer, length) do { \
+    const uint8_t *bytes__ = (const uint8_t *) (pointer); \
+    for (size_t byte__ = 0; byte__ < (length); byte__ += 1) { \
+      checksum ^= bytes__[byte__]; \
+      checksum *= 16777619U; \
+    } \
+  } while (0)
+  SPRITE_CHECKSUM_BYTES(&pack->count, sizeof(pack->count));
+  for (uint8_t index = 0; index < pack->count; index += 1) {
+    const pet_p4_miniapp_sprite_t *sprite = &pack->items[index];
+    SPRITE_CHECKSUM_BYTES(sprite->id, strlen(sprite->id) + 1);
+    SPRITE_CHECKSUM_BYTES(&sprite->frame_width, 1);
+    SPRITE_CHECKSUM_BYTES(&sprite->frame_height, 1);
+    SPRITE_CHECKSUM_BYTES(&sprite->frames, 1);
+    SPRITE_CHECKSUM_BYTES(&sprite->fps, 1);
+    if ((size_t) sprite->data_offset + sprite->data_length > pack->data_length) return 0;
+    SPRITE_CHECKSUM_BYTES(pack->pixels + sprite->data_offset, sprite->data_length);
+  }
+#undef SPRITE_CHECKSUM_BYTES
   return checksum;
 }
 
@@ -1672,6 +1746,196 @@ static void catalog_slot_path(
           : (temporary ? "/spiffs/p4w%02u.tmp" : "/spiffs/p4w%02u.json")),
     (unsigned int) slot
   );
+}
+
+static void catalog_sprite_path(
+  size_t slot,
+  uint8_t package_generation,
+  uint8_t sprite_index,
+  bool temporary,
+  char *out,
+  size_t out_size
+) {
+  snprintf(
+    out,
+    out_size,
+    temporary ? "/spiffs/p4s%02u-%u-%u.tmp" : "/spiffs/p4s%02u-%u-%u.bin",
+    (unsigned int) slot,
+    (unsigned int) package_generation,
+    (unsigned int) sprite_index
+  );
+}
+
+static int sprite_pack_find(
+  const pet_p4_miniapp_sprite_pack_t *pack,
+  const char *id
+) {
+  if (!pack || !id) return -1;
+  for (uint8_t index = 0; index < pack->count; index += 1) {
+    if (strcmp(pack->items[index].id, id) == 0) return (int) index;
+  }
+  return -1;
+}
+
+static bool append_sprite_file(
+  pet_p4_miniapp_sprite_pack_t *pack,
+  const char *id,
+  const uint8_t *file_data,
+  size_t file_length,
+  char *error,
+  size_t error_size
+) {
+  size_t pixel_count;
+  size_t pixel_bytes;
+  pet_p4_miniapp_sprite_t *sprite;
+  if (!pack || !safe_id(id, PET_P4_MINIAPP_SPRITE_ID_MAX)
+      || !file_data || file_length < MINIAPP_SPRITE_FILE_HEADER_SIZE) {
+    set_error(error, error_size, "sprite file envelope is invalid");
+    return false;
+  }
+  if (sprite_pack_find(pack, id) >= 0) return true;
+  if (pack->count >= PET_P4_MINIAPP_SPRITE_MAX
+      || memcmp(file_data, "P4S1", 4) != 0) {
+    set_error(error, error_size, "sprite file header is unsupported");
+    return false;
+  }
+  const uint8_t frame_width = file_data[4];
+  const uint8_t frame_height = file_data[5];
+  const uint8_t frames = file_data[6];
+  const uint8_t fps = file_data[7];
+  if (frame_width < MINIAPP_SPRITE_FRAME_MIN || frame_width > MINIAPP_SPRITE_FRAME_MAX
+      || frame_height < MINIAPP_SPRITE_FRAME_MIN || frame_height > MINIAPP_SPRITE_FRAME_MAX
+      || frames == 0 || frames > MINIAPP_SPRITE_FRAMES_MAX
+      || fps == 0 || fps > MINIAPP_SPRITE_FPS_MAX) {
+    set_error(error, error_size, "sprite frame declaration is out of bounds");
+    return false;
+  }
+  pixel_count = (size_t) frame_width * frame_height * frames;
+  pixel_bytes = pixel_count * 3U;
+  if (file_length != MINIAPP_SPRITE_FILE_HEADER_SIZE + pixel_bytes
+      || (size_t) pack->data_length + pixel_bytes > sizeof(pack->pixels)) {
+    set_error(error, error_size, "sprite pixel payload is invalid or too large");
+    return false;
+  }
+  sprite = &pack->items[pack->count];
+  memset(sprite, 0, sizeof(*sprite));
+  copy_utf8(sprite->id, sizeof(sprite->id), id);
+  sprite->frame_width = frame_width;
+  sprite->frame_height = frame_height;
+  sprite->frames = frames;
+  sprite->fps = fps;
+  sprite->data_offset = pack->data_length;
+  sprite->data_length = (uint16_t) pixel_bytes;
+  memcpy(
+    pack->pixels + pack->data_length,
+    file_data + MINIAPP_SPRITE_FILE_HEADER_SIZE,
+    pixel_bytes
+  );
+  pack->data_length = (uint16_t) ((size_t) pack->data_length + pixel_bytes);
+  pack->count += 1;
+  return true;
+}
+
+static bool load_sprite_pack(
+  const char *widget_json,
+  size_t slot,
+  uint8_t package_generation,
+  pet_p4_miniapp_sprite_pack_t *pack,
+  char *error,
+  size_t error_size
+) {
+  cJSON *root = NULL;
+  const cJSON *sprites;
+  uint8_t *file_data = NULL;
+  bool ok = false;
+  if (!widget_json || !pack) return false;
+  memset(pack, 0, sizeof(*pack));
+  root = cJSON_Parse(widget_json);
+  sprites = root
+    ? cJSON_GetObjectItemCaseSensitive(
+        cJSON_GetObjectItemCaseSensitive(root, "scene"),
+        "sprites"
+      )
+    : NULL;
+  if (!sprites) {
+    ok = true;
+    goto done;
+  }
+  if (!cJSON_IsArray(sprites)
+      || cJSON_GetArraySize(sprites) > PET_P4_MINIAPP_SPRITE_MAX) {
+    set_error(error, error_size, "scene.sprites is invalid");
+    goto done;
+  }
+  file_data = (uint8_t *) malloc(MINIAPP_SPRITE_FILE_MAX);
+  if (!file_data) {
+    set_error(error, error_size, "not enough memory to open component sprites");
+    goto done;
+  }
+  for (int index = 0; index < cJSON_GetArraySize(sprites); index += 1) {
+    const cJSON *declaration = cJSON_GetArrayItem(sprites, index);
+    const char *id = json_string(declaration, "id");
+    char path[48];
+    size_t file_length = 0;
+    catalog_sprite_path(slot, package_generation, (uint8_t) index, false, path, sizeof(path));
+    if (!read_binary_file(path, file_data, MINIAPP_SPRITE_FILE_MAX, &file_length)
+        || !append_sprite_file(pack, id, file_data, file_length, error, error_size)) {
+      if (!error || !error[0]) set_error(error, error_size, "component sprite file is missing");
+      goto done;
+    }
+  }
+  ok = true;
+
+done:
+  free(file_data);
+  cJSON_Delete(root);
+  return ok;
+}
+
+static bool persist_sprite_pack(
+  size_t slot,
+  uint8_t package_generation,
+  const pet_p4_miniapp_sprite_pack_t *pack
+) {
+  uint8_t *file_data = NULL;
+  bool ok = true;
+  if (!pack) return false;
+  file_data = (uint8_t *) malloc(MINIAPP_SPRITE_FILE_MAX);
+  if (!file_data && pack->count > 0) return false;
+  for (uint8_t index = 0; index < PET_P4_MINIAPP_SPRITE_MAX; index += 1) {
+    char path[48];
+    char temporary_path[48];
+    catalog_sprite_path(slot, package_generation, index, false, path, sizeof(path));
+    catalog_sprite_path(slot, package_generation, index, true, temporary_path, sizeof(temporary_path));
+    if (index >= pack->count) {
+      remove(temporary_path);
+      remove(path);
+      continue;
+    }
+    const pet_p4_miniapp_sprite_t *sprite = &pack->items[index];
+    if ((size_t) sprite->data_offset + sprite->data_length > pack->data_length) {
+      ok = false;
+      break;
+    }
+    memcpy(file_data, "P4S1", 4);
+    file_data[4] = sprite->frame_width;
+    file_data[5] = sprite->frame_height;
+    file_data[6] = sprite->frames;
+    file_data[7] = sprite->fps;
+    memcpy(
+      file_data + MINIAPP_SPRITE_FILE_HEADER_SIZE,
+      pack->pixels + sprite->data_offset,
+      sprite->data_length
+    );
+    ok = write_file_atomic(
+      temporary_path,
+      path,
+      (const char *) file_data,
+      MINIAPP_SPRITE_FILE_HEADER_SIZE + sprite->data_length
+    );
+    if (!ok) break;
+  }
+  free(file_data);
+  return ok;
 }
 
 static void catalog_snapshot_path(
@@ -1753,15 +2017,18 @@ static bool persist_catalog_snapshot(
     cJSON *item = cJSON_CreateObject();
     char widget_checksum[9];
     char buttons_checksum[9];
+    char sprites_checksum[9];
     if (!item) goto done;
     snprintf(widget_checksum, sizeof(widget_checksum), "%08x", catalog[i].widget_checksum);
     snprintf(buttons_checksum, sizeof(buttons_checksum), "%08x", catalog[i].buttons_checksum);
+    snprintf(sprites_checksum, sizeof(sprites_checksum), "%08x", catalog[i].sprites_checksum);
     cJSON_AddStringToObject(item, "widgetId", catalog[i].widget_id);
     cJSON_AddStringToObject(item, "title", catalog[i].title);
     cJSON_AddNumberToObject(item, "slot", catalog[i].slot);
     cJSON_AddNumberToObject(item, "packageGeneration", catalog[i].package_generation);
     cJSON_AddStringToObject(item, "widgetChecksum", widget_checksum);
     cJSON_AddStringToObject(item, "buttonsChecksum", buttons_checksum);
+    cJSON_AddStringToObject(item, "spritesChecksum", sprites_checksum);
     cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(root, "items"), item);
   }
   json = cJSON_PrintUnformatted(root);
@@ -1799,6 +2066,8 @@ static bool load_catalog_runtime_item(
   char *buttons_json;
   uint32_t widget_checksum;
   uint32_t buttons_checksum;
+  uint32_t sprites_checksum;
+  pet_p4_miniapp_sprite_pack_t *sprites = NULL;
   bool ok = false;
   if (!item || !runtime || item->slot >= PET_P4_MINIAPP_CATALOG_MAX
       || item->package_generation >= MINIAPP_PACKAGE_GENERATION_COUNT) {
@@ -1806,7 +2075,8 @@ static bool load_catalog_runtime_item(
   }
   widget_json = (char *) calloc(1, MINIAPP_WIDGET_JSON_MAX);
   buttons_json = (char *) calloc(1, MINIAPP_BUTTONS_JSON_MAX);
-  if (!widget_json || !buttons_json) {
+  sprites = (pet_p4_miniapp_sprite_pack_t *) calloc(1, sizeof(*sprites));
+  if (!widget_json || !buttons_json || !sprites) {
     set_error(error, error_size, "not enough memory to open component");
     goto done;
   }
@@ -1833,21 +2103,35 @@ static bool load_catalog_runtime_item(
   }
   widget_checksum = miniapp_checksum(widget_json, strlen(widget_json));
   buttons_checksum = miniapp_checksum(buttons_json, strlen(buttons_json));
+  if (!load_sprite_pack(
+        widget_json,
+        item->slot,
+        item->package_generation,
+        sprites,
+        error,
+        error_size
+      )) {
+    goto done;
+  }
+  sprites_checksum = sprite_pack_checksum(sprites);
   if (!allow_missing_checksums
       && (widget_checksum != item->widget_checksum
-          || buttons_checksum != item->buttons_checksum)) {
+          || buttons_checksum != item->buttons_checksum
+          || sprites_checksum != item->sprites_checksum)) {
     set_error(error, error_size, "component package checksum mismatch");
     goto done;
   }
   if (allow_missing_checksums) {
     item->widget_checksum = widget_checksum;
     item->buttons_checksum = buttons_checksum;
+    item->sprites_checksum = sprites_checksum;
   }
   ok = parse_runtime(
     runtime,
     item->widget_id,
     widget_json,
     buttons_json,
+    sprites,
     error,
     error_size
   );
@@ -1855,6 +2139,7 @@ static bool load_catalog_runtime_item(
 done:
   free(widget_json);
   free(buttons_json);
+  free(sprites);
   return ok;
 }
 
@@ -1916,12 +2201,13 @@ static bool load_catalog_snapshot(
   version = cJSON_GetObjectItemCaseSensitive(root, "version");
   sequence = cJSON_GetObjectItemCaseSensitive(root, "sequence");
   if (!cJSON_IsObject(root) || !cJSON_IsNumber(version)
-      || version->valueint != MINIAPP_CATALOG_VERSION
+      || (version->valueint != 2 && version->valueint != MINIAPP_CATALOG_VERSION)
       || !cJSON_IsNumber(sequence) || sequence->valuedouble < 1
       || sequence->valuedouble > UINT32_MAX) {
     goto fail;
   }
   snapshot->parsed = true;
+  snapshot->needs_upgrade = version->valueint != MINIAPP_CATALOG_VERSION;
   snapshot->sequence = (uint32_t) sequence->valuedouble;
   active_widget_id = cJSON_GetObjectItemCaseSensitive(root, "activeWidgetId");
   if (cJSON_IsString(active_widget_id)) {
@@ -1977,7 +2263,13 @@ static bool load_catalog_snapshot(
     snapshot->items[count].slot = (uint8_t) slot;
     snapshot->items[count].package_generation = (uint8_t) package_generation;
     if (!parse_checksum_hex(item, "widgetChecksum", &snapshot->items[count].widget_checksum)
-        || !parse_checksum_hex(item, "buttonsChecksum", &snapshot->items[count].buttons_checksum)) {
+        || !parse_checksum_hex(item, "buttonsChecksum", &snapshot->items[count].buttons_checksum)
+        || (version->valueint >= 3
+            && !parse_checksum_hex(
+              item,
+              "spritesChecksum",
+              &snapshot->items[count].sprites_checksum
+            ))) {
       goto fail;
     }
     count += 1;
@@ -2024,6 +2316,86 @@ static int bounded_find_entity(
     if (strcmp(config->entities[index].id, id) == 0) return index;
   }
   return -1;
+}
+
+static bool parse_bounded_sprites(
+  miniapp_runtime_t *runtime,
+  const cJSON *sprites,
+  bool runtime_v4,
+  char *error,
+  size_t error_size
+) {
+  static const char *const allowed[] = {
+    "id", "asset", "frame_width", "frame_height", "frames", "fps",
+  };
+  if (!sprites) {
+    if (runtime && runtime->sprites.count > 0) {
+      set_error(error, error_size, "component contains undeclared sprite data");
+      return false;
+    }
+    return true;
+  }
+  if (!runtime_v4 || !runtime || !cJSON_IsArray(sprites)
+      || cJSON_GetArraySize(sprites) > PET_P4_MINIAPP_SPRITE_MAX
+      || cJSON_GetArraySize(sprites) != runtime->sprites.count) {
+    set_error(error, error_size, "scene.sprites requires the v4 runtime and matching sprite files");
+    return false;
+  }
+  for (int index = 0; index < cJSON_GetArraySize(sprites); index += 1) {
+    const cJSON *declaration = cJSON_GetArrayItem(sprites, index);
+    const char *id = json_string(declaration, "id");
+    const char *asset = json_string(declaration, "asset");
+    int frame_width;
+    int frame_height;
+    int frames;
+    int fps;
+    if (!object_keys_allowed(
+          declaration,
+          allowed,
+          sizeof(allowed) / sizeof(allowed[0])
+        )
+        || !safe_id(id, PET_P4_MINIAPP_SPRITE_ID_MAX)
+        || strncmp(asset, "assets/", 7) != 0
+        || strlen(asset) < 11
+        || strcmp(asset + strlen(asset) - 4, ".png") != 0
+        || !json_int_range(
+          cJSON_GetObjectItemCaseSensitive(declaration, "frame_width"),
+          MINIAPP_SPRITE_FRAME_MIN,
+          MINIAPP_SPRITE_FRAME_MAX,
+          &frame_width
+        )
+        || !json_int_range(
+          cJSON_GetObjectItemCaseSensitive(declaration, "frame_height"),
+          MINIAPP_SPRITE_FRAME_MIN,
+          MINIAPP_SPRITE_FRAME_MAX,
+          &frame_height
+        )
+        || !json_int_range(
+          cJSON_GetObjectItemCaseSensitive(declaration, "frames"),
+          1,
+          MINIAPP_SPRITE_FRAMES_MAX,
+          &frames
+        )
+        || !json_int_range(
+          cJSON_GetObjectItemCaseSensitive(declaration, "fps"),
+          1,
+          MINIAPP_SPRITE_FPS_MAX,
+          &fps
+        )) {
+      set_error(error, error_size, "scene sprite declaration is invalid");
+      return false;
+    }
+    const pet_p4_miniapp_sprite_t *sprite = &runtime->sprites.items[index];
+    if (strcmp(sprite->id, id) != 0
+        || sprite->frame_width != frame_width
+        || sprite->frame_height != frame_height
+        || sprite->frames != frames
+        || sprite->fps != fps) {
+      set_error(error, error_size, "scene sprite metadata does not match its compiled asset");
+      return false;
+    }
+  }
+  return true;
 }
 
 static bool parse_bounded_grid(
@@ -2091,13 +2463,14 @@ static bool parse_bounded_grid(
 
 static bool parse_bounded_entities(
   pet_p4_bounded_game_config_t *config,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
   const cJSON *entities,
   char *error,
   size_t error_size
 ) {
   static const char *const allowed[] = {
     "id", "x", "y", "width", "height", "tone", "vx", "vy",
-    "bounds", "shape", "active", "collidable",
+    "bounds", "shape", "sprite", "active", "collidable",
   };
   const cJSON *item;
   if (!config || !cJSON_IsArray(entities)
@@ -2129,6 +2502,7 @@ static bool parse_bounded_entities(
     entity->height = 1;
     entity->tone = 1;
     entity->shape = PET_P4_GAME_SHAPE_RECT;
+    entity->sprite_index = -1;
     entity->active = true;
     entity->collidable = true;
     if (!json_int_range(cJSON_GetObjectItemCaseSensitive(item, "x"), 0, 15, &number)) {
@@ -2206,9 +2580,39 @@ static bool parse_bounded_entities(
       entity->shape = PET_P4_GAME_SHAPE_PADDLE;
     } else if (strcmp(shape, "ball") == 0) {
       entity->shape = PET_P4_GAME_SHAPE_BALL;
+    } else if (strcmp(shape, "circle") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_CIRCLE;
+    } else if (strcmp(shape, "capsule") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_CAPSULE;
+    } else if (strcmp(shape, "triangle") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_TRIANGLE;
+    } else if (strcmp(shape, "diamond") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_DIAMOND;
+    } else if (strcmp(shape, "heart") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_HEART;
+    } else if (strcmp(shape, "cloud") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_CLOUD;
+    } else if (strcmp(shape, "coin") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_COIN;
+    } else if (strcmp(shape, "character") == 0) {
+      entity->shape = PET_P4_GAME_SHAPE_CHARACTER;
     } else {
       set_error(error, error_size, "game entity shape is unsupported");
       return false;
+    }
+    const char *sprite_id = json_string(item, "sprite");
+    value = cJSON_GetObjectItemCaseSensitive(item, "sprite");
+    if (value && !cJSON_IsString(value)) {
+      set_error(error, error_size, "game entity sprite must be text");
+      return false;
+    }
+    if (sprite_id[0]) {
+      int sprite_index = sprite_pack_find(sprites, sprite_id);
+      if (sprite_index < 0) {
+        set_error(error, error_size, "game entity references an unknown sprite");
+        return false;
+      }
+      entity->sprite_index = (int8_t) sprite_index;
     }
     value = cJSON_GetObjectItemCaseSensitive(item, "active");
     if (value && !cJSON_IsBool(value)) {
@@ -2534,12 +2938,13 @@ static bool parse_bounded_rules(
 static bool parse_bounded_scene(
   miniapp_runtime_t *runtime,
   const cJSON *scene,
+  bool runtime_v4,
   char *error,
   size_t error_size
 ) {
   static const char *const allowed[] = {
     "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-    "grid", "entities", "rules",
+    "grid", "sprites", "entities", "rules",
   };
   pet_p4_bounded_game_config_t config;
   const cJSON *tick;
@@ -2591,7 +2996,14 @@ static bool parse_bounded_scene(
     return false;
   }
   config.tick_ms = (uint32_t) tick_ms;
-  if (!parse_bounded_grid(
+  if (!parse_bounded_sprites(
+        runtime,
+        cJSON_GetObjectItemCaseSensitive(scene, "sprites"),
+        runtime_v4,
+        error,
+        error_size
+      )
+      || !parse_bounded_grid(
         &config,
         cJSON_GetObjectItemCaseSensitive(scene, "grid"),
         error,
@@ -2599,6 +3011,7 @@ static bool parse_bounded_scene(
       )
       || !parse_bounded_entities(
         &config,
+        &runtime->sprites,
         cJSON_GetObjectItemCaseSensitive(scene, "entities"),
         error,
         error_size
@@ -2863,7 +3276,7 @@ esp_err_t pet_p4_miniapp_init(void) {
   char *newline = strpbrk(widget_id, "\r\n");
   if (newline) *newline = '\0';
   if (!parse_runtime(&g_runtime, widget_id, g_staging.widget_json,
-                     g_staging.buttons_json, error, sizeof(error))) {
+                     g_staging.buttons_json, &g_staging.sprites, error, sizeof(error))) {
     ESP_LOGW(TAG, "ignored persisted mini-app: %s", error);
     memset(&g_runtime, 0, sizeof(g_runtime));
     memset(&g_staging, 0, sizeof(g_staging));
@@ -2881,6 +3294,7 @@ esp_err_t pet_p4_miniapp_init(void) {
     g_staging.buttons_json,
     strlen(g_staging.buttons_json)
   );
+  g_catalog[0].sprites_checksum = sprite_pack_checksum(&g_staging.sprites);
   g_catalog_count = 1;
   char widget_slot[40];
   char widget_tmp[40];
@@ -2892,6 +3306,7 @@ esp_err_t pet_p4_miniapp_init(void) {
   catalog_slot_path(0, 0, true, true, buttons_tmp, sizeof(buttons_tmp));
   if (!write_file_atomic(widget_tmp, widget_slot, g_staging.widget_json, strlen(g_staging.widget_json))
       || !write_file_atomic(buttons_tmp, buttons_slot, g_staging.buttons_json, strlen(g_staging.buttons_json))
+      || !persist_sprite_pack(0, 0, &g_staging.sprites)
       || !persist_catalog_snapshot(g_catalog, g_catalog_count, widget_id)) {
     ESP_LOGW(TAG, "legacy component opened but catalog migration could not be persisted");
   }
@@ -3100,6 +3515,50 @@ bool pet_p4_miniapp_install_chunk(const cJSON *payload, char *error, size_t erro
       return false;
     }
     g_staging.buttons_next_index += 1U;
+  } else if (strncmp(path, "runtime/sprites/", 16) == 0) {
+    const char *file_name = path + 16;
+    const size_t file_name_length = strlen(file_name);
+    char sprite_id[PET_P4_MINIAPP_SPRITE_ID_MAX] = {0};
+    uint8_t *decoded = NULL;
+    size_t decoded_size = 0;
+    if (index != 0 || file_name_length <= 4
+        || strcmp(file_name + file_name_length - 4, ".p4s") != 0
+        || file_name_length - 4 >= sizeof(sprite_id)) {
+      set_error(error, error_size, "sprite chunk path or index is invalid");
+      return false;
+    }
+    memcpy(sprite_id, file_name, file_name_length - 4);
+    if (!safe_id(sprite_id, sizeof(sprite_id))) {
+      set_error(error, error_size, "sprite id is invalid");
+      return false;
+    }
+    if (sprite_pack_find(&g_staging.sprites, sprite_id) >= 0) return true;
+    decoded = (uint8_t *) malloc(MINIAPP_SPRITE_FILE_MAX);
+    if (!decoded
+        || mbedtls_base64_decode(
+          decoded,
+          MINIAPP_SPRITE_FILE_MAX,
+          &decoded_size,
+          (const unsigned char *) data,
+          strlen(data)
+        ) != 0) {
+      free(decoded);
+      set_error(error, error_size, "sprite file exceeds its decoded size bound");
+      return false;
+    }
+    if (!verify_chunk_integrity(payload, decoded, decoded_size, error, error_size)
+        || !append_sprite_file(
+          &g_staging.sprites,
+          sprite_id,
+          decoded,
+          decoded_size,
+          error,
+          error_size
+        )) {
+      free(decoded);
+      return false;
+    }
+    free(decoded);
   } else if (strcmp(path, "component.json") != 0 && strcmp(path, "negative-screen.json") != 0
              && strcmp(path, "share.json") != 0) {
     set_error(error, error_size, "P4 mini-app package contains an unsupported file");
@@ -3132,7 +3591,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
     return false;
   }
   if (!parse_runtime(next, g_staging.widget_id, g_staging.widget_json,
-                     g_staging.buttons_json, error, error_size)) {
+                     g_staging.buttons_json, &g_staging.sprites, error, error_size)) {
     free(next);
     memset(&g_staging, 0, sizeof(g_staging));
     return false;
@@ -3180,6 +3639,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
     g_staging.buttons_json,
     g_staging.buttons_len
   );
+  next_catalog[catalog_index].sprites_checksum = sprite_pack_checksum(&g_staging.sprites);
   catalog_slot_path(
     (size_t) slot,
     package_generation,
@@ -3216,6 +3676,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
                          g_staging.widget_json, g_staging.widget_len)
       || !write_file_atomic(buttons_tmp_path, buttons_path,
                             g_staging.buttons_json, g_staging.buttons_len)
+      || !persist_sprite_pack((size_t) slot, package_generation, &g_staging.sprites)
       || (memset(next, 0, sizeof(*next)),
           !load_catalog_runtime_item(
             &next_catalog[catalog_index],
@@ -3579,6 +4040,20 @@ bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size
     (void) buttons_path;
     package_cleanup_ok = remove_file_if_present(widget_tmp_path) && package_cleanup_ok;
     package_cleanup_ok = remove_file_if_present(buttons_tmp_path) && package_cleanup_ok;
+    for (uint8_t sprite_index = 0;
+         sprite_index < PET_P4_MINIAPP_SPRITE_MAX;
+         sprite_index += 1) {
+      char sprite_tmp_path[48];
+      catalog_sprite_path(
+        removed_slot,
+        package_generation,
+        sprite_index,
+        true,
+        sprite_tmp_path,
+        sizeof(sprite_tmp_path)
+      );
+      package_cleanup_ok = remove_file_if_present(sprite_tmp_path) && package_cleanup_ok;
+    }
   }
   package_cleanup_ok = remove_file_if_present(MINIAPP_WIDGET_PATH) && package_cleanup_ok;
   package_cleanup_ok = remove_file_if_present(MINIAPP_WIDGET_TMP_PATH) && package_cleanup_ok;

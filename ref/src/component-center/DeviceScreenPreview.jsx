@@ -1,8 +1,9 @@
 /**
- * [Input] component { dashboard, scene?, gameType? } from builtins or a validated formal local .clawpkg.
+ * [Input] component { dashboard, scene?, sceneSprites?, gameType? } from builtins or a validated formal local .clawpkg.
  * [Output] Renders the shared device preview, including palette/layout-aware
  *          classic dashboards, palette-keyed pixel tool panels, static pixel
- *          presets, and viewport-bounded P4 blocks/snake/flappy previews.
+ *          presets, richer clean-scene silhouettes, safe animated PNG sprites,
+ *          and viewport-bounded P4 blocks/snake/flappy previews.
  * [Pos] component node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -383,6 +384,7 @@ function scenePreviewCells(scene, step) {
       height: entityHeight,
       tone,
       shape: entity?.shape || "rect",
+      sprite: entity?.sprite || "",
     });
   });
   return { width, height, cells, entities };
@@ -492,7 +494,17 @@ function roundedCanvasRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
-function drawScenePreviewEntity(context, entity, cellWidth, cellHeight, gap, colors, cleanStyle) {
+function drawScenePreviewEntity(
+  context,
+  entity,
+  cellWidth,
+  cellHeight,
+  gap,
+  colors,
+  cleanStyle,
+  spriteImages,
+  step,
+) {
   const x = entity.x * (cellWidth + gap) + (cleanStyle ? 1.5 : 1);
   const y = entity.y * (cellHeight + gap) + (cleanStyle ? 1.5 : 1);
   const width = entity.width * cellWidth + (entity.width - 1) * gap - (cleanStyle ? 3 : 2);
@@ -503,6 +515,27 @@ function drawScenePreviewEntity(context, entity, cellWidth, cellHeight, gap, col
   const color = colors[entity.tone] || colors[1];
   const detail = entity.tone === 4 ? colors[3] : colors[4];
   context.save();
+  const sprite = entity.sprite ? spriteImages.get(entity.sprite) : null;
+  if (sprite?.image?.complete && sprite.image.naturalWidth > 0) {
+    const frame = Math.max(
+      0,
+      Math.floor(step * Math.max(1, sprite.fps) * 0.26) % Math.max(1, sprite.frames),
+    );
+    context.imageSmoothingEnabled = cleanStyle;
+    context.drawImage(
+      sprite.image,
+      frame * sprite.frameWidth,
+      0,
+      sprite.frameWidth,
+      sprite.frameHeight,
+      x,
+      y,
+      width,
+      height,
+    );
+    context.restore();
+    return;
+  }
   context.fillStyle = color;
   switch (entity.shape) {
     case "player-ship":
@@ -558,9 +591,71 @@ function drawScenePreviewEntity(context, entity, cellWidth, cellHeight, gap, col
       context.fill();
       break;
     case "ball":
+    case "circle":
       context.beginPath();
       context.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
       context.fill();
+      break;
+    case "capsule":
+      roundedCanvasRect(context, x, y, width, height, Math.min(width, height) / 2);
+      context.fill();
+      break;
+    case "triangle":
+      context.beginPath();
+      context.moveTo(centerX, y);
+      context.lineTo(x + width, y + height);
+      context.lineTo(x, y + height);
+      context.closePath();
+      context.fill();
+      break;
+    case "diamond":
+      context.beginPath();
+      context.moveTo(centerX, y);
+      context.lineTo(x + width, centerY);
+      context.lineTo(centerX, y + height);
+      context.lineTo(x, centerY);
+      context.closePath();
+      context.fill();
+      break;
+    case "heart":
+      context.beginPath();
+      context.moveTo(centerX, y + height);
+      context.bezierCurveTo(x - width * 0.08, y + height * 0.58, x, y + height * 0.08, centerX, y + height * 0.34);
+      context.bezierCurveTo(x + width, y + height * 0.08, x + width * 1.08, y + height * 0.58, centerX, y + height);
+      context.fill();
+      break;
+    case "cloud":
+      context.beginPath();
+      context.ellipse(x + width * 0.28, y + height * 0.62, width * 0.28, height * 0.27, 0, 0, Math.PI * 2);
+      context.ellipse(x + width * 0.52, y + height * 0.42, width * 0.3, height * 0.36, 0, 0, Math.PI * 2);
+      context.ellipse(x + width * 0.76, y + height * 0.62, width * 0.24, height * 0.25, 0, 0, Math.PI * 2);
+      context.fill();
+      context.fillRect(x + width * 0.22, y + height * 0.55, width * 0.58, height * 0.32);
+      break;
+    case "coin":
+      context.beginPath();
+      context.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2);
+      context.fill();
+      context.strokeStyle = detail;
+      context.lineWidth = Math.max(1, Math.min(width, height) * 0.1);
+      context.stroke();
+      break;
+    case "character":
+      context.beginPath();
+      context.ellipse(centerX, y + height * 0.3, width * 0.25, height * 0.25, 0, 0, Math.PI * 2);
+      context.fill();
+      roundedCanvasRect(
+        context,
+        x + width * 0.18,
+        y + height * 0.48,
+        width * 0.64,
+        height * 0.5,
+        Math.min(width, height) * 0.16,
+      );
+      context.fill();
+      context.fillStyle = detail;
+      context.fillRect(x + width * 0.4, y + height * 0.27, Math.max(1, width * 0.05), Math.max(1, height * 0.05));
+      context.fillRect(x + width * 0.58, y + height * 0.27, Math.max(1, width * 0.05), Math.max(1, height * 0.05));
       break;
     case "rect":
     default:
@@ -575,8 +670,9 @@ function drawScenePreviewEntity(context, entity, cellWidth, cellHeight, gap, col
   context.restore();
 }
 
-function PixelGameGrid({ type, step, scene, visualStyle }) {
+function PixelGameGrid({ type, step, scene, visualStyle, sprites }) {
   const canvasRef = useRef(null);
+  const [spriteImages, setSpriteImages] = useState(() => new Map());
   const frame = useMemo(
     () => (
       scene
@@ -589,6 +685,30 @@ function PixelGameGrid({ type, step, scene, visualStyle }) {
     ),
     [scene, type, step],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    const next = new Map();
+    const pending = (Array.isArray(sprites) ? sprites : []).map((sprite) => new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        next.set(sprite.id, {
+          image,
+          frameWidth: sprite.frameWidth,
+          frameHeight: sprite.frameHeight,
+          frames: sprite.frames,
+          fps: sprite.fps,
+        });
+        resolve();
+      };
+      image.onerror = resolve;
+      image.src = sprite.dataUrl;
+    }));
+    Promise.all(pending).then(() => {
+      if (!disposed) setSpriteImages(next);
+    });
+    return () => { disposed = true; };
+  }, [sprites]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -628,9 +748,19 @@ function PixelGameGrid({ type, step, scene, visualStyle }) {
       );
     });
     (frame.entities || []).forEach((entity) => {
-      drawScenePreviewEntity(context, entity, cellWidth, cellHeight, gap, colors, cleanStyle);
+      drawScenePreviewEntity(
+        context,
+        entity,
+        cellWidth,
+        cellHeight,
+        gap,
+        colors,
+        cleanStyle,
+        spriteImages,
+        step,
+      );
     });
-  }, [frame, type, visualStyle]);
+  }, [frame, type, visualStyle, spriteImages, step]);
 
   return (
     <canvas
@@ -641,7 +771,7 @@ function PixelGameGrid({ type, step, scene, visualStyle }) {
     />
   );
 }
-function PixelGamePreview({ dashboard, progress, gameType, scene, animate }) {
+function PixelGamePreview({ dashboard, progress, gameType, scene, sceneSprites, animate }) {
   const palette = normalizePixelPreset(dashboard.visualPalette, PIXEL_PALETTES, "candy");
   const layout = normalizePixelPreset(dashboard.visualLayout, PIXEL_LAYOUTS, "arcade");
   const visualStyle = dashboard.visualStyle === "clean" ? "clean" : "pixel";
@@ -673,7 +803,15 @@ function PixelGamePreview({ dashboard, progress, gameType, scene, animate }) {
       <div className="cds-pixel-stage">
         <section className={`cds-pixel-playfield ${previewType ? "cds-pixel-playfield--game" : ""}`}>
           {previewType
-            ? <PixelGameGrid type={previewType} step={previewStep} scene={hasScene ? scene : null} visualStyle={visualStyle} />
+            ? (
+              <PixelGameGrid
+                type={previewType}
+                step={previewStep}
+                scene={hasScene ? scene : null}
+                visualStyle={visualStyle}
+                sprites={sceneSprites}
+              />
+            )
             : <PixelSprite name={sprite} />}
           {!previewType && <b>{dashboard.headline || "待开始"}</b>}
         </section>
@@ -797,6 +935,7 @@ export default function DeviceScreenPreview({ component, className = "" }) {
             progress={progress}
             gameType={component.gameType}
             scene={component.scene}
+            sceneSprites={component.sceneSprites}
             animate={animationActive}
           />
         )

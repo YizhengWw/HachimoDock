@@ -1,6 +1,8 @@
 /*
- * [Input] .clawpkg zip/directory files, dashboard safe content/visual slots, and per-component buttons.json records.
- * [Output] Shared package validation/preview plus game/tool kind and COMPONENT_DASHBOARD_V1 payload rendering, including bounded visual presets, P4 vars-shape compatibility, four-effect rules, button count, label-byte, allowed-event, and overlap guards.
+ * [Input] .clawpkg zip/directory files, dashboard safe content/visual slots, bounded PNG sprite sheets, and per-component buttons.json records.
+ * [Output] Shared package validation/preview plus game/tool kind and COMPONENT_DASHBOARD_V1 payload rendering,
+ *          including v3/v4 runtimes, modern scene shapes, animated sprites, P4 vars compatibility,
+ *          four-effect rules, button count, label-byte, allowed-event, and overlap guards.
  * [Pos] .clawpkg contract node in ref/src-tauri/src
  * [Sync] If this file changes, update `ref/.folder.md` and the mirrored frontend contract.
  */
@@ -43,7 +45,9 @@ pub(crate) const CLAWPKG_MAX_EXPANDED_BYTES: u64 = 16 * 1024 * 1024;
 const P4_WIDGET_JSON_MAX_BYTES: usize = 4095;
 const P4_BUTTONS_JSON_MAX_BYTES: usize = 2047;
 const P4_WIDGET_MAX_EFFECTS: usize = 4;
-const P4_RUNTIME_ENGINE: &str = "p4-bounded-runtime-v3";
+const P4_RUNTIME_ENGINE_V3: &str = "p4-bounded-runtime-v3";
+const P4_RUNTIME_ENGINE_V4: &str = "p4-bounded-runtime-v4";
+const P4_RUNTIME_ENGINES: &[&str] = &[P4_RUNTIME_ENGINE_V3, P4_RUNTIME_ENGINE_V4];
 const P4_SCENE_MAX_ENTITIES: usize = 12;
 const P4_SCENE_MAX_RULES: usize = 20;
 const P4_SCENE_MAX_OPS: usize = 4;
@@ -55,7 +59,23 @@ const P4_SCENE_SHAPES: &[&str] = &[
     "star",
     "paddle",
     "ball",
+    "circle",
+    "capsule",
+    "triangle",
+    "diamond",
+    "heart",
+    "cloud",
+    "coin",
+    "character",
 ];
+const P4_SCENE_MAX_SPRITES: usize = 4;
+const P4_SCENE_MAX_SPRITE_FRAMES: i64 = 8;
+const P4_SCENE_MAX_SPRITE_PIXELS: i64 = 4096;
+const P4_SCENE_SPRITE_MIN_DIMENSION: i64 = 8;
+const P4_SCENE_SPRITE_MAX_DIMENSION: i64 = 64;
+const P4_SCENE_SPRITE_MIN_FPS: i64 = 1;
+const P4_SCENE_SPRITE_MAX_FPS: i64 = 20;
+const P4_SCENE_SPRITE_MAX_SOURCE_BYTES: usize = 128 * 1024;
 const P4_WIDGET_MAX_VARS: usize = 8;
 const P4_WIDGET_VAR_NAME_MAX_BYTES: usize = 31;
 const P4_WIDGET_STRING_VAR_MAX_BYTES: usize = 63;
@@ -409,6 +429,18 @@ fn valid_scene_id(value: &str, max_len: usize) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
 }
 
+fn valid_scene_sprite_asset(value: &str) -> bool {
+    let Some(name) = value.strip_prefix("assets/") else {
+        return false;
+    };
+    !name.is_empty()
+        && !name.contains('/')
+        && name.ends_with(".png")
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+}
+
 fn valid_scene_coordinate(value: Option<&serde_json::Value>) -> bool {
     let Some(value) = value else {
         return false;
@@ -563,11 +595,12 @@ fn validate_component_scene(
     let Some(scene_value) = widget.get("scene") else {
         return;
     };
-    if widget.get("engine").and_then(|value| value.as_str()) != Some(P4_RUNTIME_ENGINE) {
-        errors.push(format!(
-            "runtime/widget.json scene 需要 engine={}",
-            P4_RUNTIME_ENGINE
-        ));
+    let runtime_engine = widget
+        .get("engine")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if !P4_RUNTIME_ENGINES.contains(&runtime_engine) {
+        errors.push("runtime/widget.json scene 需要受支持的 engine".to_string());
     }
     let Some(scene) = scene_value.as_object() else {
         errors.push("runtime/widget.json scene 必须是对象".to_string());
@@ -582,11 +615,120 @@ fn validate_component_scene(
             "score_var",
             "auto_start",
             "grid",
+            "sprites",
             "entities",
             "rules",
         ],
     ) {
         errors.push("runtime/widget.json scene 含未知字段".to_string());
+    }
+
+    let sprites = scene.get("sprites").and_then(|value| value.as_array());
+    let mut sprite_ids = HashSet::new();
+    let mut sprite_pixels = 0_i64;
+    if scene.contains_key("sprites")
+        && !sprites.is_some_and(|items| items.len() <= P4_SCENE_MAX_SPRITES)
+    {
+        errors.push(format!(
+            "runtime/widget.json scene.sprites 最多允许 {} 项",
+            P4_SCENE_MAX_SPRITES
+        ));
+    }
+    if sprites.is_some_and(|items| !items.is_empty()) && runtime_engine != P4_RUNTIME_ENGINE_V4 {
+        errors.push(
+            "runtime/widget.json scene.sprites 需要 engine=p4-bounded-runtime-v4".to_string(),
+        );
+    }
+    for (index, sprite) in sprites.into_iter().flatten().enumerate() {
+        let label = format!("runtime/widget.json scene.sprites[{}]", index);
+        let Some(sprite) = sprite.as_object() else {
+            errors.push(format!("{} 必须是对象", label));
+            continue;
+        };
+        if !object_has_only_keys(
+            sprite,
+            &[
+                "id",
+                "asset",
+                "frame_width",
+                "frame_height",
+                "frames",
+                "fps",
+            ],
+        ) {
+            errors.push(format!("{} 含未知字段", label));
+        }
+        let id = sprite
+            .get("id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if !valid_scene_id(id, 15) || !sprite_ids.insert(id.to_string()) {
+            errors.push(format!("{}.id 无效或重复", label));
+        }
+        let asset = sprite
+            .get("asset")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if !valid_scene_sprite_asset(asset) {
+            errors.push(format!("{}.asset 必须是 assets/ 下的安全 PNG 路径", label));
+        }
+        let frame_width = sprite
+            .get("frame_width")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
+        let frame_height = sprite
+            .get("frame_height")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
+        let frames = sprite
+            .get("frames")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
+        let fps = sprite
+            .get("fps")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0);
+        let dimensions_valid = (P4_SCENE_SPRITE_MIN_DIMENSION..=P4_SCENE_SPRITE_MAX_DIMENSION)
+            .contains(&frame_width)
+            && (P4_SCENE_SPRITE_MIN_DIMENSION..=P4_SCENE_SPRITE_MAX_DIMENSION)
+                .contains(&frame_height)
+            && (1..=P4_SCENE_MAX_SPRITE_FRAMES).contains(&frames)
+            && (P4_SCENE_SPRITE_MIN_FPS..=P4_SCENE_SPRITE_MAX_FPS).contains(&fps);
+        if !dimensions_valid {
+            errors.push(format!("{} 的帧尺寸、帧数或 fps 超出 P4 上限", label));
+            continue;
+        }
+        sprite_pixels += frame_width * frame_height * frames;
+        match files.get(asset) {
+            Some(bytes) if bytes.len() > P4_SCENE_SPRITE_MAX_SOURCE_BYTES => errors.push(format!(
+                "{} PNG 源文件超过 {} KiB 上限",
+                label,
+                P4_SCENE_SPRITE_MAX_SOURCE_BYTES / 1024
+            )),
+            Some(bytes) => {
+                match image::load_from_memory_with_format(bytes, image::ImageFormat::Png) {
+                    Ok(image)
+                        if image.width() == (frame_width * frames) as u32
+                            && image.height() == frame_height as u32 => {}
+                    Ok(image) => errors.push(format!(
+                        "{} PNG 尺寸应为 {}x{}，实际为 {}x{}",
+                        label,
+                        frame_width * frames,
+                        frame_height,
+                        image.width(),
+                        image.height()
+                    )),
+                    Err(error) => errors.push(format!("{} 不是有效 PNG: {}", label, error)),
+                }
+            }
+            None => errors.push(format!("{} 引用的素材不存在: {}", label, asset)),
+        }
+    }
+    if sprite_pixels > P4_SCENE_MAX_SPRITE_PIXELS {
+        errors.push(format!(
+            "runtime/widget.json scene.sprites 总像素超过 {}",
+            P4_SCENE_MAX_SPRITE_PIXELS
+        ));
     }
     if !json_int_between(scene.get("tick_ms"), 100, 2000) {
         errors.push("runtime/widget.json scene.tick_ms 必须在 100-2000".to_string());
@@ -719,6 +861,7 @@ fn validate_component_scene(
                 "vy",
                 "bounds",
                 "shape",
+                "sprite",
                 "active",
                 "collidable",
             ],
@@ -774,6 +917,13 @@ fn validate_component_scene(
                 .is_some_and(|shape| P4_SCENE_SHAPES.contains(&shape))
         }) {
             errors.push(format!("{}.shape 不受支持", label));
+        }
+        if entity.get("sprite").is_some_and(|sprite| {
+            !sprite
+                .as_str()
+                .is_some_and(|sprite| sprite_ids.contains(sprite))
+        }) {
+            errors.push(format!("{}.sprite 引用了未知精灵", label));
         }
         if ["active", "collidable"]
             .into_iter()
@@ -885,11 +1035,14 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         }
     };
     if widget.get("engine").is_some()
-        && widget.get("engine").and_then(|value| value.as_str()) != Some(P4_RUNTIME_ENGINE)
+        && !widget
+            .get("engine")
+            .and_then(|value| value.as_str())
+            .is_some_and(|engine| P4_RUNTIME_ENGINES.contains(&engine))
     {
         errors.push(format!(
             "runtime/widget.json engine 只支持 {}",
-            P4_RUNTIME_ENGINE
+            P4_RUNTIME_ENGINES.join(" / ")
         ));
     }
     if widget.get("scene").is_some() && widget.get("game").is_some() {
@@ -1039,10 +1192,7 @@ pub fn validate_clawpkg_bytes(bytes: &[u8]) -> Result<ValidateClawpkgResult, Str
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| format!("not a valid zip: {}", e))?;
     if archive.len() > CLAWPKG_MAX_ENTRIES {
-        return Err(format!(
-            "clawpkg 文件数超过 {} 个上限",
-            CLAWPKG_MAX_ENTRIES
-        ));
+        return Err(format!("clawpkg 文件数超过 {} 个上限", CLAWPKG_MAX_ENTRIES));
     }
 
     for i in 0..archive.len() {
@@ -1337,7 +1487,10 @@ mod tests {
         let payload = vec![0u8; CLAWPKG_MAX_ENTRY_BYTES as usize + 1];
         let zip_bytes = make_zip(&[("assets/large.bin", payload.as_slice())]);
         let error = validate_clawpkg_bytes(&zip_bytes).unwrap_err();
-        assert!(error.contains("单文件大小上限"), "unexpected error: {error}");
+        assert!(
+            error.contains("单文件大小上限"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

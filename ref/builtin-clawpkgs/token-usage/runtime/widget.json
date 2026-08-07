@@ -3,7 +3,7 @@
   "engine": "p4-bounded-runtime-v3",
   "vars": {
     "agent_label": { "type": "string", "init": "当前 Agent" },
-    "headline_text": { "type": "string", "init": "等待实时统计" },
+    "headline_text": { "type": "string", "init": "等待今日统计" },
     "total_display": { "type": "string", "init": "—" },
     "input_display": { "type": "string", "init": "—" },
     "output_display": { "type": "string", "init": "—" },

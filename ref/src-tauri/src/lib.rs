@@ -5,7 +5,8 @@
  *          Codex pet import, external/community help links,
  *          controlled Codex Pets CLI installs, exact-board USB-only device
  *          follow-source binding,
- *          stale-state-safe, bounded local-file USB-first forwarding with SSH state fallback and
+ *          stale-state-safe, bounded local-file USB-first forwarding with current-followed-Agent
+ *          daily Token preference, SSH state fallback, and
  *          active speech sync plus immediate reconnect replay, a P4 host
  *          heartbeat, and verified USB binding refresh, built-in
  *          appearance default/override WAV cue sync plus P4 cached-slot reuse,
@@ -8334,12 +8335,15 @@ fn compact_usb_state_payload(source: &str, payload: &serde_json::Value) -> serde
         );
     }
 
-    for key in ["tokenUsage", "token_usage", "usage"] {
+    for key in ["dailyTokenUsage", "tokenUsage", "token_usage", "usage"] {
         if let Some(value) = payload.get(key).and_then(|value| value.as_object()) {
             out.insert(
                 "tokenUsage".to_string(),
                 serde_json::Value::Object(value.clone()),
             );
+            if key == "dailyTokenUsage" {
+                out.insert("tokenUsagePeriod".to_string(), serde_json::json!("today"));
+            }
             break;
         }
     }
@@ -11886,7 +11890,7 @@ mod tests {
             .as_str()
             .is_some_and(|value| !value.is_empty()));
         assert!(build["dirty"].is_boolean());
-        assert_eq!(build["protocolSchema"], 6);
+        assert_eq!(build["protocolSchema"], 7);
     }
 
     #[test]
@@ -12436,6 +12440,11 @@ mod tests {
                 "totalTokens": 18432,
                 "modelContextWindow": 128000,
             },
+            "dailyTokenUsage": {
+                "totalTokens": 42000,
+                "inputTokens": 30000,
+                "outputTokens": 12000,
+            },
             "metrics": {
                 "latency": {"turnMs": 1234, "firstTokenMs": 400},
                 "toolCalls": 3,
@@ -12446,7 +12455,9 @@ mod tests {
 
         let compact = compact_usb_state_payload("codex", &payload);
         assert_eq!(compact["source"], "codex");
-        assert_eq!(compact["tokenUsage"]["totalTokens"], 18432);
+        assert_eq!(compact["tokenUsage"]["totalTokens"], 42000);
+        assert_eq!(compact["tokenUsage"]["inputTokens"], 30000);
+        assert_eq!(compact["tokenUsagePeriod"], "today");
         assert_eq!(compact["metrics"]["latency"]["turnMs"], 1234);
         assert_eq!(compact["metrics"]["toolCalls"], 3);
     }

@@ -1,6 +1,6 @@
 /*
- * [Input] Persisted/embedded component packages and runtime input actions.
- * [Output] Bounded component catalog, firmware-builtin synchronization, and active views.
+ * [Input] Persisted/embedded component packages, bounded sprite packs, and runtime input actions.
+ * [Output] Bounded component catalog, builtin synchronization, active views, and sprite snapshots.
  * [Pos] Public contract for the ESP32-P4 component runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -23,6 +23,26 @@ extern "C" {
 #define PET_P4_MINIAPP_WIDGET_ID_MAX 48
 #define PET_P4_MINIAPP_ACTION_MAX 48
 #define PET_P4_MINIAPP_CATALOG_MAX 16
+#define PET_P4_MINIAPP_SPRITE_MAX 4
+#define PET_P4_MINIAPP_SPRITE_ID_MAX 16
+#define PET_P4_MINIAPP_SPRITE_PIXEL_BYTES_MAX (4096 * 3)
+
+typedef struct {
+  char id[PET_P4_MINIAPP_SPRITE_ID_MAX];
+  uint8_t frame_width;
+  uint8_t frame_height;
+  uint8_t frames;
+  uint8_t fps;
+  uint16_t data_offset;
+  uint16_t data_length;
+} pet_p4_miniapp_sprite_t;
+
+typedef struct {
+  uint8_t count;
+  uint16_t data_length;
+  pet_p4_miniapp_sprite_t items[PET_P4_MINIAPP_SPRITE_MAX];
+  uint8_t pixels[PET_P4_MINIAPP_SPRITE_PIXEL_BYTES_MAX];
+} pet_p4_miniapp_sprite_pack_t;
 
 typedef struct {
   bool active;
@@ -59,6 +79,7 @@ esp_err_t pet_p4_miniapp_sync_builtins(void);
 bool pet_p4_miniapp_active(void);
 bool pet_p4_miniapp_active_id(char *out, size_t out_size);
 bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out);
+bool pet_p4_miniapp_get_sprites(pet_p4_miniapp_sprite_pack_t *out);
 bool pet_p4_miniapp_installed_id(char *out, size_t out_size);
 size_t pet_p4_miniapp_catalog_count(void);
 size_t pet_p4_miniapp_catalog_selected(void);

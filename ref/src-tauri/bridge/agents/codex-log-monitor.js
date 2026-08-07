@@ -2,7 +2,7 @@
 
 /*
  * [Input] Codex rollout directories, append notifications, and session title metadata.
- * [Output] Incremental per-session state updates with arbitrary-age resume discovery, recursive watching, and bounded tail reads.
+ * [Output] Incremental per-session state updates with arbitrary-age resume discovery, recursive watching, bounded tail reads, and current-day Agent token totals.
  * [Pos] Codex live-state monitor for the managed Pet Manager Bridge.
  * [Sync] If discovery or state-tail semantics change, update `ref/.folder.md`.
  */
@@ -17,6 +17,17 @@ const {
 
 const MAX_MESSAGE_PREVIEW = 240;
 const MAX_DISPLAY_TITLE = 22;
+const MAX_DAILY_USAGE_FILES = 256;
+const DAILY_USAGE_TAIL_BYTES = 512 * 1024;
+const DAILY_BOUNDARY_SAMPLE_BYTES = 256 * 1024;
+const DAILY_BOUNDARY_SCAN_BYTES = 12 * 1024 * 1024;
+const DAILY_TOKEN_FIELDS = [
+  "totalTokens",
+  "inputTokens",
+  "outputTokens",
+  "cachedInputTokens",
+  "reasoningOutputTokens",
+];
 
 const TEXT_THINKING = "\u6b63\u5728\u601d\u8003";
 const TEXT_REPLYING = "\u6b63\u5728\u56de\u590d";
@@ -49,6 +60,163 @@ function readTimestampMs(value) {
   if (typeof value !== "string" || !value.trim()) return 0;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function localDayKey(value = Date.now()) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function sumDailyTokenUsage(values) {
+  const total = {
+    totalTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    reasoningOutputTokens: 0,
+  };
+  for (const usage of values) {
+    if (!usage || typeof usage !== "object") continue;
+    for (const field of DAILY_TOKEN_FIELDS) {
+      if (!Number.isFinite(usage[field])) continue;
+      total[field] = (total[field] || 0) + usage[field];
+    }
+    if (!Number.isFinite(usage.totalTokens)) {
+      total.totalTokens += (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0)
+        + (Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+    }
+  }
+  return total;
+}
+
+function cumulativeDailyTokenUsage(usage) {
+  const normalized = {};
+  for (const field of DAILY_TOKEN_FIELDS) {
+    normalized[field] = Number.isFinite(usage?.[field])
+      ? Math.max(0, usage[field])
+      : 0;
+  }
+  if (!Number.isFinite(usage?.totalTokens)) {
+    normalized.totalTokens = normalized.inputTokens + normalized.outputTokens;
+  }
+  return normalized;
+}
+
+function subtractCumulativeTokenUsage(current, baseline) {
+  const next = cumulativeDailyTokenUsage(current);
+  const previous = cumulativeDailyTokenUsage(baseline);
+  for (const field of DAILY_TOKEN_FIELDS) {
+    next[field] = Math.max(0, next[field] - previous[field]);
+  }
+  return next;
+}
+
+function lastTurnDailyTokenUsage(usage) {
+  const last = {
+    inputTokens: readNumber(usage?.lastInputTokens) || 0,
+    outputTokens: readNumber(usage?.lastOutputTokens) || 0,
+    cachedInputTokens: readNumber(usage?.lastCachedInputTokens) || 0,
+    reasoningOutputTokens: readNumber(usage?.lastReasoningOutputTokens) || 0,
+    totalTokens: readNumber(usage?.lastTotalTokens),
+  };
+  if (!Number.isFinite(last.totalTokens)) {
+    last.totalTokens = last.inputTokens + last.outputTokens;
+  }
+  return last;
+}
+
+function sessionDayKeyFromPath(root, filePath) {
+  const parts = path.relative(root, filePath).split(path.sep);
+  if (parts.length < 4 || !/^\d{4}$/.test(parts[0])
+      || !/^\d{2}$/.test(parts[1]) || !/^\d{2}$/.test(parts[2])) {
+    return "";
+  }
+  return `${parts[0]}-${parts[1]}-${parts[2]}`;
+}
+
+function localDayStartMs(value = Date.now()) {
+  const date = new Date(value);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function timestampAtOrAfterOffset(fd, fileSize, offset) {
+  let cursor = Math.max(0, Math.min(fileSize, offset));
+  let alignedToLine = cursor === 0;
+  for (let attempt = 0; attempt < 64 && cursor < fileSize; attempt += 1) {
+    const length = Math.min(DAILY_BOUNDARY_SAMPLE_BYTES, fileSize - cursor);
+    const buffer = Buffer.alloc(length);
+    const bytesRead = fs.readSync(fd, buffer, 0, length, cursor);
+    if (bytesRead <= 0) return 0;
+    const view = buffer.subarray(0, bytesRead);
+    if (!alignedToLine) {
+      const newlineIndex = view.indexOf(0x0a);
+      cursor += newlineIndex >= 0 ? newlineIndex + 1 : bytesRead;
+      alignedToLine = newlineIndex >= 0;
+      continue;
+    }
+    const prefix = view.subarray(0, Math.min(bytesRead, 1024)).toString("utf8");
+    const timestampMatch = prefix.match(/"timestamp"\s*:\s*"([^"]+)"/);
+    const timestampMs = readTimestampMs(timestampMatch?.[1]);
+    if (timestampMs) return timestampMs;
+    const newlineIndex = view.indexOf(0x0a);
+    cursor += newlineIndex >= 0 ? newlineIndex + 1 : bytesRead;
+    alignedToLine = newlineIndex >= 0;
+  }
+  return 0;
+}
+
+function findDailyCumulativeBaseline(filePath, dayStartMs) {
+  let fd;
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size <= 0) return null;
+    fd = fs.openSync(filePath, "r");
+    let low = 0;
+    let high = stat.size;
+    for (let iteration = 0; iteration < 24 && high - low > DAILY_BOUNDARY_SAMPLE_BYTES; iteration += 1) {
+      const middle = Math.floor((low + high) / 2);
+      const timestampMs = timestampAtOrAfterOffset(fd, stat.size, middle);
+      if (!timestampMs) {
+        high = middle;
+      } else if (timestampMs < dayStartMs) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+
+    const scanStart = Math.max(0, high - DAILY_BOUNDARY_SAMPLE_BYTES);
+    const scanLength = Math.min(DAILY_BOUNDARY_SCAN_BYTES, stat.size - scanStart);
+    const buffer = Buffer.alloc(scanLength);
+    const bytesRead = fs.readSync(fd, buffer, 0, scanLength, scanStart);
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+    if (scanStart > 0) lines.shift();
+    for (const rawLine of lines) {
+      if (!rawLine.includes('"token_count"')) continue;
+      let obj;
+      try {
+        obj = JSON.parse(rawLine);
+      } catch {
+        continue;
+      }
+      const payload = obj && typeof obj.payload === "object" ? obj.payload : null;
+      const timestampMs = readTimestampMs(obj?.timestamp);
+      if (timestampMs < dayStartMs || obj?.type !== "event_msg"
+          || payload?.type !== "token_count") {
+        continue;
+      }
+      const usage = extractTokenUsage(payload);
+      if (!usage) continue;
+      return subtractCumulativeTokenUsage(usage, lastTurnDailyTokenUsage(usage));
+    }
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+  return null;
 }
 
 function compactText(value, max = MAX_MESSAGE_PREVIEW) {
@@ -114,6 +282,8 @@ class CodexLogMonitor {
     this.lastTreeDiscoveryAt = 0;
     this.sessionTitles = new Map();
     this.sessionTitleIndexMtime = 0;
+    this.dailyUsageDayKey = localDayKey();
+    this.dailyUsageBySession = new Map();
   }
 
   start() {
@@ -264,6 +434,7 @@ class CodexLogMonitor {
 
   buildExtra(entry, state, event) {
     const display = this.buildDisplay(entry, state, event);
+    const dailyTokenUsage = this.buildDailyTokenUsage();
     return {
       cwd: entry.cwd || "",
       sessionTitle: this.ensureTitle(entry),
@@ -300,6 +471,7 @@ class CodexLogMonitor {
         agentMessageCount: entry.agentMessageCount || 0,
       },
       tokenUsage: entry.tokenUsage || undefined,
+      dailyTokenUsage,
     };
   }
 
@@ -318,6 +490,7 @@ class CodexLogMonitor {
         cachedInputTokens: extra.tokenUsage.cachedInputTokens,
         reasoningOutputTokens: extra.tokenUsage.reasoningOutputTokens,
       },
+      dailyTokenUsage: extra.dailyTokenUsage,
     });
     if (entry.lastEmitFingerprint === fingerprint) return;
     entry.lastEmitFingerprint = fingerprint;
@@ -339,6 +512,9 @@ class CodexLogMonitor {
     const payload = obj && typeof obj.payload === "object" ? obj.payload : null;
     const sourceEventTime = readTimestampMs(obj?.timestamp);
     if (!type) return;
+    if (!entry.sessionStartDayKey && sourceEventTime) {
+      entry.sessionStartDayKey = localDayKey(sourceEventTime);
+    }
 
     const subtype = payload && typeof payload.type === "string" ? payload.type : "";
     const key = subtype ? `${type}:${subtype}` : type;
@@ -417,6 +593,7 @@ class CodexLogMonitor {
     if (key === "event_msg:token_count") {
       const usage = extractTokenUsage(payload);
       if (!usage) return;
+      this.updateEntryDailyTokenUsage(entry, usage, sourceEventTime || Date.now());
       entry.tokenUsage = usage;
       entry.lastEventTime = Date.now();
       this.emit(entry, entry.lastState || "speaking", key);
@@ -505,7 +682,182 @@ class CodexLogMonitor {
       lastSourceEventTime: 0,
       suppressEmit: false,
       internalSession: false,
+      sessionStartDayKey: "",
+      dailyUsageDayKey: "",
+      dailyBaselineTokenUsage: null,
+      latestCumulativeTokenUsage: null,
     };
+  }
+
+  ensureDailyUsageDay() {
+    const today = localDayKey();
+    if (today === this.dailyUsageDayKey) return;
+    this.dailyUsageDayKey = today;
+    this.dailyUsageBySession.clear();
+  }
+
+  recordDailyTokenUsage(sessionId, usage, timestampMs = Date.now()) {
+    this.ensureDailyUsageDay();
+    if (!sessionId || localDayKey(timestampMs) !== this.dailyUsageDayKey) return;
+    this.dailyUsageBySession.set(sessionId, usage);
+  }
+
+  emitDailyTokenSnapshot(sessionId, tokenUsage) {
+    if (!sessionId) return;
+    try {
+      this.onState(sessionId, "idle", "token_usage:daily_snapshot", {
+        tokenUsage: tokenUsage || undefined,
+        dailyTokenUsage: this.buildDailyTokenUsage(),
+      });
+    } catch {}
+  }
+
+  updateEntryDailyTokenUsage(entry, usage, timestampMs = Date.now()) {
+    this.ensureDailyUsageDay();
+    const eventDayKey = localDayKey(timestampMs);
+    if (eventDayKey !== this.dailyUsageDayKey) {
+      entry.latestCumulativeTokenUsage = usage;
+      return;
+    }
+    if (entry.dailyUsageDayKey !== this.dailyUsageDayKey) {
+      entry.dailyUsageDayKey = this.dailyUsageDayKey;
+      entry.dailyBaselineTokenUsage = entry.latestCumulativeTokenUsage;
+    }
+    let dailyUsage;
+    if (entry.dailyBaselineTokenUsage) {
+      dailyUsage = subtractCumulativeTokenUsage(usage, entry.dailyBaselineTokenUsage);
+    } else if (entry.sessionStartDayKey && entry.sessionStartDayKey !== this.dailyUsageDayKey) {
+      // A bounded tail may not contain the final pre-midnight counter for a
+      // long resumed session. In that case the last-turn counter is a safe
+      // lower bound and, crucially, never reports historical lifetime usage.
+      dailyUsage = lastTurnDailyTokenUsage(usage);
+    } else {
+      dailyUsage = cumulativeDailyTokenUsage(usage);
+    }
+    entry.latestCumulativeTokenUsage = usage;
+    this.recordDailyTokenUsage(entry.sessionId, dailyUsage, timestampMs);
+  }
+
+  buildDailyTokenUsage() {
+    this.ensureDailyUsageDay();
+    return sumDailyTokenUsage(this.dailyUsageBySession.values());
+  }
+
+  seedDailyTokenUsageFromFile(filePath, fileName) {
+    const sessionId = this.extractSessionId(fileName);
+    if (!sessionId) return;
+    let stat;
+    let buffer;
+    try {
+      stat = fs.statSync(filePath);
+      const readLength = Math.min(stat.size, DAILY_USAGE_TAIL_BYTES);
+      if (readLength <= 0) return;
+      const fd = fs.openSync(filePath, "r");
+      buffer = Buffer.alloc(readLength);
+      fs.readSync(fd, buffer, 0, readLength, stat.size - readLength);
+      fs.closeSync(fd);
+    } catch {
+      return;
+    }
+
+    const lines = buffer.toString("utf8").split("\n");
+    if (stat.size > buffer.length) lines.shift();
+    const today = this.dailyUsageDayKey;
+    let sessionStartDayKey = sessionDayKeyFromPath(this.config.SESSION_DIR, filePath);
+    let baselineUsage = null;
+    let latestUsage = null;
+    let latestTimestamp = 0;
+    let internalSession = false;
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      let obj;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const payload = obj && typeof obj.payload === "object" ? obj.payload : null;
+      const eventTimestamp = readTimestampMs(obj?.timestamp) || stat.mtimeMs;
+      if (!sessionStartDayKey && eventTimestamp) {
+        sessionStartDayKey = localDayKey(eventTimestamp);
+      }
+      if (obj?.type === "session_meta" && isInternalCodexSession({
+        originator: payload?.originator,
+        threadSource: payload?.thread_source,
+      })) {
+        internalSession = true;
+      }
+      if (obj?.type === "turn_context" && isInternalCodexSession({ model: payload?.model })) {
+        internalSession = true;
+      }
+      if (obj?.type !== "event_msg" || payload?.type !== "token_count") continue;
+      const usage = extractTokenUsage(payload);
+      if (!usage) continue;
+      const eventDayKey = localDayKey(eventTimestamp);
+      if (eventDayKey === today) {
+        latestUsage = usage;
+        latestTimestamp = eventTimestamp;
+      } else if (eventDayKey < today && !latestUsage) {
+        baselineUsage = usage;
+      }
+    }
+    if (!baselineUsage && latestUsage && sessionStartDayKey && sessionStartDayKey !== today) {
+      baselineUsage = findDailyCumulativeBaseline(filePath, localDayStartMs());
+    }
+    const trackedEntry = this.tracked.get(filePath);
+    if (trackedEntry) {
+      trackedEntry.sessionStartDayKey = sessionStartDayKey;
+      trackedEntry.dailyUsageDayKey = today;
+      trackedEntry.dailyBaselineTokenUsage = baselineUsage;
+      trackedEntry.latestCumulativeTokenUsage = latestUsage || baselineUsage;
+    }
+    if (!internalSession && !trackedEntry?.internalSession && latestUsage) {
+      const dailyUsage = baselineUsage
+        ? subtractCumulativeTokenUsage(latestUsage, baselineUsage)
+        : (sessionStartDayKey && sessionStartDayKey !== today
+          ? lastTurnDailyTokenUsage(latestUsage)
+          : cumulativeDailyTokenUsage(latestUsage));
+      this.recordDailyTokenUsage(sessionId, dailyUsage, latestTimestamp);
+      return { sessionId, tokenUsage: latestUsage };
+    }
+    return null;
+  }
+
+  refreshDailyTokenUsage() {
+    this.ensureDailyUsageDay();
+    const files = [];
+    const stack = [{ dir: this.config.SESSION_DIR, depth: 0 }];
+    while (stack.length > 0) {
+      const { dir, depth } = stack.pop();
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const item of entries) {
+        const filePath = path.join(dir, item.name);
+        if (item.isDirectory()) {
+          if (depth < 4) stack.push({ dir: filePath, depth: depth + 1 });
+          continue;
+        }
+        if (!item.isFile() || !this.isSessionFile(item.name)) continue;
+        try {
+          const stat = fs.statSync(filePath);
+          if (localDayKey(stat.mtimeMs) === this.dailyUsageDayKey) {
+            files.push({ filePath, fileName: item.name, mtimeMs: stat.mtimeMs });
+          }
+        } catch {}
+      }
+    }
+    files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    let snapshot = null;
+    for (const file of files.slice(0, MAX_DAILY_USAGE_FILES)) {
+      const seeded = this.seedDailyTokenUsageFromFile(file.filePath, file.fileName);
+      if (!snapshot && seeded) snapshot = seeded;
+    }
+    if (snapshot) this.emitDailyTokenSnapshot(snapshot.sessionId, snapshot.tokenUsage);
   }
 
   trackFileBaseline(filePath, fileName, stat) {
@@ -723,6 +1075,7 @@ class CodexLogMonitor {
     // complete date tree. Terminal history stays silent; a currently active
     // resumed task emits one bootstrap state regardless of its creation date.
     this.discoverRecentSessionTree(now, { bootstrap: true });
+    this.refreshDailyTokenUsage();
     this.lastTreeDiscoveryAt = now;
     this.lastDiscoveryAt = now;
   }

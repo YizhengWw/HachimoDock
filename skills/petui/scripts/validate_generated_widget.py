@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate generated petui packages, including joystick and global-exit isolation."""
+"""Validate generated petui packages, including modern scenes, sprites, joystick, and global-exit isolation."""
 
 from __future__ import annotations
 
@@ -56,7 +56,8 @@ ALLOWED_PALETTES = {
 }
 ALLOWED_LAYOUTS = {"arcade", "scoreboard", "tool"}
 ALLOWED_SCENE_SHAPES = {
-    "rect", "player-ship", "enemy-ship", "bullet", "star", "paddle", "ball"
+    "rect", "player-ship", "enemy-ship", "bullet", "star", "paddle", "ball",
+    "circle", "capsule", "triangle", "diamond", "heart", "cloud", "coin", "character",
 }
 ALLOWED_SPRITES = {
     "target",
@@ -96,11 +97,23 @@ ALLOWED_GAME_ACTIONS = {
     "snake": {"start", "left", "right"},
     "flappy": {"flap"},
 }
-RUNTIME_ENGINE = "p4-bounded-runtime-v3"
-SCENE_ENGINE = "p4-grid-scene-v1"
+RUNTIME_ENGINE_V3 = "p4-bounded-runtime-v3"
+RUNTIME_ENGINE = "p4-bounded-runtime-v4"
+RUNTIME_ENGINES = {RUNTIME_ENGINE_V3, RUNTIME_ENGINE}
+SCENE_ENGINE_V1 = "p4-grid-scene-v1"
+SCENE_ENGINE = "p4-grid-scene-v2"
+SCENE_ENGINES = {SCENE_ENGINE_V1, SCENE_ENGINE}
 SCENE_MAX_ENTITIES = 12
 SCENE_MAX_RULES = 20
 SCENE_MAX_OPS = 4
+SCENE_MAX_SPRITES = 4
+SCENE_MAX_SPRITE_FRAMES = 8
+SCENE_MAX_SPRITE_PIXELS = 4096
+SCENE_SPRITE_MIN_DIMENSION = 8
+SCENE_SPRITE_MAX_DIMENSION = 64
+SCENE_SPRITE_MIN_FPS = 1
+SCENE_SPRITE_MAX_FPS = 20
+SCENE_SPRITE_MAX_SOURCE_BYTES = 128 * 1024
 WIDGET_MAX_VARS = 8
 VAR_NAME_MAX_BYTES = 31
 STRING_VAR_MAX_BYTES = 63
@@ -108,7 +121,9 @@ WIDGET_INT_MIN = -1_000_000_000
 WIDGET_INT_MAX = 1_000_000_000
 DEFAULT_CAPABILITIES = {
     "widgetRuntime": RUNTIME_ENGINE,
+    "widgetRuntimes": [RUNTIME_ENGINE_V3, RUNTIME_ENGINE],
     "widgetScene": SCENE_ENGINE,
+    "widgetScenes": [SCENE_ENGINE_V1, SCENE_ENGINE],
     "widgetGamePresets": ["blocks", "snake", "flappy"],
     # Legacy alias retained by firmware for older Pet Manager builds.
     "widgetGames": ["blocks", "snake", "flappy"],
@@ -142,6 +157,23 @@ SYSTEM_ACTIONS = {
 
 def utf8_size(value: str) -> int:
     return len(value.encode("utf-8"))
+
+
+def capability_supports(capabilities: dict[str, Any], singular: str, plural: str, value: str) -> bool:
+    advertised = capabilities.get(plural)
+    if isinstance(advertised, list):
+        return value in advertised
+    return capabilities.get(singular) == value
+
+
+def png_dimensions(path: Path) -> tuple[int, int] | None:
+    try:
+        header = path.read_bytes()[:24]
+    except OSError:
+        return None
+    if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
 
 
 def load_json(path: Path, errors: list[str]) -> Any:
@@ -614,17 +646,19 @@ def validate_scene_op(
 def validate_scene(
     scene: Any,
     runtime: dict[str, Any],
+    widget_dir: Path,
     capabilities: dict[str, Any],
     transition_actions: set[str],
     errors: list[str],
 ) -> None:
-    if capabilities.get("widgetScene") != SCENE_ENGINE:
-        errors.append(f"目标能力不支持通用场景引擎: {capabilities.get('widgetScene')!r}")
+    required_scene = SCENE_ENGINE if runtime.get("engine") == RUNTIME_ENGINE else SCENE_ENGINE_V1
+    if not capability_supports(capabilities, "widgetScene", "widgetScenes", required_scene):
+        errors.append(f"目标能力不支持通用场景引擎: {required_scene}")
     if not only_keys(
         scene,
         {
             "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-            "grid", "entities", "rules",
+            "grid", "sprites", "entities", "rules",
         },
     ):
         errors.append("runtime/widget.json.scene 含未知字段或不是对象")
@@ -645,6 +679,65 @@ def validate_scene(
         errors.append("runtime/widget.json.scene.auto_start 必须是布尔值")
     if scene.get("auto_start") is True and runtime.get("initial_state") != scene.get("active_state"):
         errors.append("runtime/widget.json.scene.auto_start 要求 initial_state 等于 active_state")
+
+    sprites = scene.get("sprites", [])
+    sprite_ids: set[str] = set()
+    sprite_pixels = 0
+    if not isinstance(sprites, list) or len(sprites) > SCENE_MAX_SPRITES:
+        errors.append(f"runtime/widget.json.scene.sprites 最多允许 {SCENE_MAX_SPRITES} 项")
+        sprites = []
+    if sprites and runtime.get("engine") != RUNTIME_ENGINE:
+        errors.append(f"runtime/widget.json.scene.sprites 需要 engine={RUNTIME_ENGINE}")
+    for index, sprite in enumerate(sprites):
+        location = f"runtime/widget.json.scene.sprites[{index}]"
+        if not only_keys(sprite, {"id", "asset", "frame_width", "frame_height", "frames", "fps"}):
+            errors.append(f"{location} 含未知字段或不是对象")
+            continue
+        sprite_id = sprite.get("id")
+        if (
+            not isinstance(sprite_id, str)
+            or SCENE_ID_PATTERN.fullmatch(sprite_id) is None
+            or sprite_id in sprite_ids
+        ):
+            errors.append(f"{location}.id 无效或重复")
+        else:
+            sprite_ids.add(sprite_id)
+        asset = sprite.get("asset")
+        if (
+            not isinstance(asset, str)
+            or re.fullmatch(r"assets/[A-Za-z0-9_.-]+\.png", asset) is None
+        ):
+            errors.append(f"{location}.asset 必须是 assets/ 下的安全 PNG 路径")
+            continue
+        frame_width = sprite.get("frame_width")
+        frame_height = sprite.get("frame_height")
+        frames = sprite.get("frames")
+        fps = sprite.get("fps")
+        dimensions_valid = (
+            int_between(frame_width, SCENE_SPRITE_MIN_DIMENSION, SCENE_SPRITE_MAX_DIMENSION)
+            and int_between(frame_height, SCENE_SPRITE_MIN_DIMENSION, SCENE_SPRITE_MAX_DIMENSION)
+            and int_between(frames, 1, SCENE_MAX_SPRITE_FRAMES)
+            and int_between(fps, SCENE_SPRITE_MIN_FPS, SCENE_SPRITE_MAX_FPS)
+        )
+        if not dimensions_valid:
+            errors.append(f"{location} 的帧尺寸、帧数或 fps 超出 P4 上限")
+            continue
+        sprite_pixels += frame_width * frame_height * frames
+        source = widget_dir / asset
+        if source.is_file() and source.stat().st_size > SCENE_SPRITE_MAX_SOURCE_BYTES:
+            errors.append(f"{location}.asset PNG 源文件超过 128 KiB 上限")
+            continue
+        dimensions = png_dimensions(source)
+        expected = (frame_width * frames, frame_height)
+        if dimensions is None:
+            errors.append(f"{location} 引用的素材不是有效 PNG 或不存在: {asset}")
+        elif dimensions != expected:
+            errors.append(
+                f"{location} PNG 尺寸应为 {expected[0]}x{expected[1]}，"
+                f"实际为 {dimensions[0]}x{dimensions[1]}"
+            )
+    if sprite_pixels > SCENE_MAX_SPRITE_PIXELS:
+        errors.append(f"runtime/widget.json.scene.sprites 总像素超过 {SCENE_MAX_SPRITE_PIXELS}")
 
     grid = scene.get("grid")
     grid_valid = only_keys(grid, {"width", "height", "rows", "solid_tones"})
@@ -686,7 +779,7 @@ def validate_scene(
             entity,
             {
                 "id", "x", "y", "width", "height", "tone", "vx", "vy",
-                "bounds", "shape", "active", "collidable",
+                "bounds", "shape", "sprite", "active", "collidable",
             },
         ):
             errors.append(f"{location} 含未知字段或不是对象")
@@ -718,6 +811,8 @@ def validate_scene(
             errors.append(f"{location}.bounds 不受支持")
         if entity.get("shape", "rect") not in ALLOWED_SCENE_SHAPES:
             errors.append(f"{location}.shape 不受支持")
+        if "sprite" in entity and entity.get("sprite") not in sprite_ids:
+            errors.append(f"{location}.sprite 引用了未知精灵")
         if any(field in entity and type(entity[field]) is not bool for field in ("active", "collidable")):
             errors.append(f"{location} active/collidable 必须是布尔值")
 
@@ -759,6 +854,7 @@ def validate_scene(
 def validate_runtime(
     runtime: Any,
     kind: str | None,
+    widget_dir: Path,
     capabilities: dict[str, Any],
     errors: list[str],
 ) -> set[str]:
@@ -769,10 +865,11 @@ def validate_runtime(
         return transition_actions
     if runtime.get("schema_version") != 1:
         errors.append("runtime/widget.json.schema_version 必须为 1")
-    if runtime.get("engine") != RUNTIME_ENGINE:
-        errors.append(f'runtime/widget.json.engine 必须固定为 "{RUNTIME_ENGINE}"')
-    if capabilities.get("widgetRuntime") != RUNTIME_ENGINE:
-        errors.append(f"目标能力不支持统一组件运行时: {capabilities.get('widgetRuntime')!r}")
+    runtime_engine = runtime.get("engine")
+    if runtime_engine not in RUNTIME_ENGINES:
+        errors.append(f"runtime/widget.json.engine 只支持: {', '.join(sorted(RUNTIME_ENGINES))}")
+    elif not capability_supports(capabilities, "widgetRuntime", "widgetRuntimes", runtime_engine):
+        errors.append(f"目标能力不支持统一组件运行时: {runtime_engine}")
     variables = runtime.get("vars")
     if not isinstance(variables, dict):
         errors.append("runtime/widget.json.vars 必须是对象；无变量时使用 {}")
@@ -915,7 +1012,7 @@ def validate_runtime(
     if game is not None:
         validate_game(game, runtime, kind, capabilities, transition_actions, errors)
     if scene is not None:
-        validate_scene(scene, runtime, capabilities, transition_actions, errors)
+        validate_scene(scene, runtime, widget_dir, capabilities, transition_actions, errors)
     return transition_actions
 
 
@@ -937,7 +1034,9 @@ def validate_game(
     if required_keys is None:
         errors.append(f"runtime/widget.json.game.type 不支持: {game_type}")
         return
-    if capabilities.get("widgetRuntime") not in {"p4-bounded-v2", RUNTIME_ENGINE}:
+    if capabilities.get("widgetRuntime") != "p4-bounded-v2" and not capability_supports(
+        capabilities, "widgetRuntime", "widgetRuntimes", RUNTIME_ENGINE_V3
+    ):
         errors.append(f"目标能力不支持旧版原生游戏预设: {capabilities.get('widgetRuntime')!r}")
     widget_games = capabilities.get("widgetGamePresets", capabilities.get("widgetGames"))
     if not isinstance(widget_games, list) or game_type not in widget_games:
@@ -1071,7 +1170,7 @@ def validate_widget(
             runtime_dashboard=False,
             errors=errors,
         )
-    transition_actions = validate_runtime(runtime, kind, capabilities, errors)
+    transition_actions = validate_runtime(runtime, kind, widget_dir, capabilities, errors)
     validate_buttons(buttons, transition_actions, capabilities, runtime, errors)
     validate_initial_preview(negative, runtime, errors)
     validate_claimed_mechanics(manifest, negative, runtime, share, errors)

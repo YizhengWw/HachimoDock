@@ -2,7 +2,7 @@
   "dashboard": {
     "title": "Token 仪表盘",
     "eyebrow": "当前 Agent",
-    "headline": "等待实时统计",
+    "headline": "等待今日统计",
     "metricLabel": "总 Token",
     "metricValue": "—",
     "metricUnit": "TOKEN",

@@ -11,7 +11,8 @@
  *          boardDeviceId selection across multiple native-USB candidates,
  *          audio-only patch commits, legacy full-sync fallback for boards that
  *          do not support per-file asset acks yet, short-id ACK-gated widget
- *          .clawpkg OTA plus capability-gated, expected-board-id removal with
+ *          .clawpkg OTA with bounded PNG-to-RGB565-alpha sprite compilation,
+ *          plus capability-gated, expected-board-id removal with
  *          legacy unsupported-phase NACK correlation, capability-sized,
  *          retry-before-downshift Base64 firmware chunks with stale-transfer
  *          discovery, exact abort recovery, and connection-generation pinning,
@@ -101,9 +102,10 @@ use transaction_waiters::{
 use widget_transaction::P4_WIDGET_JSON_MAX_BYTES;
 use widget_transaction::{
     build_widget_chunk_payload, ensure_widget_delete_supported, ensure_widget_inventory_supported,
-    format_widget_ack_timeout, prepare_p4_widget_file, widget_ota_relative_path,
-    widget_ota_should_skip_path, WIDGET_BEGIN_ACK_TIMEOUT, WIDGET_CHUNK_ACK_TIMEOUT,
-    WIDGET_CHUNK_MAX_ATTEMPTS, WIDGET_COMMIT_ACK_TIMEOUT, WIDGET_DELETE_ACK_TIMEOUT,
+    format_widget_ack_timeout, prepare_p4_widget_file, prepare_p4_widget_sprite_files,
+    widget_ota_relative_path, widget_ota_should_skip_path, WIDGET_BEGIN_ACK_TIMEOUT,
+    WIDGET_CHUNK_ACK_TIMEOUT, WIDGET_CHUNK_MAX_ATTEMPTS, WIDGET_COMMIT_ACK_TIMEOUT,
+    WIDGET_DELETE_ACK_TIMEOUT,
 };
 
 use native_usb_protocol::{
@@ -3429,6 +3431,19 @@ impl UsbSerialManager {
             Ok(())
         }
         walk(widget_dir, widget_dir, &mut entries)?;
+
+        // The package keeps author-friendly PNG sheets for validation and the
+        // desktop preview. P4 receives compact RGB565+alpha runtime files
+        // generated from the exact same source images. Raw assets are not part
+        // of the bounded firmware file contract.
+        let widget_source = entries
+            .iter()
+            .find(|(relative_path, _)| relative_path == "runtime/widget.json")
+            .map(|(_, bytes)| bytes.as_slice())
+            .ok_or_else(|| "component package is missing runtime/widget.json".to_string())?;
+        let compiled_sprites = prepare_p4_widget_sprite_files(widget_dir, widget_source)?;
+        entries.retain(|(relative_path, _)| !relative_path.starts_with("assets/"));
+        entries.extend(compiled_sprites);
 
         // 2) apply binding overrides to buttons.json in-memory
         if !binding_overrides.is_empty() {
@@ -8441,6 +8456,39 @@ mod tests {
         assert!(widget_ota_should_skip_path("runtime/.keep"));
         assert!(!widget_ota_should_skip_path("runtime/widget.json"));
         assert!(!widget_ota_should_skip_path("assets/icon.png"));
+    }
+
+    #[test]
+    fn p4_widget_sprite_sheet_compiles_to_rgb565_alpha_frames() {
+        let temporary = tempfile::tempdir().unwrap();
+        let assets = temporary.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        let mut sheet = image::RgbaImage::new(16, 8);
+        for pixel in sheet.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 128]);
+        }
+        sheet.save(assets.join("hero.png")).unwrap();
+        let widget = serde_json::to_vec(&serde_json::json!({
+            "scene": {
+                "sprites": [{
+                    "id": "hero",
+                    "asset": "assets/hero.png",
+                    "frame_width": 8,
+                    "frame_height": 8,
+                    "frames": 2,
+                    "fps": 6
+                }]
+            }
+        }))
+        .unwrap();
+
+        let compiled = prepare_p4_widget_sprite_files(temporary.path(), &widget).unwrap();
+
+        assert_eq!(compiled.len(), 1);
+        assert_eq!(compiled[0].0, "runtime/sprites/hero.p4s");
+        assert_eq!(&compiled[0].1[..8], b"P4S1\x08\x08\x02\x06");
+        assert_eq!(compiled[0].1.len(), 8 + 16 * 8 * 3);
+        assert_eq!(&compiled[0].1[8..11], &[0x00, 0xf8, 128]);
     }
 
     #[test]

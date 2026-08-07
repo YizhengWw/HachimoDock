@@ -2,7 +2,7 @@
 
 /*
  * [Input] Claude Code/Desktop transcript JSONL plus process availability.
- * [Output] Per-session lifecycle cards with restart-safe, deduplicated cumulative token usage and latest-turn context fields.
+ * [Output] Per-session lifecycle cards with restart-safe, deduplicated cumulative token usage, current-day Agent totals, and latest-turn context fields.
  * [Pos] Claude transcript monitor worker used by the managed status bridge.
  * [Sync] If Claude transcript or token aggregation semantics change, update `ref/.folder.md`.
  */
@@ -15,6 +15,14 @@ const defaults = require("./claude-code");
 
 const MAX_MESSAGE_PREVIEW = 240;
 const MAX_DISPLAY_TITLE = 22;
+const DAILY_TOKEN_FIELDS = [
+  "totalTokens",
+  "inputTokens",
+  "outputTokens",
+  "cachedInputTokens",
+  "cacheCreationInputTokens",
+  "reasoningOutputTokens",
+];
 
 const TEXT_THINKING = "\u6b63\u5728\u601d\u8003";
 const TEXT_REPLYING = "\u6b63\u5728\u56de\u590d";
@@ -23,6 +31,43 @@ const TEXT_SESSION_FALLBACK = "Claude \u4f1a\u8bdd";
 
 function readNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readTimestampMs(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value < 1_000_000_000_000 ? value * 1000 : value;
+  }
+  if (typeof value !== "string" || !value.trim()) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function localDayKey(value = Date.now()) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function sumDailyTokenUsage(values) {
+  const total = {
+    totalTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    reasoningOutputTokens: 0,
+  };
+  for (const usage of values) {
+    if (!usage || typeof usage !== "object") continue;
+    for (const field of DAILY_TOKEN_FIELDS) {
+      if (!Number.isFinite(usage[field])) continue;
+      total[field] = (total[field] || 0) + usage[field];
+    }
+    if (!Number.isFinite(usage.totalTokens)) {
+      total.totalTokens += (Number.isFinite(usage.inputTokens) ? usage.inputTokens : 0)
+        + (Number.isFinite(usage.outputTokens) ? usage.outputTokens : 0);
+    }
+  }
+  return total;
 }
 
 function compactText(value, max = MAX_MESSAGE_PREVIEW) {
@@ -137,13 +182,19 @@ function tokenUsageEventKey(obj) {
   return "";
 }
 
-function accumulateTokenUsage(entry, usage, obj) {
+function accumulateTokenUsage(
+  entry,
+  usage,
+  obj,
+  usageField = "tokenUsage",
+  eventIdsField = "tokenUsageEventIds",
+) {
   if (!entry || !usage) return false;
   const eventKey = tokenUsageEventKey(obj);
-  if (eventKey && entry.tokenUsageEventIds.has(eventKey)) return false;
-  if (eventKey) entry.tokenUsageEventIds.add(eventKey);
+  if (eventKey && entry[eventIdsField].has(eventKey)) return false;
+  if (eventKey) entry[eventIdsField].add(eventKey);
 
-  const previous = entry.tokenUsage || {};
+  const previous = entry[usageField] || {};
   const next = { ...previous };
   for (const field of [
     "inputTokens",
@@ -169,7 +220,7 @@ function accumulateTokenUsage(entry, usage, obj) {
   if (Number.isFinite(usage.modelContextWindow)) {
     next.modelContextWindow = usage.modelContextWindow;
   }
-  entry.tokenUsage = next;
+  entry[usageField] = next;
   return true;
 }
 
@@ -188,6 +239,8 @@ class ClaudeLogMonitor {
     this.tracked = new Map();
     this.processProbeAt = 0;
     this.processProbeInFlight = false;
+    this.dailyUsageDayKey = localDayKey();
+    this.dailyUsageBySession = new Map();
   }
 
   start() {
@@ -223,6 +276,7 @@ class ClaudeLogMonitor {
         cachedInputTokens: extra.tokenUsage.cachedInputTokens,
         cacheCreationInputTokens: extra.tokenUsage.cacheCreationInputTokens,
       },
+      dailyTokenUsage: extra.dailyTokenUsage,
     });
     if (entry.lastEmitFingerprint === fingerprint) return;
     entry.lastEmitFingerprint = fingerprint;
@@ -268,6 +322,7 @@ class ClaudeLogMonitor {
 
   buildExtra(entry, state, event) {
     const display = this.buildDisplay(entry, state, event);
+    const dailyTokenUsage = this.buildDailyTokenUsage();
     return {
       cwd: entry.cwd || "",
       sessionTitle: this.ensureTitle(entry),
@@ -288,7 +343,29 @@ class ClaudeLogMonitor {
         agentMessageCount: entry.agentMessageCount || 0,
       },
       tokenUsage: entry.tokenUsage || undefined,
+      dailyTokenUsage,
     };
+  }
+
+  accumulateEntryDailyTokenUsage(entry, usage, obj, eventTimestampMs) {
+    this.ensureDailyUsageDay();
+    if (!entry || !usage || localDayKey(eventTimestampMs) !== this.dailyUsageDayKey) {
+      return false;
+    }
+    if (entry.dailyUsageDayKey !== this.dailyUsageDayKey) {
+      entry.dailyUsageDayKey = this.dailyUsageDayKey;
+      entry.dailyTokenUsage = null;
+      entry.dailyTokenUsageEventIds.clear();
+    }
+    const changed = accumulateTokenUsage(
+      entry,
+      usage,
+      obj,
+      "dailyTokenUsage",
+      "dailyTokenUsageEventIds",
+    );
+    if (changed) this.recordDailyTokenUsage(entry.sessionId, entry.dailyTokenUsage);
+    return changed;
   }
 
   async isRunningOnWindows() {
@@ -444,6 +521,8 @@ class ClaudeLogMonitor {
     const role = obj.message && typeof obj.message.role === "string" ? obj.message.role : "";
     const usage = extractTokenUsage(obj);
     const tokenUsageChanged = accumulateTokenUsage(entry, usage, obj);
+    const eventTimestampMs = readTimestampMs(obj.timestamp) || Date.now();
+    this.accumulateEntryDailyTokenUsage(entry, usage, obj, eventTimestampMs);
 
     if (type === "summary" && typeof obj.summary === "string" && obj.summary.trim()) {
       entry.sessionTitle = compactText(obj.summary, 120);
@@ -497,6 +576,9 @@ class ClaudeLogMonitor {
       cwd: "",
       tokenUsage: null,
       tokenUsageEventIds: new Set(),
+      dailyTokenUsage: null,
+      dailyTokenUsageEventIds: new Set(),
+      dailyUsageDayKey: "",
       sessionTitle: "",
       firstUserMessage: "",
       lastUserMessage: "",
@@ -529,8 +611,39 @@ class ClaudeLogMonitor {
       }
       if (!obj || typeof obj !== "object") continue;
       entry.sessionId = extractSessionId(obj, entry.sessionId);
-      accumulateTokenUsage(entry, extractTokenUsage(obj), obj);
+      const usage = extractTokenUsage(obj);
+      accumulateTokenUsage(entry, usage, obj);
+      const eventTimestampMs = readTimestampMs(obj.timestamp) || Date.now();
+      this.accumulateEntryDailyTokenUsage(entry, usage, obj, eventTimestampMs);
     }
+  }
+
+  ensureDailyUsageDay() {
+    const today = localDayKey();
+    if (today === this.dailyUsageDayKey) return;
+    this.dailyUsageDayKey = today;
+    this.dailyUsageBySession.clear();
+  }
+
+  recordDailyTokenUsage(sessionId, usage) {
+    this.ensureDailyUsageDay();
+    if (!sessionId || !usage) return;
+    this.dailyUsageBySession.set(sessionId, usage);
+  }
+
+  buildDailyTokenUsage() {
+    this.ensureDailyUsageDay();
+    return sumDailyTokenUsage(this.dailyUsageBySession.values());
+  }
+
+  emitDailyTokenSnapshot(entry) {
+    if (!entry?.sessionId) return;
+    try {
+      this.onState(entry.sessionId, "idle", "claude:daily_token_snapshot", {
+        tokenUsage: entry.tokenUsage || undefined,
+        dailyTokenUsage: this.buildDailyTokenUsage(),
+      });
+    } catch {}
   }
 
   trackFileBaseline(filePath, fileName, seedTokenUsage = false) {
@@ -548,9 +661,14 @@ class ClaudeLogMonitor {
     const now = Date.now();
     const maxAgeMs = Math.max(1000, Number(this.config.NEW_FILE_MAX_AGE_MS) || 120000);
     for (const [index, file] of files.entries()) {
-      const seedTokenUsage = index === 0 || now - file.mtimeMs <= maxAgeMs;
+      const seedTokenUsage = index === 0
+        || now - file.mtimeMs <= maxAgeMs
+        || localDayKey(file.mtimeMs) === localDayKey(now);
       this.trackFileBaseline(file.filePath, file.fileName, seedTokenUsage);
     }
+    const snapshotEntry = Array.from(this.tracked.values())
+      .find((entry) => entry.dailyTokenUsage);
+    if (snapshotEntry) this.emitDailyTokenSnapshot(snapshotEntry);
   }
 
   pollFile(filePath, fileName) {

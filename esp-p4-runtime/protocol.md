@@ -69,8 +69,11 @@ Board to PC:
       "widgetDelete": true,
       "widgetInventory": true,
       "componentCatalogGeneration": true,
-      "widgetRuntime": "p4-bounded-runtime-v3",
-      "widgetScene": "p4-grid-scene-v1",
+      "widgetRuntime": "p4-bounded-runtime-v4",
+      "widgetRuntimes": ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"],
+      "widgetScene": "p4-grid-scene-v2",
+      "widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"],
+      "widgetSprites": true,
       "componentCatalogMax": 16,
       "widgetGames": ["blocks", "snake", "flappy"],
       "widgetGamePresets": ["blocks", "snake", "flappy"],
@@ -84,6 +87,8 @@ Board to PC:
         "maxSceneEntities": 12,
         "maxSceneRules": 20,
         "maxSceneOpsPerRule": 4,
+        "maxSceneSprites": 4,
+        "maxSceneSpritePixels": 4096,
         "maxWidgetJsonBytes": 4095,
         "maxButtonsJsonBytes": 2047,
         "fetchers": false,
@@ -172,6 +177,16 @@ Board to PC:
   }
 }
 ```
+
+`p4-bounded-runtime-v4` / `p4-grid-scene-v2` add modern semantic shapes and
+bounded animated sprites while the advertised arrays preserve v3/v1 package
+compatibility. A package may declare at most four horizontal PNG sprite sheets,
+eight frames per sheet, and 4096 decoded pixels across all frames. Pet Manager
+compiles each source PNG to `runtime/sprites/<id>.p4s` (RGB565 little-endian plus
+alpha) before USB downlink. Sprite files are checksum-verified, committed in the
+same dual-generation component transaction as `runtime/widget.json` and
+`buttons.json`, and restored after reboot; raw PNG files are never interpreted
+by firmware.
 
 Hardware-dependent flags are emitted from successful initialization rather
 than board-model assumptions. Capture prefers ES7210 and falls back to the
@@ -352,7 +367,14 @@ PC to board:
   `components` catalog, and the active bounded mini-app `app` page.
   Other values receive an `invalid_page` protocol NACK.
 - `stats/update`: updates the bounded P4 statistics model. The same token and
-  runtime metrics are also extracted from `state/<agent>` payloads.
+  runtime metrics are also extracted from `state/<agent>` payloads. For the
+  built-in Token dashboard, Pet Manager filters to the current followed Agent,
+  aggregates its local-calendar-day Session usage as `dailyTokenUsage`, and
+  normalizes that object into the bounded `tokenUsage` field before USB send.
+  Bridge startup publishes this aggregate through a display-free idle snapshot,
+  so opening Pet Manager does not require a new Agent message before data appears.
+  Cross-day Codex rollouts subtract the exact local-midnight cumulative baseline
+  rather than exposing lifetime Session usage.
 - `input/config`: validates and persists the P4 input map. The compatibility
   envelope `control/command` with `type: button_config` is also accepted. While
   a component is open, its mapped gameplay action wins; the current global
@@ -812,8 +834,11 @@ for the body, so older bridge payloads still render.
 ## Statistics Payload Shape
 
 The PC forwards the active Agent state with token usage and bounded runtime
-metrics. The P4 parses these fields when the message arrives, then renders from
-a fixed-size model without retaining an unbounded JSON tree.
+metrics. When `dailyTokenUsage` is available, the USB compactor prefers that
+current-followed-Agent daily aggregate over a single Session's `tokenUsage`.
+The P4 parses the normalized fields when the message arrives, then renders from
+a fixed-size model without retaining an unbounded JSON tree. Changing the
+followed source clears stale stats before the new source is applied.
 
 ```json
 {

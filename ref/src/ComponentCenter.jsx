@@ -3,7 +3,8 @@
  * [Output] Component manager in the shared Pet Manager visual system: one type-filtered
  *          game/tool library whose cards reflect live board truth and perform immediate
  *          per-component sync/removal. The manager chrome stays product-native while every widget
- *          preview and generated package uses the bounded pixel visual contract. Formal local
+ *          preview and generated package uses the bounded clean/pixel visual contract, including
+ *          modern scene silhouettes and safe animated sprite sheets. Formal local
  *          gameplay-only buttons.json is editable across screen/SW1-SW3/four-direction
  *          joystick inputs, conflict-checked against the board-authoritative global exit
  *          gesture, persisted by component/action, and stored inside the installed P4 component.
@@ -93,21 +94,36 @@ function gameInstallBlockedReason(component, usb) {
   if (!requiredRuntime && !requiredScene && !preset) return "";
   const runtime = String(usb?.capabilities?.widgetRuntime || "");
   const scene = String(usb?.capabilities?.widgetScene || "");
+  const runtimes = Array.isArray(usb?.capabilities?.widgetRuntimes)
+    ? usb.capabilities.widgetRuntimes.map(String)
+    : runtime
+      ? [runtime]
+      : [];
+  const scenes = Array.isArray(usb?.capabilities?.widgetScenes)
+    ? usb.capabilities.widgetScenes.map(String)
+    : scene
+      ? [scene]
+      : [];
   const presets = Array.isArray(usb?.capabilities?.widgetGamePresets)
     ? usb.capabilities.widgetGamePresets
     : Array.isArray(usb?.capabilities?.widgetGames)
       ? usb.capabilities.widgetGames
     : [];
-  if (requiredRuntime && runtime !== requiredRuntime) {
+  if (requiredRuntime && !runtimes.includes(requiredRuntime)) {
     return `这个组件需要 P4 通用运行时（${requiredRuntime}），请先升级设备固件。`;
   }
-  if (requiredScene && scene !== requiredScene) {
+  if (requiredScene && !scenes.includes(requiredScene)) {
     return `这个组件需要 P4 场景能力（${requiredScene}），请先升级设备固件。`;
   }
   if (preset && !presets.includes(preset)) {
     return `这个旧版游戏预设需要设备能力（${preset}），请先升级设备固件。`;
   }
-  if (preset && !["p4-bounded-v2", "p4-bounded-runtime-v3"].includes(runtime)) {
+  if (
+    preset &&
+    !runtimes.some((value) =>
+      ["p4-bounded-v2", "p4-bounded-runtime-v3", "p4-bounded-runtime-v4"].includes(value),
+    )
+  ) {
     return `这个旧版游戏预设需要 P4 组件运行时，请先升级设备固件。`;
   }
   return "";
@@ -600,6 +616,7 @@ export default function ComponentCenter() {
       sceneEngine: entry.sceneEngine || "",
       gamePreset: entry.gamePreset || "",
       scene: entry.scene || null,
+      sceneSprites: Array.isArray(entry.sceneSprites) ? entry.sceneSprites : [],
       kind: resolveComponentKind(entry.kind, entry.gameType),
       defaultBindings: Array.isArray(entry.buttons) ? entry.buttons.filter(isRoutedWidgetBinding) : [],
       screens: [{ name: "负一屏", purpose: "正式本地组件自带独立按钮功能绑定", regions: [] }],

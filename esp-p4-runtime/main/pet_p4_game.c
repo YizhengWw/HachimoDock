@@ -1,6 +1,6 @@
 /*
- * [Input] A validated built-in game kind, bounded tick rate, and semantic controls.
- * [Output] A deterministic fixed-grid frame for the P4 renderer.
+ * [Input] A validated preset or declarative scene, bounded tick rate, and semantic controls.
+ * [Output] A deterministic fixed-grid frame retaining semantic shapes and sprite references.
  * [Pos] Heap-free, script-free gameplay engine used by the declarative mini-app runtime.
  */
 
@@ -930,7 +930,8 @@ bool pet_p4_game_configure_bounded(
         || entity->bounds < PET_P4_GAME_BOUNDS_CLAMP
         || entity->bounds > PET_P4_GAME_BOUNDS_STOP
         || entity->shape < PET_P4_GAME_SHAPE_RECT
-        || entity->shape > PET_P4_GAME_SHAPE_BALL) {
+        || entity->shape > PET_P4_GAME_SHAPE_CHARACTER
+        || entity->sprite_index < -1) {
       return false;
     }
   }

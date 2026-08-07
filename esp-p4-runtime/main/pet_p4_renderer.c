@@ -1,9 +1,10 @@
 /*
- * [Input] Pet lifecycle/session state, decoded assets, and bounded mini-app view presets.
+ * [Input] Pet lifecycle/session state, decoded assets, bounded mini-app views,
+ *         semantic shapes, and persisted RGB565-alpha sprite frames.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
  *          plus a two-dot main/components indicator, current SW3-back/SW1-enter
- *          hints in the component catalog, and
+ *          hints in the component catalog, modern clean cards/HUDs, and
  *          a lightweight transfer screen that never reads changing assets.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and renderer tests.
@@ -111,6 +112,7 @@ static bool g_logged_ppa_fallback;
 static char g_decoder_fs_path[80];
 static char g_rendered_family[PET_P4_ASSET_FAMILY_MAX];
 static pet_p4_behavior_t g_behavior;
+static pet_p4_miniapp_sprite_pack_t g_miniapp_sprites;
 static bool g_logged_asset;
 static bool g_logged_missing_asset;
 static bool g_logged_asset_failure;
@@ -2976,6 +2978,21 @@ static void draw_miniapp_pixel_game_panel(
   fill_rect(x + 2, y + 2, width - 4, height - 4, palette->background_alt);
 }
 
+static void draw_miniapp_clean_card(
+  int x,
+  int y,
+  int width,
+  int height,
+  uint16_t surface,
+  const miniapp_pixel_palette_t *palette
+) {
+  fill_round_rect(x + 3, y + 5, width, height, 16, palette->shadow);
+  fill_round_rect(x, y, width, height, 16, surface);
+  if (width > 36 && height > 12) {
+    fill_round_rect(x + 14, y + 3, width - 28, 3, 2, palette->light);
+  }
+}
+
 static void draw_miniapp_pixel_sprite(
   const char *name,
   int x,
@@ -3098,8 +3115,51 @@ static uint16_t miniapp_game_tone_color(
   return palette->background_alt;
 }
 
+static bool draw_miniapp_entity_sprite(
+  const pet_p4_game_entity_t *entity,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
+  int x,
+  int y,
+  int width,
+  int height
+) {
+  if (!entity || !sprites || entity->sprite_index < 0
+      || entity->sprite_index >= sprites->count) return false;
+  const pet_p4_miniapp_sprite_t *sprite = &sprites->items[entity->sprite_index];
+  const size_t frame_bytes = (size_t) sprite->frame_width * sprite->frame_height * 3U;
+  const uint64_t now_ms = (uint64_t) esp_timer_get_time() / 1000ULL;
+  const uint8_t frame = sprite->frames > 1
+    ? (uint8_t) (((now_ms * sprite->fps) / 1000ULL) % sprite->frames)
+    : 0;
+  const size_t frame_offset = (size_t) sprite->data_offset + (size_t) frame * frame_bytes;
+  if (sprite->frame_width == 0 || sprite->frame_height == 0
+      || frame_offset + frame_bytes > sprites->data_length) return false;
+  for (int target_y = 0; target_y < height; target_y += 1) {
+    const int source_y = target_y * sprite->frame_height / height;
+    for (int target_x = 0; target_x < width; target_x += 1) {
+      const int source_x = target_x * sprite->frame_width / width;
+      const size_t offset = frame_offset
+        + ((size_t) source_y * sprite->frame_width + (size_t) source_x) * 3U;
+      const uint16_t color = (uint16_t) sprites->pixels[offset]
+        | ((uint16_t) sprites->pixels[offset + 1] << 8U);
+      const uint8_t alpha = sprites->pixels[offset + 2];
+      if (alpha == 0) continue;
+      if (alpha == 255) {
+        put_px(x + target_x, y + target_y, color);
+      } else {
+        const uint8_t red = (uint8_t) (((color >> 11) & 0x1fU) * 255U / 31U);
+        const uint8_t green = (uint8_t) (((color >> 5) & 0x3fU) * 255U / 63U);
+        const uint8_t blue = (uint8_t) ((color & 0x1fU) * 255U / 31U);
+        blend_px(x + target_x, y + target_y, red, green, blue, alpha);
+      }
+    }
+  }
+  return true;
+}
+
 static void draw_miniapp_game_entity(
   const pet_p4_game_entity_t *entity,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
   int grid_x,
   int grid_y,
   int cell,
@@ -3117,6 +3177,8 @@ static void draw_miniapp_game_entity(
   int cy = y + height / 2;
   uint16_t color = miniapp_game_tone_color(entity->tone, palette);
   uint16_t detail = entity->tone == 4 ? palette->ink : palette->light;
+
+  if (draw_miniapp_entity_sprite(entity, sprites, x, y, width, height)) return;
 
   switch (entity->shape) {
     case PET_P4_GAME_SHAPE_PLAYER_SHIP: {
@@ -3189,9 +3251,49 @@ static void draw_miniapp_game_entity(
       break;
     }
     case PET_P4_GAME_SHAPE_BALL:
+    case PET_P4_GAME_SHAPE_CIRCLE:
       fill_ellipse(cx, cy, width / 2, height / 2, color);
       if (width >= 8 && height >= 8) {
         fill_ellipse(cx - width / 5, cy - height / 5, 2, 2, detail);
+      }
+      break;
+    case PET_P4_GAME_SHAPE_CAPSULE: {
+      int radius = (width < height ? width : height) / 2;
+      fill_round_rect(x, y, width, height, radius, color);
+      if (width >= 8 && height >= 8) {
+        fill_round_rect(x + width / 5, y + height / 5, width / 3, height / 5, 2, detail);
+      }
+      break;
+    }
+    case PET_P4_GAME_SHAPE_TRIANGLE:
+      fill_triangle(cx, y, x + width - 1, y + height - 1, x, y + height - 1, color);
+      break;
+    case PET_P4_GAME_SHAPE_DIAMOND:
+      fill_triangle(cx, y, x + width - 1, cy, cx, cy, color);
+      fill_triangle(x, cy, cx, cy, cx, y + height - 1, color);
+      fill_triangle(cx, cy, x + width - 1, cy, cx, y + height - 1, color);
+      break;
+    case PET_P4_GAME_SHAPE_HEART:
+      fill_ellipse(x + width / 3, y + height / 3, width / 4, height / 4, color);
+      fill_ellipse(x + width * 2 / 3, y + height / 3, width / 4, height / 4, color);
+      fill_triangle(x, y + height / 3, x + width - 1, y + height / 3, cx, y + height - 1, color);
+      break;
+    case PET_P4_GAME_SHAPE_CLOUD:
+      fill_round_rect(x, y + height / 3, width, height * 2 / 3, height / 4, color);
+      fill_ellipse(x + width / 3, y + height / 3, width / 4, height / 3, color);
+      fill_ellipse(x + width * 2 / 3, y + height / 3, width / 3, height / 3, color);
+      break;
+    case PET_P4_GAME_SHAPE_COIN:
+      fill_ellipse(cx, cy, width / 2, height / 2, color);
+      fill_ellipse(cx, cy, width / 3, height / 3, detail);
+      fill_ellipse(cx, cy, width / 5, height / 5, color);
+      break;
+    case PET_P4_GAME_SHAPE_CHARACTER:
+      fill_ellipse(cx, y + height / 4, width / 4, height / 4, color);
+      fill_round_rect(x + width / 4, y + height / 2, width / 2, height / 2, width / 6, color);
+      if (width >= 8 && height >= 8) {
+        fill_ellipse(cx - width / 10, y + height / 5, 1, 1, detail);
+        fill_ellipse(cx + width / 10, y + height / 5, 1, 1, detail);
       }
       break;
     case PET_P4_GAME_SHAPE_RECT:
@@ -3210,6 +3312,7 @@ static void draw_miniapp_game_entity(
 
 static void draw_miniapp_game_grid(
   const pet_p4_game_frame_t *game,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
   int panel_x,
   int panel_y,
   int panel_width,
@@ -3266,7 +3369,7 @@ static void draw_miniapp_game_grid(
   if (game->kind == PET_P4_GAME_BOUNDED) {
     for (int index = 0; index < game->entity_count; index += 1) {
       draw_miniapp_game_entity(
-        &game->entities[index], grid_x, grid_y, cell, clean_style, palette
+        &game->entities[index], sprites, grid_x, grid_y, cell, clean_style, palette
       );
     }
   }
@@ -3433,13 +3536,17 @@ static void render_pixel_tool_miniapp_page(const pet_p4_miniapp_view_t *app) {
 
 static void render_pixel_miniapp_page(const pet_p4_miniapp_view_t *app) {
   miniapp_pixel_palette_t palette = miniapp_pixel_palette(app->visual_palette);
+  memset(&g_miniapp_sprites, 0, sizeof(g_miniapp_sprites));
+  (void) pet_p4_miniapp_get_sprites(&g_miniapp_sprites);
   bool clean_style = strcmp(app->visual_style, "clean") == 0;
   bool native_game = app->game.kind != PET_P4_GAME_NONE;
   bool blocks_game = app->game.kind == PET_P4_GAME_BLOCKS;
   bool native_progress = native_game && app->progress_percent >= 0;
   fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, palette.background);
   if (clean_style) {
-    fill_rect(28, 0, 108, 5, palette.primary);
+    blend_rect(0, 0, PET_P4_UI_WIDTH, 168, 255, 255, 255, 18);
+    blend_rect(0, 360, PET_P4_UI_WIDTH, 120, 0, 0, 0, 10);
+    fill_round_rect(28, 0, 108, 7, 4, palette.primary);
   } else {
     for (int y = 0; y < PET_P4_UI_HEIGHT; y += 32) {
       for (int x = 0; x < PET_P4_UI_WIDTH; x += 32) {
@@ -3451,7 +3558,7 @@ static void render_pixel_miniapp_page(const pet_p4_miniapp_view_t *app) {
   }
 
   if (clean_style) {
-    fill_round_rect_outline(28, 18, 584, 62, 8, palette.surface, palette.shadow);
+    draw_miniapp_clean_card(28, 18, 584, 62, palette.surface, &palette);
   } else {
     draw_miniapp_pixel_panel(28, 18, 584, 62, &palette);
   }
@@ -3479,25 +3586,21 @@ static void render_pixel_miniapp_page(const pet_p4_miniapp_view_t *app) {
   int score_h = native_game ? 132 : (scoreboard_first ? stage_h : 160);
   if (native_game) {
     if (clean_style) {
-      fill_round_rect_outline(
-        play_x, stage_y, play_w, stage_h, 10, palette.background_alt, palette.shadow
+      draw_miniapp_clean_card(
+        play_x, stage_y, play_w, stage_h, palette.background_alt, &palette
       );
     } else {
       draw_miniapp_pixel_game_panel(play_x, stage_y, play_w, stage_h, &palette);
     }
   } else {
     if (clean_style) {
-      fill_round_rect_outline(
-        play_x, stage_y, play_w, stage_h, 10, palette.surface, palette.shadow
-      );
+      draw_miniapp_clean_card(play_x, stage_y, play_w, stage_h, palette.surface, &palette);
     } else {
       draw_miniapp_pixel_panel(play_x, stage_y, play_w, stage_h, &palette);
     }
   }
   if (clean_style) {
-    fill_round_rect_outline(
-      score_x, stage_y, score_w, score_h, 10, palette.surface, palette.shadow
-    );
+    draw_miniapp_clean_card(score_x, stage_y, score_w, score_h, palette.surface, &palette);
   } else {
     draw_miniapp_pixel_panel(score_x, stage_y, score_w, score_h, &palette);
   }
@@ -3506,6 +3609,7 @@ static void render_pixel_miniapp_page(const pet_p4_miniapp_view_t *app) {
   if (native_game) {
     draw_miniapp_game_grid(
       &app->game,
+      &g_miniapp_sprites,
       play_x + 2,
       stage_y + 2,
       play_w - 4,

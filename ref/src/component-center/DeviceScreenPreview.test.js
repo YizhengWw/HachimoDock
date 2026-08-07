@@ -1,7 +1,8 @@
 /**
  * [Input] Read DeviceScreenPreview.jsx source.
  * [Output] Static source coverage for classic slots, board-shared tool palette/icon
- *          presets, and viewport-bounded animated blocks/snake/flappy previews.
+ *          presets, semantic v2 shapes, bounded sprite sheets, modern clean
+ *          surfaces, and viewport-bounded animated game previews.
  * [Pos] test node in ref/src/component-center
  * [Sync] If this file changes, update `ref/src/component-center/.folder.md`.
  */
@@ -176,6 +177,12 @@ test("generic scene previews render bounded shapes with distinct clean themes", 
   assert.match(source, /case "bullet"/);
   assert.match(source, /case "star"/);
   assert.match(source, /case "ball"/);
+  assert.match(source, /case "heart"/);
+  assert.match(source, /case "cloud"/);
+  assert.match(source, /case "character"/);
+  assert.match(source, /sceneSprites/);
+  assert.match(source, /context\.drawImage/);
+  assert.match(source, /sprite\.fps/);
   assert.match(source, /dashboard\.visualStyle === "clean"/);
   assert.match(source, /data-style=\{visualStyle\}/);
   assert.match(styles, /\.cds-pixel-shell\[data-palette="ocean"\]/);
@@ -183,5 +190,7 @@ test("generic scene previews render bounded shapes with distinct clean themes", 
   assert.match(styles, /\.cds-pixel-shell\[data-palette="ember"\]/);
   assert.match(styles, /\.cds-pixel-shell\[data-palette="mono"\]/);
   assert.match(styles, /\.cds-pixel-shell\[data-style="clean"\]/);
+  assert.match(styles, /radial-gradient/);
+  assert.match(styles, /border-radius:\s*14px/);
   assert.match(styles, /image-rendering:\s*auto/);
 });

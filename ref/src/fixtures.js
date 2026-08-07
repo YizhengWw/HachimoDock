@@ -10,7 +10,7 @@
  *              widget catalog (led by the promoted two-key catch package and
  *              its standardized global SW3 exit / SW1 primary action / joystick directions, then
  *              the remaining creation-dated games, including native Flappy Bird, plus tomato-clock /
- *              drink-reminder / token-usage tools) and the
+ *              drink-reminder / current-followed-Agent daily token-usage tools) and the
  *              component-generator prompt + replacement preview metadata,
  *              consumed by `ComponentCenter.jsx`.
  * [Pos] shared-data node in ref/src
@@ -404,14 +404,14 @@ export const BUILTIN_COMPONENT_CENTER = {
       source: "桌面 bridge 数据",
       status: "available",
       accent: "blue",
-      goal: "实时展示当前 coding agent 的 Token 统计；SW1 看总量，SW2 看输入，摇杆右看输出，退出跟随设备全局设置。",
-      sharePayload: "分享的是 Token 仪表盘工具组件，包含桌面桥接数据来源、总量/输入/输出三页和缓存统计。",
+      goal: "展示当前跟随 Agent 当天的 Token 消耗；SW1 看总量，SW2 看输入，摇杆右看输出，退出跟随设备全局设置。",
+      sharePayload: "分享的是 Token 仪表盘工具组件，包含桌面桥接的当前跟随 Agent 今日聚合数据、总量/输入/输出三页和缓存统计。",
       capabilities: ["bridge.tokenUsage", "runtime.stats", "input.device_global_exit", "display.multi_page"],
       packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "资源", "分享信息"],
       dashboard: {
         title: "Token 仪表盘",
         eyebrow: "当前 Agent",
-        headline: "等待实时统计",
+        headline: "等待今日统计",
         metricLabel: "总 Token",
         metricValue: "—",
         metricUnit: "TOKEN",
@@ -430,7 +430,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       screens: [
         {
           name: "Token 仪表盘",
-          purpose: "显示当前 Agent 的 Token 总量、输入、输出与缓存统计。",
+          purpose: "显示当前跟随 Agent 当天的 Token 总量、输入、输出与缓存统计。",
           regions: [
             { name: "总量", action: "stats.show_total" },
             { name: "输入", action: "stats.show_input" },
