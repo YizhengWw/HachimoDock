@@ -27,25 +27,33 @@ description: Generate, validate, and publish petui desktop-pet components for th
    - 每一项需求分别由哪个 runtime 原语实现。
    - 哪些动作适合摇杆上/下/左/右，游戏的 SW1 开始/重开动作，以及 SW2 的题材专属动作；退出由设备全局设置负责（出厂默认 SW3，但用户可以改绑或不绑定），组件不得定义退出动作或占用出厂默认退出键。
    - 先确定一套与题材匹配的现代视觉语言：主要轮廓、层级、留白、配色和动效。除非用户明确要求复古、像素或街机风，新组件默认使用 `clean`，不得把网格方块当作默认美术风格。
+   - 游戏先设计核心 PNG 素材：玩家角色、主要敌人和最重要的动态物件优先使用透明背景 PNG / 横向 sprite sheet。矩形、方块和内置 shape 只用于平台、子弹、金币、碰撞区等次要几何元素，或确实更符合极简题材时使用；不能因为省事让主体退化成色块。
 6. 读取 [references/patterns.md](references/patterns.md) 检查机制是否完整。该文件只有抽象检查项，不是组件模板。
 7. 在正式组件库之外准备独立工作包：
    - 新建组件必须从空目录开始，不要复制或改名任何既有组件。
    - 优化/修复现有组件时，只把用户指定的那一个组件复制到独立工作目录中修改，并保持原组件 ID；不得直接写入 `~/.claw-pet/components/library`。
-8. 执行校验：
+8. 执行结构与素材校验：
 
    ```bash
    python <skill-dir>/scripts/validate_generated_widget.py <component-dir>
    ```
 
-9. 修复全部校验错误。只有校验退出码为 `0` 时才允许发布。
-10. 原子发布到正式本地组件库：
+9. 如果是游戏，执行确定性玩法自测：
+
+   ```bash
+   python <skill-dir>/scripts/smoke_test_widget_game.py <component-dir>
+   ```
+
+   自测必须从真实输入映射出发，跑通开始、每个玩法动作的即时可见反馈、自动推进、得分或进展、成功/失败结算和重开。只验证 action 名存在、速度字段变化或单帧动画不算玩法通过。
+10. 修复全部结构、素材和玩法错误。只有两项校验退出码都为 `0` 时才允许发布；发布器还会重复执行玩法自测，不能跳过。
+11. 原子发布到正式本地组件库：
 
    ```bash
    python <skill-dir>/scripts/publish_generated_widget.py <component-dir> --source-agent <agent-id>
    ```
 
-11. 向用户报告 `jobId`、组件 ID、内容版本哈希和正式目录。Pet Manager 会自动发现正式目录中的组件。
-12. 如果本次是优化/修复现有组件，必须明确告诉用户：在 Pet Manager 组件中心刷新组件库，打开同一个组件卡片并点击“保存并同步”，用同一组件 ID 的新包覆盖设备上的旧包；只发布到本地组件库不会自动替换设备内容。
+12. 向用户报告 `jobId`、组件 ID、内容版本哈希、玩法自测结果和正式目录。Pet Manager 会自动发现正式目录中的组件。
+13. 如果本次是优化/修复现有组件，必须明确告诉用户：在 Pet Manager 组件中心刷新组件库，打开同一个组件卡片并点击“保存并同步”，用同一组件 ID 的新包覆盖设备上的旧包；只发布到本地组件库不会自动替换设备内容。
 
 ## 路由原则
 
@@ -61,8 +69,8 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - 先用变量、状态、transition、tick 和 dashboard 表达需求；只有确实需要坐标、移动、碰撞或边界行为时才增加 `scene`。
 - 新小游戏使用通用 `scene`，不得声明旧版 `game.type=blocks|snake|flappy`；旧版 `game` 仅用于读取和维护兼容包。
 - 文案出现移动、飞行、射击、子弹、敌人或碰撞时，runtime 必须真实实现对应 scene 机制；不得只在 Dashboard 中描述不存在的玩法。
-- `scene.entities[*].shape` 可使用 `rect|player-ship|enemy-ship|bullet|star|paddle|ball|circle|capsule|triangle|diamond|heart|cloud|coin|character`。根据实体语义选择轮廓；省略时才使用兼容默认值 `rect`，不得用无关方块冒充主体。
-- 固定轮廓不足以表达题材核心角色时，可使用受控横向 PNG sprite sheet：最多 4 个精灵、每个 1-8 帧、单帧 8-64 像素、1-20 fps、全部帧合计最多 4096 像素、单个源 PNG 不超过 128 KiB。PNG 只作为静态素材，不能包含脚本；PC 会预编译后随组件事务下发。
+- 新游戏的核心视觉元素默认使用受控横向 PNG sprite sheet：玩家/主角必须优先使用 PNG，主要敌人或目标在配额允许时也使用 PNG；最多 4 个精灵、每个 1-8 帧、单帧 8-64 像素、1-20 fps、全部帧合计最多 4096 像素、单个源 PNG 不超过 128 KiB。PNG 只作为静态素材，不能包含脚本；PC 会预编译后随组件事务下发。
+- `scene.entities[*].shape` 可使用 `rect|player-ship|enemy-ship|bullet|star|paddle|ball|circle|capsule|triangle|diamond|heart|cloud|coin|character`。优先用于平台、弹丸、金币、装饰和极简几何题材；省略时才使用兼容默认值 `rect`。若当前 Agent 没有生成或绘制 PNG 的能力，必须先说明限制并选择语义形状，禁止静默用矩形/方块冒充主体。
 - 新组件默认 `visualStyle: "clean"`；只有用户明确要求复古、像素、8-bit 或街机风时才选 `pixel`。从 `candy|sunset|mint|arcade|ocean|forest|ember|mono` 中选择有理由的配色；`classic` 只用于读取历史包。不得无条件复用同一 style、palette、layout 或实体色阶组合。
 - 视觉选择必须来自当前需求：发布前说明该风格、配色和每个实体形状为何匹配题材。若两个不同游戏除标题、文案和数值外具有相同的视觉组合，视为未完成并重新设计。
 - 不生成 JS、Python、HTML、CSS、SVG、shell 或可执行代码到组件包中。
@@ -84,9 +92,10 @@ description: Generate, validate, and publish petui desktop-pet components for th
 - 游戏在组件库中的 description 已经说明目标、核心规则与结束条件；按钮说明可由组件中心根据真实映射生成，不在 description 中写死 SW1/SW2/SW3。
 - 默认现代视觉不是“把格子间距去掉”：主体应优先使用语义形状或小型精灵，卡片/HUD 要有层级和留白；只有明确的复古需求才允许可见像素网格和方块化主体。
 - 每个 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。组件不得声明 `page_main/page_back` 等系统导航 action；退出由设备全局绑定统一处理，摇杆中键长按默认不绑定。
+- 游戏核心角色和主要动态物件已优先使用 PNG；若退回内置 shape，能够说明题材或能力限制上的具体理由，而不是为了省事。PNG 的透明背景、帧尺寸、帧数和引用路径均通过校验。
 - 出厂默认 SW3 短按是设备全局退出键，用户可以改绑或不绑定；生成或更新组件时仍不得占用 SW3，也不得自行声明退出动作。游戏优先将方向动作放到四向摇杆，将 SW1 用作开始/重新开始，将 SW2 留给射击、技能、暂停等题材专属动作。工具以 SW1 为主操作、SW2 为次操作，并可按语义使用摇杆方向切页或调节。
 - 组件画面、footer 和说明不得写死“SW3 退出”；需要提示时统一写“全局键退出”或“退出跟随设备全局设置”。
 - 无触控设备不含触屏事件；需要移动/碰撞时只使用能力清单声明的通用 scene 原语。
 - 没有虚构数据、未声明的数据源或示例残留。
-- 校验和发布命令均成功，最终路径位于正式 `library`，而不是工作目录或 `.staging`。
+- 结构校验、完整玩法自测和发布命令均成功；玩法报告证明开始、输入反馈、推进、进展/得分、结算与重开都可达。最终路径位于正式 `library`，而不是工作目录或 `.staging`。
 - 优化/修复任务保留了原 `component.json.id`，交付说明包含组件中心刷新与“保存并同步”的设备覆盖步骤。

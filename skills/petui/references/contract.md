@@ -195,9 +195,9 @@ screen.region.long_press
 - 最多 20 条 scene rule，每条 `do` 最多 4 个操作。所有数组和对象都按声明顺序执行。
 - Scene 使用固定数组、受控形状、受限 PNG 精灵和受控操作，不接受 JS、H5、脚本、表达式、任意内存或网络访问。
 
-### 受控 Sprite sheet
+### 受控 Sprite sheet（新游戏核心元素 PNG 优先）
 
-只有语义形状无法清楚表达题材主体时才增加 `scene.sprites`。PNG 必须是透明背景横向帧带，画布宽度严格等于 `frame_width * frames`，高度严格等于 `frame_height`：
+新游戏先为玩家/主角设计受控 PNG；配额允许时，主要敌人、目标或题材识别物也优先使用 PNG。内置 shape 主要用于平台、弹丸、金币、碰撞标记、装饰和本身就是极简几何的对象。不能因为生成方便而用矩形或方块代替题材主体。PNG 必须是透明背景横向帧带，画布宽度严格等于 `frame_width * frames`，高度严格等于 `frame_height`：
 
 ```json
 {
@@ -221,7 +221,7 @@ screen.region.long_press
 - 所有精灵的全部解码帧合计最多 4096 像素；单个源 PNG 不超过 128 KiB。
 - `id` 为 1-15 个安全 ASCII 字符；`asset` 只能是 `assets/<safe-name>.png`。
 - PC 预览直接读取源 PNG；下发时会编译为 RGB565+alpha 并作为同一组件事务安装，固件重启后仍会从组件双代存储恢复。
-- 不要为装饰性细节滥用精灵。简单球、胶囊、心形、云、金币和人物轮廓应优先使用内置 shape，以节省包体和运行内存。
+- 不要为装饰性细节滥用精灵。简单球、胶囊、心形、云、金币、子弹和平台可优先使用内置 shape，以节省包体和运行内存；这条节省规则不能覆盖“玩家/主角和主要题材对象 PNG 优先”的要求。
 
 ### Rule 触发器
 
@@ -248,6 +248,16 @@ screen.region.long_press
 | `tone` | `entity,tone` | 切换实体 1-4 色阶 |
 
 一个可交付小游戏必须形成“目标出现、玩家输入、即时反馈、局面变化、回合结算、重开”的完整闭环。优先组合通用状态机和 `scene`，不得从 Flappy、贪吃蛇、方块中挑一个冒充用户要求的玩法。
+
+### 玩法自测发布门槛
+
+新游戏在发布前必须运行：
+
+```bash
+python <skill-dir>/scripts/smoke_test_widget_game.py <component-dir>
+```
+
+测试器从 `buttons.json` 的真实 action 出发探索可达局面，并要求：开始后进入 active state；每个玩法输入在可达局面中产生即时可见反馈；tick/自动实体真实推进；声明的得分或进展可达；成功或失败结算可达；结算后可以重新开始。只改变 `vx/vy`、隐藏变量或文案而没有当刻画面反馈的动作不通过。发布器会在 staging 中再次运行同一测试，失败包不能进入正式组件库。
 
 文案与 runtime 必须一致：声称移动/飞行时要有实体速度或移动操作；声称碰撞时要有 collision rule；射击/战机玩法还必须有持续运动的子弹与敌人实体、子弹命中敌人的 collision rule，以及由玩家 action 驱动的水平移动。Dashboard、分享文案和组件描述不得宣传 runtime 中不存在的机制。
 

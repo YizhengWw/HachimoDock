@@ -670,11 +670,15 @@ test("petui routes game/tool requests and publishes only validated formal compon
   const widgetSkill = readFileSync(join(skillRoot, "SKILL.md"), "utf8");
   const contract = readFileSync(join(skillRoot, "references/contract.md"), "utf8");
   const publisher = readFileSync(join(skillRoot, "scripts/publish_generated_widget.py"), "utf8");
+  const gameplaySmoke = readFileSync(join(skillRoot, "scripts/smoke_test_widget_game.py"), "utf8");
   assert.match(widgetSkill, /name: petui/);
   assert.match(widgetSkill, /判断需求属于 `game` 还是 `tool`/);
   assert.match(widgetSkill, /不得把不支持的游戏静默替换成 Flappy Bird/);
   assert.match(widgetSkill, /validate_generated_widget\.py/);
+  assert.match(widgetSkill, /smoke_test_widget_game\.py/);
   assert.match(widgetSkill, /publish_generated_widget\.py/);
+  assert.match(widgetSkill, /玩家\/主角必须优先使用 PNG/);
+  assert.match(widgetSkill, /开始、每个玩法动作的即时可见反馈、自动推进、得分或进展、成功\/失败结算和重开/);
   assert.match(widgetSkill, /优化、修复或继续迭代现有组件时[\s\S]*?保留它的 `component\.json\.id`/);
   assert.match(widgetSkill, /打开同一个组件卡片并点击“保存并同步”/);
   assert.match(contract, /`buttons\.json` 最多 8 条/);
@@ -687,9 +691,14 @@ test("petui routes game/tool requests and publishes only validated formal compon
   assert.match(widgetSkill, /游戏优先将方向动作放到四向摇杆/);
   assert.match(widgetSkill, /`component\.json\.description` 用 1-2 句说明游戏目标、核心规则和结束条件/);
   assert.match(contract, /组件中心会根据 `buttons\.json` 另行展示实际操作方法/);
+  assert.match(contract, /新游戏核心元素 PNG 优先/);
+  assert.match(contract, /玩法自测发布门槛/);
   assert.match(contract, /knob\.rotate_cw/);
   assert.match(contract, /\.staging.*不是“草稿库”/);
   assert.match(publisher, /os\.replace\(staged_package, destination\)/);
+  assert.match(publisher, /smoke_test_game\(staged_package\)/);
+  assert.match(gameplaySmoke, /resultReached/);
+  assert.match(gameplaySmoke, /restartPath/);
 });
 
 test("component center preserves CreateComponentDrawer with all 3 STEP cards", () => {

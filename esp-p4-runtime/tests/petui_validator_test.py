@@ -21,6 +21,12 @@ VALIDATOR = importlib.util.module_from_spec(SPEC)
 sys.dont_write_bytecode = True
 SPEC.loader.exec_module(VALIDATOR)
 
+SMOKE_PATH = (
+    WORKSPACE_ROOT / "skills" / "petui" / "scripts" / "smoke_test_widget_game.py"
+)
+sys.path.insert(0, str(SMOKE_PATH.parent))
+from smoke_test_widget_game import run_smoke_test  # noqa: E402
+
 
 def rgba_png(width: int, height: int) -> bytes:
     def chunk(kind: bytes, data: bytes) -> bytes:
@@ -187,6 +193,18 @@ def shooter_fixture() -> dict[str, object]:
     }
 
 
+def write_fixture(root: Path, values: dict[str, object]) -> None:
+    (root / "assets").mkdir()
+    (root / "runtime").mkdir()
+    for relative, value in values.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(value, bytes):
+            path.write_bytes(value)
+        else:
+            path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
 class ClaimedMechanicsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.values = shooter_fixture()
@@ -194,17 +212,7 @@ class ClaimedMechanicsTests(unittest.TestCase):
     def validate_values(self, values: dict[str, object]) -> list[str]:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "assets").mkdir()
-            (root / "runtime").mkdir()
-            for relative, value in values.items():
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                if isinstance(value, bytes):
-                    path.write_bytes(value)
-                else:
-                    path.write_text(
-                        json.dumps(value, ensure_ascii=False), encoding="utf-8"
-                    )
+            write_fixture(root, values)
             return VALIDATOR.validate_widget(root)
 
     def test_shooter_fixture_has_real_mechanics(self) -> None:
@@ -360,6 +368,79 @@ class ClaimedMechanicsTests(unittest.TestCase):
         values["assets/hero.png"] = rgba_png(8, 8)
         errors = self.validate_values(values)
         self.assertTrue(any("PNG 尺寸应为 16x8" in error for error in errors), errors)
+
+
+class GameplaySmokeTests(unittest.TestCase):
+    def smoke_values(self, values: dict[str, object]) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_fixture(root, values)
+            return run_smoke_test(root)
+
+    def test_complete_shooter_loop_is_playable(self) -> None:
+        values = shooter_fixture()
+        runtime = values["runtime/widget.json"]
+        assert isinstance(runtime, dict)
+        runtime["engine"] = "p4-bounded-runtime-v4"
+        result = self.smoke_values(values)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["scoreReached"], result)
+        self.assertTrue(result["resultReached"], result)
+        self.assertTrue(result["restartPath"], result)
+
+    def test_velocity_only_input_fails_immediate_feedback_gate(self) -> None:
+        values = shooter_fixture()
+        runtime = values["runtime/widget.json"]
+        assert isinstance(runtime, dict)
+        runtime["engine"] = "p4-bounded-runtime-v4"
+        buttons = values["buttons.json"]
+        assert isinstance(buttons, list)
+        buttons.append(
+            {
+                "action": "play.jump",
+                "control": "前方摇杆",
+                "event": "joystick.up",
+                "label": "跳跃",
+            }
+        )
+        transitions = runtime["transitions"]
+        assert isinstance(transitions, list)
+        transitions.append({"from": "playing", "on": "play.jump"})
+        scene = runtime["scene"]
+        assert isinstance(scene, dict)
+        rules = scene["rules"]
+        assert isinstance(rules, list)
+        rules.append(
+            {
+                "on": "play.jump",
+                "do": [
+                    {"op": "velocity", "entity": "player", "vx": 0, "vy": -2}
+                ],
+            }
+        )
+        result = self.smoke_values(values)
+        self.assertFalse(result["ok"], result)
+        self.assertTrue(
+            any("即时可见反馈" in error and "play.jump" in error for error in result["errors"]),
+            result,
+        )
+
+    def test_unreachable_score_rule_fails_real_play_gate(self) -> None:
+        values = shooter_fixture()
+        runtime = values["runtime/widget.json"]
+        assert isinstance(runtime, dict)
+        runtime["engine"] = "p4-bounded-runtime-v4"
+        scene = runtime["scene"]
+        assert isinstance(scene, dict)
+        entities = scene["entities"]
+        assert isinstance(entities, list)
+        bullet = next(entity for entity in entities if entity["id"] == "bullet")
+        enemy = next(entity for entity in entities if entity["id"] == "enemy")
+        bullet["active"] = False
+        enemy["active"] = False
+        result = self.smoke_values(values)
+        self.assertFalse(result["ok"], result)
+        self.assertTrue(any("得分规则" in error for error in result["errors"]), result)
 
 
 if __name__ == "__main__":

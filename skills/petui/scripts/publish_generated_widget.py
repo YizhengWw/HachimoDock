@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from validate_generated_widget import load_capabilities, validate_widget
+from smoke_test_widget_game import smoke_test_game
 
 
 def utc_now() -> str:
@@ -110,6 +111,16 @@ def publish_widget(
         errors = validate_widget(staged_package, capabilities)
         if errors:
             raise ValueError("组件校验失败: " + "；".join(errors))
+        try:
+            gameplay = smoke_test_game(staged_package)
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"组件玩法模拟失败: {error}") from error
+        if not gameplay.get("ok"):
+            raise ValueError(
+                "组件玩法自测失败: " + "；".join(gameplay.get("errors", ["未知错误"]))
+            )
+        job.update(gameplaySmoke=gameplay, updatedAt=utc_now())
+        atomic_write_json(log_path, job)
         manifest = json.loads((staged_package / "component.json").read_text(encoding="utf-8"))
         component_id = manifest["id"]
         version_hash = content_hash(staged_package)
