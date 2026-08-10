@@ -596,6 +596,9 @@ test("Button-selected conversations are temporary and bound to status and input 
   assert.match(sessionSync, /sessionIndex: selectedSessionIndex/);
   assert.match(sessionSync, /sessionCount: selectableSessions\.length/);
   assert.match(sessionSync, /action === "session_clear"/);
+  assert.match(sessionSync, /listen\("voice-transcript"/);
+  assert.match(sessionSync, /payload\.sessionId[\s\S]*?"current"/);
+  assert.match(sessionSync, /onSessionChange\("auto"\)/);
   assert.match(sessionSync, /p4SessionActivitySignature/);
   assert.match(sessionSync, /sessions: buildP4DeviceSessionTransportPayload\(deviceSessions\)/);
   assert.match(sessionService, /session\?\.model[\s\S]*codex-auto-review/);

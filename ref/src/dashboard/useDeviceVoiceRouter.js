@@ -1,6 +1,6 @@
 /**
  * [Input] Tauri USB audio, transcript, and Agent-delivery events for device PTT utterances.
- * [Output] One monotonic, utterance-scoped draft-then-confirm voice flow plus audio relay activity callbacks.
+ * [Output] One monotonic, utterance-scoped draft-then-confirm voice flow with current-to-exact guarded route resolution plus audio relay activity callbacks.
  * [Pos] Dashboard device-voice routing state machine and event-listener boundary.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md` and `ref/src/.folder.md`.
  */
@@ -68,7 +68,12 @@ function nextRouteValue(currentValue, incomingValue, allowAutoResolution = false
   const current = normalizeText(currentValue);
   const incoming = normalizeText(incomingValue);
   if (!current) return incoming;
-  if (allowAutoResolution && current === "auto" && incoming && incoming !== "auto") {
+  if (
+    allowAutoResolution
+    && ["auto", "current"].includes(current)
+    && incoming
+    && !["auto", "current"].includes(incoming)
+  ) {
     return incoming;
   }
   return current;

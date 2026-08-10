@@ -13,8 +13,8 @@
  *          persistent USB transfer diagnostics, and serialized, exact-board
  *          native-only appearance attempts,
  *          USB desktop identity propagation,
- *          staged visible-composer voice drafts consumed only by an explicit
- *          same-board global Confirm action,
+ *          foreground-Agent-first / device-bubble-fallback visible-composer
+ *          voice drafts consumed only by an explicit same-board global Confirm action,
  *          formal local component latest-version listing/deletion with game/tool kind
  *          and manifest descriptions for component-center card summaries, without a manual import command,
  *          .clawpkg USB/SSH installs with per-component button-function
@@ -638,7 +638,7 @@ struct DeviceVoiceContext {
     board_device_id: String,
     target: P4SessionBinding,
     session_queue_empty_at_start: bool,
-    use_current_visible_session: bool,
+    use_current_visible_session: AtomicBool,
     final_requested: AtomicBool,
     final_handled: AtomicBool,
     draft_ready: AtomicBool,
@@ -749,17 +749,28 @@ fn audio_begin_session_queue_empty(payload: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-fn should_use_current_visible_session(session_queue_empty: bool, agent_id: &str) -> bool {
-    session_queue_empty && agent_uses_visible_composer(agent_id)
+fn should_use_current_visible_session(
+    agent_is_frontmost: bool,
+    session_queue_empty: bool,
+    agent_id: &str,
+) -> bool {
+    agent_uses_visible_composer(agent_id) && (agent_is_frontmost || session_queue_empty)
 }
 
-fn current_visible_voice_target(mut target: P4SessionBinding) -> P4SessionBinding {
-    target.session_id.clear();
-    target.auto_follow = false;
-    target.session_title.clear();
-    target.session_cwd.clear();
-    target.session_title_unique = false;
-    target
+fn device_voice_uses_current_visible_session(context: &DeviceVoiceContext) -> bool {
+    context.use_current_visible_session.load(Ordering::SeqCst)
+}
+
+fn device_voice_bound_target_is_addressable(
+    session_queue_empty: bool,
+    target: &P4SessionBinding,
+) -> bool {
+    !session_queue_empty
+        && !target.session_id.is_empty()
+        && !target.session_title.is_empty()
+        && (target.agent_id == "claude-code"
+            || cfg!(target_os = "macos")
+            || target.session_title_unique)
 }
 
 fn device_voice_binding_matches(target: &P4SessionBinding, binding: &P4SessionBinding) -> bool {
@@ -792,7 +803,7 @@ fn device_voice_target_is_current(context: &DeviceVoiceContext) -> bool {
     if context.cancelled.load(Ordering::SeqCst) {
         return false;
     }
-    if context.use_current_visible_session {
+    if device_voice_uses_current_visible_session(context) {
         if let Ok(binding) = p4_session_binding().lock() {
             if binding.board_device_id == context.target.board_device_id
                 && binding.agent_id == context.target.agent_id
@@ -845,7 +856,11 @@ fn p4_session_binding_inject_session_id(target: &P4SessionBinding) -> &str {
 }
 
 fn device_voice_session_id(context: &DeviceVoiceContext) -> &str {
-    p4_session_binding_inject_session_id(&context.target)
+    if device_voice_uses_current_visible_session(context) {
+        "current"
+    } else {
+        p4_session_binding_inject_session_id(&context.target)
+    }
 }
 
 fn frozen_device_voice_inject_target(
@@ -1485,19 +1500,21 @@ fn start_device_voice_context(
     utterance_id: &str,
     session_queue_empty_at_start: bool,
 ) {
-    let mut target = device_voice_target_snapshot(board_device_id);
-    let use_current_visible_session =
-        should_use_current_visible_session(session_queue_empty_at_start, &target.agent_id);
-    if use_current_visible_session {
-        target = current_visible_voice_target(target);
-    }
+    let target = device_voice_target_snapshot(board_device_id);
+    let agent_is_frontmost =
+        codex_composer::CodexComposerBridge::is_agent_frontmost(&target.agent_id);
+    let use_current_visible_session = should_use_current_visible_session(
+        agent_is_frontmost,
+        session_queue_empty_at_start,
+        &target.agent_id,
+    );
     let context = Arc::new(DeviceVoiceContext {
         emitter: emitter.clone(),
         utterance_id: utterance_id.to_string(),
         board_device_id: board_device_id.to_string(),
         target,
         session_queue_empty_at_start,
-        use_current_visible_session,
+        use_current_visible_session: AtomicBool::new(use_current_visible_session),
         final_requested: AtomicBool::new(false),
         final_handled: AtomicBool::new(false),
         draft_ready: AtomicBool::new(false),
@@ -1551,19 +1568,17 @@ fn start_device_voice_context(
         emit_device_voice_transcript(&context, "listening", 0, "", false, true, "");
     }
 
-    if context.use_current_visible_session {
+    if device_voice_uses_current_visible_session(&context) {
         eprintln!(
-            "[device-voice] empty device queue: locking the current visible {} session",
-            context.target.agent_id
+            "[device-voice] current visible {} session selected (frontmost={}, empty_queue={})",
+            context.target.agent_id, agent_is_frontmost, session_queue_empty_at_start,
         );
     }
 
-    let visible_target_is_addressable = context.use_current_visible_session
-        || (!context.target.session_id.is_empty()
-            && !context.target.session_title.is_empty()
-            && (context.target.agent_id == "claude-code"
-                || cfg!(target_os = "macos")
-                || context.target.session_title_unique));
+    let bound_target_is_addressable =
+        device_voice_bound_target_is_addressable(session_queue_empty_at_start, &context.target);
+    let visible_target_is_addressable =
+        device_voice_uses_current_visible_session(&context) || bound_target_is_addressable;
     if agent_uses_visible_composer(&context.target.agent_id) && visible_target_is_addressable {
         let startup_context = context.clone();
         if let Err(error) = thread::Builder::new()
@@ -1571,7 +1586,7 @@ fn start_device_voice_context(
             .spawn(move || {
                 let composer_context = Arc::downgrade(&startup_context);
                 let callback_agent_id = startup_context.target.agent_id.clone();
-                let callback = move |event: codex_composer::CodexComposerEvent| {
+                let callback = Arc::new(move |event: codex_composer::CodexComposerEvent| {
                     let Some(context) = composer_context.upgrade() else {
                         return;
                     };
@@ -1606,26 +1621,51 @@ fn start_device_voice_context(
                         true,
                         "",
                     );
+                });
+                let start_bound = |callback: Arc<
+                    dyn Fn(codex_composer::CodexComposerEvent) + Send + Sync,
+                >| {
+                    if startup_context.target.agent_id == "claude-code" {
+                        codex_composer::CodexComposerBridge::start_claude(
+                            &startup_context.target.session_id,
+                            &startup_context.target.session_title,
+                            &startup_context.target.session_cwd,
+                            move |event| callback(event),
+                        )
+                    } else {
+                        codex_composer::CodexComposerBridge::start(
+                            &startup_context.target.session_id,
+                            &startup_context.target.session_title,
+                            &startup_context.target.session_cwd,
+                            move |event| callback(event),
+                        )
+                    }
                 };
-                let composer_result = if startup_context.use_current_visible_session {
-                    codex_composer::CodexComposerBridge::start_current(
+                let composer_result = if device_voice_uses_current_visible_session(&startup_context)
+                {
+                    let current_callback = callback.clone();
+                    match codex_composer::CodexComposerBridge::start_current(
                         &startup_context.target.agent_id,
-                        callback,
-                    )
-                } else if startup_context.target.agent_id == "claude-code" {
-                    codex_composer::CodexComposerBridge::start_claude(
-                        &startup_context.target.session_id,
-                        &startup_context.target.session_title,
-                        &startup_context.target.session_cwd,
-                        callback,
-                    )
+                        move |event| current_callback(event),
+                    ) {
+                        Ok(composer) => Ok(composer),
+                        Err(current_error) if bound_target_is_addressable => {
+                            eprintln!(
+                                "[device-voice] current visible composer unavailable, falling back to device session: {current_error}"
+                            );
+                            startup_context
+                                .use_current_visible_session
+                                .store(false, Ordering::SeqCst);
+                            start_bound(callback.clone()).map_err(|bound_error| {
+                                format!(
+                                    "当前会话输入框不可用: {current_error}; 设备气泡会话定位也失败: {bound_error}"
+                                )
+                            })
+                        }
+                        Err(error) => Err(error),
+                    }
                 } else {
-                    codex_composer::CodexComposerBridge::start(
-                        &startup_context.target.session_id,
-                        &startup_context.target.session_title,
-                        &startup_context.target.session_cwd,
-                        callback,
-                    )
+                    start_bound(callback.clone())
                 };
                 match composer_result {
                     Ok(composer) if startup_context.cancelled.load(Ordering::SeqCst) => {
@@ -11603,31 +11643,42 @@ mod tests {
     }
 
     #[test]
-    fn empty_device_queue_uses_current_visible_agent_without_a_stale_task() {
-        assert!(should_use_current_visible_session(true, "codex"));
-        assert!(should_use_current_visible_session(true, "claude-code"));
-        assert!(!should_use_current_visible_session(false, "codex"));
-        assert!(!should_use_current_visible_session(true, "openclaw"));
+    fn voice_prefers_the_foreground_agent_and_keeps_empty_queue_fallback() {
+        assert!(should_use_current_visible_session(true, false, "codex"));
+        assert!(should_use_current_visible_session(
+            true,
+            false,
+            "claude-code"
+        ));
+        assert!(should_use_current_visible_session(false, true, "codex"));
+        assert!(should_use_current_visible_session(
+            false,
+            true,
+            "claude-code"
+        ));
+        assert!(!should_use_current_visible_session(false, false, "codex"));
+        assert!(!should_use_current_visible_session(true, true, "openclaw"));
 
-        let target = current_visible_voice_target(P4SessionBinding {
-            board_device_id: "board-p4".to_string(),
+        let stale_target = P4SessionBinding {
             agent_id: "codex".to_string(),
             session_id: "stale-session".to_string(),
-            auto_follow: true,
-            session_title: "app开发".to_string(),
-            session_cwd: r"D:\stale".to_string(),
+            session_title: "stale title".to_string(),
             session_title_unique: true,
-            generation: 9,
             ..P4SessionBinding::default()
-        });
-        assert_eq!(target.board_device_id, "board-p4");
-        assert_eq!(target.agent_id, "codex");
-        assert!(target.session_id.is_empty());
-        assert!(!target.auto_follow);
-        assert!(target.session_title.is_empty());
-        assert!(target.session_cwd.is_empty());
-        assert!(!target.session_title_unique);
-        assert_eq!(target.generation, 9);
+        };
+        assert!(!device_voice_bound_target_is_addressable(
+            true,
+            &stale_target
+        ));
+        assert!(device_voice_bound_target_is_addressable(
+            false,
+            &stale_target
+        ));
+
+        let source = include_str!("lib.rs");
+        assert!(source.contains("CodexComposerBridge::is_agent_frontmost"));
+        assert!(source.contains("falling back to device session"));
+        assert!(source.contains("use_current_visible_session"));
     }
 
     #[test]

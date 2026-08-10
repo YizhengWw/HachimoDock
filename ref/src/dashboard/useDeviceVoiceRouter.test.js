@@ -1,6 +1,6 @@
 /**
  * [Input] Device voice transcript/progress/delivery state-machine actions.
- * [Output] Behavioral coverage for frozen routes, draft-ready confirmation, monotonic revisions, stale utterances, and one terminal delivery.
+ * [Output] Behavioral coverage for frozen/current-fallback routes, draft-ready confirmation, monotonic revisions, stale utterances, and one terminal delivery.
  * [Pos] Test node for the dashboard device-voice router.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md`.
  */
@@ -135,4 +135,24 @@ test("one utterance accepts only one terminal delivery while auto may resolve on
     ok: false,
     message: "duplicate",
   }), done);
+});
+
+test("foreground-current route may resolve to the exact device session after guarded fallback", () => {
+  const listening = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    utteranceId: "utterance-current",
+    phase: "listening",
+    agentId: "codex",
+    sessionId: "current",
+  });
+  const fallback = transcript(listening, {
+    utteranceId: "utterance-current",
+    phase: "partial",
+    revision: 1,
+    text: "hello",
+    agentId: "codex",
+    sessionId: "session-from-device",
+  });
+
+  assert.equal(fallback.flow.agentId, "codex");
+  assert.equal(fallback.flow.sessionId, "session-from-device");
 });

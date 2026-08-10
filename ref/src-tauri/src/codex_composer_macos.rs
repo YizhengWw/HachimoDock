@@ -1,6 +1,6 @@
 /*
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
- * [Output] Native consent with activation-ordered Accessibility-pane routing,
+ * [Output] Read-only active-Agent detection, native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
  *          exact-session visible-composer draft replacement, including
  *          no-op-safe Claude focus confirmation across CLI/desktop metadata aliases, plus
@@ -113,6 +113,24 @@ impl MacosAgent {
             Self::Claude => "Claude",
         }
     }
+}
+
+pub(super) fn agent_is_frontmost(agent: MacosAgent) -> bool {
+    for bundle_identifier in agent_bundle_identifiers(agent) {
+        let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+            &NSString::from_str(bundle_identifier),
+        );
+        if applications
+            .iter()
+            .any(|application| application.isActive())
+        {
+            return true;
+        }
+    }
+    agent_application_pids(agent).into_iter().any(|pid| {
+        NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+            .is_some_and(|application| application.isActive())
+    })
 }
 
 fn agent_bundle_identifiers(agent: MacosAgent) -> &'static [&'static str] {

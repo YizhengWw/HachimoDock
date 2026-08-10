@@ -1,6 +1,6 @@
 /**
  * [Input] Followed Agent Session feed, P4 identity/connection, visibility policy, and dashboard notifications.
- * [Output] Exact visible-card selection, temporary routing target, encoder handling, and serialized P4 Session downlinks.
+ * [Output] Exact visible-card selection, foreground-voice lease reconciliation, temporary routing target, encoder handling, and serialized P4 Session downlinks.
  * [Pos] Dashboard-to-device Session synchronization boundary.
  * [Sync] If this file changes, update `ref/src/dashboard/.folder.md` and `ref/src/.folder.md`.
  */
@@ -291,6 +291,7 @@ export function useP4SessionSync({
     if (!enabled || !boardDeviceId || !agentId) return undefined;
     let disposed = false;
     let unlistenSessionSwitch = null;
+    let unlistenCurrentVoice = null;
 
     const setup = async () => {
       unlistenSessionSwitch = await listen("usb-message", (event) => {
@@ -355,15 +356,35 @@ export function useP4SessionSync({
         onSessionChange(nextSessionId);
         requestBindingSync();
       });
-      if (disposed) unlistenSessionSwitch?.();
+      unlistenCurrentVoice = await listen("voice-transcript", (event) => {
+        const payload = event?.payload && typeof event.payload === "object"
+          ? event.payload
+          : {};
+        if (normalizeText(payload.boardDeviceId) !== boardDeviceId) return;
+        if (normalizeText(payload.agentId) !== agentId) return;
+        if (normalizeText(payload.phase).toLowerCase() !== "submitted") return;
+        if (normalizeText(payload.sessionId).toLowerCase() !== "current") return;
+
+        // The foreground Agent session has just received the confirmed turn.
+        // Release a stale manual device-card lease so the refreshed newest
+        // session becomes the selected bubble instead of jumping back later.
+        pendingNoticeRef.current = null;
+        onSessionChange("auto");
+        requestBindingSync();
+      });
+      if (disposed) {
+        unlistenSessionSwitch?.();
+        unlistenCurrentVoice?.();
+      }
     };
 
     setup().catch((error) => {
-      console.warn("[device] failed to listen for session switch actions", error);
+      console.warn("[device] failed to listen for session or voice routing events", error);
     });
     return () => {
       disposed = true;
       unlistenSessionSwitch?.();
+      unlistenCurrentVoice?.();
     };
   }, [
     agentId,

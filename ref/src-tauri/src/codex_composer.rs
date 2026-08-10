@@ -1,6 +1,6 @@
 /*
  * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
- * [Output] Exact desktop-session navigation, bounded running-task composer lookup, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
+ * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded running-task composer lookup, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
  * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, and stale-focus recovery.
  * [Sync] If this file changes, update ref/.folder.md.
  */
@@ -434,6 +434,53 @@ pub struct CodexComposerBridge {
 
 #[cfg(windows)]
 impl CodexComposerBridge {
+    pub fn is_agent_frontmost(agent_id: &str) -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowThreadProcessId,
+        };
+
+        let expected_names: &[&str] = match agent_id.trim() {
+            "codex" => &["chatgpt.exe", "codex.exe"],
+            "claude-code" => &["claude.exe"],
+            _ => return false,
+        };
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return false;
+            }
+            let mut process_id = 0;
+            GetWindowThreadProcessId(window, &mut process_id);
+            if process_id == 0 {
+                return false;
+            }
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+            if process.is_null() {
+                return false;
+            }
+            let mut path = vec![0_u16; 32_768];
+            let mut path_len = path.len() as u32;
+            let queried =
+                QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut path_len) != 0;
+            CloseHandle(process);
+            if !queried {
+                return false;
+            }
+            let executable = String::from_utf16_lossy(&path[..path_len as usize]);
+            let executable_name = std::path::Path::new(&executable)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            expected_names
+                .iter()
+                .any(|expected| executable_name.eq_ignore_ascii_case(expected))
+        }
+    }
+
     pub fn start_current(
         agent_id: &str,
         callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
@@ -2598,6 +2645,15 @@ impl Drop for CodexComposerBridge {
 
 #[cfg(target_os = "macos")]
 impl CodexComposerBridge {
+    pub fn is_agent_frontmost(agent_id: &str) -> bool {
+        let agent = match agent_id.trim() {
+            "codex" => macos::MacosAgent::Codex,
+            "claude-code" => macos::MacosAgent::Claude,
+            _ => return false,
+        };
+        macos::agent_is_frontmost(agent)
+    }
+
     pub fn accessibility_permission_granted() -> bool {
         macos::accessibility_permission_granted()
     }
@@ -2979,6 +3035,10 @@ pub struct CodexComposerBridge;
 
 #[cfg(not(any(windows, target_os = "macos")))]
 impl CodexComposerBridge {
+    pub fn is_agent_frontmost(_agent_id: &str) -> bool {
+        false
+    }
+
     pub fn start_current(
         _agent_id: &str,
         _callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
