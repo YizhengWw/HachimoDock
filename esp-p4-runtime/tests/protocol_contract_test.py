@@ -902,8 +902,13 @@ def test_p4_diagnostics_are_persisted_and_asset_safe():
 def test_platformio_board_metadata_matches_actual_p4_hardware():
     platformio = read("platformio.ini")
     board = json.loads(read("boards/esp32-p4-wlk2802-32mb.json"))
+    default_profile, rotary_profile = platformio.split("[env:esp32_p4_evboard_rotary]", 1)
 
     assert "board = esp32-p4-wlk2802-32mb" in platformio
+    assert "-DPET_P4_ROTARY_ONLY=1" not in default_profile
+    assert "extends = env:esp32_p4_evboard" in rotary_profile
+    assert "${env:esp32_p4_evboard.build_flags}" in rotary_profile
+    assert "-DPET_P4_ROTARY_ONLY=1" in rotary_profile
     assert board["build"]["mcu"] == "esp32p4"
     assert board["build"]["f_cpu"] == "360000000L"
     assert board["build"]["f_flash"] == "80000000L"
@@ -2050,6 +2055,16 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "PET_P4_INPUT_JOYSTICK_Y_GPIO GPIO_NUM_20" in input_source
     assert "PET_P4_INPUT_JOYSTICK_X_CHANNEL ADC1_GPIO21_CHANNEL" in input_source
     assert "PET_P4_INPUT_JOYSTICK_Y_CHANNEL ADC1_GPIO20_CHANNEL" in input_source
+    assert "#ifndef PET_P4_ROTARY_ONLY" in input_source
+    assert "#if PET_P4_ROTARY_ONLY" in input_source
+    assert "rotary-only hardware profile active" in input_source
+    assert "joystick_adc=disabled" in input_source
+    assert "initialize_joystick_diagnostics(" in input_source
+    assert """initialize_joystick_diagnostics(
+    PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT,
+    PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT,
+    false
+  );""" in input_source
     assert '"esp_adc"' in cmake or "esp_adc" in cmake
     assert "PET_P4_INPUT_SAMPLE_MS 5" in input_source
     assert "PET_P4_INPUT_DEBOUNCE_MS 25" in input_source

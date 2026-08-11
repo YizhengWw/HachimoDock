@@ -1,16 +1,18 @@
 /*
  * [Input] Debounced SW1-SW3/shared center-key/legacy encoder GPIO events,
- *         calibrated four-direction joystick ADC samples, and validated
- *         desktop bindings.
+ *         optional calibrated four-direction joystick ADC samples selected by
+ *         the hardware build profile, and validated desktop bindings.
  * [Output] Persisted configurable input actions, context-local previous/next
  *          selection plus SW2 top-level page toggling, center-aware joystick
- *          decoding and ADC diagnostics with legacy encoder-event aliases, and component-local
- *          button routing that is active only while the component page is
- *          open, while the persisted global page-back gesture always wins and
- *          every other unmapped system-navigation gesture is suppressed, and
- *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
- *          input configuration with versioned SW1-confirm/SW3-back and
- *          joystick-up/down Previous/Next defaults.
+ *          decoding and ADC diagnostics, or a rotary-only profile that leaves
+ *          floating joystick ADC pins inactive, with legacy encoder-event
+ *          aliases and component-local button routing that is active only
+ *          while the component page is open. The persisted global page-back
+ *          gesture always wins, every other unmapped system-navigation gesture
+ *          is suppressed, and package-authored navigation actions are ignored.
+ *          Correlated snapshots expose the authoritative NVS-backed input
+ *          configuration with versioned SW1-confirm/SW3-back and joystick
+ *          up/down Previous/Next defaults.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `esp-p4-runtime/.folder.md` and `protocol.md`.
  */
@@ -36,6 +38,10 @@
 #include "pet_p4_audio.h"
 #include "pet_p4_input_core.h"
 #include "pet_p4_miniapp.h"
+
+#ifndef PET_P4_ROTARY_ONLY
+#define PET_P4_ROTARY_ONLY 0
+#endif
 
 #define PET_P4_INPUT_SW1_GPIO GPIO_NUM_50
 #define PET_P4_INPUT_SW2_GPIO GPIO_NUM_49
@@ -113,7 +119,9 @@ static QueueHandle_t g_event_queue;
 static pet_p4_input_config_t g_config;
 static atomic_uint g_dropped_events;
 static unsigned int g_event_sequence;
+#if !PET_P4_ROTARY_ONLY
 static adc_oneshot_unit_handle_t g_joystick_adc;
+#endif
 static atomic_bool g_joystick_ready;
 static atomic_int g_joystick_center_x;
 static atomic_int g_joystick_center_y;
@@ -124,6 +132,19 @@ static atomic_int g_joystick_maximum_x;
 static atomic_int g_joystick_minimum_y;
 static atomic_int g_joystick_maximum_y;
 
+static void initialize_joystick_diagnostics(int center_x, int center_y, bool ready) {
+  atomic_store_explicit(&g_joystick_center_x, center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_center_y, center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_current_x, center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_current_y, center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_minimum_x, center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_maximum_x, center_x, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_minimum_y, center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_maximum_y, center_y, memory_order_relaxed);
+  atomic_store_explicit(&g_joystick_ready, ready, memory_order_release);
+}
+
+#if !PET_P4_ROTARY_ONLY
 static void update_atomic_minimum(atomic_int *value, int sample) {
   int current = atomic_load_explicit(value, memory_order_relaxed);
   while (sample < current
@@ -156,6 +177,7 @@ static void record_joystick_sample(int x, int y) {
   update_atomic_minimum(&g_joystick_minimum_y, y);
   update_atomic_maximum(&g_joystick_maximum_y, y);
 }
+#endif
 
 static void copy_text(char *dest, size_t dest_size, const char *src) {
   if (!dest || dest_size == 0) return;
@@ -781,6 +803,7 @@ static void queue_button_flags(pet_p4_input_control_t control, uint8_t flags) {
   }
 }
 
+#if !PET_P4_ROTARY_ONLY
 static bool read_joystick_axes(int *x, int *y) {
   if (!g_joystick_adc || !x || !y) return false;
   return adc_oneshot_read(g_joystick_adc, PET_P4_INPUT_JOYSTICK_X_CHANNEL, x) == ESP_OK
@@ -813,6 +836,7 @@ static void calibrate_joystick_center(int *center_x, int *center_y) {
   }
   ESP_LOGI(TAG, "joystick center calibrated x=%d y=%d samples=%d", *center_x, *center_y, samples);
 }
+#endif
 
 static void input_task(void *arg) {
   (void) arg;
@@ -823,9 +847,11 @@ static void input_task(void *arg) {
     {.gpio = PET_P4_INPUT_ENCODER_PRESS_GPIO, .control = PET_P4_INPUT_CONTROL_ENCODER_PRESS},
   };
   pet_p4_rotary_decoder_t rotary;
+#if !PET_P4_ROTARY_ONLY
   pet_p4_joystick_decoder_t joystick;
   int joystick_center_x;
   int joystick_center_y;
+#endif
   TickType_t last_wake;
 
   for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i += 1) {
@@ -842,16 +868,22 @@ static void input_task(void *arg) {
     gpio_get_level(PET_P4_INPUT_ENCODER_B_GPIO),
     4
   );
+#if PET_P4_ROTARY_ONLY
+  initialize_joystick_diagnostics(
+    PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT,
+    PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT,
+    false
+  );
+  ESP_LOGW(
+    TAG,
+    "rotary-only hardware profile active enc_a=%d enc_b=%d press=%d joystick_adc=disabled",
+    PET_P4_INPUT_ENCODER_A_GPIO,
+    PET_P4_INPUT_ENCODER_B_GPIO,
+    PET_P4_INPUT_ENCODER_PRESS_GPIO
+  );
+#else
   calibrate_joystick_center(&joystick_center_x, &joystick_center_y);
-  atomic_store_explicit(&g_joystick_center_x, joystick_center_x, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_center_y, joystick_center_y, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_current_x, joystick_center_x, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_current_y, joystick_center_y, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_minimum_x, joystick_center_x, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_maximum_x, joystick_center_x, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_minimum_y, joystick_center_y, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_maximum_y, joystick_center_y, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_ready, true, memory_order_release);
+  initialize_joystick_diagnostics(joystick_center_x, joystick_center_y, true);
   pet_p4_joystick_decoder_init(
     &joystick,
     joystick_center_x,
@@ -861,6 +893,7 @@ static void input_task(void *arg) {
     PET_P4_INPUT_JOYSTICK_REPEAT_DELAY_MS,
     PET_P4_INPUT_JOYSTICK_REPEAT_INTERVAL_MS
   );
+#endif
   last_wake = xTaskGetTickCount();
 
   while (true) {
@@ -881,6 +914,7 @@ static void input_task(void *arg) {
     if (direction != PET_P4_ROTARY_NONE) {
       queue_event(PET_P4_INPUT_CONTROL_ENCODER, PET_P4_INPUT_GESTURE_ROTATE, (int) direction);
     }
+#if !PET_P4_ROTARY_ONLY
     int joystick_x;
     int joystick_y;
     if (read_joystick_axes(&joystick_x, &joystick_y)) {
@@ -899,6 +933,7 @@ static void input_task(void *arg) {
         );
       }
     }
+#endif
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PET_P4_INPUT_SAMPLE_MS));
   }
 }
@@ -916,6 +951,10 @@ esp_err_t pet_p4_input_init(void) {
     .pull_down_en = GPIO_PULLDOWN_DISABLE,
     .intr_type = GPIO_INTR_DISABLE,
   };
+  esp_err_t err;
+#if PET_P4_ROTARY_ONLY
+  err = gpio_config(&config);
+#else
   adc_oneshot_unit_init_cfg_t adc_unit_config = {
     .unit_id = ADC_UNIT_1,
     .ulp_mode = ADC_ULP_MODE_DISABLE,
@@ -924,7 +963,7 @@ esp_err_t pet_p4_input_init(void) {
     .atten = ADC_ATTEN_DB_12,
     .bitwidth = ADC_BITWIDTH_DEFAULT,
   };
-  esp_err_t err = adc_oneshot_new_unit(&adc_unit_config, &g_joystick_adc);
+  err = adc_oneshot_new_unit(&adc_unit_config, &g_joystick_adc);
   if (err != ESP_OK) return err;
   err = adc_oneshot_config_channel(
     g_joystick_adc,
@@ -944,24 +983,31 @@ esp_err_t pet_p4_input_init(void) {
     g_joystick_adc = NULL;
     return err;
   }
+#endif
+  if (err != ESP_OK) return err;
 
   load_persisted_config();
   g_event_queue = xQueueCreate(PET_P4_INPUT_QUEUE_LENGTH, sizeof(pet_p4_input_event_t));
   if (!g_event_queue) {
+#if !PET_P4_ROTARY_ONLY
     adc_oneshot_del_unit(g_joystick_adc);
     g_joystick_adc = NULL;
+#endif
     return ESP_ERR_NO_MEM;
   }
   if (xTaskCreate(input_task, "pet_p4_input", 4096, NULL, 9, NULL) != pdPASS) {
     vQueueDelete(g_event_queue);
     g_event_queue = NULL;
+#if !PET_P4_ROTARY_ONLY
     adc_oneshot_del_unit(g_joystick_adc);
     g_joystick_adc = NULL;
+#endif
     return ESP_ERR_NO_MEM;
   }
   ESP_LOGI(
     TAG,
-    "inputs ready sw1=%d sw2=%d sw3=%d center_key=%d enc_b=%d enc_a=%d joy_x=%d joy_y=%d",
+    "inputs ready profile=%s sw1=%d sw2=%d sw3=%d center_key=%d enc_b=%d enc_a=%d joy_x=%d joy_y=%d",
+    PET_P4_ROTARY_ONLY ? "rotary-only" : "joystick-compatible",
     PET_P4_INPUT_SW1_GPIO,
     PET_P4_INPUT_SW2_GPIO,
     PET_P4_INPUT_SW3_GPIO,

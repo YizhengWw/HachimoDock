@@ -594,6 +594,14 @@ legacy EC11 decoder on GPIO2/GPIO3 remains active, so the same firmware also
 supports the previous board revision. Firmware queues input events outside
 GPIO and render callbacks, and stores accepted mappings in NVS.
 
+Encoder-only assemblies use the `esp32_p4_evboard_rotary` PlatformIO hardware
+profile, which defines `PET_P4_ROTARY_ONLY=1`. That profile keeps the
+GPIO2/GPIO3 EC11 decoder and GPIO4 press input but does not initialize or sample
+ADC1 GPIO21/GPIO20. Its diagnostics snapshot reports `joystick.ready=false`, so
+unconnected joystick axes cannot emit false previous/next events. The default
+`esp32_p4_evboard` profile remains joystick-compatible, and the input
+configuration schema and legacy event names are unchanged for both profiles.
+
 PC to board:
 
 ```json

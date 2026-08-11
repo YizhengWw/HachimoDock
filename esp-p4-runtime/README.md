@@ -182,6 +182,15 @@ cd esp-p4-runtime
 python -m platformio run -e esp32_p4_evboard
 ```
 
+Encoder-only assemblies with an EC11-compatible rotary input on GPIO2/GPIO3
+and its press switch on GPIO4 should use the rotary hardware profile. It keeps
+the default environment unchanged for four-direction joystick boards and
+disables sampling of unconnected GPIO20/GPIO21 ADC inputs:
+
+```sh
+python -m platformio run -e esp32_p4_evboard_rotary
+```
+
 For an existing A/B device, the guarded Windows flash action validates the
 board partition table, writes bootloader/partition table/ota_0/OTA metadata,
 preserves NVS, the 6.875MiB SPIFFS volume, and both 10MiB appearance partitions,
