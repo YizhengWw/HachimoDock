@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "product": "HachimoDock Pet Manager",
+  "desktopVersion": "0.1.47",
+  "firmwareVersion": "0.7.49-p4",
+  "sourceCommit": "6e286753454aa1b7e8b2ac4407521606234d151e",
+  "publicSourceIncluded": false,
+  "embeddedInternalCredentials": false,
+  "artifacts": [
+    {
+      "role": "mac",
+      "file": "HachimoDock-Pet-Manager_0.1.47_macOS-arm64.dmg",
+      "bytes": 114467940,
+      "sha256": "7907e4371bb1800f0cebf8f199b6b2525258e162159aad8440cb7172dae96fda"
+    },
+    {
+      "role": "windows",
+      "file": "HachimoDock-Pet-Manager_0.1.47_Windows-x64-setup.exe",
+      "bytes": 93637758,
+      "sha256": "4c609f97a289c2537d94e90aea7ddb9eae8e0193b2dd1e6e72edd59a9409b659"
+    },
+    {
+      "role": "factory",
+      "file": "HachimoDock-P4_0.7.49-p4_factory.bin",
+      "bytes": 23068672,
+      "sha256": "b4f77bbafc9cf08997f71c202bdb76c800ec3112e9f72395fd8207f2a02f156b"
+    },
+    {
+      "role": "factoryManifest",
+      "file": "HachimoDock-P4_0.7.49-p4_factory.json",
+      "bytes": 2269,
+      "sha256": "3a96270d6c7fc2a9fa1f1b821f5a297facbc739ab3973684ce5be1a2620243b5"
+    },
+    {
+      "role": "license",
+      "file": "LICENSE",
+      "bytes": 2921,
+      "sha256": "1091af4291d83f53a48cf1d8aa3a593fdde593edc205f470dd4d3631315c61f1"
+    },
+    {
+      "role": "third-party-notices",
+      "file": "THIRD_PARTY_NOTICES.md",
+      "bytes": 2101,
+      "sha256": "b6c53da54c0d29b6eabfc052d97be406e21bdcbd74f65e18db404c1405440e20"
+    }
+  ]
+}

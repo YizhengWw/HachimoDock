@@ -1,0 +1,66 @@
+# HachimoDock Binary Distribution License
+
+Version 1.0, 11 August 2026
+
+Copyright (C) 2026 Yizheng Wang. All rights reserved.
+
+This license applies to the HachimoDock first-party executable object code,
+firmware, bundled first-party media and component data, and accompanying
+documentation distributed in an official binary release (collectively, the
+"Product"). It does not apply to third-party software or materials identified
+in `THIRD_PARTY_NOTICES.md`; those items remain governed by their respective
+licenses.
+
+## 1. License grant
+
+Subject to this license, the copyright holder grants you a limited,
+non-exclusive, non-transferable license to download, install, and use an
+unmodified official copy of the Product on compatible computers and
+HachimoDock devices for personal use or your organization's internal use.
+You may make one archival backup copy solely to restore your authorized use.
+
+## 2. Restrictions
+
+Except where applicable law or a third-party license expressly permits it,
+you may not:
+
+- copy, publish, redistribute, sublicense, sell, rent, lease, or host the
+  Product for third parties;
+- modify, adapt, translate, create derivative works from, or remove ownership
+  notices from the Product;
+- reverse engineer, decompile, disassemble, or otherwise attempt to derive
+  source code from the Product; or
+- bypass technical restrictions or use the Product to violate law or the
+  rights of others.
+
+No source-code license, patent license, trademark license, or right to create
+or distribute modified firmware is granted by implication.
+
+## 3. Ownership and third-party rights
+
+The Product is licensed, not sold. The copyright holder retains all rights not
+expressly granted here. Third-party notices and licenses included with the
+Product control to the extent they grant rights or impose obligations for the
+identified third-party materials.
+
+## 4. Updates and termination
+
+An update may replace an earlier version and may be subject to updated terms
+presented with that release. This license terminates automatically if you
+materially breach it. On termination, you must stop using and delete all
+copies of the Product, except where applicable law provides otherwise.
+
+## 5. Disclaimer and limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE PRODUCT IS PROVIDED
+"AS IS" AND "AS AVAILABLE", WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+NON-INFRINGEMENT, OR ERROR-FREE OPERATION.
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE COPYRIGHT HOLDER AND
+CONTRIBUTORS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL,
+CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOSS OF DATA, PROFITS, REVENUE, OR
+BUSINESS, ARISING FROM OR RELATED TO THE PRODUCT OR THIS LICENSE.
+
+Nothing in this license excludes rights, warranties, or liabilities that
+applicable law does not allow to be excluded or limited.
