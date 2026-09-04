@@ -1,0 +1,90 @@
+{
+  "schemaVersion": 4,
+  "profile": "v9-640x480-15fps-225f-h264-crf27",
+  "packId": "d468a7bea959f7e98102fbce16cabb1b89dcb602d77fbe5a869204e58e139e01",
+  "sourceAssets": [
+    {
+      "family": "done",
+      "videoSha256": "68fa67d96e6b52553887f8a31a0c71f5d96bc82059becfc6ea847083e112ae64",
+      "durationMs": 10080,
+      "audioSha256": "b3b436a084da54d43f91af83ba5001c3337ff430912f7dd5cb6ce4f479160a2e"
+    },
+    {
+      "family": "error",
+      "videoSha256": "aebfade615f45ef9c76029f063e43160d30262382e212a5dbf92585702aee657",
+      "durationMs": 15130,
+      "audioSha256": "5386a8ae2132b52ec3e4431078408828f8e701a2cc77a014a8e7de7fd7f8dd12"
+    },
+    {
+      "family": "idle.begging",
+      "videoSha256": "5c78981cbbd84996a4901f29937cafb7fa5a5f08bad7b2176e30f99a8081a3d7",
+      "durationMs": 12130
+    },
+    {
+      "family": "idle.daydreaming",
+      "videoSha256": "a5fa280d4daa71c3c556c077d2e50c5a5b1c48e29166f593b4058ddadf4afb88",
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.eating",
+      "videoSha256": "b5c8b0b19f2a8536045c4fd20baff88555678b57d8e0c6558baf6dd99e4defaf",
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.playing",
+      "videoSha256": "dd788dcb9e3e7c45dec50908befcf54ebb32e72022d981dd6f54300e7f95faa0",
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.reading",
+      "videoSha256": "ab615a2b6d9b22040f0c739a4202c7c26a11cf90e13cd0e1d25579bbc7584001",
+      "durationMs": 14130
+    },
+    {
+      "family": "idle.traveling",
+      "videoSha256": "a1eb978d706aafaf3060e37e8447a6d27715366d17ae3e8498662a662d805a7f",
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.wandering",
+      "videoSha256": "31f6687b6836791c108b720174b8e6818beddb6ed8ebfd9a44f24f951ae2d38c",
+      "durationMs": 15130
+    },
+    {
+      "family": "touch.lick",
+      "videoSha256": "dfed887d24279e0fa77dab40c2da02ac2464314590900ee6d421d28d5b317845",
+      "durationMs": 15130
+    },
+    {
+      "family": "touch.what",
+      "videoSha256": "1b09cdc71bf6eaef70614943af1ca6c5b44de7e9d6442ce249ba0284bbca73d9",
+      "durationMs": 15130
+    },
+    {
+      "family": "waiting_user",
+      "videoSha256": "14a4d3de2a5d89dcb59f0402c9d0d63589f92f7d51dcd4d9f7756752d1a235e1",
+      "durationMs": 15130,
+      "audioSha256": "5386a8ae2132b52ec3e4431078408828f8e701a2cc77a014a8e7de7fd7f8dd12"
+    },
+    {
+      "family": "welcome",
+      "videoSha256": "dc6f26eefefb893ad01e5b58e6297fa6da6e0987f8f8ac580ec77a3a9dc7a2f8",
+      "durationMs": 15130
+    },
+    {
+      "family": "working.browsing",
+      "videoSha256": "5607c5f17d26d4cf04d86ce2b2ba2a15717e9e5201110adb81c0ed334c533969",
+      "durationMs": 15130
+    },
+    {
+      "family": "working.thinking",
+      "videoSha256": "95b86ef527611828c039b366289292174c85c70f7e63d568b7fd04871e63f7d0",
+      "durationMs": 13130
+    },
+    {
+      "family": "working.typing",
+      "videoSha256": "de0dc23fce60d883bc46a2b08ad0dd0a2bddde8cbebf91c61642e7d09500d614",
+      "durationMs": 12130
+    }
+  ]
+}

@@ -1,0 +1,62 @@
+[package]
+name = "pet-manager-tauri"
+version = "0.1.54"
+description = "pet-manager Tauri client"
+authors = ["pet-manager contributors"]
+license-file = "../../LICENSE"
+edition = "2021"
+
+[lib]
+name = "pet_manager_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+default = []
+devtools = ["tauri/devtools"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# `protocol-asset` is required by main for serving local widget assets.
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-fs = "2"
+tauri-plugin-http = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+uuid = { version = "1", features = ["v4"] }
+flate2 = "1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "time"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+# image/webp decode for M13.1 codex-pet import (sprite sheet -> per-state MP4)
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
+# USB serial communication with claw-pet board
+serialport = "4"
+rusb = { version = "0.9", features = ["vendored"] }
+base64 = "0.22"
+sha2 = "0.10"
+zip = "0.6"
+# Used by install_clawpkg_over_ssh to stage widget dirs before scp.
+tempfile = "3.27.0"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "0.15"
+keyring = { version = "3.6.3", features = ["windows-native"] }
+winreg = "0.52"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+accessibility = "0.2"
+accessibility-sys = "0.2"
+core-foundation = "0.10"
+core-graphics = "0.24"
+dispatch2 = "0.3.1"
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSData", "NSPathUtilities", "NSString"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"

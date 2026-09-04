@@ -1,0 +1,8 @@
+{
+  "id": "bloomfrog_companion",
+  "name": "蛙蛙养成",
+  "version": "1.3.1",
+  "description": "陪植物蛙四向散步，通过抚摸和喂食提升亲密度；每次互动都会得到即时表情和文字回应。",
+  "kind": "tool",
+  "engine": "p4-bounded-runtime-v4"
+}

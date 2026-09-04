@@ -1,0 +1,1450 @@
+/**
+ * [Input] Read appearances persisted by `lib/appearance-store.js`.
+ * [Output] Card grid with the built-in Terrier first, filled hover-play previews,
+ *          compact source chooser and direct MP4-upload creation, cached local/Codex scans,
+ *          cached initial render, unobstructed previews, gallery-only creation/import/detail management actions,
+ *          and device-aware custom-appearance deletion with device-only or PC-and-device scope,
+ *          Codex/community import flows, and a first-visit quick-start modal
+ *          that stays reopenable from the page help action.
+ * [Pos] component node in pc/src
+ * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  RefreshCw,
+  Loader,
+  AlertCircle,
+  Download,
+  X,
+  Globe,
+  ExternalLink,
+  CheckCircle,
+  CheckCircle2,
+  Sparkles,
+  Trash2,
+  Unplug,
+  UploadCloud,
+} from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  getCachedAppearances,
+  deleteAppearance,
+  listAppearances,
+  saveUploadedVideoAppearance,
+} from "./lib/appearance-store.js";
+import { listBuiltinAppearances } from "./lib/builtin-appearances.js";
+import AppearancePreview from "./AppearancePreview.jsx";
+import { resolveGalleryPreviewMedia } from "./lib/appearance-preview.js";
+import { FAMILIES } from "./lib/avatar-pipeline/families.js";
+import {
+  buildCodexPetSnapshot,
+  findUpdatedCodexPets,
+  formatCodexPetModifiedAt,
+  parseCommunityPetImportInput,
+  sortCodexPetsByModifiedAt,
+} from "./lib/codex-community-import.js";
+import {
+  checkFfmpegAvailable,
+  importCodexPet,
+  installCodexCommunityPet,
+  listCodexPets,
+} from "./lib/codex-pets-client.js";
+import {
+  abortGenerationTask,
+  subscribeGenerationTask,
+} from "./lib/generation-task.js";
+import PageShell from "./shell/PageShell.jsx";
+import Card from "./shell/Card.jsx";
+import { useDeviceContext } from "./shell/DeviceContext.jsx";
+import { useToast } from "./shell/ToastStack.jsx";
+import PageOnboardingModal, {
+  usePageOnboarding,
+} from "./shell/PageOnboardingModal.jsx";
+import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
+
+// Per-family stage labels surfaced inside the RunningTaskCard so the user can
+// tell whether the slow phase is submission, polling, or download.
+const STAGE_LABELS = {
+  pending: "等待中",
+  submitting: "提交中…",
+  polling: "排队 / 生成中…",
+  downloading: "下载中…",
+  done: "已完成",
+  failed: "失败",
+};
+
+const COMMUNITY_SOURCES = [
+  {
+    id: "codex-pets-net",
+    url: "https://codex-pets.net",
+    name: "Codex Pets",
+  },
+];
+
+function codexPetPreviewSrc(pet) {
+  return pet?.previewDataUrl || pet?.preview_data_url || "";
+}
+
+async function readFileAsBytes(file) {
+  return new Uint8Array(await file.arrayBuffer());
+}
+
+export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail }) {
+  const {
+    currentDisplay,
+    deviceConnected,
+    applyDesktopPet,
+    refreshAppearances,
+  } = useDeviceContext();
+  const { push } = useToast();
+  const onboarding = usePageOnboarding(ONBOARDING_PAGE_IDS.APPEARANCE_GALLERY);
+
+  const [items, setItems] = useState(() => getCachedAppearances() || null);
+  const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  // ── Codex import modal ──
+  const [codexModalOpen, setCodexModalOpen] = useState(false);
+  const [codexPets, setCodexPets] = useState(null);
+  const [codexLoading, setCodexLoading] = useState(false);
+  const [codexError, setCodexError] = useState("");
+  const [importError, setImportError] = useState("");
+  const [importingId, setImportingId] = useState("");
+
+  // ── Community import modal ──
+  const [communityModalOpen, setCommunityModalOpen] = useState(false);
+  const [creationModalOpen, setCreationModalOpen] = useState(false);
+  const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const deleteReturnFocusRef = useRef(null);
+
+  const reload = useCallback(async ({ force = false } = {}) => {
+    setRefreshing(true);
+    setError("");
+    try {
+      const records = await listAppearances({ force });
+      setItems(records);
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || String(err));
+      // Don't blank the grid on transient sync errors: keep whatever we already
+      // had on screen, otherwise fall back to the built-in Westie/Terrier so
+      // users never see an empty gallery.
+      setItems((current) => (current && current.length > 0 ? current : listBuiltinAppearances()));
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+
+  // Subscribe to the global generation task so the in-progress card shows live
+  // progress regardless of how the user reached the gallery. Auto-reload when
+  // a run terminates — the task persists incrementally, so a fresh listing
+  // pulls in the new appearance without the user pressing 刷新.
+  const [task, setTask] = useState(null);
+  const lastEpochRef = useRef(0);
+  useEffect(() => {
+    return subscribeGenerationTask((s) => {
+      setTask(s);
+      if (s.completionEpoch > lastEpochRef.current) {
+        lastEpochRef.current = s.completionEpoch;
+        reload({ force: true });
+      }
+    });
+  }, [reload]);
+  const taskRunning = task?.status === "running";
+
+  const openCodexImport = useCallback(async () => {
+    setCodexError("");
+    setImportError("");
+    setCodexPets(null);
+    setCodexModalOpen(true);
+    setCodexLoading(true);
+    try {
+      const hasFfmpeg = await checkFfmpegAvailable();
+      if (!hasFfmpeg) {
+        setCodexError(
+          "未检测到 ffmpeg。请先安装:\n  macOS: brew install ffmpeg\n  Windows: winget install Gyan.FFmpeg\n  Linux: apt install ffmpeg",
+        );
+        return;
+      }
+      const pets = await listCodexPets();
+      setCodexPets(sortCodexPetsByModifiedAt(pets));
+    } catch (err) {
+      console.error(err);
+      setCodexError(err?.message || String(err));
+    } finally {
+      setCodexLoading(false);
+    }
+  }, []);
+
+  const handleImportPet = useCallback(
+    async (petId, { closeModal = "codex" } = {}) => {
+      setImportingId(petId);
+      setCodexError("");
+      setImportError("");
+      try {
+        const result = await importCodexPet(petId);
+        if (closeModal === "codex") setCodexModalOpen(false);
+        else if (closeModal === "community") setCommunityModalOpen(false);
+        await reload({ force: true });
+        if (result?.appearanceId) onOpenDetail?.(result.appearanceId);
+        return { ok: true, appearanceId: result?.appearanceId || "" };
+      } catch (err) {
+        console.error(err);
+        const message = err?.message || String(err);
+        setImportError(message);
+        return { ok: false, error: message };
+      } finally {
+        setImportingId("");
+      }
+    },
+    [reload, onOpenDetail],
+  );
+
+  const handleAiGenerateSource = useCallback(() => {
+    setCreationModalOpen(false);
+    onEnterWizard?.();
+  }, [onEnterWizard]);
+
+  const handleVideoUploadSource = useCallback(() => {
+    setCreationModalOpen(false);
+    setVideoUploadModalOpen(true);
+  }, []);
+
+  const handleCodexImportSource = useCallback(() => {
+    setCreationModalOpen(false);
+    openCodexImport();
+  }, [openCodexImport]);
+
+  const handleCommunityImportSource = useCallback(() => {
+    setCreationModalOpen(false);
+    setCommunityModalOpen(true);
+  }, []);
+
+  const handleUploadedVideoCreated = useCallback(
+    async (record) => {
+      await reload({ force: true });
+      if (record?.id) onOpenDetail?.(record.id);
+    },
+    [reload, onOpenDetail],
+  );
+
+  const activeAppearanceId = currentDisplay.appearance?.id || "";
+
+  const requestAppearanceDelete = useCallback((row) => {
+    if (!row || row.type === "builtin") return;
+    deleteReturnFocusRef.current = document.activeElement;
+    setDeleteTarget(row);
+    setDeleteError("");
+  }, []);
+
+  const closeAppearanceDelete = useCallback(() => {
+    if (deletePending) return;
+    setDeleteTarget(null);
+    setDeleteError("");
+    window.setTimeout(() => {
+      const previous = deleteReturnFocusRef.current;
+      if (previous?.isConnected && typeof previous.focus === "function") {
+        previous.focus();
+      }
+    }, 0);
+  }, [deletePending]);
+
+  const confirmAppearanceDelete = useCallback(async (mode) => {
+    if (!deleteTarget || deletePending) return;
+    const deleteFromPc = mode === "pc-and-device";
+    const isActiveOnDevice = deleteTarget.id === activeAppearanceId;
+    if (!deleteFromPc && !isActiveOnDevice) return;
+    if (isActiveOnDevice && !deviceConnected) {
+      setDeleteError("请先通过 USB 连接当前设备，再删除设备端正在使用的形象。");
+      return;
+    }
+
+    setDeletePending(true);
+    setDeleteError("");
+    try {
+      if (isActiveOnDevice) {
+        const builtinAppearance = listBuiltinAppearances()[0];
+        if (!currentDisplay.agentId) {
+          throw new Error("当前没有可更新的 Agent 跟随主体，无法安全恢复设备默认形象。");
+        }
+        await applyDesktopPet(currentDisplay.agentId, builtinAppearance, {
+          initialProgress: {
+            text: "正在把设备恢复为内置默认形象…",
+            percent: 0,
+          },
+        });
+      }
+
+      if (deleteFromPc) {
+        // Device reset deliberately happens first. If its ACK/sync fails, the
+        // local source remains available for a safe retry.
+        await deleteAppearance(deleteTarget.id);
+        const records = await refreshAppearances();
+        setItems(records);
+      }
+
+      push({
+        tone: "success",
+        title: deleteFromPc
+          ? `已从 PC 和设备删除 · ${deleteTarget.name}`
+          : `已从设备删除 · ${deleteTarget.name}`,
+        message: isActiveOnDevice
+          ? "设备已恢复为内置默认形象。"
+          : "PC 本地源已删除；当前设备未使用该形象，无需修改设备端。",
+      });
+      setDeleteTarget(null);
+      setDeleteError("");
+      window.setTimeout(() => {
+        const previous = deleteReturnFocusRef.current;
+        if (previous?.isConnected && typeof previous.focus === "function") {
+          previous.focus();
+        }
+      }, 0);
+    } catch (deleteFailure) {
+      console.error(deleteFailure);
+      setDeleteError(deleteFailure?.message || String(deleteFailure));
+    } finally {
+      setDeletePending(false);
+    }
+  }, [
+    activeAppearanceId,
+    applyDesktopPet,
+    currentDisplay.agentId,
+    deletePending,
+    deleteTarget,
+    deviceConnected,
+    push,
+    refreshAppearances,
+  ]);
+
+  const refreshButton = (
+    <button
+      key="refresh"
+      type="button"
+      className="btn-secondary btn-sm"
+      onClick={() => reload({ force: true })}
+      disabled={refreshing}
+    >
+      <RefreshCw size={14} className={refreshing ? "spin" : undefined} />
+      刷新
+    </button>
+  );
+
+  const addAppearanceActions = (
+    <div key="add-actions" className="appearance-gallery-actions" aria-label="添加形象">
+      <button type="button" className="btn-primary btn-sm" onClick={() => setCreationModalOpen(true)}>
+        <Sparkles size={14} /> 新建自定义形象
+      </button>
+    </div>
+  );
+
+  return (
+    <PageShell
+      title="形象画廊"
+      subtitle="浏览默认形象与你的自定义形象，进入详情可预览每个 family 的视频。"
+      actions={[refreshButton, addAppearanceActions]}
+      help={onboarding.show}
+    >
+      <PageOnboardingModal
+        id="appearance-gallery"
+        open={onboarding.open}
+        onClose={onboarding.dismiss}
+        title="创建并使用自定义形象，只要三步"
+        description="画廊负责创建和管理；设备页负责把形象应用给当前 Agent。"
+        steps={[
+          {
+            title: "选择来源",
+            description: "AI 生成、上传 MP4、Codex 或社区导入，任选一种。",
+          },
+          {
+            title: "预览并完善",
+            description: "进入详情检查各个动作，也可以单独替换视频和声音。",
+          },
+          {
+            title: "应用到设备",
+            description: "回到设备页为当前 Agent 更换形象，素材会随切换同步。",
+          },
+        ]}
+        actions={[
+          {
+            label: "选择创建方式",
+            variant: "primary",
+            icon: <Sparkles size={14} />,
+            onClick: () => {
+              setCreationModalOpen(true);
+            },
+          },
+        ]}
+      />
+
+      {error && (
+        <div className="message-banner message-banner--error">
+          <AlertCircle size={14} /> 读取形象失败：{error}
+        </div>
+      )}
+
+      {taskRunning && (
+        <Card>
+          <RunningTaskCard
+            task={task}
+            onAbort={abortGenerationTask}
+            onOpenDetail={onOpenDetail}
+          />
+        </Card>
+      )}
+
+      {items === null ? (
+        <div className="empty-state">
+          <Loader size={20} className="spin" />
+          <div>
+            <strong>正在加载形象列表…</strong>
+          </div>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="empty-state">
+          <div>
+            <strong>还没有自定义形象</strong>
+          </div>
+          <div className="muted small">
+            点击上方「添加形象」上传一张图，生成属于你的 10 段桌宠动画。
+          </div>
+        </div>
+      ) : (
+        <div className="appearance-grid">
+          {items.map((row) => (
+            <AppearanceCard
+              key={row.id}
+              row={row}
+              isActive={row.id === activeAppearanceId}
+              onOpenDetail={onOpenDetail}
+              onRequestDelete={requestAppearanceDelete}
+            />
+          ))}
+        </div>
+      )}
+
+      {deleteTarget && (
+        <AppearanceDeleteModal
+          appearance={deleteTarget}
+          activeOnDevice={deleteTarget.id === activeAppearanceId}
+          deviceConnected={deviceConnected}
+          pending={deletePending}
+          error={deleteError}
+          onClose={closeAppearanceDelete}
+          onConfirm={confirmAppearanceDelete}
+        />
+      )}
+
+      {creationModalOpen && (
+        <CreationSourceModal
+          onClose={() => setCreationModalOpen(false)}
+          onAiGenerate={handleAiGenerateSource}
+          onVideoUpload={handleVideoUploadSource}
+          onCodexImport={handleCodexImportSource}
+          onCommunityImport={handleCommunityImportSource}
+        />
+      )}
+
+      {videoUploadModalOpen && (
+        <VideoUploadModal
+          onClose={() => setVideoUploadModalOpen(false)}
+          onCreated={handleUploadedVideoCreated}
+        />
+      )}
+
+      {codexModalOpen && (
+        <CodexImportModal
+          loading={codexLoading}
+          pets={codexPets}
+          error={codexError || importError}
+          importingId={importingId}
+          onClose={() => {
+            if (importingId) return;
+            setCodexModalOpen(false);
+          }}
+          onPick={(petId) => handleImportPet(petId, { closeModal: "codex" })}
+        />
+      )}
+
+      {communityModalOpen && (
+        <CommunityImportModal
+          importingId={importingId}
+          importError={importError}
+          onClose={() => {
+            if (importingId) return;
+            setCommunityModalOpen(false);
+          }}
+          onImport={(petId) => handleImportPet(petId, { closeModal: "community" })}
+        />
+      )}
+
+    </PageShell>
+  );
+}
+
+function CreationSourceModal({
+  onClose,
+  onAiGenerate,
+  onVideoUpload,
+  onCodexImport,
+  onCommunityImport,
+}) {
+  const options = [
+    {
+      key: "ai",
+      icon: <Sparkles size={18} />,
+      title: "图片AI生成",
+      desc: "上传参考图，用现有生成向导生成完整状态视频。",
+      action: onAiGenerate,
+    },
+    {
+      key: "video",
+      icon: <UploadCloud size={18} />,
+      title: "自定义上传视频",
+      desc: "直接上传 MP4 作为一个状态视频，再到详情页补齐或替换其他状态。",
+      action: onVideoUpload,
+    },
+    {
+      key: "codex",
+      icon: <Download size={18} />,
+      title: "Codex 导入",
+      desc: "扫描本机 Codex pets，并转换成 Pet Manager 形象。",
+      action: onCodexImport,
+    },
+    {
+      key: "community",
+      icon: <Globe size={18} />,
+      title: "从社区导入",
+      desc: "打开社区或粘贴安装命令，再导入到本地形象库。",
+      action: onCommunityImport,
+    },
+  ];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card modal-card--wide" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">新建自定义形象</h3>
+            <div className="modal-subtitle">选择素材来源，创建后可在详情页替换每个状态视频。</div>
+          </div>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="creation-source-grid">
+            {options.map((option) => (
+              <button
+                key={option.key}
+                type="button"
+                className="creation-source-card"
+                onClick={option.action}
+              >
+                <span className="creation-source-card__icon">{option.icon}</span>
+                <span className="creation-source-card__copy">
+                  <strong>{option.title}</strong>
+                  <span>{option.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isMp4Upload(file) {
+  if (!file) return false;
+  if ((file.type || "").toLowerCase() === "video/mp4") return true;
+  return /\.mp4$/i.test(file.name || "");
+}
+
+function VideoUploadModal({ onClose, onCreated }) {
+  const [appearanceName, setAppearanceName] = useState("");
+  const [description, setDescription] = useState("");
+  const [family, setFamily] = useState(FAMILIES[0]?.family || "working");
+  const [videoFile, setVideoFile] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleVideoFile = useCallback((file) => {
+    if (!file) return;
+    if (!isMp4Upload(file)) {
+      setError("当前仅支持 MP4 状态视频。");
+      setVideoFile(null);
+      return;
+    }
+    setError("");
+    setVideoFile(file);
+    if (!appearanceName.trim()) {
+      setAppearanceName(file.name.replace(/\.mp4$/i, ""));
+    }
+  }, [appearanceName]);
+
+  const handleDrop = useCallback(
+    (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files?.[0];
+      if (file) handleVideoFile(file);
+    },
+    [handleVideoFile],
+  );
+
+  const handleCreate = useCallback(async () => {
+    if (!videoFile || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const videoBytes = await readFileAsBytes(videoFile);
+      const record = await saveUploadedVideoAppearance({
+        appearanceName: appearanceName,
+        description: description,
+        family: family,
+        videoBytes: videoBytes,
+        originalFilename: videoFile.name,
+      });
+      await onCreated?.(record);
+      onClose?.();
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [appearanceName, description, family, onClose, onCreated, saving, videoFile]);
+
+  return (
+    <div className="modal-backdrop" onClick={saving ? undefined : onClose}>
+      <div className="modal-card modal-card--wide" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">自定义上传视频</h3>
+            <div className="modal-subtitle">上传一个 MP4 作为初始状态视频，其他状态可稍后在详情页替换。</div>
+          </div>
+          <button className="icon-btn" type="button" onClick={onClose} disabled={saving} aria-label="关闭">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="modal-body">
+          <div className="video-upload-modal__grid">
+            <label
+              className="video-upload-modal__drop"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+            >
+              <UploadCloud size={24} />
+              <strong>{videoFile ? videoFile.name : "选择或拖入 MP4 视频"}</strong>
+              <span>当前仅支持 MP4 状态视频</span>
+              <input
+                type="file"
+                accept="video/mp4,.mp4"
+                onChange={(event) => handleVideoFile(event.target.files?.[0])}
+                disabled={saving}
+              />
+            </label>
+            <div className="video-upload-modal__form">
+              <label className="ui-field">
+                <span className="ui-field__label">形象名称</span>
+                <input
+                  className="field-input"
+                  value={appearanceName}
+                  onChange={(event) => setAppearanceName(event.target.value)}
+                  placeholder="例如：小黑猫工作版"
+                  disabled={saving}
+                />
+              </label>
+              <label className="ui-field">
+                <span className="ui-field__label">初始状态</span>
+                <select
+                  className="field-input"
+                  value={family}
+                  onChange={(event) => setFamily(event.target.value)}
+                  disabled={saving}
+                >
+                  {FAMILIES.map((item) => (
+                    <option key={item.family} value={item.family}>
+                      {item.family} · {item.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="ui-field">
+                <span className="ui-field__label">描述</span>
+                <textarea
+                  className="field-input"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="可选，用来记录这个视频形象的来源或用途。"
+                  rows={3}
+                  disabled={saving}
+                />
+              </label>
+            </div>
+          </div>
+
+          {error && (
+            <div className="message-banner message-banner--error">
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+
+          <div className="community-actions">
+            <button className="btn-secondary" type="button" onClick={onClose} disabled={saving}>
+              取消
+            </button>
+            <button className="btn-primary" type="button" onClick={handleCreate} disabled={!videoFile || saving}>
+              {saving ? (
+                <>
+                  <Loader size={14} className="spin" /> 保存中…
+                </>
+              ) : (
+                <>
+                  <UploadCloud size={14} /> 创建形象
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodexImportModal({ loading, pets, error, importingId, onClose, onPick }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">从 Codex 导入形象</h3>
+            <div className="modal-subtitle">从 ~/.codex/pets/ 读取已安装的桌宠</div>
+          </div>
+          <button
+            className="icon-btn"
+            onClick={onClose}
+            disabled={!!importingId}
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+        <div className="modal-body">
+          {loading && (
+            <div className="empty-state">
+              <Loader size={20} className="spin" />
+              <div className="muted small">正在读取 ~/.codex/pets/ …</div>
+            </div>
+          )}
+          {!loading && error && (
+            <div
+              className="message-banner message-banner--error"
+              style={{ whiteSpace: "pre-wrap" }}
+            >
+              <AlertCircle size={14} /> {error}
+            </div>
+          )}
+          {!loading && !error && pets && pets.length === 0 && (
+            <div className="empty-state">
+              <div>
+                <strong>未在 ~/.codex/pets/ 下找到可导入的宠物</strong>
+              </div>
+              <div className="muted small">先用 codex 生成一个宠物再回来导入。</div>
+            </div>
+          )}
+          {!loading && !error && pets && pets.length > 0 && (
+            <ul className="codex-pet-list">
+              {pets.map((pet) => (
+                <CodexPetRow
+                  key={pet.id}
+                  pet={pet}
+                  importingId={importingId}
+                  onPick={onPick}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CodexPetRow({ pet, importingId, onPick, highlight }) {
+  const busy = importingId === pet.id;
+  const disabled = !!importingId && !busy;
+  const modifiedAtText = formatCodexPetModifiedAt(pet.modifiedAt);
+  const previewSrc = codexPetPreviewSrc(pet);
+  return (
+    <li className={`codex-pet-row${highlight ? " codex-pet-row--new" : ""}`}>
+      <div className="codex-pet-preview" aria-hidden="true">
+        {previewSrc ? (
+          <img className="codex-pet-preview__image" src={previewSrc} alt="" />
+        ) : (
+          <span className="codex-pet-preview__empty" />
+        )}
+      </div>
+      <div className="codex-pet-info">
+        <div className="codex-pet-name">
+          {pet.displayName}
+          {highlight && <span className="codex-pet-tag">新</span>}
+        </div>
+        {pet.description && <div className="muted small">{pet.description}</div>}
+        <div className="codex-pet-meta">
+          <span>{pet.id}</span>
+          {modifiedAtText && <span>更新 {modifiedAtText}</span>}
+        </div>
+      </div>
+      <button
+        className="btn-primary btn-sm"
+        onClick={() => onPick(pet.id)}
+        disabled={disabled || busy}
+      >
+        {busy ? (
+          <>
+            <Loader size={14} className="spin" /> 转换中…
+          </>
+        ) : (
+          <>
+            <Download size={14} /> 导入
+          </>
+        )}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * Community-import flow.
+ *
+ * Step 1 — user opens the modal. We snapshot the pet IDs and modified times
+ *          already present in `~/.codex/pets/` so we can diff later. We also
+ *          probe ffmpeg up front (the actual import requires it).
+ * Step 2 — user can paste a codex-pets.net URL / curl / CLI command for direct
+ *          install+import, or open the community source in a browser.
+ * Step 3 — for browser installs, the user returns and scans `~/.codex/pets/`.
+ */
+function CommunityImportModal({ importingId, importError, onClose, onImport }) {
+  // Snapshot of codex pet IDs and mtimes at modal open; a later rescan treats
+  // new IDs and newer mtimes as freshly installed community assets.
+  const [baseline, setBaseline] = useState(null); // Map<string, number> | null
+  const [baselineError, setBaselineError] = useState("");
+  const [ffmpegOk, setFfmpegOk] = useState(true);
+
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
+  const [newPets, setNewPets] = useState(null); // CodexPetSummary[] | null
+  const [allPets, setAllPets] = useState(null); // CodexPetSummary[] | null — fallback list
+  const [directInput, setDirectInput] = useState("");
+  const [directError, setDirectError] = useState("");
+  const [directInstalling, setDirectInstalling] = useState(false);
+
+  // Take baseline + ffmpeg check on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [ok, pets] = await Promise.all([
+          checkFfmpegAvailable(),
+          listCodexPets(),
+        ]);
+        if (cancelled) return;
+        setFfmpegOk(!!ok);
+        setBaseline(buildCodexPetSnapshot(pets));
+      } catch (err) {
+        if (cancelled) return;
+        console.error(err);
+        setBaselineError(err?.message || String(err));
+        setBaseline(buildCodexPetSnapshot());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openSource = useCallback(async (url) => {
+    try {
+      await invoke("open_external_url", { url });
+    } catch (err) {
+      console.error(err);
+      // fall back to window.open — works in pure-web dev, may be a no-op in
+      // a Tauri webview but doesn't hurt to try.
+      try {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch (_) {
+        /* noop */
+      }
+    }
+  }, []);
+
+  const handleScan = useCallback(async () => {
+    if (!baseline) return;
+    setScanning(true);
+    setScanError("");
+    try {
+      const pets = (await listCodexPets({ force: true })) || [];
+      setAllPets(sortCodexPetsByModifiedAt(pets));
+      setNewPets(findUpdatedCodexPets(baseline, pets));
+    } catch (err) {
+      console.error(err);
+      setScanError(err?.message || String(err));
+    } finally {
+      setScanning(false);
+    }
+  }, [baseline]);
+
+  const directParsed = directInput.trim() ? parseCommunityPetImportInput(directInput) : null;
+
+  const handleDirectImport = useCallback(async () => {
+    const parsed = parseCommunityPetImportInput(directInput);
+    if (!parsed.ok) {
+      setDirectError(parsed.error);
+      return;
+    }
+    if (!ffmpegOk) {
+      setDirectError("未检测到 ffmpeg，无法完成导入到 Pet Manager。");
+      return;
+    }
+
+    setDirectError("");
+    setScanError("");
+    setDirectInstalling(true);
+    try {
+      await installCodexCommunityPet(parsed.petId);
+      const result = await onImport(parsed.petId);
+      if (result?.ok === false) {
+        setDirectError(result.error || "安装已完成，但导入到 Pet Manager 失败。");
+      }
+    } catch (err) {
+      console.error(err);
+      setDirectError(err?.message || String(err));
+    } finally {
+      setDirectInstalling(false);
+    }
+  }, [directInput, ffmpegOk, onImport]);
+
+  const initialLoading = baseline === null;
+  const showResults = newPets !== null;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card modal-card--wide" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3 className="modal-title">从社区导入形象</h3>
+            <div className="modal-subtitle">
+              先去社区选择形象，再按一种方式导入。
+            </div>
+          </div>
+          <button
+            className="icon-btn"
+            onClick={onClose}
+            disabled={!!importingId}
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {initialLoading ? (
+            <div className="empty-state">
+              <Loader size={20} className="spin" />
+              <div className="muted small">正在准备……</div>
+            </div>
+          ) : (
+            <>
+              {!ffmpegOk && (
+                <div
+                  className="message-banner message-banner--error"
+                  style={{ whiteSpace: "pre-wrap", marginTop: 0 }}
+                >
+                  <AlertCircle size={14} /> 未检测到 ffmpeg，导入到 Pet Manager 时会失败。
+                  {"\n  macOS: brew install ffmpeg\n  Windows: winget install Gyan.FFmpeg\n  Linux: apt install ffmpeg"}
+                </div>
+              )}
+              {baselineError && (
+                <div className="message-banner message-banner--error" style={{ marginTop: 0 }}>
+                  <AlertCircle size={14} /> 读取本地 Codex pets 失败：{baselineError}
+                </div>
+              )}
+
+              {!showResults && (
+                <>
+                  <section className="community-source-intro">
+                    <div className="community-source-intro__copy">
+                      <div className="community-direct__head">
+                        <Globe size={16} />
+                        <span>先打开社区网站</span>
+                      </div>
+                      <div className="community-step-desc">
+                        在社区里挑选形象，然后使用下方任意一种方式导入到 Pet Manager。
+                      </div>
+                    </div>
+                    <div className="community-source-list">
+                      {COMMUNITY_SOURCES.map((src) => (
+                        <button
+                          key={src.id}
+                          type="button"
+                          className="community-source"
+                          onClick={() => openSource(src.url)}
+                        >
+                          <div className="community-source__icon">
+                            <Globe size={18} />
+                          </div>
+                          <div className="community-source__body">
+                            <div className="community-source__title">{src.name}</div>
+                            <div className="community-source__url">{src.url}</div>
+                          </div>
+                          <div className="community-source__cta">
+                            <ExternalLink size={14} />
+                            <span>打开</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <div className="community-methods">
+                    <section className="community-method">
+                      <div className="community-method__head">
+                        <span className="community-method__label">方式一</span>
+                        <span>社区安装后扫描</span>
+                      </div>
+                      <div className="community-step-desc">
+                        在社区点击 “Install in Codex” 完成安装，回到这里扫描新增形象。
+                      </div>
+                      <div className="community-actions community-actions--inline">
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={handleScan}
+                          disabled={scanning || !!importingId}
+                        >
+                          {scanning ? (
+                            <>
+                              <Loader size={14} className="spin" /> 扫描中…
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={14} /> 扫描最新形象
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="community-method community-direct">
+                      <div className="community-method__head">
+                        <span className="community-method__label">方式二</span>
+                        <span>粘贴链接或命令导入</span>
+                      </div>
+                      <div className="community-step-desc">
+                        支持社区页面链接、curl 安装命令或
+                        <code>npx codex-pets add sakura-jk</code>。
+                      </div>
+                      <textarea
+                        className="community-import-input"
+                        value={directInput}
+                        onChange={(event) => {
+                          setDirectInput(event.target.value);
+                          setDirectError("");
+                        }}
+                        placeholder={
+                          "https://codex-pets.net/pets/sakura-jk\ncurl -fsSL https://codex-pets.net/install/sakura-jk | sh\nnpx codex-pets add sakura-jk"
+                        }
+                        rows={3}
+                        spellCheck={false}
+                      />
+                      {directParsed?.ok && (
+                        <div className="community-direct-status">
+                          将安装并导入：<strong>{directParsed.petId}</strong>
+                        </div>
+                      )}
+                      {(directError || importError) && (
+                        <div className="message-banner message-banner--error community-inline-error">
+                          <AlertCircle size={14} /> {directError || importError}
+                        </div>
+                      )}
+                      <div className="community-actions community-actions--inline">
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          onClick={handleDirectImport}
+                          disabled={!directInput.trim() || directInstalling || !!importingId}
+                        >
+                          {directInstalling || importingId ? (
+                            <>
+                              <Loader size={14} className="spin" /> 安装并导入中…
+                            </>
+                          ) : (
+                            <>
+                              <Download size={14} /> 安装并导入
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </section>
+                  </div>
+
+                  <div className="community-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={onClose}
+                      disabled={!!importingId}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {showResults && (
+                <>
+                  {scanError && (
+                    <div
+                      className="message-banner message-banner--error"
+                      style={{ marginTop: 0 }}
+                    >
+                      <AlertCircle size={14} /> 扫描失败：{scanError}
+                    </div>
+                  )}
+
+                  {importError && (
+                    <div
+                      className="message-banner message-banner--error"
+                      style={{ marginTop: 0 }}
+                    >
+                      <AlertCircle size={14} /> 导入失败：{importError}
+                    </div>
+                  )}
+
+                  {newPets.length > 0 ? (
+                    <>
+                      <div className="community-result-head">
+                        <CheckCircle2 size={16} className="community-result-head__icon" />
+                        <div>
+                          <div className="community-result-title">
+                            检测到 {newPets.length} 个新增或更新的形象
+                          </div>
+                          <div className="muted small">
+                            选择一个导入到 Pet Manager，导入过程会在本地用 ffmpeg
+                            将精灵图转换为视频。
+                          </div>
+                        </div>
+                      </div>
+                      <ul className="codex-pet-list">
+                        {newPets.map((pet) => (
+                          <CodexPetRow
+                            key={pet.id}
+                            pet={pet}
+                            importingId={importingId}
+                            onPick={onImport}
+                            highlight
+                          />
+                        ))}
+                      </ul>
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <div>
+                        <strong>没有检测到新的形象</strong>
+                      </div>
+                        <div className="muted small">
+                        请确认已经通过社区安装入口或 npx 命令完成安装。如果只是复制了链接或命令，
+                        可以返回上一步粘贴导入。
+                      </div>
+                    </div>
+                  )}
+
+                  {allPets && allPets.length > 0 && newPets.length === 0 && (
+                    <details className="community-fallback">
+                      <summary>查看本机所有 Codex pets ({allPets.length})</summary>
+                      <ul className="codex-pet-list" style={{ marginTop: 10 }}>
+                        {allPets.map((pet) => (
+                          <CodexPetRow
+                            key={pet.id}
+                            pet={pet}
+                            importingId={importingId}
+                            onPick={onImport}
+                          />
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+
+                  <div className="community-actions">
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setNewPets(null);
+                        setAllPets(null);
+                        setScanError("");
+                      }}
+                      disabled={!!importingId || scanning}
+                    >
+                      返回
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={handleScan}
+                      disabled={scanning || !!importingId}
+                    >
+                      {scanning ? (
+                        <>
+                          <Loader size={14} className="spin" /> 扫描中…
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={14} /> 重新扫描
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Live progress card for the background generation task. Reads from the global
+ * generation-task subscription (handed in via props from the gallery), shows
+ * per-family stage, and lets the user open the partially-saved appearance or
+ * abort the run.
+ */
+function RunningTaskCard({ task, onAbort, onOpenDetail }) {
+  const progress = task?.progress;
+  const completed = progress?.completed ?? 0;
+  const total = progress?.total ?? 0;
+  const families = progress?.families ? Object.entries(progress.families) : [];
+  const currentFamily = families.find(
+    ([, v]) => v.status === "submitting" || v.status === "polling" || v.status === "downloading",
+  );
+  const stageMessage = progress?.message;
+  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  const partialId = task?.appearanceId;
+
+  return (
+    <div className="running-task-card">
+      <div className="running-task-card__head">
+        <Loader size={16} className="spin" />
+        <div className="running-task-card__title">
+          正在生成「{task?.appearanceName || "未命名形象"}」
+        </div>
+        <span className="muted small">{completed}/{total || "?"}</span>
+      </div>
+      <div className="running-task-card__bar">
+        <div className="running-task-card__bar-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="muted small running-task-card__sub">
+        {currentFamily
+          ? `${currentFamily[0]} · ${STAGE_LABELS[currentFamily[1].status] || ""}`
+          : stageMessage || "正在准备…"}
+      </div>
+      <div className="running-task-card__actions">
+        {partialId && (
+          <button className="btn-secondary btn-sm" onClick={() => onOpenDetail?.(partialId)}>
+            <CheckCircle size={14} /> 查看已生成部分
+          </button>
+        )}
+        <button className="btn-ghost btn-sm" onClick={onAbort}>
+          <X size={14} /> 取消生成
+        </button>
+      </div>
+      <div className="muted small running-task-card__hint">
+        生成可后台进行，你可以切换页面或继续操作。关闭应用会中断生成。
+      </div>
+    </div>
+  );
+}
+
+function AppearanceCard({
+  row,
+  isActive,
+  onOpenDetail,
+  onRequestDelete,
+}) {
+  const okCount = row.families?.filter?.((f) => f.ok).length || 0;
+  const totalCount = row.families?.length || 0;
+  const isCodex = row.type === "codex-import";
+  const isBuiltin = row.type === "builtin";
+  const previewMedia = resolveGalleryPreviewMedia(row);
+
+  return (
+    <article
+      className={"appearance-card appearance-card--clickable" + (isActive ? " appearance-card--active is-active" : "")}
+    >
+      <div
+        className={"appearance-channel-preview appearance-card-preview" + (isCodex ? " appearance-card-preview--codex" : "")}
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpenDetail?.(row.id)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetail?.(row.id); } }}
+      >
+        <AppearancePreview
+          media={previewMedia}
+          className="appearance-channel-preview__media"
+          emptyClassName="appearance-channel-preview__empty"
+          playing={previewMedia.kind === "video"}
+        />
+        {isActive && (
+          <span className="appearance-card__badge appearance-card__badge--active">
+            <CheckCircle2 size={12} /> 使用中
+          </span>
+        )}
+      </div>
+      <div className="appearance-card-body">
+        <div
+          className="appearance-card-main"
+          role="button"
+          tabIndex={0}
+          onClick={() => onOpenDetail?.(row.id)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDetail?.(row.id); } }}
+        >
+          <h4>{row.name}</h4>
+          <p>{row.description || (row.provider + " / " + (row.model || "未知模型"))}</p>
+          <div className="muted small">
+            {okCount}/{totalCount} 个动画可用 · {new Date(row.created_at).toLocaleString()}
+          </div>
+          <div className="appearance-card-tags">
+            <span className="appearance-thumb__badge">
+              {isBuiltin ? "内置" : isCodex ? "Codex" : "自定义"}
+            </span>
+          </div>
+        </div>
+        {!isBuiltin && (
+          <div className="appearance-card-actions">
+            <button
+              type="button"
+              className="btn-ghost btn-sm danger"
+              aria-label={`删除形象 ${row.name}`}
+              onClick={() => onRequestDelete?.(row)}
+            >
+              <Trash2 size={14} /> 删除
+            </button>
+          </div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function AppearanceDeleteModal({
+  appearance,
+  activeOnDevice,
+  deviceConnected,
+  pending,
+  error,
+  onClose,
+  onConfirm,
+}) {
+  const dialogRef = useRef(null);
+  const cancelRef = useRef(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape" && !pending) {
+        event.preventDefault();
+        onClose?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose, pending]);
+
+  const deviceActionDisabled = pending || !activeOnDevice || !deviceConnected;
+  const bothActionDisabled = pending || (activeOnDevice && !deviceConnected);
+
+  return (
+    <div className="component-replace-modal" role="presentation">
+      <section
+        ref={dialogRef}
+        className="component-action-confirm appearance-delete-confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="appearance-delete-confirm-title"
+        aria-describedby="appearance-delete-confirm-description"
+      >
+        <span>选择删除范围</span>
+        <h2 id="appearance-delete-confirm-title">删除“{appearance.name}”？</h2>
+        <p id="appearance-delete-confirm-description">
+          {activeOnDevice
+            ? deviceConnected
+              ? "该形象正在设备上使用。设备端删除会先等待设备确认切回内置默认形象，PC 本地源是否保留由你选择。"
+              : "该形象正在设备上使用。请先通过 USB 连接当前设备，避免 PC 与设备状态失配。"
+            : "该形象当前未同步到设备；可以清理 PC 本地源，但“仅删除设备端”不可用。"}
+        </p>
+        {error && (
+          <p className="component-action-confirm__error" role="alert">{error}</p>
+        )}
+        <div>
+          <button
+            ref={cancelRef}
+            className="btn-secondary"
+            type="button"
+            onClick={onClose}
+            disabled={pending}
+          >
+            取消
+          </button>
+          <button
+            className="btn-secondary danger"
+            type="button"
+            onClick={() => onConfirm?.("device-only")}
+            disabled={deviceActionDisabled}
+            title={!activeOnDevice ? "当前设备未使用该形象" : !deviceConnected ? "请先连接设备" : undefined}
+          >
+            <Unplug size={15} />
+            {pending ? "处理中…" : "仅删除设备端"}
+          </button>
+          <button
+            className="btn-ghost danger"
+            type="button"
+            onClick={() => onConfirm?.("pc-and-device")}
+            disabled={bothActionDisabled}
+          >
+            <Trash2 size={15} />
+            {pending ? "处理中…" : "PC 和设备都删除"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}

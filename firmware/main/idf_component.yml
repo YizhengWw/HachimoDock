@@ -1,0 +1,9 @@
+dependencies:
+  espressif/esp_h264: "^1.3.6"
+  espressif/esp_lcd_st7701:
+    override_path: ../components/esp_lcd_st7701
+  espressif/esp_lvgl_adapter:
+    override_path: ../components/esp_lvgl_adapter
+  espressif/tinyusb: "*"
+  waveshare/esp32_p4_wifi6_touch_lcd_4_3:
+    override_path: ../components/esp32_p4_wifi6_touch_lcd_4_3

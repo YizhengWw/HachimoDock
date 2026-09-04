@@ -1,0 +1,4 @@
+{
+  "title": "Token 仪表盘",
+  "summary": "实时展示当前 coding agent 的 Token 总量、输入、输出与缓存统计，并支持三键切换视图。"
+}
