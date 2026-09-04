@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "appearance": {
+    "id": "builtin-terrier",
+    "clipsDir": "../pc/public/terrier-clips",
+    "width": 640,
+    "height": 480,
+    "fps": 15,
+    "maxFrames": 225,
+    "h264Crf": 27,
+    "readyProfile": "v9-640x480-15fps-225f-h264-crf27",
+    "packId": "d468a7bea959f7e98102fbce16cabb1b89dcb602d77fbe5a869204e58e139e01",
+    "slot": 0,
+    "audioSampleRate": 16000
+  },
+  "components": {
+    "packagesDir": "../pc/builtin-clawpkgs",
+    "ids": [
+      "two-key-pong",
+      "bloomfrog_companion",
+      "flappy-bird",
+      "block-combo",
+      "snake-turn",
+      "tomato-clock",
+      "drink-reminder",
+      "token-usage"
+    ],
+    "defaultActiveId": "two-key-pong",
+    "maxInstalled": 16,
+    "widgetMaxBytes": 4095,
+    "buttonsMaxBytes": 2047
+  },
+  "spiffs": {
+    "partitionLabel": "storage",
+    "pageSize": 512,
+    "blockSize": 4096,
+    "objectNameLength": 32,
+    "metadataLength": 4
+  }
+}

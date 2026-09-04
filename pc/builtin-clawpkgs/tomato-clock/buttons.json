@@ -1,0 +1,20 @@
+[
+  {
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "action": "tomato.start_pause",
+    "label": "暂停 / 继续"
+  },
+  {
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "action": "tomato.skip_phase",
+    "label": "跳过阶段"
+  },
+  {
+    "control": "前方摇杆",
+    "event": "joystick.down",
+    "action": "tomato.reset_phase",
+    "label": "重置本轮"
+  }
+]

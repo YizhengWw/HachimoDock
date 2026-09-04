@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "bond": {
+      "type": "int",
+      "init": 30
+    },
+    "bond_max": {
+      "type": "int",
+      "init": 100
+    },
+    "meals": {
+      "type": "int",
+      "init": 0
+    },
+    "pets": {
+      "type": "int",
+      "init": 0
+    },
+    "reply": {
+      "type": "string",
+      "init": "来陪我玩吧！"
+    }
+  },
+  "states": [
+    "together"
+  ],
+  "initial_state": "together",
+  "transitions": [
+    {
+      "on": "move_up",
+      "from": "*"
+    },
+    {
+      "on": "move_down",
+      "from": "*"
+    },
+    {
+      "on": "move_left",
+      "from": "*"
+    },
+    {
+      "on": "move_right",
+      "from": "*"
+    },
+    {
+      "on": "pet_pet",
+      "from": "*",
+      "inc": {
+        "bond": 1,
+        "pets": 1
+      },
+      "set": {
+        "reply": "舒服～再摸摸！"
+      }
+    },
+    {
+      "on": "feed_pet",
+      "from": "*",
+      "inc": {
+        "bond": 10,
+        "meals": 1
+      },
+      "set": {
+        "reply": "好吃好吃，我还要！"
+      }
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "蛙蛙养成",
+    "eyebrow": "植物系桌宠",
+    "headline": {
+      "var": "reply"
+    },
+    "metricLabel": "亲密度",
+    "metricValue": {
+      "var": "bond"
+    },
+    "metricUnit": "芽",
+    "note": "抚摸 +1，喂食 +10",
+    "footer": "摇杆移动 · 互动养成 · 全局键退出",
+    "progress": {
+      "pct_of": "bond",
+      "of_max": "bond_max",
+      "label": "相伴成长"
+    },
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star"
+  },
+  "scene": {
+    "tick_ms": 900,
+    "active_state": "together",
+    "auto_start": true,
+    "grid": {
+      "width": 16,
+      "height": 12
+    },
+    "sprites": [
+      {
+        "id": "bloomfrog",
+        "asset": "assets/bloomfrog.png",
+        "frame_width": 32,
+        "frame_height": 32,
+        "frames": 4,
+        "fps": 2
+      }
+    ],
+    "entities": [
+      {
+        "id": "pet",
+        "x": 5,
+        "y": 3,
+        "width": 6,
+        "height": 6,
+        "tone": 2,
+        "sprite": "bloomfrog",
+        "bounds": "clamp",
+        "collidable": false
+      },
+      {
+        "id": "snack",
+        "x": 8,
+        "y": 7,
+        "shape": "coin",
+        "tone": 3,
+        "active": false,
+        "collidable": false
+      },
+      {
+        "id": "joy",
+        "x": 9,
+        "y": 3,
+        "shape": "heart",
+        "tone": 4,
+        "active": false,
+        "collidable": false
+      }
+    ],
+    "rules": [
+      {
+        "on": "move_up",
+        "do": [
+          {
+            "op": "move",
+            "entity": "pet",
+            "dx": 0,
+            "dy": -1
+          }
+        ]
+      },
+      {
+        "on": "move_down",
+        "do": [
+          {
+            "op": "move",
+            "entity": "pet",
+            "dx": 0,
+            "dy": 1
+          }
+        ]
+      },
+      {
+        "on": "move_left",
+        "do": [
+          {
+            "op": "move",
+            "entity": "pet",
+            "dx": -1,
+            "dy": 0
+          }
+        ]
+      },
+      {
+        "on": "move_right",
+        "do": [
+          {
+            "op": "move",
+            "entity": "pet",
+            "dx": 1,
+            "dy": 0
+          }
+        ]
+      },
+      {
+        "on": "pet_pet",
+        "do": [
+          {
+            "op": "place",
+            "entity": "joy",
+            "source": "pet",
+            "dx": 4,
+            "dy": 0
+          },
+          {
+            "op": "tone",
+            "entity": "pet",
+            "tone": 3
+          }
+        ]
+      },
+      {
+        "on": "feed_pet",
+        "do": [
+          {
+            "op": "place",
+            "entity": "snack",
+            "source": "pet",
+            "dx": 3,
+            "dy": 4
+          },
+          {
+            "op": "tone",
+            "entity": "pet",
+            "tone": 4
+          }
+        ]
+      },
+      {
+        "on": "tick",
+        "do": [
+          {
+            "op": "hide",
+            "entity": "snack"
+          },
+          {
+            "op": "hide",
+            "entity": "joy"
+          },
+          {
+            "op": "tone",
+            "entity": "pet",
+            "tone": 2
+          }
+        ]
+      }
+    ]
+  }
+}

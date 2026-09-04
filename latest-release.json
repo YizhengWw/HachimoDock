@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "product": "HachimoDock Pet Manager",
+  "desktopVersion": "0.1.52",
+  "firmwareVersion": "0.7.49-p4",
+  "sourceCommit": "3966aa9b67d0bb6b11044377d0675ec547e29ee5",
+  "publicSourceIncluded": false,
+  "embeddedInternalCredentials": false,
+  "artifacts": [
+    {
+      "role": "mac",
+      "file": "HachimoDock-Pet-Manager_0.1.52_macOS-arm64.dmg",
+      "bytes": 103819415,
+      "sha256": "33f6545f55302fb17e6a019e1aa9b10195a5902eb2896bfe2fba5ec489d0025c"
+    },
+    {
+      "role": "windows",
+      "file": "HachimoDock-Pet-Manager_0.1.52_Windows-x64-setup.exe",
+      "bytes": 89566554,
+      "sha256": "af43eb92df8e22dd9bcb3da6791986bc4f46344cd21dfe26c1eb3a4b3d297cec"
+    },
+    {
+      "role": "factory",
+      "file": "HachimoDock-P4_0.7.49-p4_factory.bin",
+      "bytes": 23068672,
+      "sha256": "b4f77bbafc9cf08997f71c202bdb76c800ec3112e9f72395fd8207f2a02f156b"
+    },
+    {
+      "role": "factoryManifest",
+      "file": "HachimoDock-P4_0.7.49-p4_factory.json",
+      "bytes": 2269,
+      "sha256": "3a96270d6c7fc2a9fa1f1b821f5a297facbc739ab3973684ce5be1a2620243b5"
+    },
+    {
+      "role": "factoryPackage",
+      "file": "HachimoDock-P4_0.7.49-p4_Factory-Flasher.zip",
+      "bytes": 19923300,
+      "sha256": "c19a1e6f0c7790f44efadd3b2725dacef166e8dd6410c1796e7539af5f2a7589"
+    },
+    {
+      "role": "ffmpegSource",
+      "file": "FFmpeg-8.1.2-source.tar.xz",
+      "bytes": 11710924,
+      "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+    },
+    {
+      "role": "license",
+      "file": "LICENSE",
+      "bytes": 2921,
+      "sha256": "1091af4291d83f53a48cf1d8aa3a593fdde593edc205f470dd4d3631315c61f1"
+    },
+    {
+      "role": "third-party-notices",
+      "file": "THIRD_PARTY_NOTICES.md",
+      "bytes": 3652,
+      "sha256": "045f04187d3b0aae0acc4d591026206449821c254b09121ed5b86436a1679a99"
+    }
+  ]
+}

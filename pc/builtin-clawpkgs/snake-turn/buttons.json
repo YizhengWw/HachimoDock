@@ -1,0 +1,20 @@
+[
+  {
+    "action": "snake.start",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "开始/重开"
+  },
+  {
+    "action": "snake.turn_left",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw",
+    "label": "向左转"
+  },
+  {
+    "action": "snake.turn_right",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw",
+    "label": "向右转"
+  }
+]

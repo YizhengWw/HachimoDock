@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "agent_label": { "type": "string", "init": "当前 Agent" },
+    "headline_text": { "type": "string", "init": "等待今日统计" },
+    "total_display": { "type": "string", "init": "—" },
+    "input_display": { "type": "string", "init": "—" },
+    "output_display": { "type": "string", "init": "—" },
+    "cache_display": { "type": "string", "init": "缓存 —" },
+    "breakdown_text": { "type": "string", "init": "" }
+  },
+  "states": ["live"],
+  "initial_state": "live",
+  "pages": [
+    { "id": "total" },
+    { "id": "input" },
+    { "id": "output" }
+  ],
+  "initial_page": "total",
+  "transitions": [
+    { "from": "*", "on": "stats.show_total", "page": "total" },
+    { "from": "*", "on": "stats.show_input", "page": "input" },
+    { "from": "*", "on": "stats.show_output", "page": "output" }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "Token 仪表盘",
+    "eyebrow": { "var": "agent_label" },
+    "headline": { "var": "headline_text" },
+    "metricLabel": {
+      "switch_page": {
+        "total": "总 Token",
+        "input": "输入 Token",
+        "output": "输出 Token"
+      }
+    },
+    "metricValue": {
+      "switch_page": {
+        "total": { "var": "total_display" },
+        "input": { "var": "input_display" },
+        "output": { "var": "output_display" }
+      }
+    },
+    "metricUnit": "TOKEN",
+    "note": { "var": "cache_display" },
+    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · 全局键退出",
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_page": {
+        "total": "arcade",
+        "input": "mint",
+        "output": "sunset"
+      }
+    },
+    "visualLayout": "tool",
+    "visualSprite": {
+      "switch_page": {
+        "total": "gauge",
+        "input": "bolt",
+        "output": "gauge"
+      }
+    }
+  }
+}

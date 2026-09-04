@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "title": "番茄钟",
+    "eyebrow": "专注阶段",
+    "headline": "专注中",
+    "metricLabel": "剩余时间",
+    "metricValue": "25:00",
+    "metricUnit": "",
+    "badge": "0",
+    "note": "右上显示完成轮次",
+    "footer": "SW1暂停 · SW2跳过 · 摇杆下重置 · 全局键退出",
+    "progress": {
+      "value": 100,
+      "label": "本轮剩余"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "sunset",
+    "visualLayout": "tool",
+    "visualSprite": "timer"
+  }
+}

@@ -1,0 +1,262 @@
+/**
+ * [Input] Appearance detail source and shared stylesheet.
+ * [Output] Static Node test coverage for detail navigation, guarded deletion,
+ *          task-focused wide preview-first layout with a full-width state rail, configurable state WAV cues,
+ *          direct per-state MP4 replacement, closable background single-state generation
+ *          with centralized API credential readiness, inline progress, cancellable exact-board USB transfer, built-in non-deletable records, generated-only materials, and codex pet source labels.
+ * [Pos] test node in pc/src
+ * [Sync] If this file changes, update `pc/src/.folder.md`.
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const srcDir = dirname(fileURLToPath(import.meta.url));
+
+function readSource(fileName) {
+  return readFileSync(join(srcDir, fileName), "utf8");
+}
+
+function extractCssRule(css, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escaped}\\s*\\{(?<body>[^}]+)\\}`));
+  assert.ok(match, `Expected to find ${selector} CSS rule`);
+  return match.groups.body;
+}
+
+test("appearance detail stays focused on preview, deletion, and gallery navigation", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /返回宠物图册/);
+  assert.match(source, /删除形象/);
+  assert.doesNotMatch(source, /应用到设备/);
+  assert.doesNotMatch(source, /detail-apply-/);
+  assert.doesNotMatch(css, /detail-apply-/);
+});
+
+test("appearance detail main preview uses the resilient shared media preview", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /const activePreviewMedia = activeRecord\?\.ok/);
+  assert.match(source, /mediaFromFamily\(activeRecord, record\)/);
+  assert.match(source, /mediaFromSourcePreview\(record\)/);
+  assert.match(source, /mediaFromSourceImage\(record\)/);
+  assert.match(source, /<AppearancePreview[\s\S]*className="detail-media__video"[\s\S]*playing/);
+  assert.doesNotMatch(source, /const \[videoUrl/);
+  assert.doesNotMatch(source, /readVideoAsBlobUrl/);
+  assert.match(css, /\.detail-media__video\s*\{[\s\S]*height: clamp\(320px, 37vw, 460px\);/);
+});
+
+test("appearance detail guards deletion with progress and error feedback", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /const \[deleteState, setDeleteState\] = useState\("idle"\);/);
+  assert.match(source, /const \[deleteError, setDeleteError\] = useState\(""\);/);
+  assert.match(source, /await deleteAppearance\(record\.id\);/);
+  assert.match(source, /setDeleteState\("deleting"\);/);
+  assert.match(source, /删除中…/);
+  assert.match(source, /删除形象失败/);
+});
+
+test("appearance USB transfers expose a real shared-button cancel action", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  assert.match(source, /APPEARANCE_SYNC_CANCELLED_MESSAGE/);
+  assert.match(source, /invoke\("usb_cancel_appearance_sync"\)/);
+  assert.match(source, /handleCancelAppearanceSync/);
+  assert.match(source, /variant="danger"/);
+  assert.match(source, /aria-label="中断 USB 形象传输"/);
+  assert.match(source, /中断传输/);
+});
+
+test("appearance detail lets users configure a WAV cue for each generated state", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /replaceFamilyAudioCue/);
+  assert.match(source, /removeFamilyAudioCue/);
+  assert.match(source, /readAudioAsBlobUrl/);
+  assert.match(source, /compressWavFileForBoard/);
+  assert.match(source, /const \[audioUrl, setAudioUrl\] = useState\(""\);/);
+  assert.match(source, /accept="audio\/wav,audio\/x-wav,\.wav"/);
+  assert.match(source, /状态提示音/);
+  assert.match(source, /上传 WAV/);
+  assert.match(source, /移除提示音/);
+  assert.match(source, /const canEditAudio = activeRecord\?\.ok;/);
+  assert.doesNotMatch(source, /const canEditAudio = !isBuiltin && activeRecord\?\.ok;/);
+  assert.match(source, /const audioFamilyNames = useMemo/);
+  assert.match(source, /当前状态 \{activeRecord\.family\} 还没有提示音/);
+  assert.ok(source.includes('已有提示音: ${audioFamilyNames.join(" / ")}'));
+  assert.match(source, /familyRecord\.audioPath \|\| familyRecord\.audioSrc/);
+  assert.match(source, /const audioBytes = await compressWavFileForBoard\(file\);/);
+  assert.match(css, /\.detail-audio-config\s*\{/);
+  assert.match(css, /\.state-card__sound\s*\{/);
+});
+
+test("appearance detail lets users upload an MP4 to replace the selected state video", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /const \[stateVideoState, setStateVideoState\] = useState\("idle"\);/);
+  assert.match(source, /const \[stateVideoMessage, setStateVideoMessage\] = useState\(""\);/);
+  assert.match(source, /function isMp4VideoFile/);
+  assert.match(source, /readFileAsBytes\(file\)/);
+  assert.match(source, /handleStateVideoFileChange/);
+  assert.match(source, /accept="video\/mp4,\.mp4"/);
+  assert.match(source, /状态视频/);
+  assert.match(source, /上传 MP4 替换/);
+  assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeFamily,[\s\S]*videoBytes/);
+  assert.match(source, /已上传并替换 \$\{activeFamily\} 状态视频。需要在设备生效时，点击“替换到板端”。/);
+  assert.match(source, /setSingleStateStatus\("success"\);/);
+  assert.match(source, /detail-side-section detail-side-section--video/);
+  assert.match(css, /\.detail-state-video-upload\s*\{/);
+  assert.match(css, /\.detail-state-video-upload__actions\s*\{/);
+});
+
+test("appearance detail uses a preview-first workspace with a unified inspector and full-width state rail", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+  const audioRule = extractCssRule(css, ".detail-audio-config");
+
+  assert.match(source, /detail-workspace/);
+  assert.match(source, /detail-preview-panel/);
+  assert.match(source, /detail-control-panel/);
+  assert.match(source, /detail-context-drawer/);
+  assert.match(source, /detail-state-rail/);
+  assert.match(source, /detail-summary-card/);
+  assert.match(source, /detail-side-section detail-side-section--audio/);
+  assert.match(source, /detail-side-section detail-side-section--regenerate/);
+  assert.match(source, /detail-summary-card__description/);
+  assert.match(source, /detail-summary-card__meta/);
+  assert.match(css, /\.detail-workspace\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(340px,\s*380px\);/);
+  assert.match(css, /\.detail-preview-panel\s*\{[\s\S]*display:\s*contents;/);
+  assert.match(css, /\.detail-control-panel\s*\{[\s\S]*position:\s*sticky;/);
+  assert.match(css, /\.detail-control-panel\s*\{[\s\S]*border-radius:\s*var\(--radius-xl\);/);
+  assert.match(css, /\.detail-state-rail-section\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1;/);
+  assert.match(css, /\.detail-context-drawer\s*\{[\s\S]*margin-top:\s*0;/);
+  assert.match(css, /\.detail-state-rail\s*\{[\s\S]*grid-auto-flow:\s*column;/);
+  assert.doesNotMatch(css, /\.detail-meta\s*\{/);
+  assert.match(css, /\.detail-summary-card\s*\{/);
+  assert.match(css, /\.detail-side-section\s*\{[\s\S]*padding:\s*var\(--space-4\) var\(--space-5\);/);
+  assert.doesNotMatch(audioRule, /padding-top:\s*12px;/);
+});
+
+test("appearance detail persists audio OTA reminders and exposes the sound downlink action", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const css = readSource("styles.css");
+
+  assert.match(source, /AUDIO_SYNC_DIRTY_PREFIX/);
+  assert.match(source, /readAudioSyncDirty/);
+  assert.match(source, /writeAudioSyncDirty/);
+  assert.match(source, /markAudioSyncDirty/);
+  assert.match(source, /usb_sync_appearance/);
+  assert.match(source, /AppearanceDetail\(\{ appearanceId, boardDeviceId = ""/);
+  assert.match(
+    source,
+    /invoke\("usb_sync_appearance", \{[\s\S]*appearanceId: record\.id,[\s\S]*boardDeviceId/,
+  );
+  assert.match(source, /下发音效/);
+  assert.match(source, /板端音效 OTA 通道/);
+  assert.match(source, /已更新 \$\{activeFamily\} 的提示音，请通过音效通道下发到设备。/);
+  assert.match(source, /已移除 \$\{activeFamily\} 的提示音，请通过音效通道下发到设备。/);
+  assert.match(source, /detail-audio-sync-btn/);
+  assert.match(source, /detail-audio-sync-message/);
+  assert.match(css, /\.detail-audio-sync-btn\s*\{/);
+  assert.match(css, /\.detail-audio-sync-message\s*\{/);
+});
+
+test("appearance detail can regenerate one selected state and replace it on the board", () => {
+  const source = readSource("AppearanceDetail.jsx");
+  const wizard = readSource("CustomAvatarWizard.jsx");
+  const css = readSource("styles.css");
+  const regenerateCtaRule = extractCssRule(css, ".detail-state-regenerate-entry__cta");
+
+  assert.match(source, /AvatarWizardStep1/);
+  assert.match(source, /AvatarWizardStep2/);
+  assert.match(source, /runSingleFamilyVideo/);
+  assert.match(source, /replaceFamilyVideo/);
+  assert.match(source, /saveProviderConfig/);
+  assert.match(source, /handleSingleStateGenerate/);
+  assert.match(source, /handleSyncSingleStateToDevice/);
+  assert.match(wizard, /accept="image\/png,image\/jpeg,image\/webp,image\/gif,image\/\*"/);
+  assert.match(source, /单状态重生成/);
+  assert.match(source, /重新生成当前状态/);
+  assert.match(source, /singleStateDialogOpen/);
+  assert.match(source, /single-state-regenerate-modal/);
+  assert.match(source, /<AvatarWizardStep1[\s\S]*identityFields=\{false\}/);
+  assert.match(source, /<AvatarWizardStep2[\s\S]*startLabel="生成并替换当前状态"/);
+  assert.match(source, /生成并替换当前状态/);
+  assert.match(source, /替换到板端/);
+  assert.match(source, /usb_sync_appearance/);
+  assert.match(source, /replaceFamilyVideo\(\{[\s\S]*appearanceId: record\.id,[\s\S]*family: activeRecord\.family/);
+  assert.match(source, /runSingleFamilyVideo\(\{[\s\S]*family: activeRecord\.family/);
+  assert.match(source, /singleStateProgressFromPipeline/);
+  assert.match(source, /singleStateProgress/);
+  assert.match(source, /progress=\{[\s\S]*singleStateProgress/);
+  assert.match(css, /\.detail-state-regenerate-entry\s*\{/);
+  assert.match(source, /detail-state-regenerate-entry__cta/);
+  assert.match(css, /\.detail-state-regenerate-entry__cta\s*\{/);
+  assert.match(css, /\.ca-inline-progress\s*\{/);
+  assert.match(css, /\.ca-inline-progress__bar span\s*\{/);
+  assert.doesNotMatch(regenerateCtaRule, /width:\s*100%;/);
+  assert.match(regenerateCtaRule, /min-height:\s*var\(--control-height-md\);/);
+  assert.match(regenerateCtaRule, /background:\s*var\(--accent-soft\);/);
+  assert.match(css, /\.detail-state-regenerate-entry__cta:hover:not\(:disabled\)\s*\{/);
+  assert.match(css, /\.single-state-regenerate-modal\s*\{/);
+  assert.doesNotMatch(source, /detail-state-regenerate__preview/);
+  assert.doesNotMatch(css, /\.detail-state-regenerate__preview\s*\{/);
+});
+
+test("single-state regeneration reads credentials from centralized API settings", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /providerCredentialsConfigured/);
+  assert.match(source, /onOpenApiSettings/);
+  assert.match(source, /API_CONFIGURATION_UPDATED_EVENT/);
+  assert.doesNotMatch(source, /type="password"/);
+});
+
+test("single-state generation can keep running after the modal is closed", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /const handleCloseSingleStateDialog = useCallback\(\(\) => \{\s*setSingleStateDialogOpen\(false\);\s*\}, \[\]\);/);
+  assert.doesNotMatch(source, /if \(singleStateStatus === "generating" \|\| singleStateStatus === "syncing"\) return;/);
+  assert.doesNotMatch(source, /aria-label="关闭单状态重生成"[\s\S]{0,160}disabled=\{singleStateBusy\}/);
+  assert.match(source, /正在生成 \$\{activeRecord\.family\} 状态素材/);
+  assert.match(source, /setSingleStateStatus\("success"\);/);
+  assert.match(source, /const successMessage = `已替换 \$\{activeRecord\.family\} 状态素材。需要在设备生效时，点击“替换到板端”。`;/);
+  assert.match(source, /setSingleStateMessage\(successMessage\);/);
+});
+
+test("single-state replacement keeps the board-sync action available after updating the prompt", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /setSingleStatePrompt\(activeRecord\?\.prompt \|\| ""\);/);
+  assert.match(source, /\}, \[activeRecord\?\.family, record\?\.id\]\);/);
+  assert.doesNotMatch(source, /\}, \[activeRecord\?\.family, activeRecord\?\.prompt, record\?\.id\]\);/);
+});
+
+test("appearance detail keeps built-in appearances non-deletable and normalizes source labels", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /const isBuiltin = record\.type === "builtin";/);
+  assert.match(source, /appearanceSourceLabel/);
+  assert.match(source, /record\.type === "codex-import"/);
+  assert.match(source, /"codex pet"/);
+  assert.match(source, /"内置形象"/);
+});
+
+test("appearance detail renders every known state so missing videos can be replaced", () => {
+  const source = readSource("AppearanceDetail.jsx");
+
+  assert.match(source, /const stateFamilyRecords = useMemo\(/);
+  assert.match(source, /FAMILIES\.map\(\(definition\) =>/);
+  assert.match(source, /stateFamilyRecords\.map\(\(familyRecord\) =>/);
+  assert.match(source, /全部状态/);
+  assert.match(source, /\{generatedFamilies\.length\}\/\{stateFamilyRecords\.length\} 个已有素材/);
+  assert.match(source, /familyRecord\.ok \? "已生成" : "可上传替换"/);
+});

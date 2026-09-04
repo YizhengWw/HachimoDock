@@ -1,0 +1,158 @@
+{
+  "format": "p4-h264-v1",
+  "packId": "d468a7bea959f7e98102fbce16cabb1b89dcb602d77fbe5a869204e58e139e01",
+  "codec": "h264",
+  "container": "annex-b",
+  "width": 640,
+  "height": 480,
+  "fps": 15,
+  "families": [
+    {
+      "family": "done",
+      "path": "p4/families/sha256-68fa67d96e6b52553887f8a3.h264",
+      "frames": 151,
+      "streamBytes": 369013,
+      "fps": 15,
+      "frameDurationMs": 67,
+      "durationMs": 10080,
+      "audioPath": "p4/audio/done.wav"
+    },
+    {
+      "family": "error",
+      "path": "p4/families/sha256-aebfade615f45ef9c76029f0.h264",
+      "frames": 225,
+      "streamBytes": 538821,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130,
+      "audioPath": "p4/audio/error.wav"
+    },
+    {
+      "family": "idle.begging",
+      "path": "p4/families/sha256-5c78981cbbd84996a4901f29.h264",
+      "frames": 182,
+      "streamBytes": 477001,
+      "fps": 15,
+      "frameDurationMs": 67,
+      "durationMs": 12130
+    },
+    {
+      "family": "idle.daydreaming",
+      "path": "p4/families/sha256-a5fa280d4daa71c3c556c077.h264",
+      "frames": 225,
+      "streamBytes": 581351,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.eating",
+      "path": "p4/families/sha256-b5c8b0b19f2a8536045c4fd2.h264",
+      "frames": 225,
+      "streamBytes": 562171,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.playing",
+      "path": "p4/families/sha256-dd788dcb9e3e7c45dec50908.h264",
+      "frames": 225,
+      "streamBytes": 712058,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.reading",
+      "path": "p4/families/sha256-ab615a2b6d9b22040f0c739a.h264",
+      "frames": 212,
+      "streamBytes": 508997,
+      "fps": 15,
+      "frameDurationMs": 67,
+      "durationMs": 14130
+    },
+    {
+      "family": "idle.traveling",
+      "path": "p4/families/sha256-a1eb978d706aafaf3060e37e.h264",
+      "frames": 225,
+      "streamBytes": 584442,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "idle.wandering",
+      "path": "p4/families/sha256-31f6687b6836791c108b7201.h264",
+      "frames": 225,
+      "streamBytes": 540753,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "touch.lick",
+      "path": "p4/families/sha256-dfed887d24279e0fa77dab40.h264",
+      "frames": 225,
+      "streamBytes": 630162,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "touch.what",
+      "path": "p4/families/sha256-1b09cdc71bf6eaef70614943.h264",
+      "frames": 225,
+      "streamBytes": 553442,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "waiting_user",
+      "path": "p4/families/sha256-14a4d3de2a5d89dcb59f0402.h264",
+      "frames": 225,
+      "streamBytes": 487466,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130,
+      "audioPath": "p4/audio/waiting_user.wav"
+    },
+    {
+      "family": "welcome",
+      "path": "p4/families/sha256-dc6f26eefefb893ad01e5b58.h264",
+      "frames": 225,
+      "streamBytes": 616359,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "working.browsing",
+      "path": "p4/families/sha256-5607c5f17d26d4cf04d86ce2.h264",
+      "frames": 225,
+      "streamBytes": 570115,
+      "fps": 15,
+      "frameDurationMs": 68,
+      "durationMs": 15130
+    },
+    {
+      "family": "working.thinking",
+      "path": "p4/families/sha256-95b86ef527611828c039b366.h264",
+      "frames": 197,
+      "streamBytes": 427559,
+      "fps": 15,
+      "frameDurationMs": 67,
+      "durationMs": 13130
+    },
+    {
+      "family": "working.typing",
+      "path": "p4/families/sha256-de0dc23fce60d883bc46a2b0.h264",
+      "frames": 182,
+      "streamBytes": 485190,
+      "fps": 15,
+      "frameDurationMs": 67,
+      "durationMs": 12130
+    }
+  ]
+}
