@@ -384,9 +384,9 @@ function validateBundledP4Firmware(target) {
 }
 
 function ensureBridgeDependencies() {
-  const mqttPackage = join(bridgeRuntimePackage, "node_modules", "mqtt", "package.json");
-  const wsPackage = join(bridgeRuntimePackage, "node_modules", "ws", "package.json");
-  if (existsSync(mqttPackage) && existsSync(wsPackage)) return;
+  const manifest = JSON.parse(readFileSync(join(bridgeRuntimePackage, "package.json"), "utf8"));
+  if (Object.keys(manifest.dependencies || {}).every((name) =>
+    existsSync(join(bridgeRuntimePackage, "node_modules", name, "package.json")))) return;
 
   const npmArgs = ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"];
   const npmExecPath = process.env.npm_execpath;
