@@ -895,7 +895,7 @@ The Linux runtime consumes MP4/WAV. The P4 runtime consumes preprocessed packs:
   and packaging prebuilder then replace x264's SPS with the minimal SPS proven
   against `esp_h264`; device synchronization only validates and transfers the
   finished ready pack and never invokes FFmpeg.
-- Current macOS-bundled `0.7.49-p4` USB-UART firmware runs UART0 at 4 Mbaud. It receives a small
+- Current macOS-bundled `0.7.50-p4` USB-UART firmware runs UART0 at 4 Mbaud. It receives a small
   `asset/raw-chunk` JSON header followed immediately by bounded binary data
   and verifies the per-chunk FNV-1a checksum in RAM. The protocol accepts up
   to 65,536 bytes; the desktop deliberately uses 8,192-byte chunks for the
@@ -908,7 +908,7 @@ The Linux runtime consumes MP4/WAV. The P4 runtime consumes preprocessed packs:
   This removes Base64 expansion, JSON bulk parsing, and SPIFFS video-write
   amplification. The 64KiB value is a device maximum, not a required host
   chunk size: macOS uses 8KiB logical chunks with drained 64-byte writes,
-  while Windows `0.7.49-p4` retains its 2 Mbaud transport, starts at up to 64KiB, and
+  while Windows `0.7.50-p4` retains its 2 Mbaud transport, starts at up to 64KiB, and
   restarts the aborted transaction at 2KiB after a checksum or timeout failure.
   Windows CH343 raw
   bodies use paced 128-byte slices while control frames retain 64-byte writes.

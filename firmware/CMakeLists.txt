@@ -6,7 +6,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-set(PROJECT_VER "0.7.49-p4")
+set(PROJECT_VER "0.7.50-p4")
 if(DEFINED ENV{PET_P4_PROJECT_VER_OVERRIDE} AND NOT "$ENV{PET_P4_PROJECT_VER_OVERRIDE}" STREQUAL "")
   set(PROJECT_VER "$ENV{PET_P4_PROJECT_VER_OVERRIDE}")
 endif()

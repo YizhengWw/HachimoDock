@@ -82,6 +82,7 @@ fn clear_serial_handle_inheritance(port: &serialport::COMPort) -> Result<(), Str
 #[cfg(windows)]
 fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
     let port = serialport::new(port_name, baud)
+        .dtr_on_open(false)
         .timeout(SERIAL_IO_TIMEOUT)
         .open_native()
         .map_err(|error| error.to_string())?;

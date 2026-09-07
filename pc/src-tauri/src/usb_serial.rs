@@ -1,6 +1,8 @@
 /*
  * [Input] serialport-enumerated CDC USB ports plus JSON-line OTA/state payloads.
  * [Output] USB serial manager for device handshake, state/speech forwarding,
+ *          timeout-preserving bounded frames, boot-aware Windows probing,
+ *          reusable port handles and verified-rate reconnect caching;
  *          persistent prebuilt P4 H.264 Annex-B/WAV ready packs plus
  *          LGPL-safe VideoToolbox/Media Foundation custom-media encoding with
  *          native-SPS structural and full-decode validation, plus paced
@@ -167,15 +169,15 @@ struct SerialMessage {
 const APPEARANCE_ASSET_CHUNK_SIZE: usize = 49_152;
 const DEFAULT_USB_SERIAL_BAUD: u32 = 921_600;
 const LEGACY_USB_SERIAL_BAUD: u32 = 115_200;
+const P4_UNIFIED_UART_BAUD: u32 = 4_000_000;
+const P4_COMPAT_UART_BAUD: u32 = 2_000_000;
+// These platform-specific budgets retain the proven transmission pacing;
+// discovery and firmware UART configuration are independent of this budget.
 #[cfg(windows)]
 const P4_USB_UART_BAUD: u32 = 2_000_000;
 #[cfg(not(windows))]
 const P4_USB_UART_BAUD: u32 = 4_000_000;
 const P4_USB_UART_TRANSITION_BAUD: u32 = 3_000_000;
-#[cfg(windows)]
-const P4_USB_UART_LEGACY_BAUD: u32 = 4_000_000;
-#[cfg(not(windows))]
-const P4_USB_UART_LEGACY_BAUD: u32 = 2_000_000;
 // Linux board-runtime emits hello every three seconds until acknowledged, and
 // opening the CH343 can cold-boot P4 for roughly five seconds before its first
 // protocol frame. The first host write can also be lost while the adapter or
@@ -670,9 +672,9 @@ fn serial_baud_candidates_for_device(device: Option<&UsbDeviceInfo>) -> Vec<u32>
     let high_speed_first = device.is_some_and(usb_serial_device_prefers_high_speed);
     if high_speed_first {
         vec![
-            P4_USB_UART_BAUD,
+            P4_UNIFIED_UART_BAUD,
+            P4_COMPAT_UART_BAUD,
             P4_USB_UART_TRANSITION_BAUD,
-            P4_USB_UART_LEGACY_BAUD,
             DEFAULT_USB_SERIAL_BAUD,
             LEGACY_USB_SERIAL_BAUD,
         ]
@@ -680,9 +682,9 @@ fn serial_baud_candidates_for_device(device: Option<&UsbDeviceInfo>) -> Vec<u32>
         vec![
             DEFAULT_USB_SERIAL_BAUD,
             LEGACY_USB_SERIAL_BAUD,
-            P4_USB_UART_BAUD,
+            P4_UNIFIED_UART_BAUD,
+            P4_COMPAT_UART_BAUD,
             P4_USB_UART_TRANSITION_BAUD,
-            P4_USB_UART_LEGACY_BAUD,
         ]
     }
 }
@@ -857,6 +859,14 @@ fn send_serial_probe_handshakes(
         .map_err(|error| format!("serial handshake flush failed: {error}"))
 }
 
+fn serial_probe_attempt_timeout(index: usize, baud: u32, timeout: Duration) -> Duration {
+    if index == 0 && matches!(baud, P4_UNIFIED_UART_BAUD | P4_COMPAT_UART_BAUD) {
+        timeout.max(SERIAL_PROBE_TIMEOUT)
+    } else {
+        timeout
+    }
+}
+
 fn probe_serial_port(
     port_name: &str,
     baud_candidates: &[u32],
@@ -864,8 +874,23 @@ fn probe_serial_port(
     probe_timeout: Duration,
 ) -> Result<ProbedSerialPort, String> {
     let mut failures = Vec::new();
-    for baud in baud_candidates.iter().copied() {
-        let (mut writer, reader) = match open_serial_pair_with_retry(port_name, baud) {
+    let mut reusable_pair: Option<(
+        Box<dyn serialport::SerialPort>,
+        Box<dyn serialport::SerialPort>,
+    )> = None;
+    for (index, baud) in baud_candidates.iter().copied().enumerate() {
+        let pair = if let Some((mut writer, reader)) = reusable_pair.take() {
+            match writer.set_baud_rate(baud) {
+                Ok(()) => {
+                    let _ = writer.clear(serialport::ClearBuffer::Input);
+                    Ok((writer, reader))
+                }
+                Err(error) => Err(error.to_string()),
+            }
+        } else {
+            open_serial_pair_with_retry(port_name, baud)
+        };
+        let (mut writer, reader) = match pair {
             Ok(ports) => ports,
             Err(error) => {
                 failures.push(error);
@@ -873,8 +898,18 @@ fn probe_serial_port(
             }
         };
 
-        let _ = writer.write_data_terminal_ready(true);
-        let _ = writer.write_request_to_send(true);
+        // Runtime connections must release the boot/reset control lines on
+        // Windows. Firmware flashing retains its separate esptool reset path.
+        let _ = writer.write_data_terminal_ready(!cfg!(windows));
+        let _ = writer.write_request_to_send(!cfg!(windows));
+        let attempt_timeout = serial_probe_attempt_timeout(index, baud, probe_timeout);
+        transfer_log::record(
+            "connection",
+            "probe",
+            serde_json::json!({
+                "port": port_name, "baud": baud, "timeoutMs": attempt_timeout.as_millis(),
+            }),
+        );
         if let Err(error) = send_serial_probe_handshakes(writer.as_mut(), desktop_device_id) {
             failures.push(format!("{baud} baud: {error}"));
             continue;
@@ -884,7 +919,7 @@ fn probe_serial_port(
         let mut next_handshake_at = started + SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL;
         let mut reader = BufReader::new(reader);
         let mut line_buffer = Vec::with_capacity(32 * 1024);
-        while started.elapsed() < probe_timeout {
+        while started.elapsed() < attempt_timeout {
             if Instant::now() >= next_handshake_at {
                 if let Err(error) = send_serial_probe_handshakes(writer.as_mut(), desktop_device_id)
                 {
@@ -921,6 +956,9 @@ fn probe_serial_port(
             });
         }
         failures.push(format!("{baud} baud: no valid protocol hello"));
+        if cfg!(windows) {
+            reusable_pair = Some((writer, reader.into_inner()));
+        }
     }
 
     Err(format!(
@@ -1163,6 +1201,7 @@ fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Resu
 
 #[derive(Clone)]
 pub struct UsbSerialManager {
+    last_serial_baud: Arc<Mutex<Option<(String, u32)>>>,
     connection: Arc<Mutex<Option<UsbConnection>>>,
     desktop_device_id: Arc<Mutex<String>>,
     connect_guard: Arc<Mutex<()>>,
@@ -1182,14 +1221,41 @@ fn read_serial_line_lossy<R: BufRead>(
     reader: &mut R,
     buffer: &mut Vec<u8>,
 ) -> std::io::Result<Option<String>> {
-    buffer.clear();
-    if reader.read_until(b'\n', buffer)? == 0 {
-        return Ok(None);
+    // Keep incomplete frames across I/O timeouts, including during probing.
+    // Bound both memory and work per call so noise cannot stall the probe loop.
+    const MAX_SERIAL_LINE_BYTES: usize = 256 * 1024;
+    const READ_SLICE: Duration = Duration::from_millis(100);
+    let started = Instant::now();
+    loop {
+        let bytes = reader.fill_buf()?;
+        if bytes.is_empty() {
+            buffer.clear();
+            return Ok(None);
+        }
+        let newline = bytes.iter().position(|byte| *byte == b'\n');
+        let count = newline.map_or(bytes.len(), |index| index + 1);
+        if buffer.len().saturating_add(count) > MAX_SERIAL_LINE_BYTES {
+            buffer.clear();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "serial frame exceeds size limit",
+            ));
+        }
+        buffer.extend_from_slice(&bytes[..count]);
+        reader.consume(count);
+        if newline.is_some() {
+            break;
+        }
+        if started.elapsed() >= READ_SLICE {
+            return Err(std::io::ErrorKind::TimedOut.into());
+        }
     }
     while matches!(buffer.last(), Some(b'\n' | b'\r')) {
         buffer.pop();
     }
-    Ok(Some(String::from_utf8_lossy(buffer).into_owned()))
+    let line = String::from_utf8_lossy(buffer).into_owned();
+    buffer.clear();
+    Ok(Some(line))
 }
 
 fn log_raw_serial_line(line: &str) {
@@ -1213,6 +1279,7 @@ fn validate_expected_board_device_id(expected_board_device_id: &str) -> Result<&
 impl UsbSerialManager {
     pub fn new() -> Self {
         Self {
+            last_serial_baud: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(None)),
             desktop_device_id: Arc::new(Mutex::new(String::new())),
             connect_guard: Arc::new(Mutex::new(())),
@@ -1356,13 +1423,51 @@ impl UsbSerialManager {
             .scan_devices()
             .into_iter()
             .find(|device| device.port_name.eq_ignore_ascii_case(port_name));
-        let baud_candidates = serial_baud_candidates_for_device(detected_device.as_ref());
+        let probe_key = detected_device
+            .as_ref()
+            .map(|device| {
+                format!(
+                    "{}|{:04x}|{:04x}|{}",
+                    device.port_name, device.vid, device.pid, device.serial_number
+                )
+            })
+            .unwrap_or_else(|| port_name.to_string());
+        let mut baud_candidates = serial_baud_candidates_for_device(detected_device.as_ref());
+        if let Ok(cached) = self.last_serial_baud.lock() {
+            if let Some((key, baud)) = cached.as_ref().filter(|(key, _)| key == &probe_key) {
+                let _ = key;
+                baud_candidates.retain(|candidate| candidate != baud);
+                baud_candidates.insert(0, *baud);
+            }
+        }
         let desktop_id = self
             .desktop_device_id
             .lock()
             .map(|value| value.clone())
             .unwrap_or_default();
-        let probed = probe_serial_port(port_name, &baud_candidates, &desktop_id, probe_timeout)?;
+        let probed =
+            match probe_serial_port(port_name, &baud_candidates, &desktop_id, probe_timeout) {
+                Ok(probed) => probed,
+                Err(error) => {
+                    transfer_log::record(
+                        "connection",
+                        "failed",
+                        serde_json::json!({"port": port_name, "error": error}),
+                    );
+                    return Err(error);
+                }
+            };
+        if let Ok(mut cached) = self.last_serial_baud.lock() {
+            *cached = Some((probe_key, probed.baud));
+        }
+        transfer_log::record(
+            "connection",
+            "verified",
+            serde_json::json!({
+                "port": port_name, "baud": probed.baud,
+                "firmware": first_json_string(&probed.hello.payload, &["fw", "firmware", "version"]),
+            }),
+        );
         eprintln!(
             "[usb_serial] verified {} at {} baud as runtime={} board={} firmware={}",
             port_name,
@@ -6156,6 +6261,80 @@ mod tests {
     }
 
     #[test]
+    fn serial_frames_survive_every_timeout_split_and_repeated_timeouts() {
+        use std::collections::VecDeque;
+        struct Fragmented(VecDeque<Option<Vec<u8>>>);
+        impl std::io::Read for Fragmented {
+            fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+                match self.0.pop_front() {
+                    Some(None) => Err(std::io::ErrorKind::TimedOut.into()),
+                    Some(Some(bytes)) => {
+                        out[..bytes.len()].copy_from_slice(&bytes);
+                        Ok(bytes.len())
+                    }
+                    None => Ok(0),
+                }
+            }
+        }
+        for topic in ["hello", "firmware/chunk_ack"] {
+            let line = format!("{{\"topic\":\"{topic}\",\"payload\":{{\"ok\":true}}}}\r\n");
+            for split in 1..line.len() - 1 {
+                let port = Fragmented(VecDeque::from([
+                    Some(line.as_bytes()[..split].to_vec()),
+                    None,
+                    None,
+                    Some(line.as_bytes()[split..].to_vec()),
+                    Some(b"{\"topic\":\"next\",\"payload\":{}}\n".to_vec()),
+                ]));
+                let mut reader = BufReader::new(port);
+                let mut buffer = Vec::new();
+                for _ in 0..2 {
+                    assert_eq!(
+                        read_serial_line_lossy(&mut reader, &mut buffer)
+                            .unwrap_err()
+                            .kind(),
+                        std::io::ErrorKind::TimedOut
+                    );
+                }
+                let frame = read_serial_line_lossy(&mut reader, &mut buffer)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(frame, line.trim_end());
+                assert_eq!(parse_serial_message(&frame).unwrap().topic, topic);
+                assert!(buffer.is_empty());
+                assert_eq!(
+                    parse_serial_message(
+                        &read_serial_line_lossy(&mut reader, &mut buffer)
+                            .unwrap()
+                            .unwrap()
+                    )
+                    .unwrap()
+                    .topic,
+                    "next"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn serial_noise_is_bounded_and_eof_discards_an_incomplete_frame() {
+        let mut reader = BufReader::new(std::io::Cursor::new(vec![b'x'; 256 * 1024 + 1]));
+        let mut buffer = Vec::new();
+        assert_eq!(
+            read_serial_line_lossy(&mut reader, &mut buffer)
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(buffer.is_empty());
+        let mut reader = BufReader::new(std::io::Cursor::new(b"incomplete"));
+        assert!(read_serial_line_lossy(&mut reader, &mut buffer)
+            .unwrap()
+            .is_none());
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
     fn prefers_macos_callout_port_over_blocking_tty_pair() {
         let devices = vec![
             UsbDeviceInfo {
@@ -6213,9 +6392,9 @@ mod tests {
             assert_eq!(
                 serial_baud_candidates_for_device(Some(&device)),
                 vec![
-                    P4_USB_UART_BAUD,
+                    P4_UNIFIED_UART_BAUD,
+                    P4_COMPAT_UART_BAUD,
                     P4_USB_UART_TRANSITION_BAUD,
-                    P4_USB_UART_LEGACY_BAUD,
                     DEFAULT_USB_SERIAL_BAUD,
                     LEGACY_USB_SERIAL_BAUD
                 ]
@@ -6251,6 +6430,17 @@ mod tests {
         assert_eq!(messages[0]["payload"]["desktopDeviceId"], "desktop-1");
         assert_eq!(messages[1]["type"], "hello");
         assert!(messages.iter().all(|message| message["topic"] != "ack"));
+    }
+
+    #[test]
+    fn first_p4_probe_covers_boot_without_lengthening_every_unknown_port() {
+        let short = Duration::from_millis(1500);
+        for baud in [P4_UNIFIED_UART_BAUD, P4_COMPAT_UART_BAUD] {
+            assert!(serial_probe_attempt_timeout(0, baud, short) >= Duration::from_secs(8));
+            assert_eq!(serial_probe_attempt_timeout(1, baud, short), short);
+            assert_eq!(serial_probe_attempt_timeout(0, baud, Duration::from_secs(12)), Duration::from_secs(12));
+        }
+        assert_eq!(serial_probe_attempt_timeout(0, DEFAULT_USB_SERIAL_BAUD, short), short);
     }
 
     #[test]

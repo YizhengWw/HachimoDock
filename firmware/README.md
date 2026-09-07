@@ -103,7 +103,7 @@ cd firmware
 | 构建环境 | 串口运行参数 |
 | --- | --- |
 | `esp32_p4_evboard` | macOS 使用，4 Mbaud |
-| `esp32_p4_evboard_windows` | Windows 使用，2 Mbaud |
+| `esp32_p4_evboard_windows` | 兼容旧构建命令的别名，继承同一 4 Mbaud 配置 |
 
 可执行 `python -m platformio run -e esp32_p4_evboard_windows` 构建 Windows 对应版本。两种环境使用独立输出目录；不要混用随 PC 分发的固件文件。
 
@@ -177,7 +177,7 @@ cd firmware
 
 切换的是数据通路，不改变供电输入；实际操作请核对所用板卡说明。原生接口通过 Microsoft OS 2.0 描述符匹配系统 WinUSB，无需单独安装 INF 或 Zadig。
 
-macOS 默认采用 4 Mbaud、8 KiB 逻辑分块及分段节流；Windows 保持 2 Mbaud，可从较大的 raw 分块开始，完整性检查失败后以 2 KiB 分块重启传输。协议保留低速探测和 Base64 JSON 兼容回退，实际速度以日志统计为准。
+Windows/macOS 共用 4 Mbaud 固件。macOS 保留 8 KiB 逻辑分块及分段节流；Windows 保留原有分片与发送间隔，可从较大的 raw 分块开始，完整性检查失败后以 2 KiB 分块重启传输。PC 仍可探测连接旧 2 Mbaud 固件。运行波特率与烧录波特率分别设置，实际吞吐以日志统计为准。
 
 原生 USB 打开目标前使用随机挑战值核对设备身份和协议版本；身份不唯一、回复过期或不支持身份检查时拒绝写入，可改用 USB-UART。
 

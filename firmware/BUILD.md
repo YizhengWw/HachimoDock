@@ -16,7 +16,7 @@ pio run -e esp32_p4_evboard
 pio run -e esp32_p4_evboard_windows
 ```
 
-`esp32_p4_evboard` 对应 macOS 的 UART 参数，Windows 使用 `esp32_p4_evboard_windows`。两种环境的输出目录彼此独立。Python 测试中的协议检查为独立脚本，另运行 `python tests/protocol_contract_test.py`。
+`esp32_p4_evboard` 构建 Windows/macOS 共用的 4M 固件；`esp32_p4_evboard_windows` 仅为兼容旧构建命令的同配置别名。发布只取默认环境的一次构建产物供两端使用。Python 协议检查另运行 `python tests/protocol_contract_test.py`。
 
 ## 完整出厂镜像 / Complete factory image
 
