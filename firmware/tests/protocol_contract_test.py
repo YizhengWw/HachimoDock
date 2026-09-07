@@ -1128,7 +1128,9 @@ def test_p4_runtime_supports_native_usb_and_usb_uart_bridge():
     assert '#include "pet_p4_transport_config.h"' in source
     assert "PET_P4_UART_BAUD 4000000" in transport_config
     assert "custom_p4_uart_baud = 4000000" in platformio
-    assert "custom_p4_uart_baud = 2000000" in platformio
+    windows_env = platformio.split("[env:esp32_p4_evboard_windows]", 1)[1]
+    assert "extends = env:esp32_p4_evboard" in windows_env
+    assert "custom_p4_uart_baud" not in windows_env
     assert "PET_P4_UART_BAUD_OVERRIDE" in read("scripts/platformio_add_p4_toolchain.py")
     assert "PET_P4_UART_BAUD=${PET_P4_UART_BAUD}" in cmake
     assert "uart_rx_task" in source
@@ -1221,8 +1223,8 @@ def test_pc_uses_high_baud_for_p4_ch343_usb_uart():
     assert "P4_USB_UART_BAUD: u32 = 2_000_000" in usb
     assert "P4_USB_UART_BAUD: u32 = 4_000_000" in usb
     assert "P4_USB_UART_TRANSITION_BAUD: u32 = 3_000_000" in usb
-    assert "P4_USB_UART_LEGACY_BAUD: u32 = 4_000_000" in usb
-    assert "P4_USB_UART_LEGACY_BAUD: u32 = 2_000_000" in usb
+    assert "P4_UNIFIED_UART_BAUD: u32 = 4_000_000" in usb
+    assert "P4_COMPAT_UART_BAUD: u32 = 2_000_000" in usb
     assert "DEFAULT_USB_SERIAL_BAUD: u32 = 921_600" in usb
     assert "serial_baud_candidates_for_device" in usb
     assert "probe_serial_port(port_name, &baud_candidates" in usb
@@ -1583,7 +1585,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.49-p4")' in project
+    assert 'set(PROJECT_VER "0.7.50-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1665,7 +1667,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.49-p4")' in project
+    assert 'set(PROJECT_VER "0.7.50-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake

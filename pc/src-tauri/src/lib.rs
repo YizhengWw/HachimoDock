@@ -115,10 +115,7 @@ const USB_AUTO_RETRY_MIN_SECS: u64 = 5;
 const USB_AUTO_RETRY_MAX_SECS: u64 = 60;
 const P4_SESSION_TERMINAL_HOLD_MS: u64 = 60_000;
 const JSON_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
-#[cfg(windows)]
 const BUNDLED_P4_FIRMWARE_RESOURCE: &str = "firmware/esp32-p4/firmware.bin";
-#[cfg(not(windows))]
-const BUNDLED_P4_FIRMWARE_RESOURCE: &str = "firmware/esp32-p4/firmware-macos.bin";
 
 fn desktop_build_info() -> serde_json::Value {
     serde_json::json!({

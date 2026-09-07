@@ -6,8 +6,8 @@ HachimoDock turns Agent activity into a desktop companion: pet animations, conve
 
 ## Source and builds
 
-- [`pc/`](pc/README.md): desktop client 0.1.54, local Agent bridge, component-generation Skill and built-in resources.
-- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.49-p4, board drivers, tests and complete factory-image tools.
+- [`pc/`](pc/README.md): desktop client 0.1.55, local Agent bridge, component-generation Skill and built-in resources.
+- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.50-p4, board drivers, tests and complete factory-image tools.
 - Install Git LFS and run `git lfs pull` after cloning. Build dependencies are described in each directory.
 - For a ready-to-use app or a complete device flashing kit, visit [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest).
 - To use speech recognition or appearance generation, enter your service keys in Pet Manager’s API settings.

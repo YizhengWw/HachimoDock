@@ -7,7 +7,7 @@ import os
 project_dir = env.subst("$PROJECT_DIR")
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
 env["ENV"]["PET_P4_PROJECT_VER_OVERRIDE"] = env.GetProjectOption(
-    "custom_p4_project_version", "0.7.49-p4"
+    "custom_p4_project_version", "0.7.50-p4"
 )
 env["ENV"]["PET_P4_UART_BAUD_OVERRIDE"] = env.GetProjectOption(
     "custom_p4_uart_baud", "4000000"

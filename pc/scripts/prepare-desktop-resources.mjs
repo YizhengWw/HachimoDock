@@ -30,7 +30,6 @@ const bridgeRuntimePackage = join(
 );
 const generatedRuntime = join(tauriRoot, "generated-runtime");
 const bundledP4FirmwareDir = join(tauriRoot, "firmware", "esp32-p4");
-const windowsP4FirmwareVersion = "0.7.49-p4";
 const p4ProjectCmake = join(repositoryRoot, "firmware", "CMakeLists.txt");
 const auditedFfmpegBinarySha256 = {
   "macos-arm64": "e340c148c720888a528e7bd2e7867da3b4bea91d1f6e508c9526111257ee0468",
@@ -349,7 +348,7 @@ function readFirmwareBuildId(firmware, version) {
 }
 
 function validateBundledP4Firmware(target) {
-  const firmwareName = target === "windows" ? "firmware.bin" : "firmware-macos.bin";
+  const firmwareName = "firmware.bin";
   const bundledP4Firmware = join(bundledP4FirmwareDir, firmwareName);
   if (!existsSync(bundledP4Firmware)) {
     throw new Error(`缺少 PC 内置 P4 固件：${bundledP4Firmware}`);
@@ -367,7 +366,7 @@ function validateBundledP4Firmware(target) {
   const projectName = readNullTerminatedUtf8(firmware.subarray(descriptorOffset + 48, descriptorOffset + 80));
   const cmake = readFileSync(p4ProjectCmake, "utf8");
   const sourceVersion = cmake.match(/set\(PROJECT_VER\s+"([^"]+)"\)/)?.[1] || "";
-  const expectedVersion = target === "windows" ? windowsP4FirmwareVersion : sourceVersion;
+  const expectedVersion = sourceVersion;
   if (projectName !== "pet_manager_p4_runtime") {
     throw new Error(`PC 内置固件 projectName 异常：${projectName || "(empty)"}`);
   }
