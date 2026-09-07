@@ -181,8 +181,8 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.52_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.52_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.55_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.55_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。
