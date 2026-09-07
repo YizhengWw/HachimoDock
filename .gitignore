@@ -8,6 +8,7 @@ generated-runtime/
 build/
 managed_components/
 src-tauri/gen/
+pc/src-tauri/gen/
 __pycache__/
 .pytest_cache/
 .DS_Store

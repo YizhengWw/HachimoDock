@@ -102,10 +102,10 @@ cd firmware
 
 | 构建环境 | 串口运行参数 |
 | --- | --- |
-| `esp32_p4_evboard` | macOS 使用，4 Mbaud |
+| `esp32_p4_evboard` | Windows/macOS 共用，4 Mbaud |
 | `esp32_p4_evboard_windows` | 兼容旧构建命令的别名，继承同一 4 Mbaud 配置 |
 
-可执行 `python -m platformio run -e esp32_p4_evboard_windows` 构建 Windows 对应版本。两种环境使用独立输出目录；不要混用随 PC 分发的固件文件。
+发布时构建一次 `esp32_p4_evboard`，将同一应用镜像用于两端 PC 与完整出厂包；无需按照电脑系统分别刷固件。旧 Windows 构建命令保留为同配置别名。
 
 ## 烧录与升级
 
