@@ -48,7 +48,7 @@ macOS 本地包采用 ad-hoc 签名，不等于 Developer ID 签名或公证。W
 
 - `builtin-clawpkgs/` 保存内置组件源码，`../firmware/` 构建会读取这里。
 - `public/terrier-clips/` 是出厂形象及对应预转换素材。
-- `src-tauri/firmware/esp32-p4/` 保存配套升级镜像。Mac/Windows UART 参数不同，勿混用。
+- `src-tauri/firmware/esp32-p4/` 保存配套升级镜像。macOS 与 Windows 共用同一份 4M UART 固件，不需要按电脑系统选择固件。
 - 使用语音识别或形象生成时，在客户端“API 配置”页填写自己的服务 Key。
 - 本机 bridge 仅绑定回环地址；不要通过代理、端口转发或公网监听暴露它。安全说明见 [SECURITY.md](../SECURITY.md)。
 
