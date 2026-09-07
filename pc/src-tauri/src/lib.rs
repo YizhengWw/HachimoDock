@@ -30,7 +30,8 @@
  *          explicit-action-only Codex/Claude Desktop task navigation,
  *          and stale USB writer reconnect retry,
  *          ACK-gated ESP32-P4 A/B firmware OTA with SHA-256 verification,
- *          a version-guarded bundled-image update path, and desktop progress events,
+ *          a version-guarded bundled-image update path with source-tree fallback
+ *          restricted to debug builds, and desktop progress events,
  *          validated P4 device-microphone PCM with capture-start frozen
  *          Agent/Session routing, utterance-correlated delivery events,
  *          single-claim final recognition, cloud speech recognition, and
@@ -6158,6 +6159,7 @@ fn bundled_p4_firmware_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, St
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
         candidates.push(resource_dir.join(BUNDLED_P4_FIRMWARE_RESOURCE));
     }
+    #[cfg(debug_assertions)]
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_P4_FIRMWARE_RESOURCE));
     candidates
         .into_iter()
