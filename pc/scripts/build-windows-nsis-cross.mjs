@@ -134,6 +134,10 @@ assertExactFileCopy(
   bundledFirmwareDestination,
   "Windows 内置 P4 固件",
 );
+const v3Source = join(dirname(bundledFirmwareSource), "firmware-v3.bin");
+const v3Destination = join(dirname(bundledFirmwareDestination), "firmware-v3.bin");
+copyFileSync(v3Source, v3Destination);
+assertExactFileCopy(v3Source, v3Destination, "Windows 内置 P4 v3 固件");
 copyTree(join(refRoot, "dist", "terrier-clips"), join(stageRoot, "terrier-clips"));
 copyTree(
   join(refRoot, "builtin-clawpkgs"),

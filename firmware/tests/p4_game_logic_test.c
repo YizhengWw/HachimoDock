@@ -208,7 +208,7 @@ static void test_bounded_runtime_uses_data_rules_for_a_new_game(void) {
   assert(pet_p4_game_dispatch_action(&game, "catch.left", 520));
   assert(game.bounded_entities[0].x == 2);
 
-  config.entities[0].shape = (pet_p4_game_shape_t) (PET_P4_GAME_SHAPE_BALL + 1);
+  config.entities[0].shape = (pet_p4_game_shape_t) (PET_P4_GAME_SHAPE_CHARACTER + 1);
   assert(!pet_p4_game_configure_bounded(&game, &config, 17));
 }
 

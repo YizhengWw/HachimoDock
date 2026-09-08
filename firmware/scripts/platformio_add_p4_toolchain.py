@@ -6,8 +6,9 @@ import os
 
 project_dir = env.subst("$PROJECT_DIR")
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
+env["ENV"]["PET_P4_CHIP_FAMILY"] = env.GetProjectOption("custom_p4_chip_family", "v1")
 env["ENV"]["PET_P4_PROJECT_VER_OVERRIDE"] = env.GetProjectOption(
-    "custom_p4_project_version", "0.7.50-p4"
+    "custom_p4_project_version", "0.7.51-p4"
 )
 env["ENV"]["PET_P4_UART_BAUD_OVERRIDE"] = env.GetProjectOption(
     "custom_p4_uart_baud", "4000000"
@@ -16,7 +17,8 @@ env["ENV"]["PET_P4_UART_BAUD_OVERRIDE"] = env.GetProjectOption(
 
 def normalize_component_lock(source, target, env):
     """Undo ESP-IDF's machine-specific lock rewrite after a successful build."""
-    lock_path = os.path.join(project_dir, "dependencies.lock")
+    lock_name = "dependencies.v3.lock" if env.GetProjectOption("custom_p4_chip_family", "v1") == "v3" else "dependencies.lock"
+    lock_path = os.path.join(project_dir, lock_name)
     if not os.path.isfile(lock_path):
         return
     with open(lock_path, "r", encoding="utf-8") as lock_file:

@@ -8,7 +8,7 @@
 
 | 项目 | 配置 |
 | --- | --- |
-| 主控 | ESP32-P4，RISC-V 双核；高性能核心当前运行于 360 MHz，低功耗核心为 40 MHz |
+| 主控 | ESP32-P4，RISC-V 双核；高性能核心 v1 为 360 MHz，v3 为 400 MHz；低功耗核心为 40 MHz |
 | 片上内存 | 768 KB L2MEM、32 KB 低功耗 SRAM、8 KB TCM |
 | PSRAM | 32 MB 封装内堆叠内存 |
 | Flash | 32 MB QSPI NOR Flash |
@@ -17,6 +17,8 @@
 | USB | Type-C，可通过板上切换电路连接 CH343 USB-UART 或 ESP32-P4 原生 USB HS OTG |
 
 板型、引脚与分区配置以 [boards/](boards/)、[sdkconfig.defaults](sdkconfig.defaults) 和 [partitions.csv](partitions.csv) 为准。不同硬件版本烧录前需核对配置。
+
+ESP32-P4-WIFI6-M 的 M 表示焊接排针，不代表芯片版本。v1 与 v3 使用不同固件镜像，同一种芯片的镜像由 Windows/macOS 共用；v3 的构建与实机验收要求见 [BUILD.md](BUILD.md)。
 
 ## 已支持的功能
 

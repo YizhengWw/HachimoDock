@@ -8,7 +8,7 @@
  *          terminal conversation visibility across active-queue refreshes,
  *          stable first-seen card ordering, selected-card lifecycle authority for
  *          appearance playback, and exact retained-card selection preservation
- *          after host refreshes.
+ *          after host refreshes; actual chip revision for safe firmware selection.
  * [Pos] shared ESP32-P4 protocol dispatcher.
  * [Sync] If this file changes, update firmware/protocol.md and .folder.md.
  */
@@ -26,6 +26,7 @@
 #include "mbedtls/base64.h"
 #include "bsp/display.h"
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_timer.h"
@@ -1835,6 +1836,9 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(firmware_update, "chunkBytes", 4 * 1024);
   cJSON_AddStringToObject(firmware_update, "checksum", "sha256");
   cJSON_AddStringToObject(firmware_update, "projectName", "pet_manager_p4_runtime");
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+  cJSON_AddNumberToObject(firmware_update, "chipRevision", chip_info.revision);
   cJSON_AddBoolToObject(firmware_update, "rollback", true);
   cJSON_AddNumberToObject(firmware_update, "validationMs", 8000);
   cJSON_AddItemToObject(capabilities, "firmwareUpdate", firmware_update);

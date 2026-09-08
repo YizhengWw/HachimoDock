@@ -5,8 +5,14 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+if("$ENV{PET_P4_CHIP_FAMILY}" STREQUAL "v3")
+  set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.v3.defaults")
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-set(PROJECT_VER "0.7.50-p4")
+if("$ENV{PET_P4_CHIP_FAMILY}" STREQUAL "v3")
+  idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_LIST_DIR}/dependencies.v3.lock")
+endif()
+set(PROJECT_VER "0.7.51-p4")
 if(DEFINED ENV{PET_P4_PROJECT_VER_OVERRIDE} AND NOT "$ENV{PET_P4_PROJECT_VER_OVERRIDE}" STREQUAL "")
   set(PROJECT_VER "$ENV{PET_P4_PROJECT_VER_OVERRIDE}")
 endif()

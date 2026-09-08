@@ -27,6 +27,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 from p4_component_sprites import compile_component_sprites, sprite_pack_checksum
+from p4_image_compat import image_revision_range, factory_revision_range
 
 
 FACTORY_CONFIG_NAME = "factory-config.json"
@@ -846,6 +847,9 @@ def build_factory_image(
     output: Path,
 ) -> dict:
     flasher, segments = resolve_flash_segments(build_dir)
+    chip_bounds = image_revision_range((build_dir / "firmware.bin").read_bytes())
+    if image_revision_range((build_dir / "bootloader.bin").read_bytes()) != chip_bounds:
+        raise ValueError("factory bootloader and application chip revisions differ")
     settings = flasher["flash_settings"]
     flash_size = parse_flash_size(str(settings["flash_size"]))
     segments.append((spiffs_offset, spiffs_image.resolve()))
@@ -873,6 +877,9 @@ def build_factory_image(
         command.extend([f"0x{offset:x}", str(source)])
     run_checked(command, cwd=project_dir)
 
+    if factory_revision_range(output.read_bytes()) != chip_bounds:
+        raise ValueError("merged factory image has inconsistent chip revision bounds")
+
     if sha256_region(output, spiffs_offset, spiffs_image.stat().st_size) != sha256_file(
         spiffs_image
     ):
@@ -899,6 +906,9 @@ def build_factory_image(
         "schemaVersion": 1,
         "format": FACTORY_FORMAT,
         "completeInstall": True,
+        "chipRevisionMin": chip_bounds[0],
+        "chipRevisionMax": chip_bounds[1],
+        "chipFamily": "v3" if chip_bounds[0] >= 300 else "v1",
         "project": "pet_manager_p4_runtime",
         "version": project_version(project_dir),
         "chip": str(flasher.get("extra_esptool_args", {}).get("chip", "esp32p4")),
@@ -933,47 +943,14 @@ def flash_factory_image(
     port: str,
     baud: int,
 ) -> None:
-    if not port.strip():
-        raise ValueError("factory upload requires an explicit serial port")
-    run_checked(
-        [
-            *command_for_tool(esptool),
-            "--chip",
-            chip,
-            "--port",
-            port,
-            "--baud",
-            str(baud),
-            "--connect-attempts",
-            "5",
-            "--before",
-            "default-reset",
-            "--after",
-            "no-reset",
-            "erase-flash",
-        ]
-    )
-    run_checked(
-        [
-            *command_for_tool(esptool),
-            "--chip",
-            chip,
-            "--port",
-            port,
-            "--baud",
-            str(baud),
-            "--connect-attempts",
-            "5",
-            "--before",
-            "default-reset",
-            "--after",
-            "hard-reset",
-            "write-flash",
-            "-z",
-            "0x0",
-            str(image),
-        ]
-    )
+    if chip != "esp32p4" or not port.strip():
+        raise ValueError("factory upload requires an explicit ESP32-P4 serial port")
+    # PlatformIO may supply esptool.py as a package directory instead of an
+    # installed module. Import the same tool, then keep one verified connection.
+    if esptool.suffix.lower() == ".py":
+        sys.path.insert(0, str(esptool.parent))
+    from flash_checked import flash
+    flash(image, port, baud)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:

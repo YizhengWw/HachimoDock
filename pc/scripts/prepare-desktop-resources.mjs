@@ -347,8 +347,7 @@ function readFirmwareBuildId(firmware, version) {
   return readNullTerminatedUtf8(firmware.subarray(offset, offset + 128));
 }
 
-function validateBundledP4Firmware(target) {
-  const firmwareName = "firmware.bin";
+function validateBundledP4Firmware(target, firmwareName, expectedMin, expectedMax) {
   const bundledP4Firmware = join(bundledP4FirmwareDir, firmwareName);
   if (!existsSync(bundledP4Firmware)) {
     throw new Error(`缺少 PC 内置 P4 固件：${bundledP4Firmware}`);
@@ -357,6 +356,10 @@ function validateBundledP4Firmware(target) {
   const descriptorOffset = 24 + 8;
   if (firmware.length < descriptorOffset + 256 || firmware[0] !== 0xe9) {
     throw new Error("PC 内置 P4 固件不是有效的 ESP-IDF application image");
+  }
+  if (firmware.readUInt16LE(12) !== 18 || firmware.readUInt16LE(15) !== expectedMin
+    || firmware.readUInt16LE(17) !== expectedMax) {
+    throw new Error(`PC 内置固件 ${firmwareName} 的芯片范围不正确`);
   }
   const magic = firmware.readUInt32LE(descriptorOffset);
   if (magic !== 0xabcd5432) {
@@ -410,7 +413,8 @@ const target = requestedTarget(process.argv.slice(2), process.platform);
 const targetArch = requestedArch(target, process.platform, process.arch);
 const runtimeName = target === "windows" ? "node.exe" : "node";
 const targetRuntime = join(generatedRuntime, runtimeName);
-const p4Firmware = validateBundledP4Firmware(target);
+const p4Firmware = validateBundledP4Firmware(target, "firmware.bin", 1, 199);
+validateBundledP4Firmware(target, "firmware-v3.bin", 300, 399);
 let sourceRuntime = process.env.PET_MANAGER_NODE_BIN
   ? resolve(process.env.PET_MANAGER_NODE_BIN)
   : process.execPath;
