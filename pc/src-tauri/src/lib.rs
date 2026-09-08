@@ -116,7 +116,6 @@ const USB_AUTO_RETRY_MIN_SECS: u64 = 5;
 const USB_AUTO_RETRY_MAX_SECS: u64 = 60;
 const P4_SESSION_TERMINAL_HOLD_MS: u64 = 60_000;
 const JSON_SAFE_INTEGER_MAX: u64 = 9_007_199_254_740_991;
-const BUNDLED_P4_FIRMWARE_RESOURCE: &str = "firmware/esp32-p4/firmware.bin";
 
 fn desktop_build_info() -> serde_json::Value {
     serde_json::json!({
@@ -6154,26 +6153,37 @@ fn compare_firmware_versions(left: &str, right: &str) -> Result<VersionOrdering,
     Ok(left.cmp(&right))
 }
 
-fn bundled_p4_firmware_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn bundled_p4_firmware_path(app_handle: &tauri::AppHandle, resource: &str) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(resource_dir) = app_handle.path().resource_dir() {
-        candidates.push(resource_dir.join(BUNDLED_P4_FIRMWARE_RESOURCE));
+        candidates.push(resource_dir.join(resource));
     }
     #[cfg(debug_assertions)]
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(BUNDLED_P4_FIRMWARE_RESOURCE));
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(resource));
     candidates
         .into_iter()
         .find(|path| path.is_file())
         .ok_or_else(|| {
-            format!("bundled P4 firmware resource was not found: {BUNDLED_P4_FIRMWARE_RESOURCE}")
+            format!("bundled P4 firmware resource was not found: {resource}")
         })
 }
 
 #[tauri::command]
 fn usb_get_bundled_firmware_info(
     app_handle: tauri::AppHandle,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
 ) -> Result<usb_serial::FirmwareImageInfo, String> {
-    let path = bundled_p4_firmware_path(&app_handle)?;
+    let status = usb_manager.status();
+    let target = if status.connected && status.runtime.eq_ignore_ascii_case("esp-p4")
+        && status.capabilities.pointer("/firmwareUpdate/chipRevision").is_some() {
+        usb_serial::chip_target_from_device(&status.capabilities, None)?
+    } else {
+        // Both bundles must have the same version. Read common metadata without
+        // a serial query while discovery/appearance sync may be using the port.
+        // This is not an upgrade decision: the update command verifies the chip.
+        usb_serial::P4ChipTarget::LegacyV1
+    };
+    let path = bundled_p4_firmware_path(&app_handle, usb_serial::bundled_resource_for_chip(target))?;
     usb_serial::inspect_firmware_image(&path)
 }
 
@@ -6254,9 +6264,14 @@ async fn usb_update_bundled_firmware(
     usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
     expected_board_device_id: String,
 ) -> Result<usb_serial::FirmwareUpdateResult, String> {
-    let firmware_path = bundled_p4_firmware_path(&app_handle)?;
-    let firmware_info = usb_serial::inspect_firmware_image(&firmware_path)?;
     let manager = usb_manager.inner().clone();
+    let chip_manager = manager.clone();
+    let chip_board_id = expected_board_device_id.clone();
+    let target = tauri::async_runtime::spawn_blocking(move || {
+        chip_manager.firmware_chip_target(&chip_board_id)
+    }).await.map_err(|error| error.to_string())??;
+    let firmware_path = bundled_p4_firmware_path(&app_handle, usb_serial::bundled_resource_for_chip(target))?;
+    let firmware_info = usb_serial::inspect_firmware_image(&firmware_path)?;
     let status = manager.status();
     if !status.connected || status.board_device_id != expected_board_device_id {
         return Err("connected USB board changed before bundled firmware update".to_string());

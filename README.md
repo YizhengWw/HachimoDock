@@ -173,7 +173,7 @@ flowchart LR
 
 硬件复刻请从 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) 开始，页面提供 PCB、BOM、结构与装配资料。设备端采用完整 ESP32-P4 镜像，镜像同时包含应用固件、分区表、内置西高地形象和默认 PetUI 组件，避免首次安装后缺少资源。
 
-首次烧录建议先擦除整片 Flash，再从地址 `0x0` 写入 Release 中的完整出厂镜像；日常升级请使用 Pet Manager 的固件升级功能。完整镜像会覆盖设备设置、形象和组件，仅应在新设备或明确恢复出厂时使用。
+首次烧录请使用与芯片版本对应的完整烧录包，工具核对芯片后再擦除并从地址 `0x0` 写入；日常升级请使用 Pet Manager 的固件升级功能。完整镜像会覆盖设备设置、形象和组件，仅应在新设备或明确恢复出厂时使用。
 
 ## 快速开始
 
@@ -181,15 +181,17 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.55_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.55_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.56_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.56_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。
 
 ### 新设备或恢复出厂
 
-Release 中的 `HachimoDock-P4_*_factory.bin` 是从 `0x0` 开始烧录的完整镜像，并附带同名 JSON 分区/校验清单。烧录前请确认目标确实是 HachimoDock ESP32-P4 设备；完整镜像会覆盖设备现有数据。
+Release 提供 v1、v3 两种完整烧录包，均包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请按实际芯片修订版选择，不能互刷；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
+
+v3 支持目前已通过编译和主机测试，尚待真实 v3 板的功能与大文件传输验收，请先在测试设备上验证。
 
 ## 常见问题
 

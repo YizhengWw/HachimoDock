@@ -3,7 +3,7 @@
  *         readiness from the LCD/render initialization path.
  * [Output] 4KB ACK-gated A/B image writes, request-correlated resumable status,
  *          SHA-256 verification, boot-slot switching, delayed validity
- *          confirmation, and automatic rollback.
+ *          confirmation, automatic rollback and chip-revision anti-misflash checks.
  * [Pos] ESP32-P4 firmware update node in firmware/main
  * [Sync] If this file changes, update firmware/protocol.md and .folder.md.
  */
@@ -17,6 +17,8 @@
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
+#include "pet_p4_image_compat.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
@@ -350,6 +352,21 @@ static void handle_begin(const cJSON *payload, pet_p4_send_line_fn send_line, vo
     clear_transfer(false);
     return;
   }
+  const cJSON *revision_min = cJSON_GetObjectItemCaseSensitive(payload, "chipRevisionMin");
+  const cJSON *revision_max = cJSON_GetObjectItemCaseSensitive(payload, "chipRevisionMax");
+  if (revision_min || revision_max) {
+    unsigned long long min = json_u64(payload, "chipRevisionMin", UINT64_MAX);
+    unsigned long long max = json_u64(payload, "chipRevisionMax", UINT64_MAX);
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+    if (min > UINT16_MAX || max > UINT16_MAX
+        || !pet_p4_revision_range_valid((uint16_t) min, (uint16_t) max)
+        || chip_info.revision < min || chip_info.revision > max) {
+      send_ack(send_line, ctx, transfer_id, "begin", false, "firmware chip revision mismatch");
+      clear_transfer(false);
+      return;
+    }
+  }
   esp_err_t err = esp_ota_begin(g_update_partition, (size_t) size, &g_ota_handle);
   if (err != ESP_OK) {
     send_ack(send_line, ctx, transfer_id, "begin", false, esp_err_to_name(err));
@@ -508,6 +525,17 @@ static void handle_chunk(const cJSON *payload, pet_p4_send_line_fn send_line, vo
       false
     );
     return;
+  }
+  if (g_received_size == 0) {
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+    if (!pet_p4_image_header_matches(decoded, actual_size, chip_info.revision)) {
+      free(decoded);
+      send_chunk_ack(send_line, ctx, request_transfer_id, false,
+        "firmware chip revision mismatch", sequence, 0, false);
+      clear_transfer(true);
+      return;
+    }
   }
   esp_err_t write_err = esp_ota_write(g_ota_handle, decoded, actual_size);
   int sha_err = write_err == ESP_OK ? mbedtls_sha256_update(&g_sha256, decoded, actual_size) : -1;

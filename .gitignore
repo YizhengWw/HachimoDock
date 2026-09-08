@@ -35,5 +35,6 @@ bundle-secrets.env
 .tooling/
 firmware/sdkconfig.*
 !firmware/sdkconfig.defaults
+!firmware/sdkconfig.v3.defaults
 pc/public/terrier-clips/p4-ready/*
 !pc/public/terrier-clips/p4-ready/v9-640x480-15fps-225f-h264-crf27/

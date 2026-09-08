@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_spiffs.h"
@@ -239,6 +240,9 @@ static void send_status(
   cJSON_AddNumberToObject(runtime, "protocolSchema", PET_P4_PROTOCOL_SCHEMA);
   cJSON_AddStringToObject(runtime, "projectName", app ? app->project_name : "");
   cJSON_AddStringToObject(runtime, "idfVersion", esp_get_idf_version());
+  esp_chip_info_t chip_info;
+  esp_chip_info(&chip_info);
+  cJSON_AddNumberToObject(runtime, "chipRevision", chip_info.revision);
   cJSON_AddStringToObject(runtime, "runningPartition", running ? running->label : "");
   cJSON_AddStringToObject(
     runtime,

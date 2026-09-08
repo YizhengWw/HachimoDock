@@ -6,11 +6,13 @@ HachimoDock turns Agent activity into a desktop companion: pet animations, conve
 
 ## Source and builds
 
-- [`pc/`](pc/README.md): desktop client 0.1.55, local Agent bridge, component-generation Skill and built-in resources.
-- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.50-p4, board drivers, tests and complete factory-image tools.
+- [`pc/`](pc/README.md): desktop client 0.1.56, local Agent bridge, component-generation Skill and built-in resources.
+- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.51-p4, board drivers, tests and complete factory-image tools.
 - Install Git LFS and run `git lfs pull` after cloning. Build dependencies are described in each directory.
 - For a ready-to-use app or a complete device flashing kit, visit [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest).
 - To use speech recognition or appearance generation, enter your service keys in Pet Manager’s API settings.
+
+Choose the complete v1 or v3 flashing kit for your actual chip revision; they are not interchangeable. Windows and macOS use the same firmware for each chip family. Flashing tools check the chip before erasing, and a complete flash clears device settings, appearances and components. v3 support has passed build and host tests but still awaits validation on a physical v3 board, including large-file transfers.
 
 ## Device and voice use
 

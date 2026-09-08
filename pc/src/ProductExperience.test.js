@@ -168,6 +168,7 @@ test("Tauri release resources are target-specific and package only audited LGPL 
     "firmware/esp32-p4/firmware.bin",
   );
   assert.equal(resources["firmware/esp32-p4/firmware-macos.bin"], undefined);
+  assertResource(resources, "firmware/esp32-p4/firmware-v3.bin", "firmware/esp32-p4/firmware-v3.bin");
   assertResource(
     resources,
     "bridge/packages/clawd-backend-service/node_modules",
@@ -245,6 +246,7 @@ test("Tauri release resources are target-specific and package only audited LGPL 
   assertTauriResourceSourceExists("bridge/agents");
   assertTauriResourceSourceExists("bridge/hooks");
   assertTauriResourceSourceExists("firmware/esp32-p4/firmware.bin");
+  assertTauriResourceSourceExists("firmware/esp32-p4/firmware-v3.bin");
   assertTauriResourceSourceExists("../skills/petui");
   assertTauriResourceSourceExists("../../THIRD_PARTY_NOTICES.md");
   assert.ok(existsSync(join(refRoot, "src-tauri/bridge/packages/clawd-backend-service/package-lock.json")));

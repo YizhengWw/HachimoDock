@@ -24,6 +24,7 @@ export default function FirmwareUpdateNavItem({ usb = {} }) {
 
   useEffect(() => {
     let cancelled = false;
+    setBundledFirmware(null);
     invoke("usb_get_bundled_firmware_info")
       .then((info) => {
         if (!cancelled) setBundledFirmware(info);
@@ -34,7 +35,7 @@ export default function FirmwareUpdateNavItem({ usb = {} }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [usb.connected, usb.boardDeviceId, usb.firmware, usb.capabilities?.firmwareUpdate?.chipRevision]);
 
   useEffect(() => {
     setCompletedVersion("");

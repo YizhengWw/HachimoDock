@@ -60,6 +60,9 @@ use std::time::{Duration, Instant};
 mod appearance_transaction;
 mod connection_handle;
 mod firmware_transaction;
+mod firmware_chip;
+pub(crate) use firmware_chip::{bundled_resource_for_chip, chip_target_from_device, P4ChipTarget};
+use firmware_chip::{firmware_chip_range, validate_firmware_chip};
 mod native_usb_protocol;
 mod transaction_waiters;
 mod transfer_log;
@@ -1988,6 +1991,16 @@ impl UsbSerialManager {
         Ok(())
     }
 
+    pub(crate) fn firmware_chip_target(&self, expected_board_device_id: &str) -> Result<P4ChipTarget, String> {
+        let status = self.connected_board_status(expected_board_device_id)?;
+        if status.capabilities.pointer("/firmwareUpdate/chipRevision").is_some() {
+            return chip_target_from_device(&status.capabilities, None);
+        }
+        let diagnostics = self.query_diagnostics(expected_board_device_id)?;
+        self.connected_board_status(expected_board_device_id)?;
+        chip_target_from_device(&status.capabilities, Some(&diagnostics))
+    }
+
     pub fn update_firmware<F, R>(
         &self,
         firmware_path: &Path,
@@ -2013,6 +2026,17 @@ impl UsbSerialManager {
                 status.runtime
             ));
         }
+        // Validate the image before any abort, erase or upload side effect.
+        let firmware = std::fs::read(firmware_path)
+            .map_err(|error| format!("read firmware {}: {error}", firmware_path.display()))?;
+        if firmware.is_empty() || firmware.len() > P4_FIRMWARE_MAX_IMAGE_SIZE {
+            return Err(format!("firmware image must be 1..={} bytes, got {}",
+                P4_FIRMWARE_MAX_IMAGE_SIZE, firmware.len()));
+        }
+        let descriptor = parse_esp_idf_app_descriptor(&firmware)?;
+        let chip_range = firmware_chip_range(&firmware)?;
+        let chip_target = self.firmware_chip_target(&expected_board_device_id)?;
+        validate_firmware_chip(chip_range, chip_target)?;
         self.recover_stale_firmware_transfer(&expected_board_device_id, firmware_connection_id)?;
         let preferred_chunk_size =
             preferred_firmware_chunk_size(status.protocol_schema, &status.capabilities);
@@ -2038,17 +2062,6 @@ impl UsbSerialManager {
             );
             self.best_effort_asset_abort(&appearance_abort_id);
         }
-
-        let firmware = std::fs::read(firmware_path)
-            .map_err(|error| format!("read firmware {}: {error}", firmware_path.display()))?;
-        if firmware.is_empty() || firmware.len() > P4_FIRMWARE_MAX_IMAGE_SIZE {
-            return Err(format!(
-                "firmware image must be 1..={} bytes, got {}",
-                P4_FIRMWARE_MAX_IMAGE_SIZE,
-                firmware.len()
-            ));
-        }
-        let descriptor = parse_esp_idf_app_descriptor(&firmware)?;
 
         let initial_diagnostics = self.query_diagnostics(&expected_board_device_id)?;
         let baseline_boot_count = initial_diagnostics
@@ -2093,6 +2106,8 @@ impl UsbSerialManager {
             "transferId": transfer_id,
             "size": total_bytes,
             "sha256": sha256,
+            "chipRevisionMin": chip_range.min,
+            "chipRevisionMax": chip_range.max,
         });
         let begin_ack = self.begin_firmware_transfer(
             &expected_board_device_id,
@@ -6035,6 +6050,34 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_chip_ota_rejects_before_any_serial_write_or_progress() {
+        for (revision, name) in [(301, "firmware.bin"), (100, "firmware-v3.bin")] {
+            let manager = UsbSerialManager::new();
+            let recorded = Arc::new(Mutex::new(PacedWriterState::default()));
+            *manager.connection.lock().unwrap() = Some(UsbConnection {
+                connection_id: 1,
+                port_name: "test-only".into(),
+                baud_rate: P4_USB_UART_BAUD,
+                writer: Box::new(PacedWriter(Arc::clone(&recorded))),
+                board_device_id: "p4-test".into(),
+                runtime: "esp-p4".into(),
+                device_model: "ESP32-P4".into(),
+                firmware: "0.7.51-p4".into(),
+                build_id: String::new(), git_sha: String::new(), build_dirty: false,
+                protocol_schema: 7, wire_protocol: "pet-usb-jsonl-v3".into(),
+                capabilities: serde_json::json!({"firmwareUpdate":{"chipRevision":revision}}),
+                connected: true, cancel_reader: Arc::new(AtomicBool::new(false)),
+            });
+            let image = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("firmware/esp32-p4").join(name);
+            let result = manager.update_firmware(&image, "p4-test",
+                |_,_,_| panic!("incompatible firmware must not start transfer"),
+                || panic!("incompatible firmware must not reconnect"));
+            assert!(result.unwrap_err().contains("芯片版本不匹配"));
+            assert!(recorded.lock().unwrap().writes.is_empty());
+        }
+    }
 
     #[test]
     fn control_transactions_wait_for_an_active_asset_transfer() {

@@ -14,6 +14,21 @@ transport:
 
 ## Handshake
 
+Firmware 0.7.51 reports the actual silicon revision as an integer
+`major * 100 + minor` in `capabilities.firmwareUpdate.chipRevision` and in
+`diagnostics/status.runtime.chipRevision`. It is not inferred from the board SKU.
+The desktop selects the v1 or v3 application image from these values. Both host
+operating systems use the same 4M transport and existing chunk/pacing rules.
+
+`firmware/begin` may include `chipRevisionMin` and `chipRevisionMax`. The device
+checks them before opening the OTA partition, then independently validates the
+first application's ESP image header before writing. Images must explicitly
+bound one family (pre-v3 below 200, or v3 300–399); unbounded or mixed-family
+images are rejected. Older desktop clients may omit the begin fields, but the
+image-header check still applies. New desktop clients reject unknown chip
+identity before starting an update; only diagnostics identifying the existing
+pre-v3 SDK runtime allow the legacy v1 migration path.
+
 Board to PC:
 
 ```json
