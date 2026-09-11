@@ -17,7 +17,7 @@
 | 依赖锁 | `dependencies.lock` | `dependencies.v3.lock` |
 | 出厂烧录工具（不同于编译环境自带版本） | esptool **5.4.0** | esptool **5.4.0** |
 
-两种环境请依次构建，不要在同一工作目录并行构建，避免依赖环境相互覆盖。Windows 建议把仓库和构建缓存放在较短的纯英文路径（例如 `C:\\work\\HachimoDock`），并在 PowerShell 使用下方相同的 `python -m platformio` 命令；`tools/p4.ps1` 的默认构建目标仍是 v1。
+两种环境请依次构建，不要在同一工作目录并行构建，避免依赖环境相互覆盖。Windows 建议把仓库和构建缓存放在较短的纯英文路径（例如 `C:\work\HachimoDock`），并在 PowerShell 使用下方相同的 `python -m platformio` 命令；`tools/p4.ps1` 的默认构建目标仍是 v1。
 
 ```sh
 # 仓库根目录 / repository root
