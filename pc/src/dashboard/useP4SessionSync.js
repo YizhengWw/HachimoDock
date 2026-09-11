@@ -23,6 +23,25 @@ export const P4_MANUAL_SESSION_TIMEOUT_MS = 5 * 60_000;
 export const P4_SESSION_LEASE_REFRESH_MS = 4_000;
 const P4_DEVICE_SESSION_LIMIT = 8;
 
+export function createMissingSessionNoticeGate() {
+  let lastContext = null;
+  let lastEventAt = -Infinity;
+  return {
+    allow(context, now = performance.now()) {
+      const allowed = context !== lastContext || now - lastEventAt >= 5_000;
+      // Update on every event, so a held/floating input cannot keep producing
+      // warnings. A new attempt after five quiet seconds can notify again.
+      lastContext = context;
+      lastEventAt = now;
+      return allowed;
+    },
+    reset() {
+      lastContext = null;
+      lastEventAt = -Infinity;
+    },
+  };
+}
+
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -102,6 +121,10 @@ export function useP4SessionSync({
     0,
   );
   const pendingNoticeRef = useRef(null);
+  const missingSessionNoticeRef = useRef(null);
+  if (!missingSessionNoticeRef.current) {
+    missingSessionNoticeRef.current = createMissingSessionNoticeGate();
+  }
   const bindingQueueRef = useRef(Promise.resolve());
   const sessionId = selection.sessionId;
 
@@ -336,13 +359,18 @@ export function useP4SessionSync({
           ? boardSelectedSessionId
           : cycleVoiceSessionId(sessionId, switchCandidates, direction);
         if (nextSessionId === "auto") {
+          if (!missingSessionNoticeRef.current.allow(JSON.stringify([boardDeviceId, agentId]))) return;
           push?.({
             tone: "warning",
             title: "没有可切换的会话",
-            message: "请等待当前 Agent 的会话列表加载完成。",
+            message: sessionsLoaded
+              ? "当前 Agent 暂无可切换的会话。"
+              : "请等待当前 Agent 的会话列表加载完成。",
+            ttl: 3_000,
           });
           return;
         }
+        missingSessionNoticeRef.current.reset();
         pendingNoticeRef.current = {
           sessionId: nextSessionId,
           message: direction > 0 ? "已切换到下一个会话" : "已切换到上一个会话",
@@ -396,6 +424,7 @@ export function useP4SessionSync({
     push,
     sessionId,
     sessions,
+    sessionsLoaded,
     switchCandidates,
   ]);
 

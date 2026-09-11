@@ -336,6 +336,10 @@ PC to board:
   the matching card's progress content. Titles use one line and progress uses
   up to two lines, with UTF-8-safe pixel-width `...` truncation. Holding the
   configured `voice_ptt` button replaces the selected card with a waveform.
+  When the main page has no Session cards, the same recording feedback appears
+  in a standalone bottom panel instead of the idle bubble. Queue refresh,
+  expiration, or clearing does not end a physical voice hold; releasing the
+  button removes the panel and restores the normal idle bubble.
   The desktop reconciles adjacent snapshots and publishes at most eight cards;
   no manual card-count setting is involved. A cold snapshot admits only active
   lifecycle states. Historical `done`, `error`, and `idle` Sessions remain in

@@ -66,7 +66,7 @@ def test_factory_rejects_unbounded_and_mixed_images():
         factory_revision_range(mixed)
 
 
-@pytest.mark.parametrize("revision", [1,100,199,200,300,301,399,400])
+@pytest.mark.parametrize("revision", [1,100,199,200,300,301,302,399,400])
 def test_flash_checks_revision_before_any_erase_or_write(tmp_path, monkeypatch, revision):
     events = []
     class Device:
@@ -77,7 +77,7 @@ def test_flash_checks_revision_before_any_erase_or_write(tmp_path, monkeypatch, 
         def change_baud(self, baud): events.append("baud")
         def hard_reset(self): events.append("reset")
     device = Device()
-    monkeypatch.setitem(sys.modules, "esptool", types.SimpleNamespace(detect_chip=lambda *a,**k: device))
+    monkeypatch.setitem(sys.modules, "esptool", types.SimpleNamespace(__version__="5.4.0", detect_chip=lambda *a,**k: device))
     def write(esp, data, **kwargs):
         assert esp is device and kwargs == {"erase_all": True, "compress": True}
         events.append("write")
@@ -90,3 +90,19 @@ def test_flash_checks_revision_before_any_erase_or_write(tmp_path, monkeypatch, 
     else:
         with pytest.raises(ValueError): flash(path, "test-port")
         assert events == ["revision", "closed"]
+
+
+def test_flash_rejects_old_tool_before_opening_device(tmp_path, monkeypatch):
+    def unexpected(*args, **kwargs):
+        pytest.fail("old tool must not open the device or write flash")
+    monkeypatch.setitem(sys.modules, "esptool", types.SimpleNamespace(__version__="5.2.0", detect_chip=unexpected))
+    monkeypatch.setitem(sys.modules, "esptool.cmds", types.SimpleNamespace(run_stub=unexpected, write_flash=unexpected))
+    with pytest.raises(ValueError, match="5.4.0"):
+        flash(tmp_path / "not-read.bin", "test-port")
+
+
+def test_packaged_tools_upgrade_existing_environments():
+    source = (ROOT.parent / "pc/scripts/package-factory-release.mjs").read_text()
+    assert source.count('esptool==5.4.0') == 2
+    assert source.count('__import__("esptool").__version__ == "5.4.0"') == 2
+    assert 'esptool==5.2.0' not in source

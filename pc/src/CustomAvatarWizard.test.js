@@ -48,20 +48,13 @@ test("Volcano generation reads centralized credentials and keeps model selection
   const volcanoProvider = readSource("lib/avatar-pipeline/providers/volcano.js");
 
   assert.match(volcanoProvider, /doubao-seedance-2-0-260128/);
-  assert.match(providerConfig, /doubao-seedance-1-5-pro-251215/);
-  assert.match(providerConfig, /DEFAULT_VOLCANO_VIDEO_MODEL/);
-  assert.match(
-    providerConfig,
-    /const VOLCENGINE_VIDEO_MODEL_SUGGESTIONS = \[\s*"doubao-seedance-1-5-pro-251215",\s*DEFAULT_VOLCANO_VIDEO_MODEL,/,
-  );
+  assert.doesNotMatch(providerConfig, /doubao-seedance-1-5-pro-251215/);
   assert.match(wizard, /VIDEO_PROVIDERS/);
   assert.match(wizard, /loadProviderConfig/);
   assert.match(wizard, /saveProviderConfig/);
-  assert.match(wizard, /Seedance 2\.0.*ModelNotOpen/);
-  assert.match(wizard, /volcengineModelSelectValue/);
-  assert.match(wizard, /<select[\s\S]*className="field-input"[\s\S]*value=\{volcengineModelSelectValue\}/);
-  assert.match(wizard, /value="__custom__"/);
-  assert.match(wizard, /自定义模型名称/);
+  assert.match(wizard, /VideoModelSelect/);
+  assert.match(wizard, /VideoGenerationSettings/);
+  assert.doesNotMatch(wizard, /自定义模型名称/);
   assert.match(wizard, /isVolcengine/);
   assert.match(wizard, /!isVolcengine && \(/);
   assert.match(wizard, /providerCredentialsConfigured/);

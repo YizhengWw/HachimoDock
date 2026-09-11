@@ -10,10 +10,32 @@ import assert from "node:assert/strict";
 import {
   P4_SESSION_LEASE_REFRESH_MS,
   cycleVoiceSessionId,
+  createMissingSessionNoticeGate,
   formatDeviceSessionContent,
   formatDeviceSessionTitle,
   isDeviceSessionTargetUnique,
 } from "./useP4SessionSync.js";
+
+test("empty-session notices suppress a continuous input burst until five quiet seconds", () => {
+  const gate = createMissingSessionNoticeGate();
+  assert.equal(gate.allow("board/agent", 0), true);
+  for (let now = 140; now <= 60_060; now += 140) {
+    assert.equal(gate.allow("board/agent", now), false);
+  }
+  assert.equal(gate.allow("board/agent", 65_059), false);
+  assert.equal(gate.allow("board/agent", 70_059), true);
+});
+
+test("empty-session notice gate resets after navigation and separates device/Agent contexts", () => {
+  const gate = createMissingSessionNoticeGate();
+  assert.equal(gate.allow("board/a", 0), true);
+  assert.equal(gate.allow("board/b", 1), true);
+  assert.equal(gate.allow("other/b", 2), true);
+  assert.equal(gate.allow("other/b", 3), false);
+  gate.reset();
+  assert.equal(gate.allow("other/b", 4), true);
+  assert.equal(createMissingSessionNoticeGate().allow("other/b", 4), true);
+});
 
 test("P4 Session lease refreshes safely inside the firmware timeout", () => {
   assert.equal(P4_SESSION_LEASE_REFRESH_MS, 4_000);

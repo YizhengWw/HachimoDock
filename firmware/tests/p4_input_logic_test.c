@@ -9,12 +9,27 @@
 #include "pet_p4_input_core.h"
 
 #include <assert.h>
+#include <stddef.h>
 
 static void release_to_center(pet_p4_joystick_decoder_t *decoder) {
   assert(pet_p4_joystick_decoder_update(decoder, 2048, 2048, 5) == PET_P4_JOYSTICK_CENTER);
 }
 
 int main(void) {
+  int center_x;
+  int center_y;
+  const int samples = PET_P4_JOYSTICK_CALIBRATION_SAMPLES;
+  assert(pet_p4_joystick_calibrate_center(2048 * samples, 2100 * samples, samples, &center_x, &center_y));
+  assert(center_x == 2048 && center_y == 2100);
+  assert(!pet_p4_joystick_calibrate_center(500 * samples, 520 * samples, samples, &center_x, &center_y));
+  assert(center_x == 500 && center_y == 520);
+  assert(!pet_p4_joystick_calibrate_center(2048 * samples, 500 * samples, samples, &center_x, &center_y));
+  assert(!pet_p4_joystick_calibrate_center(4095 * samples, 2048 * samples, samples, &center_x, &center_y));
+  assert(!pet_p4_joystick_calibrate_center(2048 * (samples - 1), 2048 * (samples - 1), samples - 1, &center_x, &center_y));
+  assert(!pet_p4_joystick_calibrate_center(0, 0, 0, &center_x, &center_y));
+  assert(center_x == 0 && center_y == 0);
+  assert(!pet_p4_joystick_calibrate_center(0, 0, samples, NULL, &center_y));
+  assert(pet_p4_joystick_calibrate_center(1200 * samples, 2900 * samples, samples, &center_x, &center_y));
   pet_p4_joystick_decoder_t joystick;
   pet_p4_joystick_decoder_init(&joystick, 2048, 2048, 900, 500, 350, 140);
 

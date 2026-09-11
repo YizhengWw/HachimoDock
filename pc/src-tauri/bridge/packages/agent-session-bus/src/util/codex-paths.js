@@ -631,11 +631,9 @@ function classifyModelSupport(model, availableModels) {
  */
 function extractUuidFromBasename(basename) {
   const noExt = basename.replace(/\.jsonl$/, "");
-  // Match the trailing canonical UUID. Codex 0.40 used `<uuid>.jsonl`;
-  // Codex 0.118+ uses `rollout-<iso>-<uuid>.jsonl`. The trailing-uuid match
-  // covers both.
-  const match = noExt.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
-  if (match) return match[0];
+  // Desktop may append a writer UUID. Keep the preceding thread identity.
+  const match = noExt.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i);
+  if (match) return match[1];
   return noExt;
 }
 

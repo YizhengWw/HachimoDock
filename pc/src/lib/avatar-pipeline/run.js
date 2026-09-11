@@ -10,6 +10,7 @@ import { CUSTOM_GENERATION_FAMILIES, FAMILIES } from "./families.js";
 import { buildImagePayload, bytesToDataUrl, uint8ToBase64 } from "./image.js";
 import { processImageForPipeline } from "./image-processing.js";
 import { resolveGenerationSpeedConfig } from "./pipeline-defaults.js";
+import { requireAvailableVideoModel } from "./video-models.js";
 import { buildDryRunResponse, normalizeFamilies, normalizePromptResponse } from "./prompts.js";
 import { callThinkingModel, DEFAULT_THINKING_MODEL } from "./thinking-model.js";
 import { runVolcanoFamily } from "./providers/volcano.js";
@@ -146,6 +147,8 @@ async function runProviderFamily({
       resolution: providerConfig.resolution,
       generateAudio: providerConfig.generateAudio,
       watermark: providerConfig.watermark,
+      cameraFixed: providerConfig.cameraFixed,
+      seed: providerConfig.seed,
     },
     prompt,
     imageDataUrl: imagePayload.dataUrl,
@@ -167,6 +170,7 @@ export async function runSingleFamilyVideo({
   if (!imageFile) throw new Error("imageFile is required");
   if (!providerConfig) throw new Error("providerConfig is required");
   const manifest = buildSingleFamilyManifest({ family, prompt });
+  if (!dryRun) await requireAvailableVideoModel(providerConfig, signal);
   const entry = manifest.entries[0];
   const runtimeConfig = resolveGenerationSpeedConfig(providerConfig);
   const effectiveProviderConfig = runtimeConfig.providerConfig;
@@ -323,6 +327,7 @@ export async function runAvatarPipeline({
   const runtimeConfig = resolveGenerationSpeedConfig(providerConfig);
   const effectiveProviderConfig = runtimeConfig.providerConfig;
   const generationFamilies = CUSTOM_GENERATION_FAMILIES;
+  if (!dryRun) await requireAvailableVideoModel(providerConfig, signal);
 
   const total = generationFamilies.length;
   const progress = {
@@ -473,6 +478,8 @@ export async function runAvatarPipeline({
             resolution: effectiveProviderConfig.resolution,
             generateAudio: effectiveProviderConfig.generateAudio,
             watermark: effectiveProviderConfig.watermark,
+            cameraFixed: effectiveProviderConfig.cameraFixed,
+            seed: effectiveProviderConfig.seed,
           },
           prompt: entry.prompt,
           imageDataUrl: imagePayload.dataUrl,
@@ -578,6 +585,7 @@ export async function runSingleFamilyRetry({
   onStage,
 }) {
   if (!providerConfig) throw new Error("providerConfig is required");
+  await requireAvailableVideoModel(providerConfig, signal);
   const runtimeConfig = resolveGenerationSpeedConfig(providerConfig);
   const effectiveProviderConfig = runtimeConfig.providerConfig;
   const imageDataUrl = bytesToDataUrl(imageBytes, imageMime || "image/png");
@@ -623,6 +631,8 @@ export async function runSingleFamilyRetry({
       resolution: effectiveProviderConfig.resolution,
       generateAudio: effectiveProviderConfig.generateAudio,
       watermark: effectiveProviderConfig.watermark,
+      cameraFixed: effectiveProviderConfig.cameraFixed,
+      seed: effectiveProviderConfig.seed,
     },
     prompt,
     imageDataUrl,

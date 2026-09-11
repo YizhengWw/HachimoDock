@@ -2,7 +2,7 @@
  * [Input] User-uploaded image + centrally managed provider config; orchestrates `lib/avatar-pipeline/run.js`.
  * [Output] On success persists via `lib/appearance-store.js`, with clear GIF first-frame copy,
  *          fixed-size reference upload preview, unified field help, shared provider-config persistence with read-only credential readiness linked to the API configuration page,
- *          Volcengine Ark product-fit video dropdown plus Seedream cloud background editing,
+ *          live API-key-scoped Ark video model selection and persisted video parameters plus Seedream cloud background editing,
  *          fast low-resolution defaults, reusable step components, optional inline progress, and preflight generation requirements.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
@@ -24,7 +24,6 @@ import {
   DEFAULT_PROVIDER_ID,
   VIDEO_PROVIDERS,
   VOLCENGINE_BASE_URL,
-  VOLCENGINE_CUSTOM_MODEL_OPTION,
   VOLCENGINE_THINKING_MODEL,
   loadArkImageConfig,
   loadProviderConfig,
@@ -35,6 +34,7 @@ import {
   providerCredentialsConfigured,
 } from "./lib/api-configuration.js";
 import HelpTooltip from "./HelpTooltip.jsx";
+import { VideoModelSelect, VideoGenerationSettings } from "./VideoGenerationSettings.jsx";
 
 const FAST_REFERENCE_HEIGHT = Math.round(
   (FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension * PIPELINE_OUTPUT_ASPECT_RATIO.height) /
@@ -45,7 +45,7 @@ const HELP_TEXT = {
   baseUrl:
     "填写接口根地址，例如平台给出的 API 域名。请保留 https://，不要把具体接口路径重复填进来。",
   model:
-    "下拉只保留当前新形象流程适配过的图生视频模型。火山 Ark 可用的新模型可以通过“自定义模型名称”兜底填写。",
+    "根据当前 API Key 获取视频模型列表；实际调用权限以平台响应为准，也可手动填写模型或接入点 ID。",
 };
 
 export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
@@ -73,6 +73,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
   const [removeBg, setRemoveBg] = useState(true);
   const [fastGeneration, setFastGeneration] = useState(true);
+  const [videoParameters, setVideoParameters] = useState({});
 
   const [submitError, setSubmitError] = useState("");
   const [taskRunning, setTaskRunning] = useState(() => isGenerationRunning());
@@ -94,6 +95,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
     setModel(saved.model);
     setThinkingModel(saved.thinkingModel);
     setFastGeneration(saved.fastGeneration);
+    setVideoParameters(saved.videoParameters);
     setAdvanced(saved.advanced);
   }, [providerId]);
 
@@ -182,9 +184,10 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
       model,
       thinkingModel,
       fastGeneration,
+      videoParameters,
       advanced,
     });
-  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, advanced]);
+  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, videoParameters, advanced]);
 
   const handleStartGenerate = useCallback(() => {
     if (!file) return;
@@ -206,6 +209,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
       imageEdit: loadArkImageConfig(),
       thinkingModel: isVolcengine ? VOLCENGINE_THINKING_MODEL : thinkingModel.trim() || trimmedModel,
       fastGeneration,
+      ...(isVolcengine ? videoParameters : {}),
       advanced:
         providerId === "custom"
           ? {
@@ -243,6 +247,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
     baseUrl,
     model,
     fastGeneration,
+    videoParameters,
     advanced,
     openaiCompat,
     appearanceName,
@@ -299,6 +304,9 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
 
         {step === 1 && (
           <AvatarWizardStep2
+            apiKey={apiKey}
+            videoParameters={videoParameters}
+            onVideoParameters={setVideoParameters}
             providerId={providerId}
             credentialConfigured={providerCredentialsConfigured(providerId, {
               apiKey,
@@ -427,6 +435,9 @@ export function AvatarWizardStep1({
 }
 
 export function AvatarWizardStep2({
+  apiKey,
+  videoParameters,
+  onVideoParameters,
   providerId,
   credentialConfigured,
   onOpenApiSettings,
@@ -459,10 +470,7 @@ export function AvatarWizardStep2({
   const isCustom = providerId === "custom";
   const isKling = providerId === "kling";
   const isVolcengine = providerId === "volcengine";
-  const isVolcengineKnownModel = isVolcengine && provider.models.includes(model);
-  const volcengineModelSelectValue = isVolcengineKnownModel
-    ? model
-    : VOLCENGINE_CUSTOM_MODEL_OPTION;
+  const [modelReady, setModelReady] = useState(false);
 
   return (
     <div className="ca-card">
@@ -510,35 +518,8 @@ export function AvatarWizardStep2({
 
       <FieldWithHelp label="视频生成模型" help={HELP_TEXT.model}>
         {isVolcengine ? (
-          <>
-            <select
-              className="field-input"
-              value={volcengineModelSelectValue}
-              onChange={(event) => {
-                const nextModel = event.target.value;
-                onModel(nextModel === VOLCENGINE_CUSTOM_MODEL_OPTION ? "" : nextModel);
-              }}
-            >
-              {provider.models.map((item) => (
-                <option key={item} value={item}>
-                  {item}
-                </option>
-              ))}
-              <option value="__custom__">自定义模型名称</option>
-            </select>
-            {volcengineModelSelectValue === VOLCENGINE_CUSTOM_MODEL_OPTION && (
-              <input
-                className="field-input"
-                style={{ marginTop: 8 }}
-                placeholder="填写火山 Ark 模型名称"
-                value={model}
-                onChange={(event) => onModel(event.target.value)}
-              />
-            )}
-            <div className="field-helper">
-              默认只列出适配当前单图新形象生成流程的 Seedance 模型；Seedance 2.0 如果返回 ModelNotOpen，需要先在 Ark 控制台开通。新的兼容模型名可通过“自定义模型名称”填写。
-            </div>
-          </>
+          <VideoModelSelect apiKey={apiKey} baseUrl={baseUrl}
+            model={model} onModel={onModel} onReady={setModelReady} />
         ) : provider.models.length > 0 ? (
           <select className="field-input" value={model} onChange={(event) => onModel(event.target.value)}>
             {provider.models.map((item) => (
@@ -611,9 +592,11 @@ export function AvatarWizardStep2({
         />
         <span>
           快速生成模式：背景处理后合成黑底 4:3 参考帧，分辨率约 {FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension}x{FAST_REFERENCE_HEIGHT}，
-          使用 5 秒低清视频与更快链路。
+          默认使用 5 秒低清视频，视频参数可单独调整。
         </span>
       </label>
+
+      {isVolcengine && <VideoGenerationSettings value={videoParameters} onChange={onVideoParameters} fastGeneration={fastGeneration} />}
 
       {submitError && (
         <div className="message-banner message-banner--error" style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>
@@ -630,7 +613,7 @@ export function AvatarWizardStep2({
         <button className="btn-ghost" onClick={onBack}>
           {backLabel}
         </button>
-        <button className="btn-primary" onClick={onStart} disabled={!canStart} title={generationReadyIssue || startLabel}>
+        <button className="btn-primary" onClick={onStart} disabled={!canStart || (isVolcengine && !modelReady)} title={generationReadyIssue || startLabel}>
           {startLabel}
         </button>
       </div>

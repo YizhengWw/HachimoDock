@@ -396,10 +396,20 @@ impl PlatformH264Encoder {
         }
     }
 
-    pub(crate) fn profile_name(self) -> &'static str {
+    pub(crate) fn profile_value(self) -> &'static str {
         match self {
             Self::VideoToolbox => "constrained_baseline",
-            Self::MediaFoundation => "baseline",
+            // h264_mf uses AVCodecContext's integer profile option; unlike
+            // VideoToolbox, it does not register named H.264 profile constants.
+            Self::MediaFoundation => "66",
+        }
+    }
+
+    pub(crate) fn level_arg(self) -> &'static str {
+        match self {
+            Self::VideoToolbox => "3.0",
+            // The generic FFmpeg integer option represents Level 3.0 as 30.
+            Self::MediaFoundation => "30",
         }
     }
 
@@ -416,6 +426,8 @@ impl PlatformH264Encoder {
             Self::MediaFoundation => args.extend([
                 "-hw_encoding".to_string(),
                 "0".to_string(),
+                "-slices".to_string(),
+                "1".to_string(),
                 "-rate_control".to_string(),
                 "quality".to_string(),
                 "-quality".to_string(),
@@ -961,6 +973,10 @@ pub fn import_codex_pet(
         let fps_arg = OUTPUT_FPS.to_string();
         let mut encode_args = vec![
             "-y".to_string(),
+            "-hide_banner".to_string(),
+            "-loglevel".to_string(),
+            "error".to_string(),
+            "-nostdin".to_string(),
             "-f".to_string(),
             "concat".to_string(),
             "-safe".to_string(),
@@ -974,9 +990,9 @@ pub fn import_codex_pet(
             "-c:v".to_string(),
             h264_encoder.codec_name().to_string(),
             "-profile:v".to_string(),
-            h264_encoder.profile_name().to_string(),
+            h264_encoder.profile_value().to_string(),
             "-level:v".to_string(),
-            "3.0".to_string(),
+            h264_encoder.level_arg().to_string(),
             // All-intra: short sprite clips with B-frames decode poorly on Pi
             // and can corrupt the upper portion of each frame.
             "-g".to_string(),
@@ -1055,6 +1071,27 @@ pub fn import_codex_pet(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn platform_profiles_match_native_ffmpeg_option_types() {
+        assert_eq!(PlatformH264Encoder::MediaFoundation.codec_name(), "h264_mf");
+        assert_eq!(PlatformH264Encoder::MediaFoundation.profile_value(), "66");
+        assert_eq!(PlatformH264Encoder::MediaFoundation.level_arg(), "30");
+        assert_eq!(PlatformH264Encoder::VideoToolbox.profile_value(), "constrained_baseline");
+        assert_eq!(PlatformH264Encoder::VideoToolbox.level_arg(), "3.0");
+    }
+
+    #[test]
+    fn media_foundation_requests_single_slice_without_changing_videotoolbox() {
+        // This is an encoder hint, not proof of the output layout. P4 export
+        // still validates the actual SPS, AUDs and slice count before transfer.
+        let mut args = Vec::new();
+        PlatformH264Encoder::MediaFoundation.append_quality_args(&mut args);
+        assert!(args.windows(2).any(|pair| pair == ["-slices", "1"]));
+        let mut macos_args = Vec::new();
+        PlatformH264Encoder::VideoToolbox.append_quality_args(&mut macos_args);
+        assert!(!macos_args.iter().any(|arg| arg == "-slices"));
+    }
 
     #[test]
     fn duration_to_frame_count_maps_sprite_holds_to_cfr_ticks() {

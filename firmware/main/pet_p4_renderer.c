@@ -5,6 +5,7 @@
  *          optional direct-to-panel H.264 path for full-size idle playback,
  *          plus a two-dot main/components indicator that is hidden while a component runs,
  *          current SW3-back/SW1-enter hints in the component catalog, modern clean cards/HUDs, and
+ *          Session-independent recording feedback on the idle main page,
  *          a lightweight transfer screen that never reads changing assets.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `firmware/.folder.md` and renderer tests.
@@ -2608,6 +2609,28 @@ static void draw_voice_waveform(int x, int y, int width, uint16_t color) {
   }
 }
 
+static void draw_voice_input_row(int x, int y) {
+  uint16_t ink = rgb565(28, 31, 31);
+  uint16_t muted = rgb565(92, 98, 96);
+  draw_voice_waveform(x + 30, y, 230, rgb565(255, 163, 31));
+  fill_ellipse(x + 288, y + 13, 7, 11, ink);
+  fill_rect(x + 286, y + 22, 5, 7, ink);
+  draw_line(x + 279, y + 18, x + 279, y + 25, ink);
+  draw_line(x + 279, y + 25, x + 297, y + 25, ink);
+  draw_line(x + 297, y + 25, x + 297, y + 18, ink);
+  draw_text_line_vcenter("LISTENING", x + 324, y + 11, 30, 180, muted, 1, true);
+}
+
+static void draw_standalone_voice_overlay(void) {
+  const int height = 76;
+  const int x = PET_P4_SESSION_CARD_X;
+  const int y = PET_P4_SESSION_CARD_BOTTOM - height;
+  draw_session_card_panel(x, y, PET_P4_SESSION_CARD_WIDTH, height,
+    PET_P4_SESSION_CARD_RADIUS, true, rgb565(216, 221, 218));
+  fill_round_rect(x + 10, y + 14, 7, height - 28, 2, rgb565(25, 151, 99));
+  draw_voice_input_row(x, y + 18);
+}
+
 static void draw_session_queue_uncached(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms,
@@ -2617,7 +2640,6 @@ static void draw_session_queue_uncached(
 
   uint16_t ink = rgb565(28, 31, 31);
   uint16_t muted = rgb565(92, 98, 96);
-  uint16_t orange = rgb565(255, 163, 31);
   uint16_t card_outline = rgb565(216, 221, 218);
   uint16_t selection = rgb565(25, 151, 99);
   unsigned int selected = state->current_session_index > 0
@@ -2659,13 +2681,7 @@ static void draw_session_queue_uncached(
     draw_text_line_vcenter(item->title, x + 30, y + 10, 38, w - 82, ink, 2, true);
 
     if (is_selected && state->session_voice_active) {
-      draw_voice_waveform(x + 30, y + 62, 230, orange);
-      fill_ellipse(x + 288, y + 75, 7, 11, ink);
-      fill_rect(x + 286, y + 84, 5, 7, ink);
-      draw_line(x + 279, y + 80, x + 279, y + 87, ink);
-      draw_line(x + 279, y + 87, x + 297, y + 87, ink);
-      draw_line(x + 297, y + 87, x + 297, y + 80, ink);
-      draw_text_line_vcenter("LISTENING", x + 324, y + 73, 30, 180, muted, 1, true);
+      draw_voice_input_row(x, y + 62);
     } else {
       const char *body = item->content[0] ? item->content : item->state;
       draw_card_body_lines(body, x + 30, y + 50, w - 60, muted);
@@ -4174,7 +4190,8 @@ esp_err_t pet_p4_renderer_render(
         g_logged_missing_asset = true;
       }
     }
-    if (!show_session_queue) draw_bubble(view, now_ms);
+    if (view && view->show_voice_overlay) draw_standalone_voice_overlay();
+    else if (!show_session_queue) draw_bubble(view, now_ms);
     draw_session_queue(state, now_ms);
   }
   draw_touch_feedback(state, now_ms);

@@ -1,7 +1,7 @@
 /**
  * [Input] An appearanceId persisted by `lib/appearance-store.js` plus centralized API-settings navigation.
  * [Output] Preview-first wide appearance workspace, unified sticky current-state inspector, full-width state rail, contextual details drawer,
- *          configurable per-family WAV cue overrides, direct per-state MP4 replacement,
+ *          configurable per-family WAV cue overrides, persisted video generation parameters and direct per-state MP4 replacement,
  *          Ark-background single-state image+prompt regeneration with read-only provider credential readiness, inline progress, cancellable exact-board USB appearance transfer, and full known-state rail.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
@@ -184,6 +184,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
   const [removeBg, setRemoveBg] = useState(true);
   const [fastGeneration, setFastGeneration] = useState(true);
+  const [videoParameters, setVideoParameters] = useState({});
 
   const stateFamilyRecords = useMemo(() => {
     if (!record) return [];
@@ -250,6 +251,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     setModel(saved.model);
     setThinkingModel(saved.thinkingModel);
     setFastGeneration(saved.fastGeneration);
+    setVideoParameters(saved.videoParameters);
     setAdvanced(saved.advanced);
   }, [providerId]);
 
@@ -526,9 +528,10 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       model,
       thinkingModel,
       fastGeneration,
+      videoParameters,
       advanced,
     });
-  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, advanced]);
+  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, videoParameters, advanced]);
 
   const handleSingleStateFile = useCallback((file) => {
     if (!file) return;
@@ -602,6 +605,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       imageEdit: loadArkImageConfig(),
       thinkingModel: isVolcengine ? VOLCENGINE_THINKING_MODEL : thinkingModel.trim() || trimmedModel,
       fastGeneration,
+      ...(isVolcengine ? videoParameters : {}),
       advanced:
         providerId === "custom"
           ? {
@@ -679,6 +683,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     model,
     thinkingModel,
     fastGeneration,
+    videoParameters,
     advanced,
     openaiCompat,
     removeBg,
@@ -1261,6 +1266,9 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
 
                 {singleStateStep === 1 && (
                   <AvatarWizardStep2
+                    apiKey={apiKey}
+                    videoParameters={videoParameters}
+                    onVideoParameters={setVideoParameters}
                     providerId={providerId}
                     credentialConfigured={providerCredentialsConfigured(providerId, {
                       apiKey,

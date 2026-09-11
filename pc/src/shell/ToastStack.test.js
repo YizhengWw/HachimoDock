@@ -30,6 +30,12 @@ test("Toasts auto-dismiss via setTimeout with a configurable ttl", () => {
   assert.match(source, /ttl/);
 });
 
+test("persistent toasts can run a callback when manually dismissed", () => {
+  assert.match(source, /dismissCallbacksRef/);
+  assert.match(source, /typeof toast\.onDismiss === "function"/);
+  assert.match(source, /onDismiss\?\.\(\)/);
+});
+
 test("ToastStack renders queue items with tone, title, optional message and action", () => {
   for (const key of ["tone", "title", "message", "action"]) {
     assert.match(source, new RegExp(`\\b${key}\\b`), `toast item should support ${key}`);

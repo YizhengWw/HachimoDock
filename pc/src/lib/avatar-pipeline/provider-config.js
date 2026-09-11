@@ -1,6 +1,6 @@
 /**
  * [Input] Provider id, optional browser storage, and an optional compile-time internal Volcengine API key fallback.
- * [Output] Shared avatar video provider list, independently resolved Ark image-edit config, user-config-first persistence helpers, and normalized generation config.
+ * [Output] Shared video provider config, persisted video parameters, independently resolved Ark image-edit config, and user-config-first persistence helpers. Ark models are discovered live.
  * [Pos] config node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -8,7 +8,6 @@
 import { DEFAULT_THINKING_MODEL } from "./thinking-model.js";
 import {
   DEFAULT_VOLCANO_BASE_URL,
-  DEFAULT_VOLCANO_VIDEO_MODEL,
 } from "./providers/volcano.js";
 import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 
@@ -17,11 +16,6 @@ export const DEFAULT_PROVIDER_ID = "volcengine";
 export const VOLCENGINE_BASE_URL = DEFAULT_VOLCANO_BASE_URL;
 export const VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL;
 export const VOLCENGINE_IMAGE_MODEL = DEFAULT_VOLCANO_IMAGE_MODEL;
-export const VOLCENGINE_CUSTOM_MODEL_OPTION = "__custom__";
-export const VOLCENGINE_VIDEO_MODEL_SUGGESTIONS = [
-  "doubao-seedance-1-5-pro-251215",
-  DEFAULT_VOLCANO_VIDEO_MODEL,
-];
 
 const INTERNAL_VOLCENGINE_API_KEY = (
   typeof __PET_MANAGER_INTERNAL_CONTENT_API_KEY__ === "string"
@@ -35,7 +29,7 @@ export const VIDEO_PROVIDERS = [
     label: "火山引擎",
     sub: "Ark / Seedance / 即梦",
     baseUrl: VOLCENGINE_BASE_URL,
-    models: VOLCENGINE_VIDEO_MODEL_SUGGESTIONS,
+    models: [],
     thinkingModel: VOLCENGINE_THINKING_MODEL,
     imageModel: VOLCENGINE_IMAGE_MODEL,
   },
@@ -70,6 +64,14 @@ export const DEFAULT_ADVANCED = {
 
 function defaultStorage() {
   return typeof localStorage === "undefined" ? null : localStorage;
+}
+
+export function pickVideoParameters(value) {
+  const result = {};
+  for (const key of ["duration", "resolution", "seed", "cameraFixed", "generateAudio", "watermark"]) {
+    if (value?.[key] != null) result[key] = value[key];
+  }
+  return result;
 }
 
 export function providerById(providerId = DEFAULT_PROVIDER_ID) {
@@ -127,6 +129,7 @@ export function loadProviderConfig(providerId = DEFAULT_PROVIDER_ID, storage = d
         ? saved.imageModel
         : "",
     fastGeneration: saved.fastGeneration !== false,
+    videoParameters: pickVideoParameters(saved.videoParameters),
     advanced: { ...DEFAULT_ADVANCED, ...(saved.advanced || {}) },
   };
 }

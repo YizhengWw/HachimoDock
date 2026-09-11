@@ -167,7 +167,7 @@ test("gallery card previews fit width while Codex imports show the whole subject
 
   assert.match(appearanceGrid, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(240px,\s*1fr\)\);/);
   assert.match(gallery, /appearance-card-preview--codex/);
-  assert.match(gallery, /playing=\{previewMedia\.kind === "video"\}/);
+  assert.match(gallery, /playing=\{previewMedia\.kind === "video" && \(isActive \|\| previewActive\)\}/);
   assert.match(cardPreviewMedia, /object-fit:\s*contain/);
   assert.match(cardPreviewMedia, /object-position:\s*center\s+center/);
   assert.match(cardPreviewMedia, /transform-origin:\s*center\s+center;/);
@@ -253,13 +253,16 @@ test("community installation immediately imports and prepares the appearance", (
   assert.ok(importOffset > installOffset);
 });
 
-test("running task card is wrapped in a shell Card and only rendered while a task is in flight", () => {
+test("generation task card remains visible through terminal state until it is acknowledged", () => {
   const gallery = readSource("AppearanceGallery.jsx");
 
   assert.match(gallery, /import Card from "\.\/shell\/Card\.jsx"/);
   assert.match(
     gallery,
-    /\{taskRunning && \(\s*<Card>\s*<RunningTaskCard/,
+    /\{taskVisible && \(\s*<Card>\s*<RunningTaskCard/,
   );
-  assert.match(gallery, /const taskRunning = task\?\.status === "running";/);
+  assert.match(gallery, /const taskVisible = task\?\.status && task\.status !== "idle";/);
+  assert.match(gallery, /onDismiss=\{\(\) => acknowledgeGenerationTask\(task\.completionEpoch\)\}/);
+  assert.match(gallery, /task\?\.status === "completed"/);
+  assert.match(gallery, /task\?\.status === "failed"/);
 });

@@ -221,9 +221,10 @@ function AppInner({
   handleOpenDetail,
   handleDetailBack,
 }) {
-  const { push } = useToast();
+  const { push, dismiss } = useToast();
   const { refresh, usb } = useDeviceContext();
   const lastEpochRef = useRef(0);
+  const generationToastRef = useRef(null);
 
   const handleSetupCompleteWithRefresh = useCallback(async () => {
     await refresh();
@@ -232,34 +233,42 @@ function AppInner({
 
   useEffect(() => {
     return subscribeGenerationTask((s) => {
+      // Closing the gallery result or starting another run also removes its
+      // persistent toast. Clear the ref first: dismiss can notify this listener.
+      if (s.status !== "completed" && s.status !== "failed") {
+        const id = generationToastRef.current;
+        generationToastRef.current = null;
+        if (id !== null) dismiss(id);
+        return;
+      }
       if (s.completionEpoch <= lastEpochRef.current) return;
-      if (s.status !== "completed" && s.status !== "failed") return;
       lastEpochRef.current = s.completionEpoch;
       if (s.status === "completed") {
         refresh().catch((err) => {
           console.warn("[App] refresh after avatar generation failed", err);
         });
       }
-      push({
+      generationToastRef.current = push({
         tone: s.status === "completed" ? "success" : "error",
         title:
           s.status === "completed"
             ? `「${s.appearanceName}」生成完成`
             : `「${s.appearanceName}」生成失败`,
         message: s.status === "failed" ? s.error : "",
-        ttl: 6000,
+        ttl: 0,
+        onDismiss: () => acknowledgeGenerationTask(s.completionEpoch),
         action: s.appearanceId
           ? {
               label: "查看",
               onClick: () => {
-                acknowledgeGenerationTask();
+                acknowledgeGenerationTask(s.completionEpoch);
                 handleOpenDetail(s.appearanceId);
               },
             }
           : null,
       });
     });
-  }, [push, handleOpenDetail, refresh]);
+  }, [push, dismiss, handleOpenDetail, refresh]);
 
   if (isSetup) {
     return (
@@ -349,16 +358,15 @@ function AppInner({
         <section className="app-main">
           <main className="app-content">
             {binding && (
-              <div hidden={!isDashboard}>
-                <DeviceDashboard
-                  binding={binding}
-                  onSwitchToSetup={() => setView("setup")}
-                  onUnbind={handleUnbind}
-                  onOpenGallery={handleOpenGallery}
-                  onOpenDetail={handleOpenDetail}
-                  onOpenApiSettings={handleOpenApiSettings}
-                />
-              </div>
+              <DeviceDashboard
+                active={isDashboard}
+                binding={binding}
+                onSwitchToSetup={() => setView("setup")}
+                onUnbind={handleUnbind}
+                onOpenGallery={handleOpenGallery}
+                onOpenDetail={handleOpenDetail}
+                onOpenApiSettings={handleOpenApiSettings}
+              />
             )}
             {view === "gallery" && (
               <AppearanceGallery

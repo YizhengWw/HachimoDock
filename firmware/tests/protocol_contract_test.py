@@ -59,6 +59,40 @@ def read_usb_serial_contract():
     return "\n".join(read_workspace(path) for path in sources)
 
 
+def test_dsi_clock_uses_sdk_revision_specific_default():
+    bsp = read("components/esp32_p4_wifi6_touch_lcd_4_3/esp32_p4_wifi6_touch_lcd_4_3.c")
+    # IDF 5.5.1 chooses the legacy PHY clock for v1; IDF 5.5.4 chooses
+    # the new PLL reference for v3. The old enum compiles but aborts on v3.
+    assert re.search(r"\.phy_clk_src\s*=\s*0\s*,", bsp)
+    assert ".phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT" not in bsp
+
+
+def test_v3_dpi_clock_keeps_compensated_front_porch_positive():
+    bsp = read("components/esp32_p4_wifi6_touch_lcd_4_3/esp32_p4_wifi6_touch_lcd_4_3.c")
+    clock = re.search(
+        r"#if CONFIG_ESP32P4_REV_MIN_FULL >= 300\s+.*?"
+        r"\.dpi_clock_freq_mhz = (\d+),\s+#else\s+"
+        r"\.dpi_clock_freq_mhz = (\d+),\s+#endif", bsp, re.S)
+    assert clock, "v3 must use an exact DPI divider without changing v1 timing"
+    v3_clock, v1_clock = map(int, clock.groups())
+    assert v1_clock == 25
+    assert v3_clock == 24
+    front = int(re.search(r"\.hsync_front_porch = (\d+)", bsp).group(1))
+    back = int(re.search(r"\.hsync_back_porch = (\d+)", bsp).group(1))
+    sync = int(re.search(r"\.hsync_pulse_width = (\d+)", bsp).group(1))
+    total = 480 + sync + back + front
+
+    def compensated_front(requested):
+        # IDF 5.5.4 rounds the divider and compensates the bridge timing.
+        divider = int(240 / requested + 0.5)
+        actual = 240 / divider
+        return front + int(actual / requested * total + 0.5) - total
+
+    assert compensated_front(25) == -11  # Regression reproduced numerically.
+    assert 240 % v3_clock == 0
+    assert compensated_front(v3_clock) == front > 0
+
+
 def test_protocol_doc_declares_usb_only_p4_runtime():
     doc = read("protocol.md")
     assert '"topic": "hello"' in doc
@@ -1585,7 +1619,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.51-p4")' in project
+    assert 'set(PROJECT_VER "0.7.52-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1667,7 +1701,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.51-p4")' in project
+    assert 'set(PROJECT_VER "0.7.52-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2406,6 +2440,8 @@ if __name__ == "__main__":
         test_pc_uses_high_baud_for_p4_ch343_usb_uart,
         test_p4_runtime_initializes_waveshare_lcd_bsp,
         test_p4_lcd_matches_wlk2802_st7701s_panel_geometry,
+        test_dsi_clock_uses_sdk_revision_specific_default,
+        test_v3_dpi_clock_keeps_compensated_front_porch_positive,
         test_p4_lcd_write_only_command_link_cannot_wait_for_ack_or_id,
         test_p4_asset_commit_loads_manifest_state,
         test_p4_runtime_renders_pet_frames_to_lcd,

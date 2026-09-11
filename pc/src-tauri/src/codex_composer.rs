@@ -1,7 +1,7 @@
 /*
  * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
  * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded running-task composer lookup, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
- * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, and stale-focus recovery.
+ * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, stale-focus recovery, and Windows minimized-Claude restoration.
  * [Sync] If this file changes, update pc/.folder.md.
  */
 
@@ -1083,7 +1083,7 @@ function Get-ClaudeWindows {
     try {
       $mainRoot = [System.Windows.Automation.AutomationElement]::FromHandle($mainHandle)
       $rect = $mainRoot.Current.BoundingRectangle
-      if (-not $mainRoot.Current.IsOffscreen -and
+      if ((Test-FiniteWindowRectangle $rect) -and -not $mainRoot.Current.IsOffscreen -and
           $rect.Width -ge 420 -and $rect.Height -ge 320) {
         $windows += [pscustomobject]@{
           Root = $mainRoot
@@ -1105,7 +1105,8 @@ function Get-ClaudeWindows {
         $root = [System.Windows.Automation.AutomationElement]::FromHandle($rendererHandle)
         if ($null -eq $root -or $root.Current.IsOffscreen) { continue }
         $rect = $root.Current.BoundingRectangle
-        if ($rect.Width -lt 420 -or $rect.Height -lt 320) { continue }
+        if (-not (Test-FiniteWindowRectangle $rect) -or
+            $rect.Width -lt 420 -or $rect.Height -lt 320) { continue }
         $windows += [pscustomobject]@{
           Root = $root
           RootHandle = [int64]$rendererHandle
@@ -1119,20 +1120,30 @@ function Get-ClaudeWindows {
   return @($windows | Sort-Object Area -Descending)
 }
 
-function Get-OrLaunchClaudeWindows {
+function Get-RestoredClaudeWindows {
   $windows = @(Get-ClaudeWindows)
   if ($windows.Count -gt 0) { return $windows }
 
   $desktopProcesses = @(Get-Process -Name claude -ErrorAction SilentlyContinue |
     Where-Object { $_.MainWindowHandle -ne 0 })
+  if ($desktopProcesses.Count -eq 0) { return @() }
+  # Minimized Chromium windows can expose an empty UIA rectangle. Restore the
+  # existing window and reacquire its UIA tree before checking the session.
   foreach ($process in $desktopProcesses) {
-    [void][CodexVoiceNative]::ActivateWindow([IntPtr]$process.MainWindowHandle)
+    [void][CodexVoiceNative]::RestoreWindow([IntPtr]$process.MainWindowHandle)
   }
-  if ($desktopProcesses.Count -gt 0) {
-    Start-Sleep -Milliseconds 180
+  $deadline = (Get-MonotonicMilliseconds) + 2000
+  do {
+    Start-Sleep -Milliseconds 100
     $windows = @(Get-ClaudeWindows)
     if ($windows.Count -gt 0) { return $windows }
-  }
+  } while ((Get-MonotonicMilliseconds) -lt $deadline)
+  throw 'Claude Desktop is running, but its window could not be restored; open Claude and retry'
+}
+
+function Get-OrLaunchClaudeWindows {
+  $windows = @(Get-RestoredClaudeWindows)
+  if ($windows.Count -gt 0) { return $windows }
 
   $appIds = @()
   try {
@@ -1485,7 +1496,7 @@ function Open-ClaudeSession(
       [string]::IsNullOrWhiteSpace($sessionTitle)) {
     throw 'Claude Desktop session navigation requires an exact session ID'
   }
-  $existingWindows = @(Get-ClaudeWindows)
+  $existingWindows = @(Get-RestoredClaudeWindows)
   if ($existingWindows.Count -eq 0) {
     throw 'No running Claude Desktop window was found'
   }
@@ -3257,7 +3268,7 @@ mod tests {
         let unsupported_clock = ["TickCount", "64"].concat();
         assert!(!source.contains(&unsupported_clock));
         assert!(source.contains("Claude Desktop has no existing session mapped"));
-        assert!(source.contains("$existingWindows = @(Get-ClaudeWindows)"));
+        assert!(source.contains("$existingWindows = @(Get-RestoredClaudeWindows)"));
         assert!(source.contains("function Find-ClaudeSessionRows"));
         assert!(source.contains("function Invoke-ClaudeSessionRow"));
         let open_start = source.find("function Open-ClaudeSession(").unwrap();

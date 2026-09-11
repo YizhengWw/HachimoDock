@@ -3,7 +3,7 @@
  * [Output] Priority-ordered four-region device dashboard with runtime-aware Linux/P4 control maps,
  *          twelve exposed P4 button/joystick gestures (SW1-SW3 short/long plus
  *          joystick center short/long and four directions), an internal hold transport for PTT,
- *          shared draft-then-confirm voice enablement across button and assistant surfaces,
+ *          shared draft-then-confirm voice enablement with ordered background microphone signals,
  *          fully repeatable hardware actions with optional exit plus versioned default migration,
  *          context-local previous/next selection and SW2 top-level page toggling,
  *          bounded Agent prompt bindings, ACK-gated USB config,
@@ -744,7 +744,17 @@ function voiceReducer(state, action) {
 
 // ---------- Component ----------
 
-export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }) {
+export default function DeviceDashboard({ active = true, binding, onUnbind, onOpenApiSettings }) {
+  // Native signaling now runs off the UI thread. Keep start/stop ordering
+  // across auto-rearm, button configuration and manual toggles.
+  const audioSignalQueueRef = useRef(Promise.resolve());
+  const sendAudioBridgeSignal = useCallback((input) => {
+    const pending = audioSignalQueueRef.current
+      .catch(() => {})
+      .then(() => invoke("audio_bridge_signal", input));
+    audioSignalQueueRef.current = pending.catch(() => {});
+    return pending;
+  }, []);
   const {
     usb,
     deviceOnline,
@@ -973,9 +983,9 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
 
   // Auto-open the device-guide modal the first time the user lands here.
   useEffect(() => {
-    if (!binding || !hasKnownRuntime) return;
+    if (!active || !binding || !hasKnownRuntime) return;
     if (shouldAutoOpenOnboarding(ONBOARDING_PAGE_IDS.DEVICE)) setGuideOpen(true);
-  }, [binding, hasKnownRuntime]);
+  }, [active, binding, hasKnownRuntime]);
 
   const selectedAgentId = currentDisplay.agentId;
   const p4TargetBoardDeviceId = isP4Runtime
@@ -1146,7 +1156,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
           if (!voiceRuntime?.running) {
             throw new Error(voiceRuntime?.message || "设备录音识别通道未就绪");
           }
-          const audio = await invoke("audio_bridge_signal", {
+          const audio = await sendAudioBridgeSignal({
             boardDeviceId: targetBoardDeviceId,
             action: "start",
             voiceButton: requestedVoiceTriggerId,
@@ -1155,7 +1165,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
           audioTransport = "，设备麦克风已启用";
           voiceDispatch({ type: "set_audio_bridge_state", enabled: true, ok: true, message: "设备麦克风已通过 USB 接入" });
         } else if (voiceState.audioBridgeEnabled) {
-          await invoke("audio_bridge_signal", {
+          await sendAudioBridgeSignal({
             boardDeviceId: targetBoardDeviceId,
             action: "stop",
             voiceButton: requestedVoiceTriggerId,
@@ -1185,7 +1195,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     } catch (err) {
       setVoiceConfigOtaState({ pending: false, tone: "error", message: `按钮配置下发失败: ${err}` });
     }
-  }, [binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, usb.boardDeviceId, usb.connected, usb.runtime, voiceConfig, voiceState.audioBridgeEnabled]);
+  }, [binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId, usb.connected, usb.runtime, voiceConfig, voiceState.audioBridgeEnabled]);
 
   const updateVoiceTrigger = useCallback(async (trigger) => {
     buttonConfigRevisionRef.current += 1;
@@ -1261,7 +1271,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
         if (!voiceRuntime?.running) {
           throw new Error(voiceRuntime?.message || "设备录音识别通道未就绪");
         }
-        const audio = await invoke("audio_bridge_signal", {
+        const audio = await sendAudioBridgeSignal({
           boardDeviceId: p4TargetBoardDeviceId,
           action: "start",
           voiceButton: activeVoiceTriggerId,
@@ -1287,6 +1297,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     isP4Runtime,
     p4TargetBoardDeviceId,
     runtimeVoiceEnabled,
+    sendAudioBridgeSignal,
     usb.connected,
   ]);
 
@@ -1305,7 +1316,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
         );
         if (!voiceRuntime?.running) throw new Error(voiceRuntime?.message || "voice-service 未启动，无法接入板子音频。");
       }
-      const res = await invoke("audio_bridge_signal", {
+      const res = await sendAudioBridgeSignal({
         boardDeviceId: targetBoardDeviceId,
         action,
         voiceButton: activeVoiceTriggerId,
@@ -1315,7 +1326,7 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     } catch (err) {
       voiceDispatch({ type: "set_audio_bridge_state", enabled: !requestedEnabled, ok: false, message: `${action === "start" ? "启动" : "关闭"}板子音频失败: ${err}` });
     }
-  }, [activeVoiceTriggerId, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, usb.boardDeviceId]);
+  }, [activeVoiceTriggerId, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId]);
 
   const resumeDeviceVoiceAfterCredentialAccess = useCallback(() => {
     if (!isP4Runtime || !runtimeVoiceEnabled || !usb.connected || !p4TargetBoardDeviceId) {
@@ -1430,6 +1441,10 @@ export default function DeviceDashboard({ binding, onUnbind, onOpenApiSettings }
     buttonConfigRevisionRef.current += 1;
     await refreshButtonConfigFromBoard();
   }, [refreshButtonConfigFromBoard]);
+
+  // Session, voice, and device synchronization must keep running across tabs,
+  // but the dashboard's large control tree and media previews do not.
+  if (!active) return null;
 
   return (
     <PageShell

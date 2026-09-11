@@ -51,6 +51,7 @@ import {
   listCodexPets,
 } from "./lib/codex-pets-client.js";
 import {
+  acknowledgeGenerationTask,
   abortGenerationTask,
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
@@ -159,7 +160,7 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
       }
     });
   }, [reload]);
-  const taskRunning = task?.status === "running";
+  const taskVisible = task?.status && task.status !== "idle";
 
   const openCodexImport = useCallback(async () => {
     setCodexError("");
@@ -392,11 +393,12 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
         </div>
       )}
 
-      {taskRunning && (
+      {taskVisible && (
         <Card>
           <RunningTaskCard
             task={task}
             onAbort={abortGenerationTask}
+            onDismiss={() => acknowledgeGenerationTask(task.completionEpoch)}
             onOpenDetail={onOpenDetail}
           />
         </Card>
@@ -1231,7 +1233,7 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
  * per-family stage, and lets the user open the partially-saved appearance or
  * abort the run.
  */
-function RunningTaskCard({ task, onAbort, onOpenDetail }) {
+function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
   const progress = task?.progress;
   const completed = progress?.completed ?? 0;
   const total = progress?.total ?? 0;
@@ -1242,23 +1244,41 @@ function RunningTaskCard({ task, onAbort, onOpenDetail }) {
   const stageMessage = progress?.message;
   const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
   const partialId = task?.appearanceId;
+  const isRunning = task?.status === "running";
+  const isCompleted = task?.status === "completed";
+  const title = isRunning
+    ? `正在生成「${task?.appearanceName || "未命名形象"}」`
+    : isCompleted
+      ? `「${task?.appearanceName || "未命名形象"}」生成完成`
+      : `「${task?.appearanceName || "未命名形象"}」生成失败`;
 
   return (
     <div className="running-task-card">
       <div className="running-task-card__head">
-        <Loader size={16} className="spin" />
-        <div className="running-task-card__title">
-          正在生成「{task?.appearanceName || "未命名形象"}」
-        </div>
+        {isRunning ? (
+          <Loader size={16} className="spin" />
+        ) : isCompleted ? (
+          <CheckCircle2 size={16} />
+        ) : (
+          <AlertCircle size={16} />
+        )}
+        <div className="running-task-card__title">{title}</div>
         <span className="muted small">{completed}/{total || "?"}</span>
+        {!isRunning && (
+          <button className="icon-btn" type="button" onClick={onDismiss} aria-label="关闭生成提示">
+            <X size={14} />
+          </button>
+        )}
       </div>
       <div className="running-task-card__bar">
         <div className="running-task-card__bar-fill" style={{ width: `${pct}%` }} />
       </div>
       <div className="muted small running-task-card__sub">
-        {currentFamily
-          ? `${currentFamily[0]} · ${STAGE_LABELS[currentFamily[1].status] || ""}`
-          : stageMessage || "正在准备…"}
+        {task?.status === "failed"
+          ? task.error || "生成失败，请检查设置后重试。"
+          : currentFamily
+            ? `${currentFamily[0]} · ${STAGE_LABELS[currentFamily[1].status] || ""}`
+            : stageMessage || (isCompleted ? "形象已保存到本地形象库。" : "正在准备…")}
       </div>
       <div className="running-task-card__actions">
         {partialId && (
@@ -1266,13 +1286,21 @@ function RunningTaskCard({ task, onAbort, onOpenDetail }) {
             <CheckCircle size={14} /> 查看已生成部分
           </button>
         )}
-        <button className="btn-ghost btn-sm" onClick={onAbort}>
-          <X size={14} /> 取消生成
-        </button>
+        {isRunning ? (
+          <button className="btn-ghost btn-sm" onClick={onAbort}>
+            <X size={14} /> 取消生成
+          </button>
+        ) : (
+          <button className="btn-secondary btn-sm" onClick={onDismiss}>
+            <X size={14} /> 关闭提示
+          </button>
+        )}
       </div>
-      <div className="muted small running-task-card__hint">
-        生成可后台进行，你可以切换页面或继续操作。关闭应用会中断生成。
-      </div>
+      {isRunning && (
+        <div className="muted small running-task-card__hint">
+          生成可后台进行，你可以切换页面或继续操作。关闭应用会中断生成。
+        </div>
+      )}
     </div>
   );
 }
@@ -1283,6 +1311,7 @@ function AppearanceCard({
   onOpenDetail,
   onRequestDelete,
 }) {
+  const [previewActive, setPreviewActive] = useState(false);
   const okCount = row.families?.filter?.((f) => f.ok).length || 0;
   const totalCount = row.families?.length || 0;
   const isCodex = row.type === "codex-import";
@@ -1292,6 +1321,12 @@ function AppearanceCard({
   return (
     <article
       className={"appearance-card appearance-card--clickable" + (isActive ? " appearance-card--active is-active" : "")}
+      onPointerEnter={() => setPreviewActive(true)}
+      onPointerLeave={() => setPreviewActive(false)}
+      onFocusCapture={() => setPreviewActive(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPreviewActive(false);
+      }}
     >
       <div
         className={"appearance-channel-preview appearance-card-preview" + (isCodex ? " appearance-card-preview--codex" : "")}
@@ -1304,7 +1339,7 @@ function AppearanceCard({
           media={previewMedia}
           className="appearance-channel-preview__media"
           emptyClassName="appearance-channel-preview__empty"
-          playing={previewMedia.kind === "video"}
+          playing={previewMedia.kind === "video" && (isActive || previewActive)}
         />
         {isActive && (
           <span className="appearance-card__badge appearance-card__badge--active">

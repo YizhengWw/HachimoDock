@@ -7,10 +7,35 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import {
   buildAllFamiliesFailedMessage,
   normalizeGenerationErrorMessage,
 } from "./generation-task.js";
+
+test("terminal acknowledgement ignores older toasts and running tasks", () => {
+  // Exercise the real state machine in isolation; no provider calls or user data.
+  const source = readFileSync(new URL("./generation-task.js", import.meta.url), "utf8")
+    .replace(/^import .*;\n/gm, "")
+    .replace(/^export /gm, "");
+  const context = vm.createContext({});
+  vm.runInContext(source + "\nthis.api = { setState, getGenerationTask, acknowledgeGenerationTask };", context);
+  const { setState, getGenerationTask, acknowledgeGenerationTask } = context.api;
+  setState({ status: "failed", completionEpoch: 2, error: "test" });
+  acknowledgeGenerationTask(1);
+  assert.equal(getGenerationTask().status, "failed");
+  acknowledgeGenerationTask(2);
+  assert.equal(getGenerationTask().status, "idle");
+  setState({ status: "running", completionEpoch: 2 });
+  acknowledgeGenerationTask(2);
+  assert.equal(getGenerationTask().status, "running");
+  setState({ status: "completed", completionEpoch: 3 });
+  acknowledgeGenerationTask(2);
+  assert.equal(getGenerationTask().status, "completed");
+  acknowledgeGenerationTask(3);
+  assert.equal(getGenerationTask().status, "idle");
+});
 
 test("all-family failures collapse repeated ModelNotOpen errors into one actionable cause", () => {
   const families = ["welcome", "idle.playing", "idle.wandering"].map((family, index) => ({

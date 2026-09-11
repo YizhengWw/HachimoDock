@@ -10,9 +10,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { loadArkImageConfig, resolveProviderApiKey } from "./provider-config.js";
+import { loadArkImageConfig, loadProviderConfig, saveProviderConfig, resolveProviderApiKey } from "./provider-config.js";
 
 const libDir = dirname(fileURLToPath(import.meta.url));
+
+test("generation parameters persist without overriding credentials or identity", () => {
+  let saved;
+  const storage = { getItem: () => saved, setItem: (_key, value) => { saved = value; } };
+  const videoParameters = { duration: 10, resolution: "720p", seed: 42, cameraFixed: true, apiKey: "ignored", model: "ignored" };
+  saveProviderConfig("volcengine", { apiKey: "user-test-key", videoParameters }, storage);
+  const config = loadProviderConfig("volcengine", storage);
+  assert.deepEqual(config.videoParameters, { duration: 10, resolution: "720p", seed: 42, cameraFixed: true });
+  assert.equal(config.apiKey, "user-test-key");
+});
 
 test("provider config helper owns the shared localStorage key and Volcengine defaults", () => {
   const source = readFileSync(join(libDir, "provider-config.js"), "utf8");

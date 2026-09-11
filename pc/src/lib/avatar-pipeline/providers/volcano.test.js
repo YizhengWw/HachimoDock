@@ -11,6 +11,9 @@ import {
   buildVolcanoTaskDiagnostics,
   buildVolcanoTaskPayload,
   normalizeVolcanoSubmitErrorMessage,
+  runVolcanoFamily,
+  isVolcanoModelRejected,
+  clearVolcanoModelRejections,
 } from "./volcano.js";
 
 test("Seedance 2.0 payload includes matching first and last frame references", () => {
@@ -54,7 +57,7 @@ test("Seedance 1.5 payload includes prompt flags plus matching first and last fr
   assert.deepEqual(payload.content, [
     {
       type: "text",
-      text: "无人机以极快速度穿越复杂障碍或自然奇观 --duration 5 --camerafixed false --watermark false",
+      text: "无人机以极快速度穿越复杂障碍或自然奇观 --duration 5 --camerafixed false --watermark false --ratio 4:3 --resolution 480p",
     },
     { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "first_frame" },
     { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "last_frame" },
@@ -62,7 +65,7 @@ test("Seedance 1.5 payload includes prompt flags plus matching first and last fr
   assert.equal("duration" in payload, false);
   assert.equal("ratio" in payload, false);
   assert.equal("resolution" in payload, false);
-  assert.equal("generate_audio" in payload, false);
+  assert.equal(payload.generate_audio, false);
   assert.equal("watermark" in payload, false);
 });
 
@@ -89,9 +92,47 @@ test("Volcano ModelNotOpen submit error becomes an actionable account message", 
     "doubao-seedance-2-0-260128",
   );
 
-  assert.match(message, /火山引擎模型未开通/);
+  assert.match(message, /火山引擎模型不可用/);
   assert.match(message, /doubao-seedance-2-0-260128/);
-  assert.match(message, /doubao-seedance-1-5-pro-251215/);
+  assert.doesNotMatch(message, /doubao-seedance-1-5-pro-251215/);
   assert.match(message, /Ark 控制台/);
-  assert.match(message, /原始错误/);
+  assert.match(message, /刷新视频模型列表/);
+});
+
+test("explicit video controls reach the Ark request", () => {
+  const payload = buildVolcanoTaskPayload({ model: "doubao-seedance-2-0-260128", prompt: "move",
+    duration: 10, resolution: "720p", seed: 42, cameraFixed: true, generateAudio: true, watermark: true });
+  assert.equal(payload.duration, 10);
+  assert.equal(payload.resolution, "720p");
+  assert.equal(payload.seed, 42);
+  assert.equal(payload.camera_fixed, true);
+  assert.equal(payload.generate_audio, true);
+  assert.equal(payload.watermark, true);
+  assert.throws(() => buildVolcanoTaskPayload({ seed: 0.5 }), /整数/);
+  const defaults = buildVolcanoTaskPayload({ duration: "auto", resolution: "auto" });
+  assert.equal(defaults.duration, undefined);
+  assert.equal(defaults.resolution, undefined);
+});
+
+test("unavailable model is not retried and is excluded for this API Key", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error: { code: "InvalidEndpointOrModel.NotFound", message: "model unavailable" } }, { status: 404 });
+  };
+  try {
+    const config = { apiKey: "test-rejected-key", model: "doubao-seedance-unavailable" };
+    await assert.rejects(runVolcanoFamily({ config, prompt: "move" }), /模型不可用/);
+    assert.equal(calls, 1);
+    assert.equal(isVolcanoModelRejected(config.apiKey, config.model), true);
+    await assert.rejects(runVolcanoFamily({ config, prompt: "move" }), /无法调用/);
+    assert.equal(calls, 1);
+    assert.equal(isVolcanoModelRejected("another-test-key", config.model), false);
+    assert.equal(isVolcanoModelRejected(config.apiKey, config.model, Date.now() + 6 * 60_000), false);
+    await assert.rejects(runVolcanoFamily({ config, prompt: "move" }), /模型不可用/);
+    assert.equal(isVolcanoModelRejected(config.apiKey, config.model), true);
+    clearVolcanoModelRejections(config.apiKey);
+    assert.equal(isVolcanoModelRejected(config.apiKey, config.model), false);
+  } finally { globalThis.fetch = original; }
 });

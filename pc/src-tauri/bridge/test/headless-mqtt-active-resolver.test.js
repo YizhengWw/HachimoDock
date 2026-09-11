@@ -73,6 +73,17 @@ test("headless bridge contains no legacy MQTT device transport", () => {
   assert.doesNotMatch(headlessSource, /mqtt\.connect|claw-pet\/board|publish-command|publish-test|device-availability/);
 });
 
+test("Codex live commentary and tool calls remain visible to device clients", () => {
+  for (const event of [
+    "response_item:assistant_message",
+    "response_item:function_call",
+    "response_item:custom_tool_call",
+    "response_item:web_search_call",
+  ]) {
+    assert.match(headlessSource, new RegExp(`visibleCodexEvents[\\s\\S]*${event}`));
+  }
+});
+
 test("Claude hook events produce stable device card content", () => {
   const working = buildClaudeHookDisplay({ prompt: "修复 Claude 客户端的前台语音输入" }, "working", "UserPromptSubmit");
   assert.equal(working.title, "修复 Claude 客户端的前台语音输入");

@@ -1,6 +1,6 @@
 """Flash a complete P4 image only after checking the connected silicon revision.
 
-Requires esptool 5.2.x. Keeps one serial connection from chip detection through
+Requires esptool 5.4.0 (including P4 v3.2 stub support). Keeps one serial connection from chip detection through
 erase/write/verify; no hardware is touched until the caller explicitly runs it.
 """
 import argparse
@@ -13,6 +13,8 @@ def flash(image: Path, port: str, baud: int = 921600):
     import esptool
     from esptool.cmds import run_stub, write_flash
 
+    if esptool.__version__ != "5.4.0":
+        raise ValueError("请安装 esptool==5.4.0 后重试；旧版烧录工具不支持此 P4 芯片，未擦除数据")
     data = image.read_bytes()
     minimum, maximum = factory_revision_range(data)
     with esptool.detect_chip(port, baud=115200) as connected:
