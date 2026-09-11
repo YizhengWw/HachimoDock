@@ -1,13 +1,14 @@
 "use strict";
 
 /*
- * [Input] Codex rollout directories, append notifications, and session title metadata.
- * [Output] Incremental per-session state updates with arbitrary-age resume discovery, recursive watching, bounded tail reads, and current-day Agent token totals.
+ * [Input] Codex rollouts, read-only Desktop diagnostics, append notifications and session titles.
+ * [Output] Bounded state recovery, original resumed-thread identity, current-day tokens and public reply mirror deduplication; older diagnostics cannot overwrite newer rollouts.
  * [Pos] Codex live-state monitor for the managed Pet Manager Bridge.
  * [Sync] If discovery or state-tail semantics change, update `pc/.folder.md`.
  */
 
 const fs = require("fs");
+const { createHash } = require("node:crypto");
 const path = require("path");
 const defaults = require("./codex");
 const {
@@ -21,6 +22,9 @@ const MAX_DAILY_USAGE_FILES = 256;
 const DAILY_USAGE_TAIL_BYTES = 512 * 1024;
 const DAILY_BOUNDARY_SAMPLE_BYTES = 256 * 1024;
 const DAILY_BOUNDARY_SCAN_BYTES = 12 * 1024 * 1024;
+const DESKTOP_LOG_BOOTSTRAP_WINDOW_MS = 6 * 60 * 60 * 1000;
+const DESKTOP_LOG_ACTIVE_FRESH_MS = 5 * 60 * 1000;
+const DESKTOP_LOG_BATCH_SIZE = 512;
 const DAILY_TOKEN_FIELDS = [
   "totalTokens",
   "inputTokens",
@@ -32,6 +36,7 @@ const DAILY_TOKEN_FIELDS = [
 const TEXT_THINKING = "\u6b63\u5728\u601d\u8003";
 const TEXT_REPLYING = "\u6b63\u5728\u56de\u590d";
 const TEXT_DONE = "\u5df2\u5b8c\u6210";
+const TEXT_ERROR = "\u6267\u884c\u5931\u8d25";
 const TEXT_SESSION_FALLBACK = "Codex \u4f1a\u8bdd";
 const RESTORABLE_ACTIVE_STATES = new Set([
   "working",
@@ -47,6 +52,39 @@ const RESTORABLE_ACTIVE_STATES = new Set([
   "codex-permission",
   "notification",
 ]);
+
+const DESKTOP_LOG_BOOTSTRAP_SQL = `
+  SELECT id, ts, thread_id, target, feedback_log_body
+  FROM logs
+  WHERE ts >= ?
+    AND id <= ?
+    AND thread_id IS NOT NULL
+    AND (
+      (target = 'codex_core::session::handlers'
+        AND feedback_log_body LIKE '%op: TurnInput%')
+      OR (target = 'codex_core::session::turn'
+        AND (feedback_log_body LIKE '%post sampling token usage%'
+          OR feedback_log_body LIKE '%Turn error:%'))
+    )
+  ORDER BY id DESC
+  LIMIT 512
+`;
+
+const DESKTOP_LOG_INCREMENTAL_SQL = `
+  SELECT id, ts, thread_id, target, feedback_log_body
+  FROM logs
+  WHERE id > ? AND id <= ?
+    AND thread_id IS NOT NULL
+    AND (
+      (target = 'codex_core::session::handlers'
+        AND feedback_log_body LIKE '%op: TurnInput%')
+      OR (target = 'codex_core::session::turn'
+        AND (feedback_log_body LIKE '%post sampling token usage%'
+          OR feedback_log_body LIKE '%Turn error:%'))
+    )
+  ORDER BY id ASC
+  LIMIT 512
+`;
 
 function readNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
@@ -230,6 +268,61 @@ function wrapDisplayBody(value) {
   return compactText(value, MAX_MESSAGE_PREVIEW);
 }
 
+function responseAssistantText(payload) {
+  if (!payload || payload.type !== "message" || payload.role !== "assistant"
+      || !Array.isArray(payload.content) || !isVisibleAssistantPayload(payload)) {
+    return "";
+  }
+  return payload.content
+    .map((block) => block && (block.type === "output_text" || block.type === "text")
+      && typeof block.text === "string" ? block.text : "")
+    .filter(Boolean)
+    .join("\n").trim();
+}
+
+function isVisibleAssistantPayload(payload) {
+  // Only public reply/commentary channels may become device bubbles.
+  return [payload?.channel, payload?.phase].every((value) =>
+    !value || ["commentary", "final", "final_answer"].includes(value));
+}
+
+function isMirroredAssistantMessage(entry, message, source, phase = "") {
+  phase = phase === "final_answer" ? "final" : phase;
+  const fingerprint = createHash("sha256").update(message.trim()).digest("hex");
+  const pending = entry.pendingAssistantMessages || (entry.pendingAssistantMessages = []);
+  const index = pending.findIndex((item) =>
+    item.fingerprint === fingerprint && item.source !== source
+      && (!item.phase || !phase || item.phase === phase));
+  if (index >= 0) {
+    pending.splice(index, 1);
+    return true;
+  }
+  pending.push({ fingerprint, source, phase });
+  if (pending.length > 64) pending.shift();
+  return false;
+}
+
+function toolDisplayContent(event, payload) {
+  if (event === "response_item:web_search_call") return "正在搜索资料";
+  const rawName = typeof payload?.name === "string"
+    ? payload.name
+    : typeof payload?.tool_name === "string"
+      ? payload.tool_name
+      : "";
+  const name = rawName.toLowerCase();
+  if (name.includes("apply_patch") || name.includes("edit") || name.includes("write")) {
+    return "正在修改代码";
+  }
+  if (name.includes("view_image") || name.includes("image")) return "正在查看图片";
+  if (name.includes("search") || name.includes("browser")) return "正在搜索资料";
+  if (name.includes("read") || name.includes("resource")) return "正在读取资料";
+  if (name.includes("wait")) return "正在等待任务完成";
+  if (name.includes("exec") || name.includes("shell") || name.includes("command")) {
+    return "正在运行命令";
+  }
+  return "正在执行工具";
+}
+
 function stripCodexPrefix(sessionId) {
   return typeof sessionId === "string" ? sessionId.replace(/^codex:/, "") : "";
 }
@@ -268,6 +361,58 @@ function extractTokenUsage(payload) {
   return hasAny ? usage : null;
 }
 
+function desktopLogTurnId(body) {
+  if (typeof body !== "string") return "";
+  return body.match(/Submission\s+sub=Submission\s*\{\s*id:\s*"([^"]+)"/)?.[1]
+    || body.match(/\bturn(?:\.id|_id)=([0-9a-f-]{16,})/i)?.[1]
+    || "";
+}
+
+function parseDesktopLogSignal(row) {
+  const threadId = typeof row?.thread_id === "string" ? row.thread_id.trim() : "";
+  const target = typeof row?.target === "string" ? row.target : "";
+  const body = typeof row?.feedback_log_body === "string" ? row.feedback_log_body : "";
+  const timestampMs = Number(row?.ts) > 0 ? Number(row.ts) * 1000 : Date.now();
+  if (!threadId || !body) return null;
+
+  if (target === "codex_core::session::handlers" && body.includes("op: TurnInput")) {
+    return {
+      sessionId: `codex:${threadId}`,
+      state: "thinking",
+      event: "event_msg:task_started",
+      timestampMs,
+      turnId: desktopLogTurnId(body),
+      content: TEXT_THINKING,
+    };
+  }
+
+  if (target !== "codex_core::session::turn") return null;
+  if (body.includes("Turn error:")) {
+    return {
+      sessionId: `codex:${threadId}`,
+      state: "error",
+      event: "event_msg:task_complete",
+      timestampMs,
+      turnId: desktopLogTurnId(body),
+      content: TEXT_ERROR,
+    };
+  }
+  if (body.includes("post sampling token usage")
+      && /\bmodel_needs_follow_up=false\b/.test(body)
+      && /\bhas_pending_input=false\b/.test(body)
+      && /\bneeds_follow_up=false\b/.test(body)) {
+    return {
+      sessionId: `codex:${threadId}`,
+      state: "attention",
+      event: "event_msg:task_complete",
+      timestampMs,
+      turnId: desktopLogTurnId(body),
+      content: TEXT_DONE,
+    };
+  }
+  return null;
+}
+
 class CodexLogMonitor {
   constructor(agentConfig, onState) {
     this.config = { ...defaults, ...(agentConfig || {}) };
@@ -284,12 +429,18 @@ class CodexLogMonitor {
     this.sessionTitleIndexMtime = 0;
     this.dailyUsageDayKey = localDayKey();
     this.dailyUsageBySession = new Map();
+    this.desktopLogDb = agentConfig?.DESKTOP_LOG_DB || null;
+    this.desktopLogDbOwned = false;
+    this.desktopLogCursor = 0;
+    this.desktopLogInitialized = false;
+    this.desktopLogEntries = new Map();
   }
 
   start() {
     if (this.timer) return;
     this.refreshRootWatcher();
     this.baselineExistingSessions();
+    this.bootstrapDesktopLogState();
     this.refreshDirectoryWatchers();
     this.timer = setInterval(() => this.poll(), this.config.POLL_INTERVAL_MS);
     this.timer.unref?.();
@@ -313,6 +464,181 @@ class CodexLogMonitor {
       this.rootWatcher = null;
     }
     this.dirtyFiles.clear();
+    if (this.desktopLogDbOwned && this.desktopLogDb) {
+      try { this.desktopLogDb.close(); } catch {}
+    }
+    this.desktopLogDb = null;
+    this.desktopLogDbOwned = false;
+    this.desktopLogInitialized = false;
+  }
+
+  desktopLogDbPath() {
+    const explicit = typeof this.config.DESKTOP_LOG_DB_PATH === "string"
+      ? this.config.DESKTOP_LOG_DB_PATH.trim()
+      : "";
+    return explicit || path.join(path.dirname(this.config.SESSION_DIR), "logs_2.sqlite");
+  }
+
+  ensureDesktopLogDb() {
+    if (this.desktopLogDb) return this.desktopLogDb;
+    const dbPath = this.desktopLogDbPath();
+    if (!dbPath || !fs.existsSync(dbPath)) return null;
+    try {
+      // Node 22+ ships this module. Older development runtimes keep the
+      // rollout-only path without turning a missing optional API into a crash.
+      const { DatabaseSync } = require("node:sqlite");
+      this.desktopLogDb = new DatabaseSync(dbPath, { readOnly: true });
+      this.desktopLogDbOwned = true;
+      return this.desktopLogDb;
+    } catch {
+      return null;
+    }
+  }
+
+  desktopLogMaxId(db) {
+    try {
+      return Number(db.prepare("SELECT COALESCE(MAX(id), 0) AS max_id FROM logs").get()?.max_id) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  desktopLogActivityMs(db, sessionId) {
+    const threadId = stripCodexPrefix(sessionId);
+    if (!threadId) return 0;
+    try {
+      const row = db.prepare("SELECT COALESCE(MAX(ts), 0) AS max_ts FROM logs WHERE thread_id = ?").get(threadId);
+      return (Number(row?.max_ts) || 0) * 1000;
+    } catch {
+      return 0;
+    }
+  }
+
+  hasRecentRolloutState(signal) {
+    const maxDistanceMs = Math.max(5_000, Number(this.config.POLL_INTERVAL_MS) * 4 || 6_000);
+    for (const entry of this.tracked.values()) {
+      if (entry.sessionId !== signal.sessionId) continue;
+      if (entry.internalSession) return true;
+      if (Number(entry.lastSourceEventTime) > signal.timestampMs) return true;
+      if (signal.turnId && entry.turnId && signal.turnId !== entry.turnId
+          && Number(entry.lastSourceEventTime) >= signal.timestampMs - maxDistanceMs) return true;
+      if (Number(entry.lastSourceEventTime) < signal.timestampMs - maxDistanceMs) continue;
+      if (signal.event === "event_msg:task_complete") {
+        if (entry.lastEvent === "event_msg:task_complete"
+            || ["attention", "error", "idle"].includes(entry.lastState)) return true;
+        continue;
+      }
+      if (RESTORABLE_ACTIVE_STATES.has(entry.lastState)) return true;
+    }
+    return false;
+  }
+
+  emitDesktopLogSignal(signal) {
+    if (!signal || this.hasRecentRolloutState(signal)) return;
+    const indexedTitle = this.getIndexedTitle(signal.sessionId);
+    const rollout = [...this.tracked.values()]
+      .filter((item) => item.sessionId === signal.sessionId)
+      .sort((a, b) => (b.lastSourceEventTime || 0) - (a.lastSourceEventTime || 0))[0];
+    // Unknown/internal diagnostics are not a second source of user sessions.
+    if ((!rollout && !indexedTitle) || isInternalCodexSession(rollout)
+        || isInternalCodexSession({ sessionTitle: indexedTitle })) return;
+    let entry = this.desktopLogEntries.get(signal.sessionId);
+    if (entry && (entry.lastSourceEventTime > signal.timestampMs
+        || (entry.lastSourceEventTime === signal.timestampMs && entry.lastEvent === signal.event))) return;
+    if (!entry) {
+      entry = this.createEntry(signal.sessionId, 0, false);
+      if (this.desktopLogEntries.size >= 256) {
+        this.desktopLogEntries.delete(this.desktopLogEntries.keys().next().value);
+      }
+      this.desktopLogEntries.set(signal.sessionId, entry);
+    }
+    if (rollout) {
+      for (const key of ["cwd", "sessionTitle", "firstUserMessage", "lastUserMessage",
+        "lastAgentMessage", "userMessageCount", "agentMessageCount", "tokenUsage"]) {
+        entry[key] = rollout[key];
+      }
+    }
+    if (indexedTitle) entry.sessionTitle = indexedTitle;
+    entry.turnId = signal.turnId || entry.turnId;
+    entry.lastState = signal.state;
+    entry.lastEvent = signal.event;
+    entry.lastEventTime = signal.timestampMs;
+    entry.lastSourceEventTime = signal.timestampMs;
+    entry.lastDisplayContent = signal.content || entry.lastDisplayContent;
+    if (signal.event === "event_msg:task_complete") {
+      entry.completedAt = signal.timestampMs;
+      entry.lastTaskCompleteMessage = signal.content || TEXT_DONE;
+    } else {
+      entry.startedAt = signal.timestampMs;
+      entry.lastTaskCompleteMessage = "";
+      entry.lastAgentMessage = "";
+    }
+    this.emit(entry, signal.state, signal.event);
+  }
+
+  applyDesktopLogRows(rows, options = {}) {
+    const latestBySession = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const signal = parseDesktopLogSignal(row);
+      if (!signal) continue;
+      latestBySession.set(signal.sessionId, signal);
+    }
+
+    const bootstrap = options.bootstrap === true;
+    const now = Date.now();
+    for (const signal of latestBySession.values()) {
+      if (bootstrap) {
+        if (!RESTORABLE_ACTIVE_STATES.has(signal.state)) continue;
+        const activityMs = this.desktopLogActivityMs(options.db, signal.sessionId);
+        if (!activityMs || activityMs < now - DESKTOP_LOG_ACTIVE_FRESH_MS) continue;
+        // Activity proves freshness, not the lifecycle event's ordering.
+        // Do not move an old start past a newer rollout completion.
+      } else if (signal.timestampMs < now - DESKTOP_LOG_ACTIVE_FRESH_MS
+          || signal.timestampMs > now + DESKTOP_LOG_ACTIVE_FRESH_MS) {
+        continue;
+      }
+      this.emitDesktopLogSignal(signal);
+    }
+  }
+
+  bootstrapDesktopLogState() {
+    const db = this.ensureDesktopLogDb();
+    if (!db) return;
+    const upperId = this.desktopLogMaxId(db);
+    try {
+      const cutoffSeconds = Math.floor((Date.now() - DESKTOP_LOG_BOOTSTRAP_WINDOW_MS) / 1000);
+      const rows = db.prepare(DESKTOP_LOG_BOOTSTRAP_SQL).all(cutoffSeconds, upperId).reverse();
+      this.applyDesktopLogRows(rows, { bootstrap: true, db });
+      this.desktopLogCursor = upperId;
+      this.desktopLogInitialized = true;
+    } catch {
+      // Retry bounded bootstrap after a transient lock/schema failure.
+      this.desktopLogInitialized = false;
+    }
+  }
+
+  pollDesktopLogState() {
+    const db = this.ensureDesktopLogDb();
+    if (!db) return;
+    const upperId = this.desktopLogMaxId(db);
+    if (!this.desktopLogInitialized || upperId < this.desktopLogCursor) {
+      this.bootstrapDesktopLogState();
+      return;
+    }
+    if (upperId <= this.desktopLogCursor) return;
+    try {
+      const rows = db.prepare(DESKTOP_LOG_INCREMENTAL_SQL).all(
+        this.desktopLogCursor,
+        upperId,
+      );
+      this.applyDesktopLogRows(rows, { db });
+      this.desktopLogCursor = rows.length >= DESKTOP_LOG_BATCH_SIZE
+        ? Number(rows.at(-1).id) : upperId;
+    } catch {
+      // A busy WAL or a transient schema migration should not interrupt the
+      // primary rollout monitor. The next poll retries from the same cursor.
+      return;
+    }
   }
 
   refreshSessionTitleIndex() {
@@ -375,15 +701,12 @@ class CodexLogMonitor {
   }
 
   extractSessionId(fileName) {
+    // Resumed Desktop rollouts append a writer UUID after the thread UUID.
     const match = fileName.match(
-      /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i
+      /^rollout-.*?-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\.jsonl$/i
     );
     if (match && match[1]) return `codex:${match[1]}`;
-
-    const base = fileName.replace(".jsonl", "");
-    const parts = base.split("-");
-    if (parts.length < 10) return null;
-    return `codex:${parts.slice(-5).join("-")}`;
+    return null;
   }
 
   ensureTitle(entry) {
@@ -406,7 +729,7 @@ class CodexLogMonitor {
     let content = "";
     if (event === "event_msg:task_started") {
       content = TEXT_THINKING;
-    } else if (event === "event_msg:agent_message") {
+    } else if (event === "event_msg:agent_message" || event === "response_item:assistant_message") {
       content = latestAgentMessage || TEXT_REPLYING;
     } else if (event === "event_msg:task_complete") {
       content = finalAgentMessage || TEXT_DONE;
@@ -415,9 +738,9 @@ class CodexLogMonitor {
     } else if (state === "attention") {
       content = finalAgentMessage || TEXT_DONE;
     } else if (state === "thinking") {
-      content = TEXT_THINKING;
+      content = latestAgentMessage || TEXT_THINKING;
     } else {
-      content = entry.lastDisplayContent || TEXT_THINKING;
+      content = latestAgentMessage || entry.lastDisplayContent || TEXT_THINKING;
     }
 
     content = wrapDisplayBody(content);
@@ -519,6 +842,20 @@ class CodexLogMonitor {
     const subtype = payload && typeof payload.type === "string" ? payload.type : "";
     const key = subtype ? `${type}:${subtype}` : type;
 
+    if (key === "response_item:message" && payload?.role === "assistant") {
+      const message = responseAssistantText(payload);
+      if (!message) return;
+      if (isMirroredAssistantMessage(entry, message, "response_item", payload.phase || payload.channel)) return;
+      entry.lastAgentMessage = compactText(message, MAX_MESSAGE_PREVIEW);
+      entry.agentMessageCount = (entry.agentMessageCount || 0) + 1;
+      entry.lastState = "speaking";
+      entry.lastEvent = "response_item:assistant_message";
+      entry.lastEventTime = Date.now();
+      entry.lastSourceEventTime = sourceEventTime;
+      this.emit(entry, "speaking", entry.lastEvent);
+      return;
+    }
+
     if (type === "session_meta" && payload) {
       entry.cwd = typeof payload.cwd === "string" ? payload.cwd : "";
       entry.originator = typeof payload.originator === "string" ? payload.originator : "";
@@ -546,6 +883,10 @@ class CodexLogMonitor {
     }
 
     if (key === "event_msg:task_started" && payload) {
+      entry.pendingAssistantMessages = [];
+      entry.lastAgentMessage = "";
+      entry.lastTaskCompleteMessage = "";
+      entry.lastDisplayContent = "";
       entry.turnId = typeof payload.turn_id === "string" ? payload.turn_id : entry.turnId;
       entry.startedAt = readNumber(payload.started_at) || entry.startedAt;
       entry.modelContextWindow = readNumber(payload.model_context_window) || entry.modelContextWindow;
@@ -572,6 +913,9 @@ class CodexLogMonitor {
     }
 
     if (key === "event_msg:agent_message" && payload) {
+      if (!isVisibleAssistantPayload(payload)) return;
+      if (typeof payload.message === "string" && payload.message.trim()
+          && isMirroredAssistantMessage(entry, payload.message, "event_msg", payload.phase || payload.channel)) return;
       const message = compactText(payload.message || "", MAX_MESSAGE_PREVIEW);
       if (message) entry.lastAgentMessage = message;
       entry.agentMessageCount = (entry.agentMessageCount || 0) + 1;
@@ -598,6 +942,12 @@ class CodexLogMonitor {
       entry.lastEventTime = Date.now();
       this.emit(entry, entry.lastState || "speaking", key);
       return;
+    }
+
+    if (key === "response_item:function_call"
+        || key === "response_item:custom_tool_call"
+        || key === "response_item:web_search_call") {
+      entry.lastDisplayContent = entry.lastAgentMessage || toolDisplayContent(key, payload);
     }
 
     const state = this.config.LOG_EVENT_MAP[key];
@@ -1139,7 +1489,9 @@ class CodexLogMonitor {
       this.refreshDirectoryWatchers();
       this.cleanStaleFiles();
     }
+    this.pollDesktopLogState();
   }
 }
 
 module.exports = CodexLogMonitor;
+module.exports.parseDesktopLogSignal = parseDesktopLogSignal;

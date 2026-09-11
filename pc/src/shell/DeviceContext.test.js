@@ -224,8 +224,8 @@ test("provider exposes a focused force-refresh for immediate picker use", () => 
   assert.match(source, /refreshAppearances,\s*\n\s*refresh,/);
 });
 
-test("provider exposes a deduplicated Agent refresh with focus-based stale scanning", () => {
-  assert.match(source, /const\s+AGENT_SCAN_FOCUS_STALE_MS\s*=\s*30_000/);
+test("provider exposes a deduplicated Agent refresh with low-frequency focus-based stale scanning", () => {
+  assert.match(source, /const\s+AGENT_SCAN_FOCUS_STALE_MS\s*=\s*5\s*\*\s*60_000/);
   assert.match(source, /const\s+\[agentScan,\s*setAgentScan\]\s*=\s*useState/);
   assert.match(source, /agentScanRequestRef/);
   assert.match(source, /const\s+refreshAgents\s*=\s*useCallback\(\s*async\s*\(\)\s*=>/);

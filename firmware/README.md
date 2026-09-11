@@ -72,7 +72,7 @@ Token 仪表盘展示当前跟随 Agent 在本地自然日内的累计用量，�
 
 ## 构建固件
 
-先安装 Git LFS、Python 3、PlatformIO Core 和 Pillow。首次构建需要联网下载 ESP-IDF、编译器及锁定版本的依赖。
+先安装 Git LFS、Python 3.10+、PlatformIO Core 6.1.19+ 和 Pillow；v3 不支持 Core 6.1.18。首次构建需要联网下载 ESP-IDF、编译器及锁定版本的依赖。详细工具版本、v3 命令与 DSI 接线要求见 [BUILD.md](BUILD.md)。完整烧录包的工具固定使用 esptool 5.4.0。
 
 ### macOS / Linux
 
@@ -106,8 +106,9 @@ cd firmware
 | --- | --- |
 | `esp32_p4_evboard` | Windows/macOS 共用，4 Mbaud |
 | `esp32_p4_evboard_windows` | 兼容旧构建命令的别名，继承同一 4 Mbaud 配置 |
+| `esp32_p4_evboard_v3` | v3.x 芯片，Windows/macOS 共用，4 Mbaud |
 
-发布时构建一次 `esp32_p4_evboard`，将同一应用镜像用于两端 PC 与完整出厂包；无需按照电脑系统分别刷固件。旧 Windows 构建命令保留为同配置别名。
+发布时分别构建 v1 和 v3 环境，每种芯片的同一应用镜像用于两端 PC 与对应完整出厂包；无需按照电脑系统分别刷固件。旧 Windows 构建命令保留为 v1 同配置别名。v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。
 
 ## 烧录与升级
 
@@ -234,7 +235,7 @@ p4/
 在仓库根目录执行主机测试：
 
 ```sh
-python -m unittest discover -s firmware/tests -p '*_test.py'
+python -m pytest firmware/tests -q
 python firmware/tests/protocol_contract_test.py
 python firmware/tools/build_builtin_bundle.py --check
 ```

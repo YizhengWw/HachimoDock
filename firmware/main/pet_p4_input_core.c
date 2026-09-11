@@ -18,6 +18,19 @@ static uint32_t saturating_add_u32(uint32_t value, uint32_t increment) {
   return UINT32_MAX - value < increment ? UINT32_MAX : value + increment;
 }
 
+bool pet_p4_joystick_calibrate_center(
+  int64_t sum_x, int64_t sum_y, int samples, int *center_x, int *center_y
+) {
+  if (!center_x || !center_y) return false;
+  // Keep actual measurements for diagnostics; never invent a usable center
+  // for a disconnected axis or failed ADC reads.
+  *center_x = samples > 0 ? (int)(sum_x / samples) : 0;
+  *center_y = samples > 0 ? (int)(sum_y / samples) : 0;
+  return samples == PET_P4_JOYSTICK_CALIBRATION_SAMPLES
+    && *center_x >= 1200 && *center_x <= 2900
+    && *center_y >= 1200 && *center_y <= 2900;
+}
+
 void pet_p4_button_decoder_init(
   pet_p4_button_decoder_t *decoder,
   bool pressed,

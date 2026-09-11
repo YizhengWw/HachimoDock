@@ -2,7 +2,7 @@
  * [Input] Children tree consuming useToast; toast push payloads.
  * [Output] App-level toast queue with ToastProvider/useToast hook and a bottom-anchored ToastStack rendering tone/title/message/action items with auto-dismiss; replaces App.jsx inline ToastStack and AppearanceGallery inline-style sync-notice.
  * [Pos] component node in pc/src/shell
- * [Sync] If this file changes, update `pc/src/shell/.folder.md`.
+ * [Sync] If this file changes, update `pc/src/.folder.md`; dismiss callbacks run once.
  */
 
 import React, {
@@ -31,6 +31,7 @@ let nextToastId = 1;
 export function ToastProvider({ children }) {
   const [items, setItems] = useState([]);
   const timersRef = useRef(new Map());
+  const dismissCallbacksRef = useRef(new Map());
 
   const dismiss = useCallback((id) => {
     setItems((prev) => prev.filter((item) => item.id !== id));
@@ -39,6 +40,9 @@ export function ToastProvider({ children }) {
       clearTimeout(timer);
       timersRef.current.delete(id);
     }
+    const onDismiss = dismissCallbacksRef.current.get(id);
+    dismissCallbacksRef.current.delete(id);
+    onDismiss?.();
   }, []);
 
   const push = useCallback(
@@ -46,6 +50,9 @@ export function ToastProvider({ children }) {
       const id = nextToastId++;
       const ttl = typeof toast.ttl === "number" ? toast.ttl : DEFAULT_TTL;
       setItems((prev) => [...prev, { ...toast, id }]);
+      if (typeof toast.onDismiss === "function") {
+        dismissCallbacksRef.current.set(id, toast.onDismiss);
+      }
       if (ttl > 0) {
         const timer = setTimeout(() => dismiss(id), ttl);
         timersRef.current.set(id, timer);
@@ -60,6 +67,7 @@ export function ToastProvider({ children }) {
     return () => {
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
+      dismissCallbacksRef.current.clear();
     };
   }, []);
 

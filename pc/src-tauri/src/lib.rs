@@ -4,7 +4,8 @@
  *          local agent discovery, atomic all-Agent petui Skill replacement,
  *          Codex pet import, external/community help links,
  *          controlled Codex Pets CLI installs, exact-board USB-only device
- *          follow-source binding,
+ *          follow-source binding, background Bridge/voice lifecycle and
+ *          Session/audio commands that never wait on the window thread,
  *          stale-state-safe, bounded local-file USB-first forwarding with Session-independent
  *          current-followed-Agent daily Token telemetry, SSH state fallback, and
  *          active speech sync plus immediate reconnect replay, a P4 host
@@ -3444,7 +3445,7 @@ fn normalize_voice_button(input: Option<String>) -> Result<String, String> {
 
 #[tauri::command]
 #[allow(non_snake_case, clippy::too_many_arguments)]
-fn audio_bridge_signal(
+async fn audio_bridge_signal(
     boardDeviceId: String,
     action: String,
     pcIp: Option<String>,
@@ -3454,6 +3455,29 @@ fn audio_bridge_signal(
     playDev: Option<String>,
     voiceButton: Option<String>,
     usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+) -> Result<serde_json::Value, String> {
+    let manager = usb_manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        audio_bridge_signal_blocking(
+            boardDeviceId, action, pcIp, pcPort, listenPort, captureDev, playDev,
+            voiceButton, manager,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[allow(non_snake_case, clippy::too_many_arguments)]
+fn audio_bridge_signal_blocking(
+    boardDeviceId: String,
+    action: String,
+    pcIp: Option<String>,
+    pcPort: Option<u16>,
+    listenPort: Option<u16>,
+    captureDev: Option<String>,
+    playDev: Option<String>,
+    voiceButton: Option<String>,
+    usb_manager: usb_serial::UsbSerialManager,
 ) -> Result<serde_json::Value, String> {
     let action = action.trim().to_lowercase();
     if action != "start" && action != "stop" {
@@ -3616,9 +3640,19 @@ fn is_allowed_button_config_action(action: &str) -> bool {
 }
 
 #[tauri::command]
-fn set_p4_session_binding(
+async fn set_p4_session_binding(
     input: SetP4SessionBindingInput,
     usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+) -> Result<P4SessionBinding, String> {
+    let manager = usb_manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || set_p4_session_binding_blocking(input, manager))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn set_p4_session_binding_blocking(
+    input: SetP4SessionBindingInput,
+    usb_manager: usb_serial::UsbSerialManager,
 ) -> Result<P4SessionBinding, String> {
     let board_device_id = input.board_device_id.trim().to_string();
     let agent_id = normalize_agent_id(&input.agent_id)
@@ -4475,7 +4509,16 @@ fn voice_runtime_lifecycle_lock() -> &'static Mutex<()> {
 }
 
 #[tauri::command]
-fn ensure_bridge_runtime(
+async fn ensure_bridge_runtime(
+    app_handle: tauri::AppHandle,
+    input: Option<EnsureBridgeRuntimeInput>,
+) -> Result<BridgeRuntimeStatusResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_bridge_runtime_blocking(app_handle, input))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn ensure_bridge_runtime_blocking(
     app_handle: tauri::AppHandle,
     input: Option<EnsureBridgeRuntimeInput>,
 ) -> Result<BridgeRuntimeStatusResponse, String> {
@@ -4767,7 +4810,16 @@ struct EnsureDeviceVoiceRuntimeInput {
 }
 
 #[tauri::command]
-fn ensure_voice_runtime(
+async fn ensure_voice_runtime(
+    app_handle: tauri::AppHandle,
+    input: Option<EnsureVoiceRuntimeInput>,
+) -> Result<VoiceRuntimeStatusResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || ensure_voice_runtime_blocking(app_handle, input))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+fn ensure_voice_runtime_blocking(
     app_handle: tauri::AppHandle,
     input: Option<EnsureVoiceRuntimeInput>,
 ) -> Result<VoiceRuntimeStatusResponse, String> {
@@ -5747,8 +5799,7 @@ fn detect_mimocode() -> DetectedAgent {
     }
 }
 
-#[tauri::command]
-fn detect_local_agents() -> Result<AgentDiscoveryResponse, String> {
+fn detect_local_agents_inner() -> Result<AgentDiscoveryResponse, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -5765,6 +5816,13 @@ fn detect_local_agents() -> Result<AgentDiscoveryResponse, String> {
         scanned_at: now,
         agents,
     })
+}
+
+#[tauri::command]
+async fn detect_local_agents() -> Result<AgentDiscoveryResponse, String> {
+    tauri::async_runtime::spawn_blocking(detect_local_agents_inner)
+        .await
+        .map_err(|error| format!("Agent detection worker failed: {error}"))?
 }
 
 /// Download raw bytes from a URL on the Rust side, bypassing plugin-http's
@@ -9665,7 +9723,7 @@ pub fn run() {
             // id.
             thread::spawn(move || {
                 thread::sleep(Duration::from_secs(3));
-                if let Err(error) = ensure_bridge_runtime(
+                if let Err(error) = ensure_bridge_runtime_blocking(
                     handle,
                     Some(EnsureBridgeRuntimeInput {
                         force_restart: false,

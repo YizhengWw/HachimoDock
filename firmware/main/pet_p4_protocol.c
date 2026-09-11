@@ -8,7 +8,8 @@
  *          terminal conversation visibility across active-queue refreshes,
  *          stable first-seen card ordering, selected-card lifecycle authority for
  *          appearance playback, and exact retained-card selection preservation
- *          after host refreshes; actual chip revision for safe firmware selection.
+ *          after host refreshes; queue resets preserve physical voice-hold feedback;
+ *          actual chip revision for safe firmware selection.
  * [Pos] shared ESP32-P4 protocol dispatcher.
  * [Sync] If this file changes, update firmware/protocol.md and .folder.md.
  */
@@ -231,7 +232,7 @@ static void restore_idle_session_view(
   state->current_session_count = 0;
   state->current_session_index = 0;
   state->session_notice_until_ms = 0;
-  state->session_voice_active = false;
+  // Queue refresh/expiry does not end a physical push-to-talk hold.
   state->done_until_ms = 0;
   state->local_lifecycle[0] = '\0';
   state->local_lifecycle_until_ms = 0;

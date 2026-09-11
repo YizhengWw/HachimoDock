@@ -59,6 +59,20 @@ test("desktop window opens at the configured minimum size and remains centered",
   assert.equal(mainWindow.center, true);
 });
 
+test("generation result acknowledgement also removes its persistent toast", () => {
+  const app = readSource("src/App.jsx");
+  assert.match(app, /generationToastRef\.current = push\(/);
+  assert.match(app, /generationToastRef\.current = null;[\s\S]*?dismiss\(id\)/);
+  assert.match(app, /onDismiss: \(\) => acknowledgeGenerationTask\(s\.completionEpoch\)/);
+});
+
+test("Agent discovery leaves the UI thread without permanently caching missing executables", () => {
+  const backend = readSource("src-tauri/src/lib.rs");
+  assert.match(backend, /async fn detect_local_agents\(/);
+  assert.match(backend, /spawn_blocking\(detect_local_agents_inner\)/);
+  assert.doesNotMatch(backend, /static (?:FULL_SHELL_PATH|NPM_GLOBAL_BIN): OnceLock/);
+});
+
 test("desktop CSP no longer exposes the removed browser-local background model", () => {
   const config = JSON.parse(readSource("src-tauri/tauri.conf.json"));
   const csp = config.app.security.csp;
@@ -444,11 +458,13 @@ test("app shell routes device, pet album, component center, API settings, detail
   assert.doesNotMatch(app, /CommunityImportHelp/);
 });
 
-test("bound dashboard stays mounted while other pages are visible", () => {
+test("bound dashboard keeps its controller mounted but drops visual content off-tab", () => {
   const app = readSource("src/App.jsx");
+  const dashboard = readSource("src/DeviceDashboard.jsx");
 
-  assert.match(app, /\{binding && \(\s*<div hidden=\{!isDashboard\}>/);
+  assert.match(app, /\{binding && \(\s*<DeviceDashboard[\s\S]*active=\{isDashboard\}/);
   assert.doesNotMatch(app, /\{isDashboard && binding && \(/);
+  assert.match(dashboard, /if \(!active\) return null;/);
 });
 
 test("appearance detail receives the current board binding for exact native USB sync", () => {

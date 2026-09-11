@@ -1,5 +1,5 @@
 /**
- * [Input] Shared avatar provider configs, platform-specific native Volcengine ASR credential commands, and optional return navigation.
+ * [Input] Shared avatar provider configs including persisted video parameters, native Volcengine ASR credential commands, and optional return navigation.
  * [Output] Dedicated API configuration page that owns every user-entered API/Access/Secret key field, links to the official Volcengine key-acquisition guides, immediately broadcasts saved ASR changes, and explains macOS private-file versus Windows credential storage.
  * [Pos] top-level page node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
@@ -47,6 +47,7 @@ function persistedProviderConfig(config) {
     model: config.model || "",
     thinkingModel: config.thinkingModel || "",
     fastGeneration: config.fastGeneration !== false,
+    videoParameters: config.videoParameters || {},
     advanced: config.advanced || {},
   };
 }

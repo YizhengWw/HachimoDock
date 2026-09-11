@@ -74,6 +74,11 @@ typedef struct {
   pet_p4_joystick_direction_t direction;
 } pet_p4_joystick_decoder_t;
 
+#define PET_P4_JOYSTICK_CALIBRATION_SAMPLES 32
+bool pet_p4_joystick_calibrate_center(
+  int64_t sum_x, int64_t sum_y, int samples, int *center_x, int *center_y
+);
+
 void pet_p4_button_decoder_init(
   pet_p4_button_decoder_t *decoder,
   bool pressed,

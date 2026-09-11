@@ -181,8 +181,8 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.56_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.56_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.57_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.57_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。
@@ -191,7 +191,9 @@ flowchart LR
 
 Release 提供 v1、v3 两种完整烧录包，均包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请按实际芯片修订版选择，不能互刷；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
 
-v3 支持目前已通过编译和主机测试，尚待真实 v3 板的功能与大文件传输验收，请先在测试设备上验证。
+**v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。** 包内脚本需要 Python 3.10+，自动安装 esptool **5.4.0**。屏幕连接 **DSI**，不是 CSI；请断电后插拔排线。详细版本和步骤见 [固件构建与烧录指南](firmware/BUILD.md)。
+
+v3 的 24 MHz 显示修复已在实机确认恢复宠物动画；本版本按键、麦克风、完整形象与固件传输等仍需实机验收，请先在测试设备上验证。
 
 ## 常见问题
 

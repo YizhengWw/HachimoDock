@@ -2,7 +2,7 @@
  * [Input] A verified ESP32-P4 factory build directory and reviewed distribution notices.
  * [Output] A source-free, no-key ZIP containing the complete factory image, binary segments, resource catalogs, and guided macOS/Windows flashing tools.
  * [Pos] Private firmware-build to public factory-flasher package boundary.
- * [Sync] If this file changes, update `scripts/.folder.md` and `docs/public-release-migration.md`.
+ * [Sync] If this file changes, update `scripts/.folder.md` and `firmware/BUILD.md`.
  */
 
 import { createHash } from "node:crypto";
@@ -102,7 +102,9 @@ fi
 if [[ ! -x "\${venv}/bin/python" ]]; then
   echo "首次运行：正在创建本地 esptool 环境……"
   python3 -m venv "\${venv}"
-  "\${venv}/bin/python" -m pip install "esptool==5.2.0"
+fi
+if ! "\${venv}/bin/python" -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("esptool") and __import__("esptool").__version__ == "5.4.0" else 1)' >/dev/null 2>&1; then
+  "\${venv}/bin/python" -m pip install "esptool==5.4.0"
 fi
 
 echo "检测到的候选串口："
@@ -154,7 +156,10 @@ function Invoke-Python([string[]]$Arguments) {
 if (-not (Test-Path -LiteralPath $VenvPython)) {
     Write-Host "首次运行：正在创建本地 esptool 环境……"
     Invoke-Python @("-m", "venv", $Venv)
-    & $VenvPython -m pip install "esptool==5.2.0"
+}
+& $VenvPython -c 'import importlib.util, sys; sys.exit(0 if importlib.util.find_spec("esptool") and __import__("esptool").__version__ == "5.4.0" else 1)'
+if ($LASTEXITCODE -ne 0) {
+    & $VenvPython -m pip install "esptool==5.4.0"
     if ($LASTEXITCODE -ne 0) { throw "esptool 安装失败。" }
 }
 
@@ -276,10 +281,35 @@ writeFileSync(
 );
 
 const readme = `# HachimoDock ESP32-P4 完整出厂烧录包\n\n版本：${manifest.version}\n\n本包不只是应用固件，包含完整 factory.bin、Bootloader、分区表、OTA 元数据、默认西高地形象、8 个内置组件、校验清单，以及 Windows/macOS 引导烧录工具。\n\n## 推荐用法\n\n1. 关闭 Pet Manager。\n2. Waveshare ESP32-P4-WIFI6 的 USB 数据路径跳线保持断开，让 Type-C 连接 CH343 USB-UART。\n3. macOS 双击 \`tools/flash-macOS.command\`；Windows 右键 \`tools/flash-Windows.ps1\` 并选择“使用 PowerShell 运行”。\n4. 首次运行会在本包内创建隔离的 esptool 环境，需要 Python 3.10+ 和网络。\n5. 按提示选择串口并输入 \`ERASE\`。工具会擦除整片 Flash，再把完整镜像从 \`0x0\` 写入并校验。\n\n## 重要警告\n\n该操作会覆盖设备设置、形象和组件。日常升级请使用 Pet Manager 的“固件升级”；只有新设备或明确恢复出厂时才使用本包。\n\n如果连接失败，按住 BOOT，短按一次 RESET/EN，松开 BOOT 后重试。若 921600 不稳定，可将工具脚本中的波特率改为 460800 后重新完整烧录。\n\n## 内容\n\n- \`firmware/${imageName}\`：推荐烧录的完整镜像（地址 0x0）\n- \`firmware/${manifestName}\`：镜像内容、分区和 SHA-256 清单\n- \`firmware/segments/\`：可独立核验的各二进制段，不建议普通用户分别烧录\n- \`resources/\`：默认形象及组件资源清单/分区资料\n- \`tools/\`：Windows/macOS 烧录工具\n- \`SHA256SUMS\`：包内全部文件校验值\n`;
+const toolGuide = `
+## 工具版本与 v3 接线
+
+- 运行烧录脚本：Python **3.10+**，首次运行需要联网；脚本自动安装并核对 **esptool 5.4.0**，旧版本会自动更新。
+- 本烧录包不需要 PlatformIO 或 ESP-IDF。自行编译源码才需要 PlatformIO Core **6.1.19**；v1 使用平台 55.03.32 / ESP-IDF 5.5.1，v3 使用平台 55.03.38-1 / ESP-IDF 5.5.4。
+- 官方工具与说明：[esptool 5.4.0](https://github.com/espressif/esptool/releases/tag/v5.4.0)。请使用包内检查脚本，不要使用 --force 或不明确支持此芯片版本的图形烧录工具。
+- **v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。** ESP32-P4-WIFI6-M 的 M 不代表芯片修订版本。
+- 屏幕排线连接 **DSI**，不是摄像头 **CSI**；断电后再插拔排线。配套屏幕的 v3 固件使用 24 MHz 显示时序。
+- 未接摇杆时不会触发方向动作；接好摇杆、保持居中后重启，重新完成启动校准。
+
+## 脚本无法双击时
+
+macOS：打开终端，输入 zsh 后加空格，把 tools/flash-macOS.command 拖入终端，再回车。
+
+Windows：在解压目录打开 PowerShell，执行：
+
+\`\`\`powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\\tools\\flash-Windows.ps1 -Port COM5
+\`\`\`
+
+请把 COM5 改为设备实际串口。此参数只影响本次 PowerShell 进程，不修改全局执行策略。请先确认包来源和 SHA256SUMS。
+
+烧录工具会先读取芯片版本，并核对完整镜像中的 Bootloader 和应用范围；确认匹配后才擦除、写入和校验。全部完成后，松开 BOOT 并重启，检查宠物画面和客户端连接。烧录速率默认 921600，必要时改为 460800；设备正常运行的串口速率为 4M，两者不同。
+`;
+const revisionLabel = (revision) => `${Math.floor(revision / 100)}.${revision % 100}`;
 writeFileSync(join(packageRoot, "README-FLASHING-CN.md"), readme.replace(
   `版本：${manifest.version}`,
-  `版本：${manifest.version}\n\n适用芯片：ESP32-P4 ${chipFamily}（${manifest.chipRevisionMin / 100}～${manifest.chipRevisionMax / 100}）。Windows/macOS 共用本包；v1 与 v3 不可互刷。工具会在擦除前核对芯片版本。`,
-));
+  `版本：${manifest.version}\n\n适用芯片：ESP32-P4 ${chipFamily}（${revisionLabel(manifest.chipRevisionMin)}～${revisionLabel(manifest.chipRevisionMax)}）。Windows/macOS 共用本包；v1 与 v3 不可互刷。工具会在擦除前核对芯片版本。`,
+) + toolGuide);
 
 const contentManifest = {
   schemaVersion: 1,

@@ -56,6 +56,9 @@ void pet_p4_build_view_model(const pet_p4_runtime_state_t *state, pet_p4_view_mo
   out->body = state ? state->current_speech : "";
   out->stats_json = state ? state->stats_json : "";
   out->status = status_from_state(state);
+  out->show_voice_overlay = state && state->session_voice_active
+    && state->session_queue_count == 0 && strcmp(out->page, "main") == 0;
+  if (out->show_voice_overlay) return;
   if (should_wait_for_session_card(state)) {
     out->title = "";
     out->body = "休息中";

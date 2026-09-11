@@ -51,7 +51,7 @@ const EMPTY_APPEARANCE_SYNC = {
   appearanceName: "",
 };
 
-const AGENT_SCAN_FOCUS_STALE_MS = 30_000;
+const AGENT_SCAN_FOCUS_STALE_MS = 5 * 60_000;
 const USB_STATUS_POLL_MS = 3_000;
 const USB_STATUS_SLOW_WARNING_MS = 10_000;
 

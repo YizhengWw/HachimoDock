@@ -2,7 +2,8 @@
  * [Input] serialport-enumerated CDC USB ports plus JSON-line OTA/state payloads.
  * [Output] USB serial manager for device handshake, state/speech forwarding,
  *          timeout-preserving bounded frames, boot-aware Windows probing,
- *          reusable port handles and verified-rate reconnect caching;
+ *          reusable port handles, verified-rate reconnect caching and
+ *          lifecycle-updated status snapshots during bulk writes;
  *          persistent prebuilt P4 H.264 Annex-B/WAV ready packs plus
  *          LGPL-safe VideoToolbox/Media Foundation custom-media encoding with
  *          native-SPS structural and full-decode validation, plus paced
@@ -1206,6 +1207,7 @@ fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Resu
 pub struct UsbSerialManager {
     last_serial_baud: Arc<Mutex<Option<(String, u32)>>>,
     connection: Arc<Mutex<Option<UsbConnection>>>,
+    status_snapshot: Arc<Mutex<UsbConnectionStatus>>,
     desktop_device_id: Arc<Mutex<String>>,
     connect_guard: Arc<Mutex<()>>,
     asset_transfer_guard: Arc<Mutex<()>>,
@@ -1284,6 +1286,7 @@ impl UsbSerialManager {
         Self {
             last_serial_baud: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(None)),
+            status_snapshot: Arc::new(Mutex::new(disconnected_usb_status())),
             desktop_device_id: Arc::new(Mutex::new(String::new())),
             connect_guard: Arc::new(Mutex::new(())),
             asset_transfer_guard: Arc::new(Mutex::new(())),
@@ -1420,6 +1423,7 @@ impl UsbSerialManager {
                 existing.cancel_reader.store(true, Ordering::SeqCst);
             }
             *conn = None;
+            cache_usb_status(&self.status_snapshot, None);
         }
 
         let detected_device = self
@@ -1511,11 +1515,13 @@ impl UsbSerialManager {
         {
             let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
             *conn = Some(connection);
+            cache_usb_status(&self.status_snapshot, conn.as_ref());
         }
         on_message(initial_hello.topic, initial_hello.payload);
 
         // Start reader thread
         let conn_ref = Arc::clone(&self.connection);
+        let status_snapshot = Arc::clone(&self.status_snapshot);
         let desktop_id_ref = Arc::clone(&self.desktop_device_id);
         let asset_ack_waiters = Arc::clone(&self.asset_ack_waiters);
         let widget_ack_waiters = Arc::clone(&self.widget_ack_waiters);
@@ -1588,6 +1594,7 @@ impl UsbSerialManager {
                         if let Some(ref mut c) = *conn {
                             if c.connection_id == connection_id {
                                 apply_hello_payload_to_connection(c, &msg.payload);
+                                cache_usb_status(&status_snapshot, Some(c));
                                 let _ = c.writer.write_all(ack.as_bytes());
                                 let _ = c.writer.flush();
                             }
@@ -1603,6 +1610,7 @@ impl UsbSerialManager {
                 if let Some(ref mut c) = *conn {
                     if c.connection_id == connection_id {
                         c.connected = false;
+                        cache_usb_status(&status_snapshot, Some(c));
                     }
                 }
             }
@@ -1619,6 +1627,7 @@ impl UsbSerialManager {
                     existing.cancel_reader.store(true, Ordering::SeqCst);
                 }
                 *conn = None;
+                cache_usb_status(&self.status_snapshot, None);
             }
         }
     }
@@ -1747,6 +1756,7 @@ impl UsbSerialManager {
         };
         if let Err(error) = write_result {
             conn.connected = false;
+            cache_usb_status(&self.status_snapshot, Some(conn));
             return Err(error);
         }
 
@@ -2932,6 +2942,7 @@ impl UsbSerialManager {
             };
             if let Err(error) = header_write_result {
                 connection.connected = false;
+                cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset paced header write failed: {error}"));
             }
             if let Some(ready_receiver) = ready_receiver.as_ref() {
@@ -2976,6 +2987,7 @@ impl UsbSerialManager {
             };
             if let Err(error) = raw_write_result {
                 connection.connected = false;
+                cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset paced write failed: {error}"));
             }
             raw_write_elapsed_ms = raw_write_started.elapsed().as_millis();
@@ -3091,14 +3103,17 @@ impl UsbSerialManager {
                 P4_CH343_RAW_WRITE_GAP,
             ) {
                 connection.connected = false;
+                cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset paced recovery write failed: {error}"));
             }
             if let Err(error) = connection.writer.write_all(b"\n") {
                 connection.connected = false;
+                cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset recovery delimiter failed: {error}"));
             }
             if let Err(error) = connection.writer.flush() {
                 connection.connected = false;
+                cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset recovery flush failed: {error}"));
             }
         }
@@ -3116,7 +3131,7 @@ impl UsbSerialManager {
         let mut last_error = String::new();
         // Preferred chunks retain bounded same-index retries for isolated UART
         // loss. Larger capability experiments get one integrity attempt before
-        // the outer transaction restarts with the proven 8KiB unit.
+        // the outer transaction restarts with the platform-safe unit.
         let max_attempts = if chunk.len() > P4_RAW_APPEARANCE_SAFE_CHUNK_SIZE {
             1
         } else {
@@ -4593,41 +4608,67 @@ impl UsbSerialManager {
 
     /// Get current connection status
     pub fn status(&self) -> UsbConnectionStatus {
-        let conn = self.connection.lock().ok();
-        match conn.as_ref().and_then(|c| c.as_ref()) {
-            Some(c) => UsbConnectionStatus {
-                connected: c.connected,
-                port_name: c.port_name.clone(),
-                baud_rate: c.baud_rate,
-                board_device_id: c.board_device_id.clone(),
-                transport: "usb".to_string(),
-                runtime: c.runtime.clone(),
-                device_model: c.device_model.clone(),
-                firmware: c.firmware.clone(),
-                build_id: c.build_id.clone(),
-                git_sha: c.git_sha.clone(),
-                build_dirty: c.build_dirty,
-                protocol_schema: c.protocol_schema,
-                wire_protocol: c.wire_protocol.clone(),
-                capabilities: c.capabilities.clone(),
-            },
-            None => UsbConnectionStatus {
-                connected: false,
-                port_name: String::new(),
-                baud_rate: 0,
-                board_device_id: String::new(),
-                transport: "mqtt".to_string(),
-                runtime: String::new(),
-                device_model: String::new(),
-                firmware: String::new(),
-                build_id: String::new(),
-                git_sha: String::new(),
-                build_dirty: false,
-                protocol_schema: 0,
-                wire_protocol: String::new(),
-                capabilities: serde_json::Value::Null,
-            },
+        if let Ok(connection) = self.connection.try_lock() {
+            let snapshot = connection
+                .as_ref()
+                .map(usb_connection_status)
+                .unwrap_or_else(disconnected_usb_status);
+            if let Ok(mut cached) = self.status_snapshot.lock() {
+                *cached = snapshot.clone();
+            }
+            return snapshot;
         }
+
+        self.status_snapshot
+            .lock()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_else(|_| disconnected_usb_status())
+    }
+}
+
+fn usb_connection_status(connection: &UsbConnection) -> UsbConnectionStatus {
+    UsbConnectionStatus {
+        connected: connection.connected,
+        port_name: connection.port_name.clone(),
+        baud_rate: connection.baud_rate,
+        board_device_id: connection.board_device_id.clone(),
+        transport: "usb".to_string(),
+        runtime: connection.runtime.clone(),
+        device_model: connection.device_model.clone(),
+        firmware: connection.firmware.clone(),
+        build_id: connection.build_id.clone(),
+        git_sha: connection.git_sha.clone(),
+        build_dirty: connection.build_dirty,
+        protocol_schema: connection.protocol_schema,
+        wire_protocol: connection.wire_protocol.clone(),
+        capabilities: connection.capabilities.clone(),
+    }
+}
+
+// Call while holding the connection lock, before releasing it or doing I/O.
+// Every lifecycle transition must replace the snapshot, not just status polls.
+fn cache_usb_status(cache: &Mutex<UsbConnectionStatus>, connection: Option<&UsbConnection>) {
+    if let Ok(mut cached) = cache.lock() {
+        *cached = connection.map(usb_connection_status).unwrap_or_else(disconnected_usb_status);
+    }
+}
+
+fn disconnected_usb_status() -> UsbConnectionStatus {
+    UsbConnectionStatus {
+        connected: false,
+        port_name: String::new(),
+        baud_rate: 0,
+        board_device_id: String::new(),
+        transport: "mqtt".to_string(),
+        runtime: String::new(),
+        device_model: String::new(),
+        firmware: String::new(),
+        build_id: String::new(),
+        git_sha: String::new(),
+        build_dirty: false,
+        protocol_schema: 0,
+        wire_protocol: String::new(),
+        capabilities: serde_json::Value::Null,
     }
 }
 
@@ -5428,9 +5469,9 @@ fn build_p4_h264_ffmpeg_args(
         "-c:v".to_string(),
         encoder.codec_name().to_string(),
         "-profile:v".to_string(),
-        encoder.profile_name().to_string(),
+        encoder.profile_value().to_string(),
         "-level:v".to_string(),
-        "3.0".to_string(),
+        encoder.level_arg().to_string(),
         "-pix_fmt".to_string(),
         "nv12".to_string(),
         "-g".to_string(),
@@ -5447,9 +5488,13 @@ fn build_p4_h264_ffmpeg_args(
         "2400k".to_string(),
     ];
     encoder.append_quality_args(&mut args);
+    // Do not insert an additional AUD into Media Foundation output. The P4
+    // parser below still rejects missing/invalid frame boundaries. Retain the
+    // existing AUD insertion for VideoToolbox.
+    if encoder == crate::codex_import::PlatformH264Encoder::VideoToolbox {
+        args.extend(["-bsf:v".to_string(), "h264_metadata=aud=insert".to_string()]);
+    }
     args.extend([
-        "-bsf:v".to_string(),
-        "h264_metadata=aud=insert".to_string(),
         "-f".to_string(),
         "h264".to_string(),
         output.display().to_string(),
@@ -6007,6 +6052,9 @@ fn serial_port_priority(port_name: &str) -> u8 {
 }
 
 fn is_supported_usb_serial_port(port_name: &str, vid: u16) -> bool {
+    if port_name.trim().is_empty() {
+        return false;
+    }
     port_name.contains("ttyACM")
         || port_name.contains("ttyUSB")
         || port_name.contains("usbmodem")
@@ -6050,6 +6098,53 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_returns_the_last_snapshot_while_the_writer_lock_is_busy() {
+        let manager = UsbSerialManager::new();
+        let recorded = Arc::new(Mutex::new(PacedWriterState::default()));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 1,
+            port_name: "COM21".into(),
+            baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(PacedWriter(recorded)),
+            board_device_id: "p4-test".into(),
+            runtime: "esp-p4".into(),
+            device_model: "ESP32-P4".into(),
+            firmware: "0.7.51-p4".into(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 7,
+            wire_protocol: "pet-usb-jsonl-v3".into(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::new(AtomicBool::new(false)),
+        });
+
+        assert_eq!(manager.status().port_name, "COM21");
+        let _writer_guard = manager.connection.lock().unwrap();
+        let cached = manager.status();
+        assert!(cached.connected);
+        assert_eq!(cached.board_device_id, "p4-test");
+        drop(_writer_guard);
+
+        // A new board must be visible even before the first successful poll.
+        {
+            let mut connection = manager.connection.lock().unwrap();
+            connection.as_mut().unwrap().board_device_id = "p4-replacement".into();
+            cache_usb_status(&manager.status_snapshot, connection.as_ref());
+            assert_eq!(manager.status().board_device_id, "p4-replacement");
+            connection.as_mut().unwrap().connected = false;
+            cache_usb_status(&manager.status_snapshot, connection.as_ref());
+            assert!(!manager.status().connected);
+        }
+        manager.disconnect();
+        let _guard = manager.connection.lock().unwrap();
+        let disconnected = manager.status();
+        assert!(!disconnected.connected);
+        assert!(disconnected.board_device_id.is_empty());
+    }
 
     #[test]
     fn cross_chip_ota_rejects_before_any_serial_write_or_progress() {
@@ -6415,6 +6510,14 @@ mod tests {
     #[test]
     fn accepts_espressif_native_usb_cdc_ports() {
         assert!(is_supported_usb_serial_port("COM15", 0x303a));
+    }
+
+    #[test]
+    fn rejects_usb_serial_devices_without_an_assigned_port_name() {
+        for vid in [0x1d6b, 0x0525, 0x303a, 0x1a86, 0x10c4, 0x0403] {
+            assert!(!is_supported_usb_serial_port("", vid));
+            assert!(!is_supported_usb_serial_port("   ", vid));
+        }
     }
 
     #[test]
@@ -7006,9 +7109,26 @@ mod tests {
             assert!(joined.contains("pad=640:480:(ow-iw)/2:(oh-ih)/2:black"));
             assert!(joined.contains("-frames:v 225"));
             assert!(joined.contains(&format!("-c:v {}", encoder.codec_name())));
-            assert!(joined.contains(&format!("-profile:v {}", encoder.profile_name())));
+            // Assert the external encoder contract, not the value returned by
+            // the implementation under test (which hid the Windows regression).
+            match encoder {
+                crate::codex_import::PlatformH264Encoder::MediaFoundation => {
+                    assert!(args.windows(2).any(|pair| pair == ["-profile:v", "66"]));
+                    assert!(args.windows(2).any(|pair| pair == ["-level:v", "30"]));
+                    assert!(args.windows(2).any(|pair| pair == ["-slices", "1"]));
+                    assert!(!args.iter().any(|arg| arg == "h264_metadata=aud=insert"));
+                    assert!(!args.iter().any(|arg| arg == "baseline"));
+                }
+                crate::codex_import::PlatformH264Encoder::VideoToolbox => {
+                    assert!(args
+                        .windows(2)
+                        .any(|pair| pair == ["-profile:v", "constrained_baseline"]));
+                    assert!(args.windows(2).any(|pair| pair == ["-level:v", "3.0"]));
+                    assert!(args.windows(2).any(|pair| pair == ["-bsf:v", "h264_metadata=aud=insert"]));
+                    assert!(!args.iter().any(|arg| arg == "-slices"));
+                }
+            }
             assert!(joined.contains("-pix_fmt nv12"));
-            assert!(joined.contains("-bsf:v h264_metadata=aud=insert"));
             assert!(!joined.contains("libx264"));
             assert!(!joined.contains("libopenh264"));
             assert!(!joined.contains("-crf"));
@@ -7150,7 +7270,9 @@ mod tests {
     fn p4_raw_chunk_policy_uses_platform_limit_and_safe_integrity_fallback() {
         assert_eq!(
             p4_raw_asset_chunk_size_for_limit(Some(4 * 1024)),
-            P4_RAW_APPEARANCE_SAFE_CHUNK_SIZE
+            P4_RAW_APPEARANCE_ASSET_CHUNK_SIZE
+                .min(4 * 1024)
+                .max(P4_RAW_APPEARANCE_SAFE_CHUNK_SIZE)
         );
         assert_eq!(
             p4_raw_asset_chunk_size_for_limit(Some(8 * 1024)),

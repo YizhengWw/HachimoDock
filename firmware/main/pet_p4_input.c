@@ -11,7 +11,8 @@
  *          package-authored navigation actions are ignored, plus correlated snapshots of the authoritative NVS-backed
  *          input configuration with versioned SW1-confirm/SW3-back and
  *          joystick-up/down Previous/Next defaults, and cached telemetry replay
- *          immediately after a mini-app is activated.
+ *          immediately after a mini-app is activated; conversation clearing
+ *          preserves ongoing physical voice-hold feedback.
  * [Pos] ESP32-P4 physical-input runtime.
  * [Sync] If this file changes, update `firmware/.folder.md` and `protocol.md`.
  */
@@ -52,10 +53,6 @@
 #define PET_P4_INPUT_SAMPLE_MS 5
 #define PET_P4_INPUT_DEBOUNCE_MS 25
 #define PET_P4_INPUT_LONG_PRESS_MS 700
-#define PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT 2048
-#define PET_P4_INPUT_JOYSTICK_CENTER_MIN 1200
-#define PET_P4_INPUT_JOYSTICK_CENTER_MAX 2900
-#define PET_P4_INPUT_JOYSTICK_CALIBRATION_SAMPLES 32
 #define PET_P4_INPUT_JOYSTICK_ACTIVATION_DELTA 900
 #define PET_P4_INPUT_JOYSTICK_RELEASE_DELTA 500
 #define PET_P4_INPUT_JOYSTICK_REPEAT_DELAY_MS 350
@@ -788,11 +785,11 @@ static bool read_joystick_axes(int *x, int *y) {
     && adc_oneshot_read(g_joystick_adc, PET_P4_INPUT_JOYSTICK_Y_CHANNEL, y) == ESP_OK;
 }
 
-static void calibrate_joystick_center(int *center_x, int *center_y) {
+static bool calibrate_joystick_center(int *center_x, int *center_y) {
   long long sum_x = 0;
   long long sum_y = 0;
   int samples = 0;
-  for (int i = 0; i < PET_P4_INPUT_JOYSTICK_CALIBRATION_SAMPLES; i += 1) {
+  for (int i = 0; i < PET_P4_JOYSTICK_CALIBRATION_SAMPLES; i += 1) {
     int x;
     int y;
     if (read_joystick_axes(&x, &y)) {
@@ -802,17 +799,14 @@ static void calibrate_joystick_center(int *center_x, int *center_y) {
     }
     vTaskDelay(pdMS_TO_TICKS(2));
   }
-  *center_x = samples > 0 ? (int) (sum_x / samples) : PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
-  *center_y = samples > 0 ? (int) (sum_y / samples) : PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
-  if (*center_x < PET_P4_INPUT_JOYSTICK_CENTER_MIN
-      || *center_x > PET_P4_INPUT_JOYSTICK_CENTER_MAX) {
-    *center_x = PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
+  bool valid = pet_p4_joystick_calibrate_center(sum_x, sum_y, samples, center_x, center_y);
+  if (valid) {
+    ESP_LOGI(TAG, "joystick center calibrated x=%d y=%d samples=%d", *center_x, *center_y, samples);
+  } else {
+    ESP_LOGW(TAG, "joystick disabled: invalid center x=%d y=%d samples=%d; connect and center joystick, then reboot",
+             *center_x, *center_y, samples);
   }
-  if (*center_y < PET_P4_INPUT_JOYSTICK_CENTER_MIN
-      || *center_y > PET_P4_INPUT_JOYSTICK_CENTER_MAX) {
-    *center_y = PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT;
-  }
-  ESP_LOGI(TAG, "joystick center calibrated x=%d y=%d samples=%d", *center_x, *center_y, samples);
+  return valid;
 }
 
 static void input_task(void *arg) {
@@ -843,7 +837,7 @@ static void input_task(void *arg) {
     gpio_get_level(PET_P4_INPUT_ENCODER_B_GPIO),
     4
   );
-  calibrate_joystick_center(&joystick_center_x, &joystick_center_y);
+  const bool joystick_calibrated = calibrate_joystick_center(&joystick_center_x, &joystick_center_y);
   atomic_store_explicit(&g_joystick_center_x, joystick_center_x, memory_order_relaxed);
   atomic_store_explicit(&g_joystick_center_y, joystick_center_y, memory_order_relaxed);
   atomic_store_explicit(&g_joystick_current_x, joystick_center_x, memory_order_relaxed);
@@ -852,7 +846,7 @@ static void input_task(void *arg) {
   atomic_store_explicit(&g_joystick_maximum_x, joystick_center_x, memory_order_relaxed);
   atomic_store_explicit(&g_joystick_minimum_y, joystick_center_y, memory_order_relaxed);
   atomic_store_explicit(&g_joystick_maximum_y, joystick_center_y, memory_order_relaxed);
-  atomic_store_explicit(&g_joystick_ready, true, memory_order_release);
+  atomic_store_explicit(&g_joystick_ready, joystick_calibrated, memory_order_release);
   pet_p4_joystick_decoder_init(
     &joystick,
     joystick_center_x,
@@ -886,12 +880,14 @@ static void input_task(void *arg) {
     int joystick_y;
     if (read_joystick_axes(&joystick_x, &joystick_y)) {
       record_joystick_sample(joystick_x, joystick_y);
-      pet_p4_joystick_direction_t joystick_direction = pet_p4_joystick_decoder_update(
+      // An invalid startup calibration stays disarmed until reboot. Continue
+      // sampling for diagnostics, but never generate directions from floating pins.
+      pet_p4_joystick_direction_t joystick_direction = joystick_calibrated ? pet_p4_joystick_decoder_update(
         &joystick,
         joystick_x,
         joystick_y,
         PET_P4_INPUT_SAMPLE_MS
-      );
+      ) : PET_P4_JOYSTICK_CENTER;
       if (joystick_direction != PET_P4_JOYSTICK_CENTER) {
         queue_event(
           PET_P4_INPUT_CONTROL_JOYSTICK,
@@ -1059,7 +1055,7 @@ static bool apply_local_action(
     state->current_session_title[0] = '\0';
     state->current_session_notice[0] = '\0';
     state->session_notice_until_ms = 0;
-    state->session_voice_active = false;
+    // Clearing conversation cards must not hide an ongoing voice hold.
     state->last_update_ms = ts_ms;
     return true;
   }

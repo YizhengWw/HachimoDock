@@ -527,7 +527,9 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
     esp_lcd_dsi_bus_config_t bus_config = {
         .bus_id = 0,
         .num_data_lanes = BSP_LCD_MIPI_DSI_LANE_NUM,
-        .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
+        // Zero lets each SDK select its silicon-specific PLL reference clock.
+        // The legacy PHY default is not a valid PLL reference on P4 rev >= 3.
+        .phy_clk_src = 0,
         .lane_bit_rate_mbps = BSP_LCD_MIPI_DSI_LANE_BITRATE_MBPS,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus), TAG, "New DSI bus init failed");
@@ -549,7 +551,14 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
 
     esp_lcd_dpi_panel_config_t dpi_config = {
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+#if CONFIG_ESP32P4_REV_MIN_FULL >= 300
+        // IDF 5.5.4 rounds 240 / 25 to 10, then compensates the horizontal
+        // porch by -21 pixels (514 * 24 / 25 - 514). Our 10-pixel front
+        // porch cannot absorb that correction. Use an exact divider on v3.
+        .dpi_clock_freq_mhz = 24,
+#else
         .dpi_clock_freq_mhz = 25,
+#endif
         .virtual_channel = 0,
         .pixel_format = BSP_LCD_PIXEL_FORMAT,
         .num_fbs = 1,

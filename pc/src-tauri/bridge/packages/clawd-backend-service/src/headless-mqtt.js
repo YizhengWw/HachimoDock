@@ -1869,18 +1869,20 @@ function startCodexMonitor(config) {
   const visibleCodexEvents = new Set([
     "event_msg:task_started",
     "event_msg:agent_message",
+    "response_item:assistant_message",
+    "response_item:function_call",
+    "response_item:custom_tool_call",
+    "response_item:web_search_call",
     "event_msg:task_complete",
   ]);
   const speechCodexEvents = new Set([
     "event_msg:agent_message",
+    "response_item:assistant_message",
     "event_msg:task_complete",
   ]);
   const allowedCodexEvents = new Set([
     ...visibleCodexEvents,
     "event_msg:user_message",
-    "response_item:function_call",
-    "response_item:custom_tool_call",
-    "response_item:web_search_call",
     "event_msg:context_compacted",
     "event_msg:turn_aborted",
     "event_msg:token_count",

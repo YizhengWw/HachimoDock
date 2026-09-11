@@ -25,6 +25,8 @@ typedef struct {
   pet_p4_view_status_t status;
   bool show_bubble;
   bool compact_bubble;
+  // Main-page recording feedback when there is no Session card to host it.
+  bool show_voice_overlay;
 } pet_p4_view_model_t;
 
 void pet_p4_build_view_model(const pet_p4_runtime_state_t *state, pet_p4_view_model_t *out);

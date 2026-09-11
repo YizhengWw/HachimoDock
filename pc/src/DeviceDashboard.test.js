@@ -442,7 +442,7 @@ test("board audio enable starts local runtimes and targets the active board", ()
   assert.match(source, /ensure_device_voice_runtime/);
   assert.match(source, /isP4Runtime \? "ensure_device_voice_runtime" : "ensure_voice_runtime"/);
   assert.match(source, /boardDeviceId: targetBoardDeviceId/);
-  assert.match(source, /\[activeVoiceTriggerId, binding\.boardDeviceId, isP4Runtime, onlineBoardDeviceId, usb\.boardDeviceId\]/);
+  assert.match(source, /\[activeVoiceTriggerId, binding\.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb\.boardDeviceId\]/);
   assert.match(rust, /fn ensure_device_voice_runtime\s*\(/);
   assert.match(rust, /pc_audio::built_in_stt_status\(\)/);
   assert.match(rust, /pc_microphone_enabled = action == "start" && !p4_usb_connected/);

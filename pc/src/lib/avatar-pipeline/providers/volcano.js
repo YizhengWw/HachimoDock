@@ -1,7 +1,8 @@
 /**
  * [Input] per-family prompt + image payload + Volcengine Ark API-key/model-name config.
  * [Output] submitted task id, model-specific Ark v3 first/last-frame payload,
- *          account-actionable submit errors, polled status, and downloaded MP4 bytes.
+ *          account-actionable submit errors with expiring/resettable model rejections,
+ *          explicit video parameters, polled status, and downloaded MP4 bytes.
  * [Pos] provider node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update this header.
  */
@@ -11,7 +12,30 @@ import { downloadBinary, pipelineFetch, readJsonOrThrow, sleep, withRetry } from
 export const DEFAULT_VOLCANO_BASE_URL = "https://ark.cn-beijing.volces.com";
 export const VOLCANO_TASK_PATH = "/api/v3/contents/generations/tasks";
 export const DEFAULT_VOLCANO_VIDEO_MODEL = "doubao-seedance-2-0-260128";
-const VOLCANO_FALLBACK_VIDEO_MODEL = "doubao-seedance-1-5-pro-251215";
+const rejectedModels = new Map();
+const MODEL_REJECTION_TTL_MS = 5 * 60 * 1000;
+export const VIDEO_MODEL_ACCESS_CHANGED = "pet-manager:video-model-access-changed";
+export function clearVolcanoModelRejections(apiKey) {
+  rejectedModels.delete(String(apiKey || "").trim());
+}
+export function isVolcanoModelRejected(apiKey, model, now = Date.now()) {
+  const entries = rejectedModels.get(String(apiKey || "").trim());
+  const until = entries?.get(model);
+  if (!until) return false;
+  if (until <= now) { entries.delete(model); return false; }
+  return true;
+}
+function rejectModel(apiKey, model) {
+  apiKey = String(apiKey || "").trim();
+  if (!rejectedModels.has(apiKey)) {
+    if (rejectedModels.size >= 8) rejectedModels.delete(rejectedModels.keys().next().value);
+    rejectedModels.set(apiKey, new Map());
+  }
+  const entries = rejectedModels.get(apiKey);
+  if (entries.size >= 64) entries.delete(entries.keys().next().value);
+  entries.set(model, Date.now() + MODEL_REJECTION_TTL_MS);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(VIDEO_MODEL_ACCESS_CHANGED));
+}
 
 function joinUrl(baseUrl, path) {
   const trimmed = (baseUrl || DEFAULT_VOLCANO_BASE_URL).replace(/\/+$/, "");
@@ -38,7 +62,7 @@ function hasPromptFlag(prompt, flag) {
   return new RegExp(`(^|\\s)--${flag}(\\s|$)`, "i").test(String(prompt || ""));
 }
 
-function buildSeedance15Prompt(prompt, { duration, watermark }) {
+function buildSeedance15Prompt(prompt, { duration, watermark, ratio, resolution, cameraFixed, seed }) {
   const parts = [String(prompt || "").trim()];
   if (!hasPromptFlag(prompt, "duration")) {
     const normalizedDuration =
@@ -48,10 +72,14 @@ function buildSeedance15Prompt(prompt, { duration, watermark }) {
     parts.push(`--duration ${normalizedDuration}`);
   }
   if (!hasPromptFlag(prompt, "camerafixed")) {
-    parts.push("--camerafixed false");
+    parts.push(`--camerafixed ${Boolean(cameraFixed)}`);
   }
   if (!hasPromptFlag(prompt, "watermark")) {
     parts.push(`--watermark ${Boolean(watermark)}`);
+  }
+  for (const [flag, value] of [["ratio", ratio], ["resolution", resolution], ["seed", seed]]) {
+    if (value != null && value !== "" && value !== "auto"
+        && !hasPromptFlag(prompt, flag)) parts.push(`--${flag} ${value}`);
   }
   return parts.filter(Boolean).join(" ");
 }
@@ -69,15 +97,21 @@ export function buildVolcanoTaskPayload({
   resolution,
   generateAudio = false,
   watermark = false,
+  cameraFixed = false,
+  seed,
 }) {
+  if (seed != null && (!Number.isInteger(Number(seed)) || Number(seed) < -1 || Number(seed) > 4294967295)) {
+    throw new Error("随机种子必须是 -1 到 4294967295 之间的整数。");
+  }
   if (isSeedance15Model(model)) {
     return {
       model: model || DEFAULT_VOLCANO_VIDEO_MODEL,
       content: [
-        { type: "text", text: buildSeedance15Prompt(prompt, { duration, watermark }) },
+        { type: "text", text: buildSeedance15Prompt(prompt, { duration, watermark, ratio, resolution, cameraFixed, seed }) },
         normalizeMediaEntry("image_url", imageDataUrl, "first_frame"),
         normalizeMediaEntry("image_url", imageDataUrl, "last_frame"),
       ].filter(Boolean),
+      generate_audio: Boolean(generateAudio),
     };
   }
 
@@ -97,13 +131,15 @@ export function buildVolcanoTaskPayload({
     content,
     generate_audio: Boolean(generateAudio),
     watermark: Boolean(watermark),
+    camera_fixed: Boolean(cameraFixed),
   };
+  if (seed != null) payload.seed = Number(seed);
   if (duration !== undefined && duration !== null && String(duration).toLowerCase() !== "auto") {
     const num = Number(duration);
     payload.duration = Number.isFinite(num) ? num : duration;
   }
   if (ratio) payload.ratio = ratio;
-  if (resolution) payload.resolution = resolution;
+  if (resolution && resolution !== "auto") payload.resolution = resolution;
   return payload;
 }
 
@@ -165,19 +201,18 @@ export function normalizeVolcanoSubmitErrorMessage(message, model) {
   const envelope = parseVolcanoErrorEnvelope(raw);
   const code = String(envelope?.error?.code || "");
   const providerMessage = String(envelope?.error?.message || "");
-  if (code === "ModelNotOpen" || /has not activated the model/i.test(providerMessage)) {
+  if (["ModelNotOpen", "InvalidEndpointOrModel.NotFound"].includes(code) || /has not activated the model/i.test(providerMessage)) {
     const selectedModel = String(model || "").trim() || "所选模型";
     return [
-      `火山引擎模型未开通：当前 Ark 账号还没有开通 ${selectedModel}。`,
-      `请在 Ark 控制台开通该模型服务，或先在模型下拉中改用 ${VOLCANO_FALLBACK_VIDEO_MODEL}。`,
-      `原始错误：${raw}`,
+      `火山引擎模型不可用：${selectedModel} 已下线、未开通或当前 API Key 无权限。`,
+      "请刷新视频模型列表重新选择，并在 Ark 控制台检查同账号 API Key 的模型权限。",
     ].join("\n");
   }
   return raw;
 }
 
 function shouldRetryVolcanoHttp(err) {
-  const message = String(err?.message || err || "");
+  const message = String(err?.cause?.message || err?.message || err || "");
   const match = /HTTP\s+(\d{3})/.exec(message);
   if (!match) return true;
   const status = Number(match[1]);
@@ -240,6 +275,8 @@ async function submitTask({
   resolution,
   generateAudio,
   watermark,
+  cameraFixed,
+  seed,
   signal,
 }) {
   const apiUrl = joinUrl(baseUrl, VOLCANO_TASK_PATH);
@@ -252,6 +289,8 @@ async function submitTask({
     resolution,
     generateAudio,
     watermark,
+    cameraFixed,
+    seed,
   });
   const json = await withRetry(
     async () => {
@@ -267,6 +306,8 @@ async function submitTask({
       try {
         return await readJsonOrThrow(response, "volcano submit");
       } catch (err) {
+        const envelope = parseVolcanoErrorEnvelope(err?.message);
+        if (["ModelNotOpen", "InvalidEndpointOrModel.NotFound"].includes(envelope?.error?.code)) rejectModel(apiKey, model);
         const diagnostics = JSON.stringify(buildVolcanoTaskDiagnostics(payload));
         const message = normalizeVolcanoSubmitErrorMessage(err?.message || String(err), model);
         throw new Error(`${message}\nVolcano payload summary: ${diagnostics}`, {
@@ -356,6 +397,7 @@ async function downloadVideo({ videoUrl, signal }) {
  */
 export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, onStage }) {
   if (!config?.apiKey) throw new Error("Volcano API key is required");
+  if (isVolcanoModelRejected(config.apiKey, config.model)) throw new Error("当前 API Key 无法调用此模型，请重新选择可用模型。");
   onStage?.({ stage: "submitting" });
   const { taskId, raw: submitRaw } = await submitTask({
     apiKey: config.apiKey,
@@ -368,6 +410,8 @@ export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, o
     resolution: config.resolution,
     generateAudio: config.generateAudio,
     watermark: config.watermark,
+    cameraFixed: config.cameraFixed,
+    seed: config.seed,
     signal,
   });
   onStage?.({ stage: "polling", detail: { taskId } });

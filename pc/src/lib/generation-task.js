@@ -1,7 +1,8 @@
 /**
  * [Input] Wizard hands off `{ imageFile, providerConfig, ... }`; UI subscribes to state.
  * [Output] Module-level singleton that owns the current custom avatar-generation run so it
- *   survives navigation, reports filtered-family progress, and reports concise provider errors without legacy browser-model special cases.
+ *   survives navigation, reports filtered-family progress and concise provider errors,
+ *   and guards terminal-result acknowledgement by completion epoch.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI component subscribing
  *   via `subscribeGenerationTask` (currently App.jsx + AppearanceGallery.jsx).
@@ -82,8 +83,10 @@ export function abortGenerationTask() {
  * Clear a terminal (completed / failed) state back to idle. Safe to call from
  * a toast dismiss handler. No-op while a run is still in progress.
  */
-export function acknowledgeGenerationTask() {
-  if (state.status === "completed" || state.status === "failed") {
+export function acknowledgeGenerationTask(expectedCompletionEpoch = null) {
+  const matchesExpectedRun =
+    expectedCompletionEpoch === null || state.completionEpoch === expectedCompletionEpoch;
+  if (matchesExpectedRun && (state.status === "completed" || state.status === "failed")) {
     setState({
       status: "idle",
       progress: null,
