@@ -6,7 +6,8 @@
  *          plus a two-dot main/components indicator that is hidden while a component runs,
  *          current SW3-back/SW1-enter hints in the component catalog, modern clean cards/HUDs, and
  *          Session-independent recording feedback on the idle main page,
- *          a lightweight transfer screen that never reads changing assets.
+ *          a lightweight transfer screen that never reads changing assets,
+ *          and reusable bounded H.264 decode storage isolated from immutable asset caches.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `firmware/.folder.md` and renderer tests.
  */
@@ -132,6 +133,10 @@ static uint16_t g_session_overlay_row_run_end[PET_P4_UI_HEIGHT][PET_P4_SESSION_C
 static esp_h264_dec_handle_t g_h264_decoder;
 static bool g_h264_decoder_open;
 static size_t g_h264_stream_offset;
+// tinyh264 removes emulation-prevention bytes in place. Never give it the cache.
+static uint8_t *g_h264_work_stream;
+static size_t g_h264_work_capacity;
+static size_t g_h264_work_size;
 static int g_h264_decoded_frame = -1;
 static uint8_t *g_h264_output;
 static uint32_t g_h264_output_size;
@@ -1563,6 +1568,7 @@ static void reset_h264_decoder(void) {
   g_h264_decoder = NULL;
   g_h264_decoder_open = false;
   g_h264_stream_offset = 0;
+  g_h264_work_size = 0;
   g_h264_decoded_frame = -1;
   g_h264_output = NULL;
   g_h264_output_size = 0;
@@ -1616,11 +1622,29 @@ static bool h264_stream_has_single_slice_access_units(
   return access_units > 0 && slices_in_access_unit == 1U;
 }
 
-static bool start_h264_decoder(const char *fs_path) {
+static bool start_h264_decoder(const char *fs_path, const uint8_t *stream, size_t stream_size) {
   esp_h264_dec_cfg_sw_t config = {
     .pic_type = ESP_H264_RAW_FMT_I420,
   };
   reset_h264_decoder();
+  if (!stream || stream_size == 0 || stream_size > PET_P4_ASSET_CACHE_MAX_FILE_BYTES) {
+    return false;
+  }
+  if (g_h264_work_capacity < stream_size) {
+    uint8_t *resized = heap_caps_realloc(
+      g_h264_work_stream, stream_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+    if (!resized) {
+      ESP_LOGW(TAG, "P4 H264 working buffer allocation failed bytes=%u", (unsigned int) stream_size);
+      return false;
+    }
+    g_h264_work_stream = resized;
+    g_h264_work_capacity = stream_size;
+  }
+  // Refresh once per playback/seek, not on every frame. Reuse the allocation
+  // across loops and families, but never reuse the decoder-mutated contents.
+  memcpy(g_h264_work_stream, stream, stream_size);
+  g_h264_work_size = stream_size;
   esp_h264_err_t err = esp_h264_dec_sw_new(&config, &g_h264_decoder);
   if (err != ESP_H264_ERR_OK || !g_h264_decoder) {
     ESP_LOGW(TAG, "P4 H264 decoder create failed error=%d", (int) err);
@@ -1639,22 +1663,20 @@ static bool start_h264_decoder(const char *fs_path) {
 }
 
 static bool decode_next_h264_frame(
-  const uint8_t *stream,
-  size_t stream_size,
   int width,
   int height
 ) {
   unsigned int steps = 0;
   size_t expected_output = (size_t) width * (size_t) height * 3U / 2U;
-  if (!g_h264_decoder || !g_h264_decoder_open || !stream
-      || stream_size == 0 || width <= 0 || height <= 0) {
+  if (!g_h264_decoder || !g_h264_decoder_open || !g_h264_work_stream
+      || g_h264_work_size == 0 || width <= 0 || height <= 0) {
     return false;
   }
-  while (g_h264_stream_offset < stream_size && steps++ < 64U) {
-    size_t remaining = stream_size - g_h264_stream_offset;
+  while (g_h264_stream_offset < g_h264_work_size && steps++ < 64U) {
+    size_t remaining = g_h264_work_size - g_h264_stream_offset;
     esp_h264_dec_in_frame_t input = {
       .raw_data = {
-        .buffer = (uint8_t *) (stream + g_h264_stream_offset),
+        .buffer = g_h264_work_stream + g_h264_stream_offset,
         .len = remaining > UINT32_MAX ? UINT32_MAX : (uint32_t) remaining,
       },
     };
@@ -2035,12 +2057,12 @@ static bool render_h264_asset_frame(
   if (target_frame >= asset->frames) target_frame = asset->frames - 1;
   if (!g_h264_decoder || strcmp(g_h264_fs_path, fs_path) != 0
       || target_frame < g_h264_decoded_frame) {
-    if (!start_h264_decoder(fs_path)) return false;
+    if (!start_h264_decoder(fs_path, stream->bytes, stream->size)) return false;
   }
   unsigned int decoded_in_pass = 0;
   while (g_h264_decoded_frame < target_frame
          && decoded_in_pass < PET_P4_H264_MAX_DECODE_FRAMES_PER_RENDER) {
-    if (!decode_next_h264_frame(stream->bytes, stream->size, asset->width, asset->height)) {
+    if (!decode_next_h264_frame(asset->width, asset->height)) {
       return false;
     }
     decoded_in_pass += 1U;
