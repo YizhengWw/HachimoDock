@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "product": "HachimoDock Pet Manager",
-  "desktopVersion": "0.1.57",
-  "firmwareVersion": "0.7.52-p4",
-  "sourceCommit": "24bd75e182fa236b0bddc536812f367befe142a9",
-  "firmwareSourceCommit": "4687e16678d11fcc8a3270a8257ddb577b18512e",
+  "desktopVersion": "0.1.58",
+  "firmwareVersion": "0.7.53-p4",
+  "sourceCommit": "662135aeb256efeda36ffb5ec9040dac107c9c9c",
+  "firmwareSourceCommit": "7bdc2590c4d12bf4e4f9a5cbab3a84344e65fd65",
   "publicSourceIncluded": true,
   "embeddedInternalCredentials": false,
   "flashingTools": {
@@ -16,42 +16,43 @@
       "chipFamily": "v1",
       "chipRevisionMin": 1,
       "chipRevisionMax": 199,
-      "sha256": "d417b0585d36ab16d7fb82f63064657c173e71bb4a74a613ee5eb16a3b00bebf"
+      "hardwareValidation": "build-and-host-regressions-passed; hardware-validation-pending",
+      "sha256": "a52fbb37484b4755a8677fd86cde3a5ec2a7f9718acfe433da4243e23fc9a696"
     },
     {
       "chipFamily": "v3",
       "chipRevisionMin": 300,
       "chipRevisionMax": 399,
-      "hardwareValidation": "display-fix-confirmed; release-functional-validation-pending",
-      "sha256": "21843f842ea85b675fd9bd356c5aa3cab15483775555fc5943b8269e598e71f3"
+      "hardwareValidation": "v3.2-ota-and-multistate-playback-verified",
+      "sha256": "44c5254238e414a5702d9e585fc1b4719b41329e204ee286d516af046ff4a364"
     }
   ],
   "artifacts": [
     {
       "role": "mac",
-      "file": "HachimoDock-Pet-Manager_0.1.57_macOS-arm64.dmg",
-      "bytes": 101791129,
-      "sha256": "4e35e5c4fce77f8b4dfdea014d3c69ca5f218e885d7db4c4acf57aa93a6c1074"
+      "file": "HachimoDock-Pet-Manager_0.1.58_macOS-arm64.dmg",
+      "bytes": 101782470,
+      "sha256": "a72ccfd36c4f53f4a4634a772893f60506ff1c51d08428120061ece07c9e96d5"
     },
     {
       "role": "windows",
-      "file": "HachimoDock-Pet-Manager_0.1.57_Windows-x64-setup.exe",
-      "bytes": 88660057,
-      "sha256": "261d3fe081fe94ee932d2d7391bd9d6a1a7d957427508e933fd0b3858e3afc26"
+      "file": "HachimoDock-Pet-Manager_0.1.58_Windows-x64-setup.exe",
+      "bytes": 88720076,
+      "sha256": "e83495cd33fe50ff039aaed2571c2a28ab3c59f3982e82296fb8d86d02a84332"
     },
     {
       "role": "factoryPackage",
-      "file": "HachimoDock-P4-v1_0.7.52-p4_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v1_0.7.53-p4_Factory-Flasher.zip",
       "chipFamily": "v1",
-      "bytes": 19929804,
-      "sha256": "381f85432585af45cc72a72848112a7ae1efdfb8a8fe18cbf4853e554182772d"
+      "bytes": 19929933,
+      "sha256": "0693a100e5ab144283cb47fbcea5f4ef33cfb439893d89c680c27743c1b86331"
     },
     {
       "role": "factoryPackage",
-      "file": "HachimoDock-P4-v3_0.7.52-p4_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v3_0.7.53-p4_Factory-Flasher.zip",
       "chipFamily": "v3",
-      "bytes": 19948862,
-      "sha256": "6697d4b88317aba5991ff0d5fc22b89f6590b2062ef0b300ead0c1d24c5d6048"
+      "bytes": 19949218,
+      "sha256": "20e329e5dc0c2c3cc127e21bd169d4955ca5af9030829913a5d51a091bf48e64"
     },
     {
       "role": "ffmpegSource",
