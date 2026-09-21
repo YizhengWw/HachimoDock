@@ -30,7 +30,7 @@
   </p>
 </div>
 
-![HachimoDock（哈基米机）产品图](https://image.lceda.cn/oshwhub/pullImage/507a23d52ed54d08a73c715a18c35ee9.png)
+![HachimoDock（哈基米机）产品图](https://image.lceda.cn/oshwhub/pullImage/2d5070cc50b04dbbaaa4e3152aaadf4f.jpg)
 
 ## 项目简介
 
