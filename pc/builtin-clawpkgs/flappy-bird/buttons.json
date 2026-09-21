@@ -1,0 +1,8 @@
+[
+  {
+    "action": "flappy.flap",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "拍翅"
+  }
+]

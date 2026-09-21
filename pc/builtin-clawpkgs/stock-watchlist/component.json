@@ -1,0 +1,1 @@
+{"id":"stock-watchlist","name":"自选股行情","version":"1.1.0","kind":"tool","description":"查看自选股的最新价格与涨跌幅，支持分页；在 PC 详情中添加和管理股票。保持 Pet Manager 运行并连接 USB，每 2 秒更新；断连后标记数据过期。"}

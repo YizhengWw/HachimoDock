@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "appearance": {
+    "id": "builtin-terrier",
+    "systemCues": true,
+    "clipsDir": "../pc/public/terrier-clips",
+    "width": 640,
+    "height": 480,
+    "fps": 15,
+    "maxFrames": 225,
+    "h264Crf": 27,
+    "readyProfile": "v9-640x480-15fps-225f-h264-crf27",
+    "packId": "0509b28de7e7cee192e6d4a6939fc833af71a8f83cf37de2fe02f21d8bf0dba7",
+    "slot": 0,
+    "audioSampleRate": 16000
+  },
+  "components": {
+    "packagesDir": "../pc/builtin-clawpkgs",
+    "ids": [
+      "stock-watchlist",
+      "two-key-pong",
+      "bloomfrog_companion",
+      "flappy-bird",
+      "block-combo",
+      "snake-turn",
+      "tomato-clock",
+      "drink-reminder",
+      "token-usage"
+    ],
+    "defaultActiveId": "stock-watchlist",
+    "maxInstalled": 16,
+    "widgetMaxBytes": 4095,
+    "buttonsMaxBytes": 2047
+  },
+  "spiffs": {
+    "partitionLabel": "storage",
+    "pageSize": 512,
+    "blockSize": 4096,
+    "objectNameLength": 32,
+    "metadataLength": 4
+  }
+}

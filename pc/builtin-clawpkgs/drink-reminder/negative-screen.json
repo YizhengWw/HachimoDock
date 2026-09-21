@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "title": "喝水提醒",
+    "eyebrow": "距离下次喝水",
+    "headline": "补水倒计时",
+    "metricLabel": "剩余",
+    "metricValue": "60",
+    "metricUnit": "分钟",
+    "badge": "0",
+    "note": "每 60 分钟提醒一次",
+    "footer": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出",
+    "progress": {
+      "value": 100,
+      "label": "距提醒"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "mint",
+    "visualLayout": "tool",
+    "visualSprite": "droplet"
+  }
+}

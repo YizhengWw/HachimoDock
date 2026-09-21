@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "Token 仪表盘",
+    "eyebrow": "当前 Agent",
+    "headline": "等待今日统计",
+    "metricLabel": "总 Token",
+    "metricValue": "—",
+    "metricUnit": "TOKEN",
+    "note": "缓存 —",
+    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · 全局键退出",
+    "visualStyle": "pixel",
+    "visualPalette": "arcade",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+  }
+}
