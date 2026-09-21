@@ -13,14 +13,14 @@
  *          returning to Component Center does not re-query the board while a full App restart does.
  *          Formal local deletion is a device-first transaction when the package is installed,
  *          so a failed board ACK never destroys the only local source. Generated formal-local
- *          packages lead newest-first; builtins follow in product order with 双键接球 first and
- *          蛙蛙养成 second. Exact formal revisions promoted into builtins are deduplicated;
- *          a later generated same-id revision replaces the duplicate builtin card.
+ *          packages lead newest-first; builtins follow in product order with stocks first.
+ *          Generated same-id revisions replace duplicate builtin cards; no component is pinned.
  *          Synced cards remain clickable to update the latest package, while one trash action
  *          offers device-only or PC+device deletion according to the available sources.
  *          The page subtitle explains that the top-right creation action installs the shared
  *          Skill into an Agent for iterative generation and automatic library discovery;
- *          type filters stay on a compact row below those title actions.
+ *          type filters stay on a compact row below those title actions. Stock management
+ *          lives only in the stock component detail modal.
  *          A first-visit quick-start modal explains browse/create and direct card sync, and
  *          remains reopenable from the page help action. Component generation stays
  *          in the user's current Agent conversation through the editable frog-pet example:
@@ -64,7 +64,7 @@ import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
 import CandidateCard, { resolveComponentKind } from "./component-center/CandidateCard.jsx";
 import ComponentPreviewModal from "./component-center/ComponentPreviewModal.jsx";
 import { isRoutedWidgetBinding } from "./component-center/binding-labels.js";
-import { sortComponentsByCreatedAt } from "./component-center/library-order.js";
+import { mergeComponentCatalog, sortComponentsByCreatedAt } from "./component-center/library-order.js";
 import {
   COMPONENT_CONTROL_OPTIONS,
   componentInputEventSlots,
@@ -98,6 +98,9 @@ const CONTROL_HELP = Object.fromEntries(
 );
 
 function gameInstallBlockedReason(component, usb) {
+  if (component?.dataSource && usb?.capabilities?.widgetData !== "p4-data-list-v1") {
+    return "这个组件需要实时数据列表能力，请先升级设备固件。";
+  }
   const requiredRuntime = String(component?.runtimeEngine || "");
   const requiredScene = String(component?.sceneEngine || "");
   const preset = String(component?.gamePreset || component?.gameType || "");
@@ -623,6 +626,7 @@ export default function ComponentCenter() {
       dashboard: entry.dashboard || {},
       gameType: entry.gameType || "",
       runtimeEngine: entry.runtimeEngine || "",
+      dataSource: entry.dataSource || "",
       sceneEngine: entry.sceneEngine || "",
       gamePreset: entry.gamePreset || "",
       scene: entry.scene || null,
@@ -682,9 +686,8 @@ export default function ComponentCenter() {
     ? activeRecordSourceKey(activeComponentRecord)
     : "";
 
-  /** Generated packages remain newest-first and can occupy the first card. Builtins
-   *  retain their explicit product order after them. A generated same-id revision
-   *  replaces its duplicate builtin card so only the latest visible source is shown. */
+  /** User packages remain newest-first, followed by default-order builtins
+   *  (stocks first), without duplicate ids or a permanent pinned component. */
   const catalogItems = useMemo(() => {
     const builtins = BUILTIN_COMPONENT_CENTER.components.map((item) => ({
       ...item,
@@ -696,11 +699,7 @@ export default function ComponentCenter() {
         .filter((entry) => !PROMOTED_BUILTIN_SOURCE_HASHES.has(entry.versionHash))
         .map((entry) => buildLibraryComponent(entry)),
     );
-    const publishedIds = new Set(publishedItems.map((item) => item.id));
-    return [
-      ...publishedItems,
-      ...builtins.filter((item) => !publishedIds.has(item.id)),
-    ];
+    return mergeComponentCatalog(publishedItems, builtins);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localComponents]);
 
@@ -1531,6 +1530,7 @@ export default function ComponentCenter() {
       {previewComponent && (
         <ComponentPreviewModal
           component={previewComponent}
+          usb={usb}
           kind={resolveComponentKind(previewComponent.kind, previewComponent.gameType)}
           isLocal={previewComponent.isLocal}
           isInstalled={previewIsInstalled}

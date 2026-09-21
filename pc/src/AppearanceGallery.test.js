@@ -81,7 +81,8 @@ test("gallery can create a custom appearance from an uploaded MP4 state video", 
   assert.match(gallery, /accept="video\/mp4,\.mp4"/);
   assert.match(gallery, /readFileAsBytes\(videoFile\)/);
   assert.match(gallery, /saveUploadedVideoAppearance\(\{[\s\S]*appearanceName:[\s\S]*family:[\s\S]*videoBytes:/);
-  assert.match(gallery, /onOpenDetail\?\.\(record\.id\)/);
+  // 2026-09-18: a new upload first forces 人设与声音, then opens the detail page
+  assert.match(gallery, /afterSave: \(\) => onOpenDetail\?\.\(createdId\)/);
   assert.match(gallery, /当前仅支持 MP4 状态视频/);
   assert.match(gallery, /className="video-upload-modal__drop"/);
   assert.match(gallery, /className="video-upload-modal__grid"/);

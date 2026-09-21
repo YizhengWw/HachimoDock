@@ -9,13 +9,17 @@ idf_component_register(
     "pet_p4_lcd.c"
     "pet_p4_assets.c"
     "pet_p4_audio.c"
+    "pet_p4_system_cues.c"
+    "pet_p4_audio_frontend.c"
     "pet_p4_behavior.c"
+    "pet_p4_conversation.c"
     "pet_p4_diagnostics.c"
     "pet_p4_font_cn.c"
     "pet_p4_game.c"
     "pet_p4_input.c"
     "pet_p4_input_core.c"
     "pet_p4_miniapp.c"
+    "pet_p4_widget_data.c"
     "pet_p4_builtin_components_data.c"
     "pet_p4_ota.c"
     "pet_p4_protocol.c"
@@ -38,6 +42,7 @@ idf_component_register(
     esp_driver_uart
     esp_driver_usb_serial_jtag
     espressif__esp_h264
+    espressif__esp-sr
     esp_lcd
     esp_partition
     usb
@@ -51,6 +56,12 @@ idf_component_register(
     spiffs
     tinyusb
 )
+
+# Shared, OTA-updatable status cues live in the application, not appearance slots.
+foreach(cue done error waiting_user)
+  set(cue_input "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/${cue}.wav")
+  target_add_binary_data(${COMPONENT_LIB} "${cue_input}" BINARY)
+endforeach()
 
 execute_process(
   COMMAND

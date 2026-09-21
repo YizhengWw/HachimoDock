@@ -4,8 +4,11 @@
  *          compact source chooser and direct MP4-upload creation, cached local/Codex scans,
  *          cached initial render, unobstructed previews, gallery-only creation/import/detail management actions,
  *          and device-aware custom-appearance deletion with device-only or PC-and-device scope,
- *          Codex/community import flows, and a first-visit quick-start modal
- *          that stays reopenable from the page help action.
+ *          Codex/community import flows, a first-visit quick-start modal
+ *          that stays reopenable from the page help action, and per-card 人设与声音
+ *          (persona + Doubao voice) editing that is mandatory right after any creation flow;
+ *          saving explains next-reply application without switching the device appearance;
+ *          generation cards distinguish shared-reference rejection and retained partial results.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -21,6 +24,7 @@ import {
   ExternalLink,
   CheckCircle,
   CheckCircle2,
+  Mic,
   Sparkles,
   Trash2,
   Unplug,
@@ -55,6 +59,8 @@ import {
   abortGenerationTask,
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
+import PersonaVoiceModal from "./PersonaVoiceModal.jsx";
+import { listPersonaSetupPending, clearPersonaSetupPending, personaSummaryLabel } from "./lib/persona-voice.js";
 import PageShell from "./shell/PageShell.jsx";
 import Card from "./shell/Card.jsx";
 import { useDeviceContext } from "./shell/DeviceContext.jsx";
@@ -91,7 +97,7 @@ async function readFileAsBytes(file) {
   return new Uint8Array(await file.arrayBuffer());
 }
 
-export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail }) {
+export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail, onOpenApiSettings }) {
   const {
     currentDisplay,
     deviceConnected,
@@ -121,6 +127,8 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const deleteReturnFocusRef = useRef(null);
+  // { appearance, required, afterSave } — required=true right after a creation flow.
+  const [personaTarget, setPersonaTarget] = useState(null);
 
   const reload = useCallback(async ({ force = false } = {}) => {
     setRefreshing(true);
@@ -128,6 +136,7 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
     try {
       const records = await listAppearances({ force });
       setItems(records);
+      return records;
     } catch (err) {
       console.error(err);
       setError(err?.message || String(err));
@@ -143,6 +152,46 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
   useEffect(() => {
     reload();
   }, [reload]);
+
+  const openPersonaEditor = useCallback((row, options = {}) => {
+    if (!row) return;
+    setPersonaTarget({
+      appearance: row,
+      required: Boolean(options.required),
+      afterSave: typeof options.afterSave === "function" ? options.afterSave : null,
+    });
+  }, []);
+
+  const closePersonaEditor = useCallback(() => setPersonaTarget(null), []);
+
+  const handlePersonaSaved = useCallback(
+    async (saved) => {
+      const target = personaTarget;
+      setPersonaTarget(null);
+      push({
+        tone: "success",
+        title: `人设与声音已保存 · ${target?.appearance?.name || ""}`,
+        message: "正在对话时，将从下一轮回复开始使用新设置。",
+      });
+      await reload({ force: true });
+      if (target?.afterSave) target.afterSave();
+    },
+    [personaTarget, push, reload],
+  );
+
+  // A freshly created appearance (wizard / upload / import) must get its persona and voice
+  // before use: the store marks it pending, this effect forces the modal once it is listed.
+  useEffect(() => {
+    if (!items || personaTarget) return;
+    const pending = listPersonaSetupPending();
+    if (pending.length === 0) return;
+    const ids = new Set(items.map((item) => item.id));
+    for (const id of pending) {
+      if (!ids.has(id)) clearPersonaSetupPending(id);
+    }
+    const row = items.find((item) => pending.includes(item.id) && item.personaVoice && !item.personaVoice.configured);
+    if (row) openPersonaEditor(row, { required: true });
+  }, [items, personaTarget, openPersonaEditor]);
 
 
   // Subscribe to the global generation task so the in-progress card shows live
@@ -195,9 +244,12 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
         const result = await importCodexPet(petId);
         if (closeModal === "codex") setCodexModalOpen(false);
         else if (closeModal === "community") setCommunityModalOpen(false);
-        await reload({ force: true });
-        if (result?.appearanceId) onOpenDetail?.(result.appearanceId);
-        return { ok: true, appearanceId: result?.appearanceId || "" };
+        const records = await reload({ force: true });
+        const createdId = result?.appearanceId || "";
+        const created = createdId ? (records || []).find((row) => row.id === createdId) : null;
+        if (created) openPersonaEditor(created, { required: true, afterSave: () => onOpenDetail?.(createdId) });
+        else if (createdId) onOpenDetail?.(createdId);
+        return { ok: true, appearanceId: createdId };
       } catch (err) {
         console.error(err);
         const message = err?.message || String(err);
@@ -207,7 +259,7 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
         setImportingId("");
       }
     },
-    [reload, onOpenDetail],
+    [reload, onOpenDetail, openPersonaEditor],
   );
 
   const handleAiGenerateSource = useCallback(() => {
@@ -232,10 +284,13 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
 
   const handleUploadedVideoCreated = useCallback(
     async (record) => {
-      await reload({ force: true });
-      if (record?.id) onOpenDetail?.(record.id);
+      const records = await reload({ force: true });
+      const createdId = record?.id || "";
+      const created = createdId ? (records || []).find((row) => row.id === createdId) : null;
+      if (created) openPersonaEditor(created, { required: true, afterSave: () => onOpenDetail?.(createdId) });
+      else if (createdId) onOpenDetail?.(createdId);
     },
-    [reload, onOpenDetail],
+    [reload, onOpenDetail, openPersonaEditor],
   );
 
   const activeAppearanceId = currentDisplay.appearance?.id || "";
@@ -429,9 +484,20 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
               isActive={row.id === activeAppearanceId}
               onOpenDetail={onOpenDetail}
               onRequestDelete={requestAppearanceDelete}
+              onOpenPersona={openPersonaEditor}
             />
           ))}
         </div>
+      )}
+
+      {personaTarget && (
+        <PersonaVoiceModal
+          appearance={personaTarget.appearance}
+          required={personaTarget.required}
+          onClose={closePersonaEditor}
+          onSaved={handlePersonaSaved}
+          onOpenApiSettings={onOpenApiSettings}
+        />
       )}
 
       {deleteTarget && (
@@ -1246,10 +1312,11 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
   const partialId = task?.appearanceId;
   const isRunning = task?.status === "running";
   const isCompleted = task?.status === "completed";
+  const referenceBlocked = Boolean(progress?.referenceImageError);
   const title = isRunning
     ? `正在生成「${task?.appearanceName || "未命名形象"}」`
     : isCompleted
-      ? `「${task?.appearanceName || "未命名形象"}」生成完成`
+      ? `「${task?.appearanceName || "未命名形象"}」${referenceBlocked ? "部分生成完成" : "生成完成"}`
       : `「${task?.appearanceName || "未命名形象"}」生成失败`;
 
   return (
@@ -1263,7 +1330,7 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
           <AlertCircle size={16} />
         )}
         <div className="running-task-card__title">{title}</div>
-        <span className="muted small">{completed}/{total || "?"}</span>
+        <span className="muted small">已处理 {completed}/{total || "?"}</span>
         {!isRunning && (
           <button className="icon-btn" type="button" onClick={onDismiss} aria-label="关闭生成提示">
             <X size={14} />
@@ -1276,6 +1343,8 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
       <div className="muted small running-task-card__sub">
         {task?.status === "failed"
           ? task.error || "生成失败，请检查设置后重试。"
+          : referenceBlocked
+            ? stageMessage
           : currentFamily
             ? `${currentFamily[0]} · ${STAGE_LABELS[currentFamily[1].status] || ""}`
             : stageMessage || (isCompleted ? "形象已保存到本地形象库。" : "正在准备…")}
@@ -1310,6 +1379,7 @@ function AppearanceCard({
   isActive,
   onOpenDetail,
   onRequestDelete,
+  onOpenPersona,
 }) {
   const [previewActive, setPreviewActive] = useState(false);
   const okCount = row.families?.filter?.((f) => f.ok).length || 0;
@@ -1365,9 +1435,23 @@ function AppearanceCard({
               {isBuiltin ? "内置" : isCodex ? "Codex" : "自定义"}
             </span>
           </div>
+          <div
+            className={"appearance-card__persona" + (row.personaVoice?.configured ? "" : " appearance-card__persona--missing")}
+            title={row.personaVoice?.configured ? "实时对话使用的人设与音色" : "还没有设置人设与声音"}
+          >
+            <Mic size={12} /> {personaSummaryLabel(row.personaVoice)}
+          </div>
         </div>
-        {!isBuiltin && (
-          <div className="appearance-card-actions">
+        <div className="appearance-card-actions">
+          <button
+            type="button"
+            className="btn-ghost btn-sm persona-voice-btn"
+            aria-label={`人设与声音 ${row.name}`}
+            onClick={() => onOpenPersona?.(row)}
+          >
+            <Mic size={14} /> 人设与声音
+          </button>
+          {!isBuiltin && (
             <button
               type="button"
               className="btn-ghost btn-sm danger"
@@ -1376,8 +1460,8 @@ function AppearanceCard({
             >
               <Trash2 size={14} /> 删除
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </article>
   );

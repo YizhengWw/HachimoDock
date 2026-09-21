@@ -29,6 +29,18 @@ function readSource(fileName) {
 
 // ── Unified library + modal layout ────────────────────────────────────────────
 
+test("stock management lives only in the matching component details", () => {
+  const center = readSource("ComponentCenter.jsx");
+  const modal = readSource("component-center/ComponentPreviewModal.jsx");
+  assert.doesNotMatch(center, /<StockWatchlist/);
+  assert.doesNotMatch(center, /stock_widget_add/);
+  assert.match(readSource("fixtures.js"), /id: "stock-watchlist"/);
+  assert.match(modal, /component\.dataSource === "stocks\.watchlist"/);
+  assert.match(modal, /component\.id === "stock-watchlist"/);
+  assert.match(modal, /<StockWatchlist key=\{component\.id\} usb=\{usb\}/);
+  assert.doesNotMatch(readSource("component-center/StockWatchlist.jsx"), /stock_widget_add/);
+});
+
 test("ComponentCenter uses one library and removes the separate board overview", () => {
   const component = readSource("ComponentCenter.jsx");
   assert.match(component, /id="component-library"/);
@@ -231,7 +243,7 @@ test("USB preflight trusts the shared DeviceContext USB state", () => {
   assert.match(component, /if \(!status\?\.connected && !deviceConnected\)/);
 });
 
-test("Library leads with newest local components, then ordered builtins, while live inventory drives state", () => {
+test("Library merges newest local components and default builtin order while live inventory drives state", () => {
   const component = readSource("ComponentCenter.jsx");
   const catalogBody = component.slice(
     component.indexOf("const catalogItems = useMemo"),
@@ -239,7 +251,7 @@ test("Library leads with newest local components, then ordered builtins, while l
   );
   assert.match(
     catalogBody,
-    /const publishedItems = sortComponentsByCreatedAt[\s\S]*const publishedIds = new Set[\s\S]*\.\.\.publishedItems,[\s\S]*\.\.\.builtins\.filter/,
+    /const publishedItems = sortComponentsByCreatedAt[\s\S]*mergeComponentCatalog\(publishedItems, builtins\)/,
   );
   assert.doesNotMatch(catalogBody, /FEATURED_BUILTIN|featuredBuiltins/);
   assert.match(
@@ -515,27 +527,27 @@ test("formal library refresh ignores stale overlapping responses", () => {
   assert.match(component, /setInterval\(refreshComponentLibrary, 30000\)/);
 });
 
-test("component library keeps user components newest-first ahead of ordered builtins", () => {
+test("component library keeps user components newest-first ahead of default-order builtins", () => {
   const component = readSource("ComponentCenter.jsx");
   const order = readFileSync(join(srcDir, "component-center/library-order.js"), "utf8");
 
   assert.doesNotMatch(component, /FEATURED_BUILTIN|featuredBuiltins/);
-  assert.match(component, /\.\.\.publishedItems,[\s\S]*\.\.\.builtins\.filter/);
-  assert.match(component, /const publishedIds = new Set/);
+  assert.match(component, /mergeComponentCatalog\(publishedItems, builtins\)/);
+  assert.match(order, /const publishedIds = new Set/);
   assert.match(component, /PROMOTED_BUILTIN_SOURCE_HASHES\.has\(entry\.versionHash\)/);
   assert.match(component, /"75b1737728db27be"/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
 });
 
-test("builtin catalog starts with 双键接球 and a sprite-complete 蛙蛙养成", () => {
+test("builtin catalog starts with stocks followed by 双键接球 and a sprite-complete 蛙蛙养成", () => {
   const fixtures = readSource("fixtures.js");
   const packageRoot = join(srcDir, "../builtin-clawpkgs/two-key-pong");
   const componentManifest = JSON.parse(readFileSync(join(packageRoot, "component.json"), "utf8"));
   const widget = JSON.parse(readFileSync(join(packageRoot, "runtime/widget.json"), "utf8"));
   const buttons = JSON.parse(readFileSync(join(packageRoot, "buttons.json"), "utf8"));
 
-  assert.match(fixtures, /components:\s*\[\s*\{\s*id: "two-key-pong"/);
+  assert.match(fixtures, /components:\s*\[\s*\{\s*id: "stock-watchlist"/);
   assert.equal(componentManifest.id, "two-key-pong");
   assert.equal(componentManifest.version, "1.1.5");
   assert.equal(widget.engine, "p4-bounded-runtime-v3");
@@ -554,6 +566,7 @@ test("builtin catalog starts with 双键接球 and a sprite-complete 蛙蛙养�
 test("all builtin components omit exit actions, reserve SW3 globally, and use SW1 for primary actions", () => {
   const packageRoot = join(srcDir, "../builtin-clawpkgs");
   const packageIds = [
+    "stock-watchlist",
     "two-key-pong",
     "bloomfrog_companion",
     "flappy-bird",
@@ -804,10 +817,11 @@ test("CreateNewCard calls setCreateDrawerOpen when clicked", () => {
   assert.match(component, /CreateNewCard[\s\S]*?onClick.*setCreateDrawerOpen\(true\)/);
 });
 
-test("fixtures expose 双键接球 then 蛙蛙养成, three remaining games, and three more tools", () => {
+test("fixtures expose stocks first then the existing games and tools", () => {
   const data = readSource("fixtures.js");
   assert.match(data, /export const BUILTIN_COMPONENT_CENTER/);
   const orderedIds = [
+    "stock-watchlist",
     "two-key-pong",
     "bloomfrog_companion",
     "flappy-bird",
@@ -847,7 +861,7 @@ test("fixtures expose 双键接球 then 蛙蛙养成, three remaining games, and
   assert.doesNotMatch(data, /slack-off-countdown/);
   assert.doesNotMatch(data, /摸鱼倒计时/);
   assert.equal((data.match(/kind: "game"/g) || []).length, 4);
-  assert.equal((data.match(/kind: "tool"/g) || []).length, 4);
+  assert.equal((data.match(/kind: "tool"/g) || []).length, 5);
   assert.equal((data.match(/visualStyle: "pixel"/g) || []).length, 7);
   assert.equal((data.match(/visualLayout: "tool"/g) || []).length, 4);
   assert.match(data, /event: "button\.sw1\.short_press"/);

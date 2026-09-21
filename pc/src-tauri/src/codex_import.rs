@@ -672,9 +672,12 @@ pub fn install_codex_community_pet(pet_id: &str) -> Result<CodexCommunityInstall
     let pet_id = validate_community_pet_id(pet_id)?;
     let mut not_found = true;
     let mut last_error = String::new();
+    let extra_ca = crate::llm_network::community_ca_file()?;
 
     for npx in npx_candidates() {
-        let output = crate::command_for_host(npx)
+        let mut command = crate::command_for_host(npx);
+        if let Some(file) = &extra_ca { command.env("NODE_EXTRA_CA_CERTS", file.path()); }
+        let output = command
             .args(["--yes", "codex-pets", "add", &pet_id])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())

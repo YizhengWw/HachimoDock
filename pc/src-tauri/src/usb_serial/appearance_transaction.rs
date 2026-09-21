@@ -218,6 +218,13 @@ pub(super) fn p4_raw_transfer_fallback_slot(
         .find(|slot| slot.slot == P4_BUILTIN_APPEARANCE_SLOT)
 }
 
+// A protected factory appearance is addressed by its slot identity, not the
+// desktop bundle hash (which may differ after audio-only product updates).
+pub(super) fn p4_builtin_slot(state: &P4AppearanceSlotState) -> Result<&P4AppearanceSlot, String> {
+    state.slots.iter().find(|slot| slot.slot == P4_BUILTIN_APPEARANCE_SLOT)
+        .ok_or_else(|| "设备内置形象不可用；请修复出厂素材。未覆盖自定义形象，也未自动重传。".to_string())
+}
+
 pub(super) fn parse_missing_asset_ack_phase(error: &str) -> Option<AppearanceAssetAckPhase> {
     if !error.contains("未收到板端素材 OTA 确认:") {
         return None;

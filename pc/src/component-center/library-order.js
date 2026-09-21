@@ -1,6 +1,6 @@
 /**
  * [Input] Component-library records with `createdAtMs` or ISO `createdAt`.
- * [Output] Stable newest-created-first ordering shared by builtin and custom components.
+ * [Output] Stable newest-first user ordering followed by the default builtin sequence.
  * [Pos] component-center library node in pc/src/component-center
  * [Sync] If this file changes, update `pc/src/component-center/.folder.md`.
  */
@@ -21,4 +21,12 @@ export function sortComponentsByCreatedAt(components) {
       || left.index - right.index
     ))
     .map(({ component }) => component);
+}
+
+export function mergeComponentCatalog(publishedItems, builtins) {
+  const publishedIds = new Set(publishedItems.map((item) => item.id));
+  return [
+    ...publishedItems,
+    ...builtins.filter((item) => !publishedIds.has(item.id)),
+  ];
 }

@@ -2,7 +2,10 @@
  * [Input] pipeline output or direct uploaded video bytes plus per-family manifest metadata.
  * [Output] cached local filesystem persistence, synchronous cached list reads, direct uploaded-video appearances,
  *          built-in appearance fallback/override merging, immediate P4-ready preparation after media mutations,
- *          source-preview/audio cue asset URLs, and blob URL readers.
+ *          source-preview/audio cue asset URLs, blob URL readers, and the per-appearance 人设与声音 document
+ *          (`persona-voice.json`, normalized onto every record as `personaVoice`; new appearances are
+ *          marked "persona setup pending" until saved). Successful saves refresh device-context
+ *          consumers immediately and queue the saved persona/voice for an active conversation.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI components that consume the appearance manifest shape.
  */
@@ -29,6 +32,15 @@ import {
   createBuiltinTerrierAppearance,
   defaultAudioCueSrcForFamily,
 } from "./builtin-appearances.js";
+import {
+  PERSONA_VOICE_FILE,
+  PERSONA_VOICE_SCHEMA_VERSION,
+  clearPersonaSetupPending,
+  markPersonaSetupPending,
+  normalizePersonaVoice,
+  buildRealtimeChatStartInput,
+  emitPersonaVoiceUpdated,
+} from "./persona-voice.js";
 
 const ROOT_DIR = "custom-appearances";
 const MANIFEST_FILE = "manifest.json";
@@ -105,6 +117,69 @@ async function writeBuiltinAudioOverrides(overrides) {
   });
 }
 
+async function readPersonaVoiceDocument(appearanceId) {
+  const rel = `${ROOT_DIR}/${appearanceId}/${PERSONA_VOICE_FILE}`;
+  try {
+    const raw = await readTextFile(rel, { baseDir: BaseDirectory.AppLocalData });
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function attachPersonaVoice(record, document) {
+  return {
+    ...record,
+    personaVoice: normalizePersonaVoice(document, {
+      name: record?.name,
+      description: record?.description,
+      isBuiltin: record?.type === "builtin",
+    }),
+  };
+}
+
+/** Read the normalized 人设与声音 of one appearance (defaults when nothing is saved yet). */
+export async function readPersonaVoice(appearanceId) {
+  const record = await getAppearance(appearanceId);
+  return record.personaVoice;
+}
+
+/**
+ * Persist the 人设与声音 document for one appearance (built-in Terrier included: the
+ * document lives beside its audio overrides and survives manifest regeneration).
+ */
+export async function savePersonaVoice(appearanceId, input) {
+  if (!appearanceId) throw new Error("missing appearance id");
+  const isBuiltin = appearanceId === BUILTIN_TERRIER_APPEARANCE_ID;
+  const normalized = normalizePersonaVoice(input, { isBuiltin });
+  const document = {
+    schema_version: PERSONA_VOICE_SCHEMA_VERSION,
+    persona: normalized.persona,
+    voice: normalized.voice,
+    updated_at: new Date().toISOString(),
+  };
+  await ensureRoot();
+  const dir = `${ROOT_DIR}/${appearanceId}`;
+  const has = await exists(dir, { baseDir: BaseDirectory.AppLocalData });
+  if (!has) await mkdir(dir, { baseDir: BaseDirectory.AppLocalData, recursive: true });
+  await writeTextFile(`${dir}/${PERSONA_VOICE_FILE}`, JSON.stringify(document, null, 2), {
+    baseDir: BaseDirectory.AppLocalData,
+  });
+  clearPersonaSetupPending(appearanceId);
+  invalidateAppearanceCache();
+  const saved = { ...normalized, configured: true };
+  emitPersonaVoiceUpdated(appearanceId, saved);
+  try {
+    await invoke("realtime_chat_update_persona", {
+      input: buildRealtimeChatStartInput({ id: appearanceId, personaVoice: saved }, ""),
+    });
+  } catch (error) {
+    throw new Error(`设置已保存，但当前对话更新失败，请重试保存：${error}`);
+  }
+  return saved;
+}
+
 function appLocalAudioSrc(audioPath, root) {
   if (!audioPath || !root) return "";
   try {
@@ -133,7 +208,7 @@ async function getBuiltinTerrierAppearance() {
       audioDefault: false,
     };
   });
-  return record;
+  return attachPersonaVoice(record, await readPersonaVoiceDocument(BUILTIN_TERRIER_APPEARANCE_ID));
 }
 
 function withDefaultAudioCues(record) {
@@ -244,7 +319,8 @@ export async function saveAppearance(input) {
   await prepareP4Appearance(id);
 
   invalidateAppearanceCache();
-  return toRecord(manifest, await absolutePathFor(dir), await getRoot());
+  markPersonaSetupPending(id);
+  return attachPersonaVoice(toRecord(manifest, await absolutePathFor(dir), await getRoot()), null);
 }
 
 /**
@@ -292,7 +368,8 @@ export async function saveUploadedVideoAppearance(input) {
   await prepareP4Appearance(id);
 
   invalidateAppearanceCache();
-  return toRecord(manifest, await absolutePathFor(dir), await getRoot());
+  markPersonaSetupPending(id);
+  return attachPersonaVoice(toRecord(manifest, await absolutePathFor(dir), await getRoot()), null);
 }
 
 /**
@@ -314,7 +391,7 @@ async function readAppearanceRecords() {
         const text = await readTextFile(rel, { baseDir: BaseDirectory.AppLocalData });
         const manifest = JSON.parse(text);
         const absDir = await absolutePathFor(`${ROOT_DIR}/${entry.name}`);
-        results.push(toRecord(manifest, absDir, root));
+        results.push(attachPersonaVoice(toRecord(manifest, absDir, root), await readPersonaVoiceDocument(entry.name)));
       } catch (err) {
         // ignore broken manifest dirs
         console.warn("Failed to load appearance manifest:", rel, err);
@@ -354,7 +431,7 @@ export async function getAppearance(id) {
   const text = await readTextFile(`${dir}/${MANIFEST_FILE}`, { baseDir: BaseDirectory.AppLocalData });
   const manifest = JSON.parse(text);
   const absDir = await absolutePathFor(dir);
-  return toRecord(manifest, absDir, await getRoot());
+  return attachPersonaVoice(toRecord(manifest, absDir, await getRoot()), await readPersonaVoiceDocument(id));
 }
 
 export async function deleteAppearance(id) {
@@ -451,7 +528,7 @@ export async function replaceFamilyAudioCue({ appearanceId, family, audioBytes }
   );
   const idx = manifest.families.findIndex((f) => f.family === family);
   if (idx < 0) throw new Error(`未找到状态素材: ${family}`);
-  manifest.families[idx] = { ...manifest.families[idx], audioPath: audioRel };
+  manifest.families[idx] = { ...manifest.families[idx], audioPath: audioRel, audioSource: "custom" };
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
@@ -483,6 +560,7 @@ export async function removeFamilyAudioCue({ appearanceId, family }) {
     await remove(manifest.families[idx].audioPath, { baseDir: BaseDirectory.AppLocalData }).catch(() => {});
   }
   delete manifest.families[idx].audioPath;
+  delete manifest.families[idx].audioSource;
   delete manifest.families[idx].audioSrc;
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,

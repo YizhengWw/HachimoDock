@@ -268,6 +268,7 @@ for (const segment of manifest.segments) {
 cpSync(resourceTree, join(resourceDir, "expanded-storage"), { recursive: true });
 copyFileSync(license, join(packageRoot, "LICENSE"));
 copyFileSync(notice, join(packageRoot, "THIRD_PARTY_NOTICES.md"));
+cpSync(join(repositoryRoot, "licenses"), join(packageRoot, "licenses"), { recursive: true });
 
 const macTool = join(toolDir, "flash-macOS.command");
 const windowsTool = join(toolDir, "flash-Windows.ps1");
@@ -277,10 +278,10 @@ chmodSync(macTool, 0o755);
 
 writeFileSync(
   join(resourceDir, "README-CN.md"),
-  `# 内置资源说明\n\n- \`expanded-storage/\`：出厂 SPIFFS 的展开内容，含默认形象索引、8 个内置组件清单及受限 PNG sprite。\n- \`../firmware/segments/0x520000-default-terrier.spiffs.bin\`：完整存储分区镜像。\n- \`../firmware/segments/0xc00000-default-terrier.appearance0.bin\`：默认西高地 H.264 形象分区镜像。\n- 最终烧录请始终使用 \`../firmware/${imageName}\`，不要逐个写入资源文件。\n`,
+  `# 内置资源说明\n\n- \`expanded-storage/\`：出厂 SPIFFS 的展开内容，含默认形象索引、${manifest.components.count} 个内置组件清单及受限 PNG sprite。\n- \`../firmware/segments/0x520000-default-terrier.spiffs.bin\`：完整存储分区镜像。\n- \`../firmware/segments/0xc00000-default-terrier.appearance0.bin\`：默认西高地 H.264 形象分区镜像。\n- 最终烧录请始终使用 \`../firmware/${imageName}\`，不要逐个写入资源文件。\n`,
 );
 
-const readme = `# HachimoDock ESP32-P4 完整出厂烧录包\n\n版本：${manifest.version}\n\n本包不只是应用固件，包含完整 factory.bin、Bootloader、分区表、OTA 元数据、默认西高地形象、8 个内置组件、校验清单，以及 Windows/macOS 引导烧录工具。\n\n## 推荐用法\n\n1. 关闭 Pet Manager。\n2. Waveshare ESP32-P4-WIFI6 的 USB 数据路径跳线保持断开，让 Type-C 连接 CH343 USB-UART。\n3. macOS 双击 \`tools/flash-macOS.command\`；Windows 右键 \`tools/flash-Windows.ps1\` 并选择“使用 PowerShell 运行”。\n4. 首次运行会在本包内创建隔离的 esptool 环境，需要 Python 3.10+ 和网络。\n5. 按提示选择串口并输入 \`ERASE\`。工具会擦除整片 Flash，再把完整镜像从 \`0x0\` 写入并校验。\n\n## 重要警告\n\n该操作会覆盖设备设置、形象和组件。日常升级请使用 Pet Manager 的“固件升级”；只有新设备或明确恢复出厂时才使用本包。\n\n如果连接失败，按住 BOOT，短按一次 RESET/EN，松开 BOOT 后重试。若 921600 不稳定，可将工具脚本中的波特率改为 460800 后重新完整烧录。\n\n## 内容\n\n- \`firmware/${imageName}\`：推荐烧录的完整镜像（地址 0x0）\n- \`firmware/${manifestName}\`：镜像内容、分区和 SHA-256 清单\n- \`firmware/segments/\`：可独立核验的各二进制段，不建议普通用户分别烧录\n- \`resources/\`：默认形象及组件资源清单/分区资料\n- \`tools/\`：Windows/macOS 烧录工具\n- \`SHA256SUMS\`：包内全部文件校验值\n`;
+const readme = `# HachimoDock ESP32-P4 完整出厂烧录包\n\n版本：${manifest.version}\n\n本包不只是应用固件，包含完整 factory.bin、Bootloader、分区表、OTA 元数据、默认西高地形象、${manifest.components.count} 个内置组件、校验清单，以及 Windows/macOS 引导烧录工具。\n\n## 推荐用法\n\n1. 关闭 Pet Manager。\n2. Waveshare ESP32-P4-WIFI6 的 USB 数据路径跳线保持断开，让 Type-C 连接 CH343 USB-UART。\n3. macOS 双击 \`tools/flash-macOS.command\`；Windows 右键 \`tools/flash-Windows.ps1\` 并选择“使用 PowerShell 运行”。\n4. 首次运行会在本包内创建隔离的 esptool 环境，需要 Python 3.10+ 和网络。\n5. 按提示选择串口并输入 \`ERASE\`。工具会擦除整片 Flash，再把完整镜像从 \`0x0\` 写入并校验。\n\n## 重要警告\n\n该操作会覆盖设备设置、形象和组件。日常升级请使用 Pet Manager 的“固件升级”；只有新设备或明确恢复出厂时才使用本包。\n\n如果连接失败，按住 BOOT，短按一次 RESET/EN，松开 BOOT 后重试。若 921600 不稳定，可将工具脚本中的波特率改为 460800 后重新完整烧录。\n\n## 内容\n\n- \`firmware/${imageName}\`：推荐烧录的完整镜像（地址 0x0）\n- \`firmware/${manifestName}\`：镜像内容、分区和 SHA-256 清单\n- \`firmware/segments/\`：可独立核验的各二进制段，不建议普通用户分别烧录\n- \`resources/\`：默认形象及组件资源清单/分区资料\n- \`tools/\`：Windows/macOS 烧录工具\n- \`SHA256SUMS\`：包内全部文件校验值\n`;
 const toolGuide = `
 ## 工具版本与 v3 接线
 
@@ -309,7 +310,7 @@ const revisionLabel = (revision) => `${Math.floor(revision / 100)}.${revision % 
 writeFileSync(join(packageRoot, "README-FLASHING-CN.md"), readme.replace(
   `版本：${manifest.version}`,
   `版本：${manifest.version}\n\n适用芯片：ESP32-P4 ${chipFamily}（${revisionLabel(manifest.chipRevisionMin)}～${revisionLabel(manifest.chipRevisionMax)}）。Windows/macOS 共用本包；v1 与 v3 不可互刷。工具会在擦除前核对芯片版本。`,
-) + toolGuide);
+).replaceAll("${manifest.components.count} 个内置组件", `${manifest.components.count} 个内置组件`) + toolGuide);
 
 const contentManifest = {
   schemaVersion: 1,

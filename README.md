@@ -59,7 +59,23 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
   </tr>
 </table>
 
+## 特别致谢：Xiaomi MiLoCo
+
+感谢 **[Xiaomi MiLoCo](https://github.com/XiaoMi/xiaomi-miloco)** 团队开放智能家居能力。家居控制云协议基于其开源 SDK `miloco-miot` 适配为 Rust 实现，并非直接打包完整 Python SDK。
+
+相关 MiLoCo 授权作品的版权归小米所有，适用 [Xiaomi Miloco License](licenses/Xiaomi-Miloco-LICENSE.md)，版权标识、免责声明及许可证随相关实现一并保留。非商业使用仍须符合该许可证的用途范围；本项目不向第三方授予额外的商业使用、再许可或商标权限。完整说明见 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
 ## 核心亮点
+
+### 0.1.79：实时对话、智能家居与实时行情
+
+- **实时对话**：配置语音服务与对话大模型后，在宠物界面长按 SW2 开始聊天，再次长按结束。支持人设、TTS 2.0 音色、蓝色字幕气泡；配套固件支持边听边说与打断，效果受麦克风、扬声器安装位置和环境影响。
+- **智能家居**：在「智能家居」授权米家账号后，可在实时对话中用自然语言控制账号授权的设备，例如“让音箱放一首爵士乐”。能力取决于设备及账号权限；较长编排通过语音确认，不要求回到 PC 点击。
+- **自选股行情**：组件列表第一项内置行情组件，默认小米与阿里。在组件详情页按名称或代码搜索、管理自选股；PC 每 2 秒更新并通过 USB 下发，需保持客户端运行。涨价和涨幅红色、下跌绿色，行情可能有延迟，不提供交易功能。
+- **Windows 音频与形象管理**：改善实时对话句内断音、内置形象切换和跨形象提示音；Agent 语音输入可多次追加。
+- **生成失败提示**：区分生图与图生视频审核；明确人像限制，并提供自行生成 MP4 后上传的入口说明，不承诺绕过平台审核。
+
+公开包不内置 API Key、企业 CA 或固定代理地址。首次使用请在「API 配置」中填写自己的服务凭据。详见 [实时对话](pc/docs/realtime-chat.md)、[智能家居](pc/docs/smart-home.md)、[实时数据组件](pc/docs/widget-live-data.md)。
 
 | 能力 | 说明 |
 |---|---|
@@ -179,8 +195,8 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.58_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.58_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.79_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.79_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。

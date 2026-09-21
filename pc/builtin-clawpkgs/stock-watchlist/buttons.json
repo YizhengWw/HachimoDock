@@ -1,0 +1,1 @@
+[{"action":"list.previous","control":"前方摇杆","event":"knob.rotate_ccw","label":"上一页"},{"action":"list.next","control":"前方摇杆","event":"knob.rotate_cw","label":"下一页"},{"action":"list.home","control":"SW1","event":"button.sw1.short_press","label":"回到首页"}]

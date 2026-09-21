@@ -1,6 +1,6 @@
 /*
  * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
- * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded running-task composer lookup, pinned draft updates, and guarded explicit-confirm submission without automatic send on ASR finalization.
+ * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded composer lookup, per-recording appended draft updates, and explicit-confirm submission without automatic send on ASR finalization.
  * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, stale-focus recovery, and Windows minimized-Claude restoration.
  * [Sync] If this file changes, update pc/.folder.md.
  */
@@ -430,6 +430,23 @@ pub struct CodexComposerBridge {
     sender: std::sync::mpsc::Sender<ComposerCommand>,
     failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+impl CodexComposerBridge {
+    /// Drain this recording's queued writes before a new recording reads its base.
+    /// Closing without cancellation must never erase the previous voice segment.
+    pub fn preserve_draft(&self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        if self.closed.swap(true, Ordering::SeqCst) { return Ok(()); }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.sender.send(ComposerCommand {
+            payload: json!({ "kind": "release" }), started: None, response: Some(tx),
+        }).map_err(|_| "上一段语音输入已关闭".to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(8))
+            .map_err(|_| "等待上一段语音完成写入超时".to_string())??;
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
@@ -1731,6 +1748,17 @@ function Open-CodexSessionById(
   return Open-CodexSession $sessionTitle $workspaceLabel
 }
 
+function Normalize-ComposerText([string]$text) {
+  return $text.Replace("`r`n", "`n")
+}
+
+function Join-VoiceDraft([string]$base, [string]$transcript) {
+  $text = (Normalize-ComposerText $transcript).Trim()
+  if ([string]::IsNullOrEmpty($text)) { return $base }
+  if ([string]::IsNullOrEmpty($base) -or $base -match '\s$') { return ($base + $text) }
+  return ($base + ' ' + $text)
+}
+
 function Get-ComposerText($element) {
   $pattern = $null
   $value = ''
@@ -1738,12 +1766,12 @@ function Get-ComposerText($element) {
       [System.Windows.Automation.ValuePattern]::Pattern,
       [ref]$pattern
   )) {
-    $value = Normalize-Label ([string]$pattern.Current.Value)
+    $value = Normalize-ComposerText ([string]$pattern.Current.Value)
   } elseif ($element.TryGetCurrentPattern(
       [System.Windows.Automation.TextPattern]::Pattern,
       [ref]$pattern
   )) {
-    $value = Normalize-Label ([string]$pattern.DocumentRange.GetText(-1))
+    $value = Normalize-ComposerText ([string]$pattern.DocumentRange.GetText(-1))
   } else {
     throw 'Visible composer exposes neither ValuePattern nor TextPattern'
   }
@@ -1753,12 +1781,12 @@ function Get-ComposerText($element) {
 
 function Test-AllowedComposerValue([string]$value, [string[]]$allowedValues) {
   # A null allow-list is used only for the initial semantic bind. Product
-  # policy permits the first speech draft to replace an existing user draft;
-  # every later rebind still requires the exact last voice-controlled value.
+  # bind snapshots the existing draft as an immutable prefix; later rebinds
+  # still require the exact last voice-controlled value (including formatting).
   if ($null -eq $allowedValues) { return $true }
-  $normalizedValue = Normalize-Label $value
+  $normalizedValue = Normalize-ComposerText $value
   foreach ($allowedValue in @($allowedValues)) {
-    if ($normalizedValue -eq (Normalize-Label ([string]$allowedValue))) { return $true }
+    if ($normalizedValue -ceq (Normalize-ComposerText ([string]$allowedValue))) { return $true }
   }
   return $false
 }
@@ -2090,7 +2118,7 @@ function Assert-TargetCurrent($state, [bool]$checkSession) {
   }
   $currentInfo = Get-ComposerText $state.Composer
   $currentValue = [string]$currentInfo[1]
-  if ($currentValue -ne $state.LastValue) {
+  if ($currentValue -cne $state.LastValue) {
     throw 'Visible composer was edited outside voice input; voice updates were cancelled'
   }
   $state.Pattern = $currentInfo[0]
@@ -2145,7 +2173,7 @@ function Wait-ComposerText($state, [string]$expectedText, [int]$timeoutMs) {
     try {
       $updatedInfo = Get-ComposerText $state.Composer
       $updatedValue = [string]$updatedInfo[1]
-      if ($updatedValue -eq $expectedText) {
+      if ($updatedValue -ceq $expectedText) {
         $state.Pattern = $updatedInfo[0]
         return $true
       }
@@ -2157,20 +2185,24 @@ function Wait-ComposerText($state, [string]$expectedText, [int]$timeoutMs) {
 }
 
 function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck) {
-  $normalizedText = Normalize-Label $text
-  if ($normalizedText -eq $state.LastValue) { return }
+  $normalizedText = Join-VoiceDraft $state.BaseValue $text
+  if ($normalizedText -ceq $state.LastValue) {
+    Assert-TargetCurrent $state $forceSessionCheck
+    return
+  }
   $lastError = ''
   for ($attempt = 0; $attempt -lt 2; $attempt += 1) {
     try {
       if ($attempt -gt 0) {
         Rebind-CodexTarget $state @($state.LastValue, $normalizedText)
-        if ($state.LastValue -eq $normalizedText) { return }
+        if ($state.LastValue -ceq $normalizedText) { return }
       }
       $now = Get-MonotonicMilliseconds
       $checkSession = $forceSessionCheck -or (($now - $state.LastSessionCheck) -ge 900)
       Assert-TargetCurrent $state $checkSession
       if ($checkSession) { $state.LastSessionCheck = $now }
       Focus-Composer $state
+      Assert-TargetCurrent $state $false
       [CodexVoiceNative]::ReplaceFocusedText($normalizedText)
       # Chromium can block a synchronous TextPattern read while committing the
       # just-injected ProseMirror update. Let the accessibility tree settle.
@@ -2189,17 +2221,18 @@ function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck) {
 }
 
 function Clear-ComposerVoiceText($state) {
-  if ([string]::IsNullOrEmpty($state.LastValue)) { return }
+  if ($state.LastValue -ceq $state.BaseValue) { return }
   Assert-TargetCurrent $state (-not [bool]$state.CurrentVisible)
   Focus-Composer $state
-  [CodexVoiceNative]::ReplaceFocusedText('')
-  $state.LastValue = ''
+  Assert-TargetCurrent $state $false
+  [CodexVoiceNative]::ReplaceFocusedText($state.BaseValue)
+  $state.LastValue = $state.BaseValue
 }
 
 function Assert-ComposerHasText($state) {
   Assert-TargetCurrent $state (-not [bool]$state.CurrentVisible)
   $currentInfo = Get-ComposerText $state.Composer
-  $currentValue = Normalize-Label ([string]$currentInfo[1])
+  $currentValue = Normalize-ComposerText ([string]$currentInfo[1])
   if ([string]::IsNullOrEmpty($currentValue)) {
     throw 'Visible composer voice draft is no longer present; it was not sent again'
   }
@@ -2337,6 +2370,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
           Composer = $composer.Element
           ComposerRuntimeId = $composerRuntimeId
           Pattern = $composer.Pattern
+          BaseValue = [string]$composer.Value
           LastValue = [string]$composer.Value
           LastSessionCheck = Get-MonotonicMilliseconds
         }
@@ -2353,6 +2387,10 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         Assert-ComposerHasText $state
         Invoke-SendButton $state
         Write-ComposerReply @{ ok = $true; phase = 'submitted'; revision = $command.revision; mode = 'visible' }
+        break
+      }
+      'release' {
+        Write-ComposerReply @{ ok = $true; phase = 'released'; mode = 'visible' }
         break
       }
       'cancel' {
@@ -2523,6 +2561,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     if let Some(response) = command.response {
                         let _ = response.send(result);
                     }
+                    if command.payload.get("kind").and_then(Value::as_str) == Some("release") { break; }
                 }
                 worker_closed.store(true, Ordering::SeqCst);
                 if let Ok(mut child) = worker_child.lock() {
@@ -2905,6 +2944,7 @@ impl CodexComposerBridge {
                                     "composerValue": composer_value,
                                 })
                             }),
+                        "release" => Ok(json!({ "ok": true, "phase": "released", "mode": "visible" })),
                         "cancel" => {
                             if let Some(state) = state.as_mut() {
                                 macos::cancel_voice(state);
@@ -2938,7 +2978,7 @@ impl CodexComposerBridge {
                     if let Some(response) = command.response {
                         let _ = response.send(result);
                     }
-                    if matches!(kind.as_str(), "confirm" | "cancel")
+                    if matches!(kind.as_str(), "confirm" | "cancel" | "release")
                         || (kind == "begin" && purpose == "locate")
                     {
                         break;
@@ -3050,6 +3090,8 @@ impl CodexComposerBridge {
         false
     }
 
+    pub fn preserve_draft(&self) -> Result<(), String> { Ok(()) }
+
     pub fn start_current(
         _agent_id: &str,
         _callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
@@ -3133,6 +3175,66 @@ fn workspace_label_from_cwd(cwd: &str) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn releasing_a_recording_drains_updates_without_cancel_or_send() {
+        use std::sync::{mpsc, Arc, Mutex, atomic::AtomicBool};
+        let (sender, receiver) = mpsc::channel();
+        let bridge = CodexComposerBridge {
+            sender, failed: Arc::new(AtomicBool::new(false)), closed: Arc::new(AtomicBool::new(false)),
+        };
+        let value = Arc::new(Mutex::new("已经输入\n".to_string()));
+        let worker_value = value.clone();
+        let worker = std::thread::spawn(move || {
+            let mut draft = crate::voice_draft::VoiceDraft::new(worker_value.lock().unwrap().clone());
+            let mut pending = None;
+            while let Some(command) = receive_latest_composer_command(&receiver, &mut pending) {
+                match composer_command_kind(&command) {
+                    "update" => {
+                        draft.last = draft.desired(command.payload["text"].as_str().unwrap());
+                        *worker_value.lock().unwrap() = draft.last.clone();
+                    }
+                    "release" => {
+                        command.response.unwrap().send(Ok(json!({"ok":true}))).unwrap();
+                        return;
+                    }
+                    _ => panic!("release must not cancel or send the draft"),
+                }
+            }
+        });
+        bridge.update(1, "部分").unwrap();
+        bridge.update(2, "完整的一句话").unwrap();
+        bridge.preserve_draft().unwrap();
+        assert!(bridge.update(3, "迟到的旧结果").is_err());
+        drop(bridge);
+        worker.join().unwrap();
+        let next = crate::voice_draft::VoiceDraft::new(value.lock().unwrap().clone());
+        assert_eq!(next.desired("第二句话"), "已经输入\n完整的一句话 第二句话");
+    }
+
+    #[test]
+    fn windows_append_contract_preserves_base_and_formatting() {
+        let source = include_str!("codex_composer.rs");
+        let begin = source.find("function Normalize-ComposerText").unwrap();
+        let end = source[begin..].find("function Add-UniqueComposerElement").unwrap() + begin;
+        let functions = &source[begin..end];
+        assert!(functions.contains("function Join-VoiceDraft"));
+        assert!(!functions.contains("Normalize-Label"));
+        assert!(source.contains("BaseValue = [string]$composer.Value"));
+        assert!(source.contains("Join-VoiceDraft $state.BaseValue $text"));
+        assert!(source.contains("ReplaceFocusedText($state.BaseValue)"));
+        assert!(source.contains("$currentValue -cne $state.LastValue"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_powershell_append_preserves_previous_segments() {
+        let source = include_str!("codex_composer.rs");
+        let start = source.find("function Normalize-ComposerText").unwrap();
+        let end = start + source[start..].find("function Get-ComposerText").unwrap();
+        let script = format!("{}\nif ((Join-VoiceDraft 'first' 'second') -cne 'first second') {{ exit 1 }}\nif ((Join-VoiceDraft \"line`n  \" 'next') -cne \"line`n  next\") {{ exit 2 }}\nif ((Join-VoiceDraft 'old' '') -cne 'old') {{ exit 3 }}", &source[start..end]);
+        assert!(hidden_powershell().arg("-Command").arg(script).status().unwrap().success());
+    }
 
     fn command(kind: &str, revision: u64) -> ComposerCommand {
         ComposerCommand {

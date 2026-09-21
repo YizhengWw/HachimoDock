@@ -62,6 +62,39 @@ fn emit_build_identity() {
 }
 
 fn main() {
+    prepare_internal_ca();
     emit_build_identity();
     tauri_build::build()
+}
+
+fn prepare_internal_ca() {
+    for name in ["PET_MANAGER_INTERNAL_CA_FILE", "PET_MANAGER_INTERNAL_CA_SHA256", "PET_MANAGER_INTERNAL_CREDENTIALS_FILE"] {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    let input = env::var_os("PET_MANAGER_INTERNAL_CA_FILE");
+    let approved = env::var_os("PET_MANAGER_INTERNAL_CA_SHA256");
+    let credentials = env::var_os("PET_MANAGER_INTERNAL_CREDENTIALS_FILE");
+    if env::var_os("CARGO_FEATURE_INTERNAL_NETWORK").is_none() {
+        assert!(input.is_none() && approved.is_none() && credentials.is_none(), "Public builds refuse internal CA or credential inputs");
+        return;
+    }
+    let input = input.expect("Internal builds require an explicitly approved CA file");
+    assert!(approved.is_some(), "Internal builds require approved CA fingerprints");
+    println!("cargo:rerun-if-changed={}", PathBuf::from(input).display());
+    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("../scripts/prepare-internal-ca.mjs");
+    println!("cargo:rerun-if-changed={}", script.display());
+    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("approved-internal-ca.pem");
+    let status = Command::new("node").arg(script).arg(output).status()
+        .expect("Node.js is required to validate the approved CA chain");
+    assert!(status.success(), "Internal CA validation failed");
+    let credentials = credentials.expect("Internal builds require an explicit credential file");
+    println!("cargo:rerun-if-changed={}", PathBuf::from(credentials).display());
+    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("../scripts/prepare-internal-credentials.mjs");
+    println!("cargo:rerun-if-changed={}", script.display());
+    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("internal-credentials.json");
+    let status = Command::new("node").arg(script).arg(output).status()
+        .expect("Node.js is required to validate internal credentials");
+    assert!(status.success(), "Internal credential validation failed");
 }

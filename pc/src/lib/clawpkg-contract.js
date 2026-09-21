@@ -498,6 +498,17 @@ function validateWidgetVars(widget, errors) {
   });
 }
 
+export function validateWidgetData(widget, errors) {
+  if (widget?.data === undefined) return;
+  const data = widget.data;
+  if (!isObject(data) || Object.keys(data).some((key) => !["source", "page_var"].includes(key))
+      || !/^[a-z0-9_.-]{1,47}$/.test(data.source || "")
+      || widget.vars?.[data.page_var]?.type !== "int"
+      || widget.engine !== "p4-bounded-runtime-v4" || "scene" in widget || "game" in widget) {
+    errors.push("runtime/widget.json.data 需要受控 source 和整数 page_var；仅用于 v4 列表工具，不能混用 scene/game");
+  }
+}
+
 function widgetEffectCount(rule) {
   if (!rule || typeof rule !== "object" || Array.isArray(rule)) return 0;
   const setCount = rule.set && typeof rule.set === "object" && !Array.isArray(rule.set)
@@ -557,6 +568,7 @@ export function validateClawpkgManifest(manifest) {
       errors.push(`runtime/widget.json 压缩后超过 P4 ${P4_WIDGET_JSON_MAX_BYTES} 字节上限`);
     }
     validateWidgetVars(manifest["runtime/widget.json"], errors);
+    validateWidgetData(manifest["runtime/widget.json"], errors);
     validateComponentGame(
       manifest["runtime/widget.json"],
       manifest["buttons.json"],

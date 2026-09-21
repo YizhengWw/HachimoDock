@@ -45,6 +45,7 @@ pub struct ComponentLibraryEntry {
     pub buttons: Vec<serde_json::Value>,
     pub game_type: Option<String>,
     pub runtime_engine: Option<String>,
+    pub data_source: Option<String>,
     pub scene_engine: Option<String>,
     pub game_preset: Option<String>,
     pub scene: Option<serde_json::Value>,
@@ -443,6 +444,7 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
         buttons,
         game_type,
         runtime_engine,
+        data_source: runtime.as_ref().and_then(|v| v.get("data")).and_then(|v| v.get("source")).and_then(|v| v.as_str()).map(str::to_string),
         scene_engine,
         game_preset,
         scene,
@@ -453,7 +455,7 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
     })
 }
 
-fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibraryEntry, String> {
+pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibraryEntry, String> {
     ensure_layout(home)?;
     let validation = crate::clawpkg::validate_clawpkg_at_path(source)?;
     if !validation.ok {

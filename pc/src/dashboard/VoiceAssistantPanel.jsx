@@ -23,10 +23,13 @@ import {
 } from "lucide-react";
 import { API_CONFIGURATION_UPDATED_EVENT } from "../lib/api-configuration.js";
 import Switch from "../shell/Switch";
+import UsageHelp from "../UsageHelp.jsx";
+import { useUsageHelp } from "../shell/DeviceContext.jsx";
+import { friendlyControlLabel } from "../lib/usage-help.js";
 
 export function buildVoiceSummary(voiceConfig, selectedTrigger) {
   if (!voiceConfig?.enabled) return "未开启";
-  const trigger = selectedTrigger?.label || "默认触发";
+  const trigger = friendlyControlLabel(selectedTrigger?.label || "未绑定快捷键");
   return `已开启 · ${trigger}`;
 }
 
@@ -158,6 +161,7 @@ export default function VoiceAssistantPanel({
   onCredentialReady,
   onOpenApiSettings,
 }) {
+  const usageHelp = useUsageHelp();
   const [asrState, setAsrState] = useState({
     loading: true,
     configured: false,
@@ -238,7 +242,7 @@ export default function VoiceAssistantPanel({
   }
 
   const boardOffline = state.deviceOnline === false;
-  const triggerLabel = selectedTrigger?.label || "默认触发";
+  const triggerLabel = friendlyControlLabel(selectedTrigger?.label || "未绑定快捷键");
   const voicePhase = state.deviceVoiceFlow?.phase || "idle";
   const desktopPlatform = detectDesktopPlatform();
   const showAccessibilityGuidance = needsVisibleComposerGuidance(state);
@@ -365,6 +369,7 @@ export default function VoiceAssistantPanel({
 
   return (
     <div className="voice-panel voice-panel--compact">
+      <UsageHelp mode="voice" onOpenApiSettings={onOpenApiSettings} />
       <section
         className={`voice-panel__command${voiceConfig.enabled ? " is-on" : ""}`}
         aria-label="按键语音控制"
@@ -376,7 +381,7 @@ export default function VoiceAssistantPanel({
           <div className="voice-panel__command-title">
             <strong>{voiceConfig.enabled ? "按键语音已启用" : "按键语音未启用"}</strong>
             <span className={`voice-panel__status-chip${asrState.configured ? " is-success" : ""}`}>
-              {asrState.configured ? "ASR 已就绪" : "ASR 待配置"}
+              {asrState.configured ? "语音识别已配置" : "语音识别待配置"}
             </span>
             <span className="voice-panel__status-chip">
               {triggerLabel}
@@ -582,7 +587,7 @@ export default function VoiceAssistantPanel({
                 state.deviceVoiceFlow.updatedAt
                   ? `（${new Date(state.deviceVoiceFlow.updatedAt).toLocaleTimeString()}）`
                   : ""
-              }\n${formatVoiceUserMessage(state.deviceVoiceFlow.message)}`}
+              }\n${formatVoiceUserMessage(state.deviceVoiceFlow.message)}${state.deviceVoiceFlow.phase === "draft_ready" ? ` ${usageHelp.confirm}` : ""}`}
             </div>
           )}
 
@@ -665,38 +670,35 @@ export default function VoiceAssistantPanel({
                 </div>
               )}
               <div className="voice-panel__accessibility-guide-tip">
-                <span>DEV TIP · {desktopPlatform === "windows" ? "WINDOWS" : "MACOS"}</span>
+                <span>操作提示 · {desktopPlatform === "windows" ? "Windows" : "Mac"}</span>
                 {desktopPlatform === "windows" ? (
                   <>
                     <p>
-                      从项目根目录运行下方文件。不要只提升其中一个程序的管理员权限；
+                      请保持 Agent 窗口可见。不要只提升其中一个程序的管理员权限；
                       推荐 Pet Manager 与 {visibleVoiceAgentLabel} 都以普通用户身份运行。
                     </p>
-                    <code>{VISIBLE_COMPOSER_DEV_PATHS.windows}</code>
+                    {import.meta.env.DEV && <code>{VISIBLE_COMPOSER_DEV_PATHS.windows}</code>}
                   </>
                 ) : accessibilityPermission.trusted === true ? (
                   <>
                     {isMimocodeVoice ? (
                       <p>
                         无需再进入系统设置。请保持 MiMoCode 终端在前台，并把光标停在输入位置；
-                        松开设备按键后只写入最终文字；短按确认键（默认 SW3）才发送。
+                        松开设备按键后追加文字，不会自动发送。{usageHelp.confirm}
                       </p>
                     ) : (
                       <p>
-                        无需再进入系统设置。请保持设备选中的 {visibleVoiceAgentLabel} 任务处于可打开状态，
-                        识别文字会先保留在输入框；短按确认键（默认 SW3）后才发送。
+                        无需再进入系统设置。请打开 {visibleVoiceAgentLabel} 的目标对话，
+                        识别文字会追加到输入框，不会自动发送。{usageHelp.confirm}
                       </p>
                     )}
                   </>
                 ) : (
                   <>
                     <p>
-                      在辅助功能页点“＋”，文件选择器按
-                      {" "}
-                      <kbd>⌘⇧G</kbd>
-                      ，输入项目的绝对路径并选择下方 Dev 可执行文件；启用开关后完全重启客户端。
+                      在辅助功能页点“＋”，选择「应用程序」中的 Pet Manager，启用开关后重新打开应用。
                     </p>
-                    <code>{VISIBLE_COMPOSER_DEV_PATHS.macos}</code>
+                    {import.meta.env.DEV && <code>{VISIBLE_COMPOSER_DEV_PATHS.macos}</code>}
                   </>
                 )}
               </div>

@@ -1,19 +1,17 @@
 {
   "schemaVersion": 4,
   "profile": "v9-640x480-15fps-225f-h264-crf27",
-  "packId": "d468a7bea959f7e98102fbce16cabb1b89dcb602d77fbe5a869204e58e139e01",
+  "packId": "0509b28de7e7cee192e6d4a6939fc833af71a8f83cf37de2fe02f21d8bf0dba7",
   "sourceAssets": [
     {
       "family": "done",
       "videoSha256": "68fa67d96e6b52553887f8a31a0c71f5d96bc82059becfc6ea847083e112ae64",
-      "durationMs": 10080,
-      "audioSha256": "b3b436a084da54d43f91af83ba5001c3337ff430912f7dd5cb6ce4f479160a2e"
+      "durationMs": 10080
     },
     {
       "family": "error",
       "videoSha256": "aebfade615f45ef9c76029f063e43160d30262382e212a5dbf92585702aee657",
-      "durationMs": 15130,
-      "audioSha256": "5386a8ae2132b52ec3e4431078408828f8e701a2cc77a014a8e7de7fd7f8dd12"
+      "durationMs": 15130
     },
     {
       "family": "idle.begging",
@@ -63,8 +61,7 @@
     {
       "family": "waiting_user",
       "videoSha256": "14a4d3de2a5d89dcb59f0402c9d0d63589f92f7d51dcd4d9f7756752d1a235e1",
-      "durationMs": 15130,
-      "audioSha256": "5386a8ae2132b52ec3e4431078408828f8e701a2cc77a014a8e7de7fd7f8dd12"
+      "durationMs": 15130
     },
     {
       "family": "welcome",

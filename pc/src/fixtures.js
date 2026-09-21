@@ -7,9 +7,8 @@
  *            • `AGENT_DISCOVERY_FIXTURES` — scenarios for the agent-detection
  *              flow, consumed by `agent-discovery-contract.js`.
  *            • `BUILTIN_COMPONENT_CENTER` — the actual builtin negative-screen
- *              widget catalog (双键接球 first and 蛙蛙养成 second inside the builtin group,
- *              followed by the remaining games and tools; generated components can still precede
- *              the builtin group) with global SW3 exit / SW1 primary action / joystick directions,
+ *              widget catalog (自选股行情 first in the default sequence, then 双键接球
+ *              and 蛙蛙养成; new user components can precede them) with global SW3 exit / SW1 primary action / joystick directions,
  *              including native Flappy Bird plus tomato-clock /
  *              drink-reminder / current-followed-Agent daily token-usage tools) and the
  *              component-generator prompt + replacement preview metadata,
@@ -23,6 +22,9 @@
  */
 
 import bloomfrogSpriteUrl from "../builtin-clawpkgs/bloomfrog_companion/assets/bloomfrog.png";
+import stockManifest from "../builtin-clawpkgs/stock-watchlist/component.json";
+import stockWidget from "../builtin-clawpkgs/stock-watchlist/runtime/widget.json";
+import stockBindings from "../builtin-clawpkgs/stock-watchlist/buttons.json";
 
 export const AGENT_DISCOVERY_FIXTURES = {
   ready_available: {
@@ -111,6 +113,24 @@ export const AGENT_DISCOVERY_FIXTURES = {
 
 export const BUILTIN_COMPONENT_CENTER = {
   components: [
+    {
+      id: "stock-watchlist",
+      name: stockManifest.name,
+      version: stockManifest.version,
+      kind: "tool",
+      category: "内置工具",
+      source: "PC 实时行情",
+      status: "available",
+      accent: "blue",
+      runtimeEngine: stockWidget.engine,
+      dataSource: stockWidget.data.source,
+      goal: stockManifest.description,
+      capabilities: ["widget.data", "input.device_global_exit"],
+      packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "分享信息"],
+      dashboard: stockWidget.dashboard,
+      defaultBindings: stockBindings,
+      screens: [{ name: stockManifest.name, purpose: "每页显示 5 只自选股的最新价格与涨跌幅。", regions: [] }],
+    },
     {
       id: "two-key-pong",
       name: "双键接球",

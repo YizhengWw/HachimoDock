@@ -146,7 +146,7 @@ export const P4_CARDS = [
         control: "sw2",
         rows: [
           { gesture: "短按", action: "切换宠物/组件" },
-          { gesture: "长按", action: "暂不绑定" },
+          { gesture: "长按", action: "开始 / 结束实时对话" },
         ],
       },
       {

@@ -1,6 +1,6 @@
 /**
  * [Input] Raw provider and per-family generation errors.
- * [Output] Node regression coverage for concise, actionable provider failures without legacy browser-model errors.
+ * [Output] Regression coverage for actionable failures, reference-image policy rejection, manual MP4 guidance and skipped-action summaries.
  * [Pos] test node in pc/src/lib
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -78,4 +78,35 @@ test("raw provider errors are translated into product-level guidance", () => {
     normalizeGenerationErrorMessage('volcano submit HTTP 401: {"error":{"message":"invalid api key"}}'),
     /API Key 无效或已过期/,
   );
+});
+
+test("portrait upload alternative survives the all-actions-failed summary", () => {
+  const raw = 'volcano submit HTTP 400: {"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"input image may contain real person"}}';
+  const summary = normalizeGenerationErrorMessage(buildAllFamiliesFailedMessage([
+    { family: "welcome", ok: false, error: raw },
+    { family: "working", ok: false, skipped: true, error: raw },
+  ]));
+  assert.match(summary, /参考图未通过人像审核/);
+  assert.match(summary, /自行生成动态形象并导出 MP4/);
+  assert.match(summary, /形象画廊 → 新建自定义形象 → 自定义上传视频/);
+  assert.match(summary, /上传 MP4 替换/);
+  assert.equal((summary.match(/自行生成动态形象/g) || []).length, 1);
+});
+
+test("image copyright rejection is not misreported as bad parameters or credentials", () => {
+  const raw = 'volcano submit HTTP 400: {"error":{"code":"InputImageSensitiveContentDetected.PolicyViolation","message":"The input image content[1] content[2] may be related to copyright restrictions. Request id: test-id","type":"BadRequest"}}';
+  const message = normalizeGenerationErrorMessage(raw);
+  assert.match(message, /^图生视频失败：/);
+  assert.match(message, /参考图未通过版权审核/);
+  assert.match(message, /可能涉及版权限制/);
+  assert.match(message, /复核/);
+  assert.doesNotMatch(message, /请求参数|API Key|模型不可用/);
+  const summary = buildAllFamiliesFailedMessage([
+    { family: "welcome", ok: false, error: raw },
+    { family: "working", ok: false, skipped: true, error: raw },
+  ]);
+  assert.equal((summary.match(/参考图未通过版权审核/g) || []).length, 1);
+  assert.match(summary, /停止提交剩余 1 个动作/);
+  assert.match(summary, /已完成的结果保留/);
+  assert.match(normalizeGenerationErrorMessage('volcano submit HTTP 400: {"error":{"code":"InvalidParameter","message":"unsupported ratio"}}'), /请求参数不被当前模型接受/);
 });

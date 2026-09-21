@@ -1,0 +1,49 @@
+.smart-home { color: var(--text-primary, #14151a); }
+.smart-home .page-shell__body { display: grid; gap: 18px; }
+.smart-home button { cursor: pointer; }
+.smart-home button:disabled { cursor: not-allowed; opacity: .5; }
+.smart-home .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.smart-home input:not([type=checkbox]), .smart-home select, .smart-home textarea { border: 1px solid #e6e7eb; border-radius: 10px; padding: 10px 12px; background: white; color: inherit; min-width: 0; font: inherit; }
+.smart-home input[type=checkbox] { accent-color: #ff6700; }
+.smart-home :focus-visible { outline: 2px solid #ff6700; outline-offset: 3px; }
+.smart-home p, .smart-home small { color: #7c818d; line-height: 1.65; }
+.home-welcome { text-align: center; max-width: 600px; margin: 28px auto; }
+.home-mark { display: inline-flex; align-items: center; justify-content: center; background: #fff1e6; color: #ff6700; border-radius: 14px; padding: 12px; }
+.home-auth { display: grid; gap: 12px; margin-top: 24px; text-align: left; }
+.home-auth textarea { min-height: 80px; }
+.home-toggle { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.home-toggle span { color: #7c818d; font-size: 12px; }
+.home-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 12px; background: #eef0f3; width: fit-content; }
+.home-tabs button { border: none; background: transparent; color: #7c818d; border-radius: 9px; padding: 9px 22px; font: inherit; }
+.home-tabs .is-active { background: white; color: #ff6700; box-shadow: 0 1px 4px #0000000d; }
+.home-filters { display: flex; flex-wrap: wrap; gap: 10px; }
+.home-filters input { flex: 1; }
+.home-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
+.home-device { padding: 20px; background: white; border: 1px solid #e6e7eb; border-radius: 16px; display: grid; gap: 10px; }
+.home-device h3, .home-device p { margin: 0; overflow-wrap: anywhere; }
+.home-device label { font-size: 12px; color: #7c818d; }
+.home-device-head, .home-detail header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.home-online { color: #15a466; background: #eaf8f1; padding: 4px 8px; border-radius: 20px; font-size: 12px; }
+.home-offline { color: #7c818d; font-size: 12px; }
+.home-message { padding: 14px 18px; background: #fff6ed; border: 1px solid #ffdcc1; border-radius: 12px; font-size: 13px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.home-message.is-error { background: #fff1ef; color: #c74733; border-color: #ffd1c9; }
+.home-empty { padding: 30px; text-align: center; color: #7c818d; }
+.home-plan { border: 1px solid #e6e7eb; border-radius: 12px; padding: 16px; margin-bottom: 12px; overflow-wrap: anywhere; }
+.home-plan li { line-height: 1.8; }
+.home-plan > label { display: block; margin: 10px 0; font-size: 12px; color: #7c818d; line-height: 1.6; }
+.home-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.home-draft li { padding: 8px 0; display: flex; align-items: center; gap: 8px; }
+.home-draft li span { flex: 1; overflow-wrap: anywhere; }
+.home-chat { max-height: 280px; overflow: auto; }
+.home-chat p { padding: 12px; background: #f7f8fa; border-radius: 12px; white-space: pre-wrap; }
+.home-chat p strong { display: block; color: #14151a; margin-bottom: 4px; }
+.home-chat .is-user { background: #fff1e6; }
+.home-chat-input { display: flex; gap: 10px; margin: 14px 0; }
+.home-chat-input input { flex: 1; }
+.home-overlay { position: fixed; inset: 0; background: #14151a40; z-index: 100; display: flex; justify-content: flex-end; }
+.home-detail { width: min(520px, 95vw); height: 100%; overflow-y: auto; background: white; padding: 28px; box-sizing: border-box; box-shadow: -8px 0 30px #00000012; }
+.home-detail h2, .home-detail p { margin: 0 0 12px; }
+.home-control { display: grid; gap: 8px; padding: 16px 0; border-bottom: 1px solid #e6e7eb; }
+.home-control + .btn { margin-top: 18px; }
+.smart-home .home-error-text { color: #c74733; }
+@media(max-width: 760px) { .home-grid { grid-template-columns: 1fr; } .home-chat-input { flex-wrap: wrap; } .home-chat-input input { min-width: 180px; } }

@@ -2,7 +2,7 @@
  * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
  * [Output] Read-only active-Agent detection, native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
- *          exact-session visible-composer draft replacement, including
+ *          exact-session per-recording draft append with original-prefix preservation, including
  *          no-op-safe Claude focus confirmation across CLI/desktop metadata aliases, plus
  *          ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
@@ -151,7 +151,7 @@ pub(super) struct MacosComposerState {
     agent: MacosAgent,
     session_id: String,
     session_title: String,
-    last_value: String,
+    draft: crate::voice_draft::VoiceDraft,
     current_visible_target: Option<ComposerTarget>,
 }
 
@@ -1526,7 +1526,7 @@ fn is_composer_element(element: &AXUIElement) -> bool {
 }
 
 fn composer_value(element: &AXUIElement) -> String {
-    let value = normalize_text(&element_value(element));
+    let value = element_value(element).replace("\r\n", "\n");
     if is_placeholder(&value) {
         String::new()
     } else {
@@ -1690,8 +1690,11 @@ fn focus_composer(target: &ComposerTarget) -> Result<(), String> {
 }
 
 fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), String> {
-    let text = normalize_text(text);
+    let text = text.replace("\r\n", "\n");
     focus_composer(target)?;
+    if composer_value(&target.composer) != target.value {
+        return Err("输入框内容在获取焦点后发生变化，已保留原文".into());
+    }
     target
         .composer
         .set_attribute(&AXAttribute::value(), CFString::new(&text).into_CFType())
@@ -1737,7 +1740,7 @@ pub(super) fn begin_voice(
         agent,
         session_id: session_id.to_string(),
         session_title,
-        last_value: String::new(),
+        draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
         current_visible_target: pin_visible_target.then_some(target),
     })
 }
@@ -1749,19 +1752,19 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
         agent,
         session_id: String::new(),
         session_title: String::new(),
-        last_value: String::new(),
+        draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
         current_visible_target: Some(target),
     })
 }
 
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
-    let text = normalize_text(text);
-    if text == state.last_value {
-        return Ok(text);
-    }
+    let text = state.draft.desired(text);
     let mut last_error = String::new();
     for _ in 0..2 {
         match find_voice_target(state).and_then(|target| {
+            if !state.draft.can_update(&target.value, &text) {
+                return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
+            }
             if target.value == text {
                 Ok(())
             } else {
@@ -1769,7 +1772,7 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
             }
         }) {
             Ok(()) => {
-                state.last_value = text.clone();
+                state.draft.last = text.clone();
                 return Ok(text);
             }
             Err(error) => {
@@ -1976,18 +1979,18 @@ pub(super) fn confirm_voice(
         ));
     }
     let text = target.value.clone();
-    state.last_value = text.clone();
+    state.draft.last = text.clone();
     thread::sleep(Duration::from_millis(80));
     focus_composer(&target)?;
     press_enter(target.agent, &target.app)?;
 
     match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY) {
         Ok(SubmitReadback::Confirmed) => {
-            state.last_value.clear();
+            state.draft.last.clear();
             return Ok(String::new());
         }
         Ok(SubmitReadback::ComposerChanged) => {
-            state.last_value.clear();
+            state.draft.last.clear();
             return Err(format!(
                 "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
                 state.agent.label()
@@ -2010,11 +2013,11 @@ pub(super) fn confirm_voice(
 
     match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT) {
         Ok(SubmitReadback::Confirmed) => {
-            state.last_value.clear();
+            state.draft.last.clear();
             return Ok(String::new());
         }
         Ok(SubmitReadback::ComposerChanged) => {
-            state.last_value.clear();
+            state.draft.last.clear();
             return Err(format!(
                 "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
                 state.agent.label()
@@ -2030,15 +2033,12 @@ pub(super) fn confirm_voice(
 }
 
 pub(super) fn cancel_voice(state: &mut MacosComposerState) {
-    if state.last_value.is_empty() {
-        return;
-    }
     if let Ok(target) = find_voice_target(state) {
-        if target.value == state.last_value {
-            let _ = replace_composer_text(&target, "");
+        if let Some(base) = state.draft.rollback(&target.value) {
+            let _ = replace_composer_text(&target, base);
         }
     }
-    state.last_value.clear();
+    state.draft.last = state.draft.base.clone();
 }
 
 #[cfg(debug_assertions)]

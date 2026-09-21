@@ -1,8 +1,10 @@
 /**
  * [Input] children tree consuming useDeviceContext; Tauri invoke/listen for verified P4 USB status, appearance sync progress, manual serial rescan, bindings, and agents; lib helpers for appearance/agent storage.
  * [Output] Single USB-only source of polling and derived state (binding, USB status, deviceOnline, force-refreshable appearances, agentAppearanceMap, enabledAgents, bridge-authoritative selectedAgentId, agentOptions, agentScan, currentDisplay, target-verified per-device currentComponent, cancellable appearanceSync); USB polling is single-flight and suppresses unchanged Context updates; defaults a truly unconfigured first run to Codex while preserving saved local/Bridge selection, exposes deduplicated manual Agent refresh plus focus-triggered stale refresh, hydrates the active channel from the bridge profile before trusting localStorage cache, and keeps follow changes explicitly USB-only; Rust owns background serial auto-connect while manual rescan can explicitly scan/connect.
+ *          Saved-persona events refresh the current target immediately; every conversation start reads fresh disk settings.
+ *          Current-key usage help is published by the dashboard and consumed across setup surfaces.
  * [Pos] component node in pc/src/shell
- * [Sync] If this file changes, update `pc/src/shell/.folder.md`.
+ * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
 
 import React, {
@@ -15,6 +17,7 @@ import React, {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { buildUsageHelp } from "../lib/usage-help.js";
 import { listen } from "@tauri-apps/api/event";
 import {
   DEFAULT_AGENT_ID,
@@ -28,7 +31,8 @@ import {
   saveEnabledAgents,
 } from "../lib/agent-appearance-config.js";
 import { applyDesktopPetAssignment } from "../lib/desktop-pet-assignment.js";
-import { listAppearances } from "../lib/appearance-store.js";
+import { getAppearance, listAppearances } from "../lib/appearance-store.js";
+import { buildRealtimeChatStartInput, PERSONA_VOICE_UPDATED_EVENT } from "../lib/persona-voice.js";
 import {
   readActiveComponentForTarget,
   readConfiguredComponentSshHost,
@@ -56,6 +60,7 @@ const USB_STATUS_POLL_MS = 3_000;
 const USB_STATUS_SLOW_WARNING_MS = 10_000;
 
 const DeviceContext = createContext(null);
+const EMPTY_USAGE_HELP = buildUsageHelp();
 
 function bridgeEnabledAgents(profile) {
   const selectedAgentId = profile?.selectedAgentId || "";
@@ -67,8 +72,10 @@ function bridgeEnabledAgents(profile) {
 }
 
 export function DeviceContextProvider({ binding: bindingProp, onBindingChange, children }) {
+  const [usageHelp, setUsageHelp] = useState(EMPTY_USAGE_HELP);
   const [binding, setBindingState] = useState(bindingProp || null);
   useEffect(() => setBindingState(bindingProp || null), [bindingProp]);
+  useEffect(() => { if (!binding) setUsageHelp(EMPTY_USAGE_HELP); }, [binding]);
 
   const [usb, setUsb] = useState({ connected: false, portName: "", boardDeviceId: "" });
   const [appearances, setAppearances] = useState([]);
@@ -111,6 +118,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   );
   const [appearanceSync, setAppearanceSync] = useState(EMPTY_APPEARANCE_SYNC);
   const appearanceSyncTokenRef = useRef(0);
+  // 实时对话（2026-09-18）：Rust 持有会话，这里只镜像状态并把板端按键请求解析成当前形象。
+  const [realtimeChat, setRealtimeChat] = useState({ active: false, state: "idle", error: "", reason: "" });
 
   // --- USB status poll (3s); serial auto-connect is owned by the Rust backend. ---
   useEffect(() => {
@@ -324,8 +333,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       };
       emitAppearanceSyncProgress(initialProgress || {
         text: appearance?.name
-          ? `准备下发「${appearance.name}」到设备端...`
-          : "准备下发形象到设备端...",
+          ? `正在切换到「${appearance.name}」，优先使用设备已有素材…`
+          : "正在切换形象，优先使用设备已有素材…",
         percent: 0,
       });
       const currentAppearanceId = currentDisplay.appearance?.id || "";
@@ -400,6 +409,80 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
     [onBindingChange],
   );
 
+  const realtimeTargetRef = useRef({ appearance: null, boardDeviceId: "" });
+  useEffect(() => {
+    const onPersonaSaved = (event) => {
+      const { appearanceId, personaVoice } = event.detail || {};
+      if (!appearanceId || !personaVoice) return;
+      setAppearances((records) => records.map((record) => record.id === appearanceId ? { ...record, personaVoice } : record));
+      const target = realtimeTargetRef.current;
+      if (target.appearance?.id === appearanceId) {
+        realtimeTargetRef.current = { ...target, appearance: { ...target.appearance, personaVoice } };
+      }
+    };
+    window.addEventListener(PERSONA_VOICE_UPDATED_EVENT, onPersonaSaved);
+    return () => window.removeEventListener(PERSONA_VOICE_UPDATED_EVENT, onPersonaSaved);
+  }, []);
+  useEffect(() => {
+    realtimeTargetRef.current = {
+      appearance: currentDisplay.appearance || null,
+      boardDeviceId: String(usb.boardDeviceId || "").trim(),
+    };
+  }, [currentDisplay.appearance, usb.boardDeviceId]);
+
+  const startRealtimeChat = useCallback(async (options = {}) => {
+    const target = realtimeTargetRef.current;
+    const selectedAppearance = options.appearance || target.appearance;
+    const appearance = selectedAppearance ? await getAppearance(selectedAppearance.id) : null;
+    const boardDeviceId = String(options.boardDeviceId || target.boardDeviceId || "").trim();
+    if (!appearance) throw new Error("设备上还没有形象，先在画廊里应用一个形象");
+    if (!appearance.personaVoice?.configured) {
+      throw new Error(`「${appearance.name}」还没有设置人设与声音，先在画廊卡片右下角设置`);
+    }
+    if (!boardDeviceId) throw new Error("设备未通过 USB 连接");
+    const status = await invoke("realtime_chat_start", { input: buildRealtimeChatStartInput(appearance, boardDeviceId) });
+    setRealtimeChat((current) => ({ ...current, ...status, error: "" }));
+    return status;
+  }, []);
+
+  const stopRealtimeChat = useCallback(async (reason = "ui") => {
+    const status = await invoke("realtime_chat_stop", { reason });
+    setRealtimeChat((current) => ({ ...current, ...status }));
+    return status;
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners = [];
+    invoke("realtime_chat_status")
+      .then((status) => { if (!disposed && status) setRealtimeChat((current) => ({ ...current, ...status })); })
+      .catch(() => {});
+    listen("realtime-chat-state", (event) => {
+      const status = event?.payload;
+      if (status && typeof status === "object") setRealtimeChat((current) => ({ ...current, ...status }));
+    }).then((stop) => { if (disposed) stop(); else unlisteners.push(stop); }).catch(() => {});
+    // Recover the final error even if a fast failure raced listener registration.
+    const refresh = setInterval(() => {
+      invoke("realtime_chat_status").then((status) => {
+        if (!disposed && status?.sessionId) setRealtimeChat((current) => ({ ...current, ...status }));
+      }).catch(() => {});
+    }, 2000);
+    // 板端「实时对话」键：Rust 不知道设备上是哪个形象，由这里用当前形象拉起会话。
+    listen("realtime-chat-request", (event) => {
+      const boardDeviceId = String(event?.payload?.boardDeviceId || "").trim();
+      startRealtimeChat({ boardDeviceId }).catch((error) => {
+        const message = error?.message || String(error);
+        setRealtimeChat((current) => ({ ...current, active: false, state: "idle", error: message }));
+        invoke("usb_send_speech", { text: message.slice(0, 60) }).catch(() => {});
+      });
+    }).then((stop) => { if (disposed) stop(); else unlisteners.push(stop); }).catch(() => {});
+    return () => {
+      disposed = true;
+      clearInterval(refresh);
+      unlisteners.forEach((stop) => { try { stop(); } catch { /* ignore */ } });
+    };
+  }, [startRealtimeChat]);
+
   const value = useMemo(
     () => ({
       binding,
@@ -418,6 +501,11 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       currentComponent,
       currentComponentTarget,
       appearanceSync,
+      realtimeChat,
+      usageHelp,
+      setUsageHelp,
+      startRealtimeChat,
+      stopRealtimeChat,
       applyDesktopPet,
       cancelAppearanceSync,
       saveAgentAppearance,
@@ -443,6 +531,10 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       currentComponent,
       currentComponentTarget,
       appearanceSync,
+      realtimeChat,
+      usageHelp,
+      startRealtimeChat,
+      stopRealtimeChat,
       applyDesktopPet,
       cancelAppearanceSync,
       saveAgentAppearance,
@@ -460,4 +552,8 @@ export function useDeviceContext() {
   const ctx = useContext(DeviceContext);
   if (!ctx) throw new Error("useDeviceContext must be used inside <DeviceContextProvider>");
   return ctx;
+}
+
+export function useUsageHelp() {
+  return useContext(DeviceContext)?.usageHelp || EMPTY_USAGE_HELP;
 }

@@ -1,7 +1,8 @@
 /**
  * [Input] image + provider config + onProgress callback + AbortSignal.
  * [Output] orchestrates Ark Seedream background editing + Responses prompt generation + low-resolution
- *          custom-generation family video tasks in parallel, or a user-prompted single-family replacement.
+ *          bounded parallel video tasks with shared-reference rejection stopping unsubmitted actions,
+ *          or a user-prompted single-family replacement; completed results remain available.
  * [Pos] orchestrator node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
@@ -13,7 +14,7 @@ import { resolveGenerationSpeedConfig } from "./pipeline-defaults.js";
 import { requireAvailableVideoModel } from "./video-models.js";
 import { buildDryRunResponse, normalizeFamilies, normalizePromptResponse } from "./prompts.js";
 import { callThinkingModel, DEFAULT_THINKING_MODEL } from "./thinking-model.js";
-import { runVolcanoFamily } from "./providers/volcano.js";
+import { getVolcanoInputImageRejection, runVolcanoFamily } from "./providers/volcano.js";
 import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 import { runKlingFamily } from "./providers/kling.js";
 import { runCustomFamily } from "./providers/custom.js";
@@ -418,6 +419,7 @@ export async function runAvatarPipeline({
   progress.message = `正在生成 ${manifest.entries.length} 个动画 (${runtimeConfig.fastGeneration ? "快速低清" : "标准"} / 并发 ${CONCURRENCY})…`;
   emit();
 
+  let sharedImageError = "";
   async function runOne(entry) {
     setStatus(progress, entry.family, { status: "submitting" });
     emit();
@@ -517,6 +519,12 @@ export async function runAvatarPipeline({
       return familyResult;
     } catch (err) {
       const message = err?.message || String(err);
+      if (!["kling", "custom"].includes(effectiveProviderConfig.provider)
+        && getVolcanoInputImageRejection(err)) {
+        sharedImageError ||= message;
+        progress.referenceImageError = getVolcanoInputImageRejection(err).message;
+        progress.message = "共用参考图未通过审核，已停止提交后续动作；等待已提交任务结束，保留成功结果。";
+      }
       // Log the full error so the UI's condensed `message` (e.g. bare "Type error")
       // can be traced to the actual network call / stack that threw.
       console.error(`[avatar-pipeline] family="${entry.family}" failed:`, err);
@@ -539,6 +547,17 @@ export async function runAvatarPipeline({
       if (signal?.aborted) return;
       const idx = cursor++;
       if (idx >= manifest.entries.length) return;
+      if (sharedImageError) {
+        const entry = manifest.entries[idx];
+        familiesResult[idx] = {
+          family: entry.family, prompt: entry.prompt, ok: false,
+          skipped: true, error: sharedImageError,
+        };
+        setStatus(progress, entry.family, { status: "failed", skipped: true, error: sharedImageError });
+        progress.completed += 1;
+        emit();
+        continue;
+      }
       familiesResult[idx] = await runOne(manifest.entries[idx]);
     }
   }
@@ -550,7 +569,9 @@ export async function runAvatarPipeline({
 
   // Allow partial success: caller decides if there's at least one to save.
   progress.stage = "saving";
-  progress.message = "正在写入本地资源…";
+  progress.message = sharedImageError
+    ? `${progress.referenceImageError} 已停止提交剩余 ${familiesResult.filter((family) => family.skipped).length} 个动作，成功生成 ${familiesResult.filter((family) => family.ok).length} 个动作；成功结果保留。`
+    : "正在写入本地资源…";
   emit();
 
   return {

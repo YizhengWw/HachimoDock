@@ -14,7 +14,7 @@
  *          persistent USB transfer diagnostics, and serialized, exact-board
  *          native-only appearance attempts,
  *          USB desktop identity propagation,
- *          foreground-Agent-first / device-bubble-fallback visible-composer
+ *          foreground-Agent-first / device-bubble-fallback append-only-across-recordings visible-composer
  *          voice drafts consumed only by an explicit same-board global Confirm action,
  *          formal local component latest-version listing/deletion with game/tool kind
  *          and manifest descriptions for component-center card summaries, without a manual import command,
@@ -37,7 +37,7 @@
  *          Agent/Session routing, utterance-correlated delivery events,
  *          single-claim final recognition, cloud speech recognition, and
  *          prompt-free owner-only macOS ASR credential-file initialization,
- *          activation-gated, draft-replacing, AX-node-rebindable live/final Codex/Claude visible-composer synchronization
+ *          activation-gated, prefix-preserving, AX-node-rebindable live/final Codex/Claude visible-composer synchronization
  *          plus macOS MiMoCode current-caret draft insertion, with Return/send reserved for the device Confirm action,
  *          with non-prompting macOS Accessibility diagnostics and native system-consent requests at startup and protected operations,
  *          without background fallback, managed bridge-only non-visible-agent voice injection, stale
@@ -53,12 +53,26 @@
  */
 
 mod clawpkg;
+mod widget_data;
+mod stock_quotes;
 mod codex_composer;
 mod codex_import;
 mod component_library;
+mod doubao_tts;
 mod pc_audio;
+mod pc_playback;
+mod persona_llm;
+mod miot_protocol;
+mod smart_home;
+mod smart_home_credentials;
+mod llm_network;
+mod internal_credentials;
+mod voice_draft;
+mod realtime_chat;
+mod realtime_chat_log;
 mod usb_audio;
 mod usb_serial;
+mod voice_chat_settings;
 mod volcengine_asr;
 
 use serde::{Deserialize, Serialize};
@@ -197,8 +211,13 @@ fn ensure_default_appearance_audio_cues(
             continue;
         }
         let dest = videos_dir.join(format!("{}.wav", family_name));
-        if !dest.is_file() {
-            let _ = fs::copy(source, dest);
+        // Only families without an explicit audioPath use our bundled default.
+        // Refresh stale defaults after app upgrades; never replace uploaded cues.
+        let bundled = fs::read(&source)
+            .map_err(|e| format!("读取默认提示音失败: {e}"))?;
+        if fs::read(&dest).ok().as_deref() != Some(bundled.as_slice()) {
+            fs::write(&dest, &bundled)
+                .map_err(|e| format!("更新默认提示音失败: {e}"))?;
         }
     }
     Ok(())
@@ -353,7 +372,7 @@ fn reconnect_usb_serial_to_expected_board(
 /// Build a reqwest blocking client that is *immune* to system / shell HTTP
 /// proxy env vars (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, …).
 ///
-/// All HTTP that flows through this binary today is loopback or LAN
+/// HTTP routed through this helper is exclusively loopback or LAN
 /// (`127.0.0.1:23333` to the bridge sidecar, `192.168.44.1:80` to the
 /// board's AP-mode HTTP server). `reqwest`'s default behaviour is to
 /// honour `ALL_PROXY` regardless, and its `NO_PROXY` parser is stricter
@@ -989,9 +1008,9 @@ fn stop_device_voice_context(
     context: &Arc<DeviceVoiceContext>,
     reason: &str,
     emit_cancelled: bool,
-) {
+) -> Result<(), String> {
     if context.cancelled.swap(true, Ordering::SeqCst) {
-        return;
+        return Ok(());
     }
     context.composer_startup_ready.notify_all();
     if let Ok(recognizer) = context.recognizer.lock() {
@@ -999,9 +1018,11 @@ fn stop_device_voice_context(
             recognizer.cancel();
         }
     }
+    let mut released = Ok(());
     if let Ok(composer) = context.composer.lock() {
         if let Some(composer) = composer.as_ref() {
-            composer.cancel();
+            if emit_cancelled { composer.cancel(); }
+            else { released = composer.preserve_draft(); }
         }
     }
     if emit_cancelled {
@@ -1014,14 +1035,15 @@ fn stop_device_voice_context(
         emit_device_voice_transcript(context, "cancelled", revision, &text, false, false, reason);
     }
     complete_device_voice_context(context);
+    released
 }
 
 fn cancel_device_voice_context(context: &Arc<DeviceVoiceContext>, reason: &str) {
-    stop_device_voice_context(context, reason, true);
+    let _ = stop_device_voice_context(context, reason, true);
 }
 
-fn supersede_device_voice_context(context: &Arc<DeviceVoiceContext>) {
-    stop_device_voice_context(context, "superseded by a new device recording", false);
+fn supersede_device_voice_context(context: &Arc<DeviceVoiceContext>) -> Result<(), String> {
+    stop_device_voice_context(context, "superseded by a new device recording", false)
 }
 
 fn submit_device_voice_via_agent_bus(context: Arc<DeviceVoiceContext>, text: String) {
@@ -1546,7 +1568,10 @@ fn start_device_voice_context(
             "[device-voice] superseding utterance={} with utterance={}",
             previous.utterance_id, context.utterance_id
         );
-        supersede_device_voice_context(&previous);
+        if let Err(error) = supersede_device_voice_context(&previous) {
+            fail_device_voice_context(&context, &format!("上一段语音仍在写入，原草稿已保留，请稍后重试：{error}"));
+            return;
+        }
     }
 
     emit_device_voice_transcript(&context, "listening", 0, "", false, true, "");
@@ -2277,6 +2302,11 @@ fn handle_incoming_usb_message(
 ) {
     resolve_button_config_ack(&topic, &payload);
 
+    // 实时对话进行中：设备麦克风流归实时对话，不进 PTT 语音输入链路。
+    if (topic.starts_with("audio/") || topic == "protocol/ack") && realtime_chat::route_device_audio(&topic, &payload) {
+        return;
+    }
+
     if topic.starts_with("audio/") {
         let (relay_event, validated_chunk, completed_audio) = match usb_audio_relay().lock() {
             Ok(mut relay) => {
@@ -2438,6 +2468,9 @@ fn handle_incoming_usb_message(
     }
 
     if topic == "input/action" || topic == "input/event" {
+        if realtime_chat::handle_input_event(emitter, &payload) {
+            return;
+        }
         let Some(agent_input) = extract_usb_agent_input(&topic, &payload) else {
             return;
         };
@@ -3576,9 +3609,11 @@ fn audio_bridge_signal_blocking(
         "ok": true,
         "boardDeviceId": boardDeviceId,
         "sent": serde_json::Value::Object(obj),
-        "usbSent": usb_sent,        "usbError": usb_error,
+        "usbSent": usb_sent,
+        "usbError": usb_error,
         "usbAudioRelay": usb_audio_relay_status,
-        "pcAudioCapture": pc_audio_capture_status,    }))
+        "pcAudioCapture": pc_audio_capture_status,
+    }))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -3618,6 +3653,7 @@ fn is_allowed_button_config_action(action: &str) -> bool {
     matches!(
         action,
         "voice_ptt"
+            | realtime_chat::ACTION_ID
             | "system_page"
             | "system_reset"
             | "volume_adjust"
@@ -5831,30 +5867,24 @@ async fn detect_local_agents() -> Result<AgentDiscoveryResponse, String> {
 /// `Content-Disposition` filenames from Volcano TOS CDN).
 #[tauri::command]
 async fn download_bytes(url: String) -> Result<Vec<u8>, String> {
-    eprintln!("[download_bytes] GET {url}");
+    eprintln!("[download_bytes] GET");
     let started = std::time::Instant::now();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()
-            .map_err(|e| format!("build client: {e}"))?;
-        let url_for_err = url.clone();
+    let result = async {
+        let client = llm_network::download_client(Duration::from_secs(120))?;
         let response = client
             .get(&url)
-            .send()
-            .map_err(|e| format!("GET {url_for_err}: {e}"))?;
+            .send().await
+            .map_err(|e| llm_network::connection_error(&e))?;
         let status = response.status();
         if !status.is_success() {
             return Err(format!(
-                "HTTP {} downloading {url_for_err}",
+                "素材下载失败（HTTP {}）",
                 status.as_u16()
             ));
         }
-        let bytes = response.bytes().map_err(|e| format!("read body: {e}"))?;
+        let bytes = response.bytes().await.map_err(|e| llm_network::connection_error(&e))?;
         Ok(bytes.to_vec())
-    })
-    .await
-    .map_err(|e| format!("join blocking task: {e}"))?;
+    }.await;
     match &result {
         Ok(bytes) => eprintln!(
             "[download_bytes] OK {} bytes in {} ms",
@@ -5891,24 +5921,20 @@ async fn http_request_text(
 
     let headers: HashMap<String, String> = match headers_json {
         Some(raw) if !raw.trim().is_empty() => {
-            serde_json::from_str(&raw).map_err(|e| format!("invalid headersJson: {e}"))?
+            serde_json::from_str(&raw).map_err(|_| "请求头格式无效".to_string())?
         }
         _ => HashMap::new(),
     };
 
-    eprintln!("[http_request_text] {} {}", method, url);
+    // Never log URLs: provider/CDN queries can carry signed credentials.
+    eprintln!("[http_request_text] request");
     let started = std::time::Instant::now();
-    let log_method = method.clone();
-    let log_url = url.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
+    let result = async {
         let timeout_ms = timeout_ms.unwrap_or(120_000).max(1);
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
-            .map_err(|e| format!("build client: {e}"))?;
+        let client = llm_network::client(Duration::from_millis(timeout_ms))?;
 
         let req_method = reqwest::Method::from_bytes(method.as_bytes())
-            .map_err(|e| format!("invalid method {method}: {e}"))?;
+            .map_err(|_| "请求方法无效".to_string())?;
         let mut request = client.request(req_method.clone(), &url);
 
         for (name, value) in headers {
@@ -5918,33 +5944,27 @@ async fn http_request_text(
             request = request.body(body);
         }
 
-        let response = request.send().map_err(|e| format!("{method} {url}: {e}"))?;
+        let response = request.send().await.map_err(|e| llm_network::connection_error(&e))?;
         let status = response.status();
         let body = response
-            .text()
-            .map_err(|e| format!("read {method} {url} body: {e}"))?;
+            .text().await
+            .map_err(|e| llm_network::connection_error(&e))?;
 
         Ok(HttpTextResponse {
             status: status.as_u16(),
             ok: status.is_success(),
             body,
         })
-    })
-    .await
-    .map_err(|e| format!("join blocking task: {e}"))?;
+    }.await;
 
     match &result {
         Ok(response) => eprintln!(
-            "[http_request_text] {} {} -> {} in {} ms",
-            log_method,
-            log_url,
+            "[http_request_text] status {} in {} ms",
             response.status,
             started.elapsed().as_millis()
         ),
         Err(e) => eprintln!(
-            "[http_request_text] {} {} !! {} ms: {e}",
-            log_method,
-            log_url,
+            "[http_request_text] failed in {} ms: {e}",
             started.elapsed().as_millis()
         ),
     }
@@ -6412,9 +6432,21 @@ fn validate_appearance_id(appearance_id: &str) -> Result<&str, String> {
     Ok(appearance_id)
 }
 
+fn builtin_terrier_has_audio_overrides(local_dir: &Path) -> Result<bool, String> {
+    let path = local_dir.join("audio-overrides.json");
+    match fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice::<HashMap<String, String>>(&bytes)
+            .map(|items| !items.is_empty())
+            .map_err(|_| "内置形象专属音效设置损坏，请重新保存；未忽略用户音效。".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err("无法读取内置形象专属音效设置".into()),
+    }
+}
+
 fn ensure_builtin_terrier_source(
     app_local_data_dir: &Path,
     clips_dir: &Path,
+    include_default_audio: bool,
 ) -> Result<PathBuf, String> {
     if !clips_dir.is_dir() {
         return Err(format!(
@@ -6471,7 +6503,9 @@ fn ensure_builtin_terrier_source(
             .get(&family)
             .map(|relative| app_local_data_dir.join(relative))
             .filter(|path| path.is_file());
+        let audio_custom = audio_override.is_some();
         let audio_source = audio_override.or_else(|| {
+            if !include_default_audio { return None; }
             default_appearance_audio_cue_name(&family)
                 .map(|cue_name| clips_dir.join(cue_name))
                 .filter(|path| path.is_file())
@@ -6484,6 +6518,7 @@ fn ensure_builtin_terrier_source(
             family_entry["audioPath"] = serde_json::json!(format!(
                 "custom-appearances/builtin-terrier/videos/{audio_name}"
             ));
+            family_entry["audioSource"] = serde_json::json!(if audio_custom { "custom" } else { "default" });
         }
         families.push(family_entry);
     }
@@ -6519,12 +6554,11 @@ fn prepare_p4_appearance_by_id(
         .map_err(|error| format!("resolve resource directory failed: {error}"))?;
     let clips_dir = resource_dir.join("terrier-clips");
     let appearance_dir = if appearance_id == "builtin-terrier" {
-        ensure_builtin_terrier_source(&app_local_data_dir, &clips_dir)?
+        ensure_builtin_terrier_source(&app_local_data_dir, &clips_dir, false)?
     } else {
         let dir = app_local_data_dir
             .join("custom-appearances")
             .join(appearance_id);
-        ensure_default_appearance_audio_cues(&dir, &clips_dir)?;
         dir
     };
     usb_serial::prepare_p4_appearance(&appearance_dir, &app_local_data_dir)
@@ -6547,10 +6581,6 @@ fn start_p4_ready_migration(app_handle: tauri::AppHandle) {
         let Ok(app_local_data_dir) = app_handle.path().app_local_data_dir() else {
             return;
         };
-        let Ok(resource_dir) = app_handle.path().resource_dir() else {
-            return;
-        };
-        let clips_dir = resource_dir.join("terrier-clips");
         let appearances_root = app_local_data_dir.join("custom-appearances");
         let Ok(entries) = fs::read_dir(&appearances_root) else {
             return;
@@ -6564,11 +6594,7 @@ fn start_p4_ready_migration(app_handle: tauri::AppHandle) {
             {
                 continue;
             }
-            if let Err(error) = ensure_default_appearance_audio_cues(&appearance_dir, &clips_dir)
-                .and_then(|_| {
-                    usb_serial::prepare_p4_appearance(&appearance_dir, &app_local_data_dir)
-                        .map(|_| ())
-                })
+            if let Err(error) = usb_serial::prepare_p4_appearance(&appearance_dir, &app_local_data_dir)
             {
                 eprintln!(
                     "[p4-ready] background migration failed source={}: {}",
@@ -6658,28 +6684,42 @@ async fn usb_sync_appearance(
         let local_dir = app_local_data_dir
             .join("custom-appearances")
             .join("builtin-terrier");
+        let has_overrides = builtin_terrier_has_audio_overrides(&local_dir)?;
         match sync_runtime {
             UsbAppearanceSyncRuntime::EspP4
-                if usb_serial::inspect_prepared_p4_appearance(&local_dir).is_ok() =>
+                if has_overrides && usb_serial::inspect_prepared_p4_appearance(&local_dir).is_ok() =>
             {
                 local_dir
             }
-            UsbAppearanceSyncRuntime::EspP4 => clips_dir,
+            UsbAppearanceSyncRuntime::EspP4 if has_overrides => {
+                return Err("专属音效素材尚未准备好，请重新保存音效后再切换。".into());
+            }
+            UsbAppearanceSyncRuntime::EspP4 => clips_dir.clone(),
             UsbAppearanceSyncRuntime::Linux => {
-                ensure_builtin_terrier_source(&app_local_data_dir, &clips_dir)?
+                ensure_builtin_terrier_source(&app_local_data_dir, &clips_dir, true)?
             }
         }
     } else {
         let dir = app_local_data_dir
             .join("custom-appearances")
             .join(&appearance_id);
-        ensure_default_appearance_audio_cues(&dir, &clips_dir)?;
+        if matches!(sync_runtime, UsbAppearanceSyncRuntime::Linux) {
+            ensure_default_appearance_audio_cues(&dir, &clips_dir)?;
+        }
         dir
     };
 
+    let use_device_builtin = appearance_id == "builtin-terrier"
+        && appearance_dir == clips_dir
+        && (!serial_connected || status.capabilities["appearance"]["builtinProtected"] == true);
     match sync_runtime {
         UsbAppearanceSyncRuntime::EspP4 => {
-            usb_serial::inspect_prepared_p4_appearance(&appearance_dir)?;
+            if !use_device_builtin { usb_serial::inspect_prepared_p4_appearance(&appearance_dir)?; }
+            if !use_device_builtin && usb_serial::prepared_p4_requires_system_cues(&appearance_dir)?
+                && serial_connected
+                && status.capabilities["appearance"]["systemCues"] != true {
+                return Err("此形象使用公共提示音，请先升级设备固件至 0.7.63 或更新版本。".into());
+            }
         }
         UsbAppearanceSyncRuntime::Linux if !appearance_dir.join("manifest.json").is_file() => {
             return Err(format!("未找到形象素材: {}", appearance_dir.display()));
@@ -6701,6 +6741,7 @@ async fn usb_sync_appearance(
                         &dir,
                         &data_dir,
                         &expected_board_device_id,
+                        use_device_builtin,
                         |current, total, bytes_sent, bytes_total| {
                             let _ = emitter.emit(
                                 "usb-sync-progress",
@@ -6721,6 +6762,7 @@ async fn usb_sync_appearance(
                         &dir,
                         &data_dir,
                         &expected_board_device_id,
+                        use_device_builtin,
                         |current, total, bytes_sent, bytes_total| {
                             let _ = emitter.emit(
                                 "usb-sync-progress",
@@ -8270,6 +8312,17 @@ async fn purge_clawpkg_sync_cache(app_handle: tauri::AppHandle) -> Result<bool, 
     Ok(true)
 }
 
+/// Publish the fixed bundled stock widget, without importing personal watchlist settings.
+#[tauri::command]
+async fn stock_widget_add(app: tauri::AppHandle) -> Result<component_library::ComponentLibraryEntry, String> {
+    let home = get_home_dir()?;
+    let source = app.path().resource_dir().map_err(|e| e.to_string())?.join("builtin-clawpkgs/stock-watchlist");
+    #[cfg(debug_assertions)]
+    let source = if source.exists() { source } else { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/stock-watchlist") };
+    tauri::async_runtime::spawn_blocking(move || component_library::publish_source(&home, &source))
+        .await.map_err(|e| e.to_string())?
+}
+
 /// Return the latest published version of each formal local component.
 #[tauri::command]
 async fn list_component_library() -> Result<component_library::ComponentLibrarySnapshot, String> {
@@ -8316,9 +8369,14 @@ async fn open_external_url(url: String) -> Result<(), String> {
         #[cfg(target_os = "linux")]
         let status = command_for_host("xdg-open").arg(&target).status();
         #[cfg(target_os = "windows")]
-        let status = command_for_host("cmd")
-            .args(["/C", "start", "", &target])
-            .status();
+        let status: Result<std::process::ExitStatus,std::io::Error> = {
+            use std::os::windows::{ffi::OsStrExt,process::ExitStatusExt};
+            // OAuth URLs contain '&'. Never pass them through cmd.exe or a shell.
+            let url: Vec<u16> = std::ffi::OsStr::new(&target).encode_wide().chain(Some(0)).collect();
+            let verb: Vec<u16> = std::ffi::OsStr::new("open").encode_wide().chain(Some(0)).collect();
+            let code = unsafe { windows_sys::Win32::UI::Shell::ShellExecuteW(std::ptr::null_mut(),verb.as_ptr(),url.as_ptr(),std::ptr::null(),std::ptr::null(),1) } as isize;
+            if code<=32 { Err(std::io::Error::other("无法打开系统浏览器")) } else { Ok(std::process::ExitStatus::from_raw(0)) }
+        };
         match status {
             Ok(s) if s.success() => Ok(()),
             Ok(s) => Err(format!("打开外部资源失败 (exit {:?})", s.code())),
@@ -9713,6 +9771,18 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             volcengine_asr::configure_storage_dir(app.path().app_data_dir()?)
                 .map_err(std::io::Error::other)?;
+            voice_chat_settings::configure_storage_dir(app.path().app_data_dir()?)
+                .map_err(std::io::Error::other)?;
+            llm_network::configure_storage_dir(app.path().app_data_dir()?)
+                .map_err(std::io::Error::other)?;
+            if let Err(error) = stock_quotes::configure(app.path().app_data_dir()?) {
+                eprintln!("[stocks] {error}");
+            }
+            stock_quotes::start(usb_for_auto.clone());
+            smart_home::configure_storage_dir(app.path().app_data_dir()?)
+                .map_err(std::io::Error::other)?;
+            realtime_chat_log::configure(&app.path().app_local_data_dir()?)
+                .map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             start_usb_auto_connect(usb_for_auto, handle.clone());
             start_p4_ready_migration(handle.clone());
@@ -9745,6 +9815,26 @@ pub fn run() {
         })
         .manage(usb_manager)
         .invoke_handler(tauri::generate_handler![
+            stock_quotes::stock_watchlist_status,
+            stock_quotes::stock_watchlist_save,
+            stock_quotes::stock_watchlist_refresh,
+            stock_quotes::stock_quote_lookup,
+            stock_quotes::stock_search,
+            stock_widget_add,
+            smart_home::smart_home_request,
+            smart_home::smart_home_cancel,
+            smart_home::smart_home_chat,
+            realtime_chat::realtime_chat_start,
+            realtime_chat::realtime_chat_stop,
+            realtime_chat::realtime_chat_status,
+            realtime_chat::persona_voice_preview,
+            realtime_chat::realtime_chat_update_persona,
+            realtime_chat::load_voice_chat_settings,
+            realtime_chat::save_voice_chat_settings,
+            realtime_chat::clear_voice_chat_secret,
+            llm_network::load_llm_network_settings,
+            llm_network::save_llm_network_settings,
+            llm_network::test_llm_network_settings,
             wifi_get_status,
             wifi_connect_ap,
             wifi_restore,
@@ -11678,6 +11768,40 @@ fn current_timestamp_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_audio_cues_refresh_without_overwriting_uploaded_cues() {
+        let temp = tempfile::tempdir().unwrap();
+        let appearance = temp.path().join("appearance");
+        let clips = temp.path().join("clips");
+        fs::create_dir_all(appearance.join("videos")).unwrap();
+        fs::create_dir_all(&clips).unwrap();
+        fs::write(clips.join("done.wav"), b"new default").unwrap();
+        fs::write(appearance.join("videos/done.wav"), b"old default").unwrap();
+        let manifest = appearance.join("manifest.json");
+        fs::write(&manifest, r#"{"families":[{"family":"done","ok":true}]}"#).unwrap();
+        ensure_default_appearance_audio_cues(&appearance, &clips).unwrap();
+        assert_eq!(fs::read(appearance.join("videos/done.wav")).unwrap(), b"new default");
+        fs::write(&manifest, r#"{"families":[{"family":"done","ok":true,"audioPath":"videos/done.wav"}]}"#).unwrap();
+        fs::write(appearance.join("videos/done.wav"), b"user uploaded cue").unwrap();
+        ensure_default_appearance_audio_cues(&appearance, &clips).unwrap();
+        assert_eq!(fs::read(appearance.join("videos/done.wav")).unwrap(), b"user uploaded cue");
+    }
+
+    #[test]
+    fn builtin_slot_reuse_respects_audio_overrides_and_ignores_stale_prepared_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!builtin_terrier_has_audio_overrides(tmp.path()).unwrap());
+        fs::create_dir_all(tmp.path().join("p4-ready")).unwrap();
+        assert!(!builtin_terrier_has_audio_overrides(tmp.path()).unwrap());
+        let path = tmp.path().join("audio-overrides.json");
+        fs::write(&path, r#"{"done":"audio-overrides/done.wav"}"#).unwrap();
+        assert!(builtin_terrier_has_audio_overrides(tmp.path()).unwrap());
+        fs::write(&path, "{}").unwrap();
+        assert!(!builtin_terrier_has_audio_overrides(tmp.path()).unwrap());
+        fs::write(&path, "broken").unwrap();
+        assert!(builtin_terrier_has_audio_overrides(tmp.path()).is_err());
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

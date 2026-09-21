@@ -1,7 +1,7 @@
 interface:
   display_name: "petui"
-  short_description: "生成 PNG 优先且通过完整玩法自测的 P4 组件"
-  default_prompt: "Use $petui to generate, validate, gameplay-test, and publish a polished PNG-first P4 game or tool component."
+  short_description: "生成并校验 P4 游戏、工具与由 PC 提供实时数据的列表组件"
+  default_prompt: "Use $petui to generate, validate, test, and publish a P4 game, tool, or live-data component backed by an available PC data source."
 
 policy:
   allow_implicit_invocation: true

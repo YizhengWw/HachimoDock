@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
@@ -205,6 +206,8 @@ typedef struct {
   pet_p4_miniapp_sprite_pack_t sprites;
   miniapp_rule_t rules[MINIAPP_SLOT_COUNT];
   pet_p4_miniapp_view_t view;
+  char data_source[48];
+  int8_t data_page_var;
 } miniapp_runtime_t;
 
 typedef struct {
@@ -1164,6 +1167,8 @@ static void refresh_view(miniapp_runtime_t *runtime) {
   view->active = runtime->active;
   view->progress_percent = -1;
   view->revision = next_revision;
+  copy_utf8(view->data_source, sizeof(view->data_source), runtime->data_source);
+  if (runtime->data_source[0]) view->data_page = runtime->vars[runtime->data_page_var].int_value;
   copy_utf8(view->widget_id, sizeof(view->widget_id), runtime->widget_id);
   if (runtime->current_state >= 0) {
     copy_utf8(view->state, sizeof(view->state), runtime->states[runtime->current_state]);
@@ -1220,7 +1225,7 @@ static bool parse_runtime(
   static const char *const allowed[] = {
     "schema_version", "vars", "states", "initial_state", "pages", "initial_page",
     "transitions", "tick", "dashboard", "fetchers", "readers", "engine", "scene",
-    "game",
+    "game", "data",
   };
   cJSON *root;
   const cJSON *schema;
@@ -1270,6 +1275,24 @@ static bool parse_runtime(
     goto fail;
   }
   if (!parse_vars(parsed, cJSON_GetObjectItemCaseSensitive(root, "vars"), error, error_size)) goto fail;
+  const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  if (data) {
+    static const char *const data_keys[] = {"source", "page_var"};
+    const char *source = json_string(data, "source");
+    int page_var = find_var(parsed, json_string(data, "page_var"));
+    if (!runtime_v4 || scene || legacy_game || !cJSON_IsObject(data)
+        || !object_keys_allowed(data, data_keys, 2) || !source[0] || strlen(source) > 47
+        || page_var < 0 || parsed->vars[page_var].type != MINIAPP_VAR_INT) {
+      set_error(error, error_size, "invalid bounded data source/page_var"); goto fail;
+    }
+    for (const char *p = source; *p; p++) {
+      if (!((*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '.' || *p == '_' || *p == '-')) {
+        set_error(error, error_size, "invalid data source id"); goto fail;
+      }
+    }
+    copy_utf8(parsed->data_source, sizeof(parsed->data_source), source);
+    parsed->data_page_var = page_var;
+  }
   if (!parse_name_array(cJSON_GetObjectItemCaseSensitive(root, "states"), parsed->states,
                         &parsed->state_count, MINIAPP_MAX_STATES, "states", error, error_size)) goto fail;
   initial_state = json_string(root, "initial_state");
@@ -1554,6 +1577,7 @@ bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out) {
   portENTER_CRITICAL(&g_runtime_lock);
   *out = g_runtime.view;
   portEXIT_CRITICAL(&g_runtime_lock);
+  pet_p4_widget_data_view(out->data_source, out->data_page, esp_timer_get_time() / 1000ULL, &out->data);
   return true;
 }
 
@@ -3800,7 +3824,7 @@ static bool restore_active_after_builtin_sync(const char *preferred_widget_id) {
   int index = preferred_widget_id && preferred_widget_id[0]
     ? catalog_find(g_catalog, g_catalog_count, preferred_widget_id)
     : -1;
-  if (index < 0) index = catalog_find(g_catalog, g_catalog_count, "two-key-pong");
+  if (index < 0) index = catalog_find(g_catalog, g_catalog_count, "stock-watchlist");
   if (index < 0 && g_catalog_count > 0) index = 0;
   return index < 0 || activate_catalog_index((size_t) index);
 }
@@ -3821,10 +3845,14 @@ static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
   const cJSON *package;
   if (!cJSON_IsArray(components)) return false;
 
-  // User-created packages remain ahead of product defaults. With no user
-  // packages this still yields the factory order (Pong first, Frog second).
+  // Set the stock widget first during migration; later installs still prepend normally.
+  const int stock_index = catalog_find(g_catalog, g_catalog_count, "stock-watchlist");
+  if (stock_index >= 0) {
+    ordered[ordered_count++] = g_catalog[stock_index];
+    used[stock_index] = true;
+  }
   for (size_t index = 0; index < g_catalog_count; index += 1) {
-    if (builtin_bundle_contains_id(components, g_catalog[index].widget_id)) continue;
+    if (used[index] || builtin_bundle_contains_id(components, g_catalog[index].widget_id)) continue;
     ordered[ordered_count++] = g_catalog[index];
     used[index] = true;
   }
@@ -3873,7 +3901,7 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
       || !cJSON_IsNumber(bundle_version)
       || bundle_version->valueint != 1
       || !cJSON_IsArray(components)
-      || cJSON_GetArraySize(components) != 8) {
+      || cJSON_GetArraySize(components) != 9) {
     cJSON_Delete(bundle);
     ESP_LOGW(TAG, "embedded built-in component bundle is invalid");
     return ESP_ERR_INVALID_RESPONSE;

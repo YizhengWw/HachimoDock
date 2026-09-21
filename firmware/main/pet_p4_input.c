@@ -18,6 +18,7 @@
  */
 
 #include "pet_p4_input.h"
+#include "pet_p4_conversation.h"
 
 #include <stdio.h>
 #include <stdatomic.h>
@@ -194,6 +195,7 @@ static bool action_is_allowed(const char *action) {
   static const char *const allowed[] = {
     "disabled",
     "voice_ptt",
+    "realtime_chat",
     "agent_enter",
     "agent_prompt",
     "session_next",
@@ -247,7 +249,7 @@ static void load_default_config(pet_p4_input_config_t *config) {
   add_default_binding(config, "button.sw1.long_press", "disabled", "");
   add_default_binding(config, "button.sw1.hold", "voice_ptt", "");
   add_default_binding(config, "button.sw2.short_press", "component_center", "");
-  add_default_binding(config, "button.sw2.long_press", "disabled", "");
+  add_default_binding(config, "button.sw2.long_press", "realtime_chat", "");
   add_default_binding(config, "button.sw2.hold", "disabled", "");
   add_default_binding(config, "button.sw3.short_press", "page_back", "");
   add_default_binding(config, "button.sw3.long_press", "disabled", "");
@@ -1286,6 +1288,21 @@ static void dispatch_binding_event(
   const char *gesture
 ) {
   const pet_p4_input_binding_t *binding = active_binding(event_name);
+  if (pet_p4_conversation_active(state)) {
+    // The realtime mode owns input: never move/confirm/send into an Agent session.
+    if (!strcmp(event_name, "joystick.up") || !strcmp(event_name, "knob.rotate_ccw"))
+      pet_p4_conversation_move(state, -1, event->ts_ms);
+    else if (!strcmp(event_name, "joystick.down") || !strcmp(event_name, "knob.rotate_cw"))
+      pet_p4_conversation_move(state, 1, event->ts_ms);
+    else if (binding && (!strcmp(binding->action, "realtime_chat") || !strcmp(binding->action, "page_back"))) {
+      pet_p4_input_binding_t exit = *binding;
+      copy_text(exit.action, sizeof(exit.action), "realtime_chat");
+      send_input_event(state, send_line, ctx, event, event_name, gesture, &exit, "", false);
+      return;
+    }
+    send_ignored_component_event(state, send_line, ctx, event, event_name, gesture);
+    return;
+  }
   const pet_p4_input_binding_t *global_exit = active_global_exit_binding(state, event_name);
   if (global_exit) {
     char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
@@ -1380,7 +1397,7 @@ static void process_button_event(
       || event->gesture == PET_P4_INPUT_GESTURE_HOLD_END) {
     char long_event_name[PET_P4_INPUT_EVENT_MAX];
     snprintf(long_event_name, sizeof(long_event_name), "%s.long_press", prefix);
-    if (state
+    if (state && !pet_p4_conversation_active(state)
         && strcmp(state->screen_page, "app") == 0
         && pet_p4_miniapp_has_input(long_event_name)) {
       return;
@@ -1445,7 +1462,7 @@ void pet_p4_input_process(
           break;
       }
       if (!event_name[0]) continue;
-      if (state
+      if (state && !pet_p4_conversation_active(state)
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
           && !active_global_exit_binding(state, event_name)) {
@@ -1463,7 +1480,7 @@ void pet_p4_input_process(
     } else if (event.control == PET_P4_INPUT_CONTROL_ENCODER
         && event.gesture == PET_P4_INPUT_GESTURE_ROTATE) {
       const char *event_name = event.delta > 0 ? "knob.rotate_cw" : "knob.rotate_ccw";
-      if (state && strcmp(state->screen_page, "components") == 0) {
+      if (state && !pet_p4_conversation_active(state) && strcmp(state->screen_page, "components") == 0) {
         static const pet_p4_input_binding_t select_binding = {
           .event = "knob.rotate_cw",
           .action = "component_select",
@@ -1484,7 +1501,7 @@ void pet_p4_input_process(
         );
         continue;
       }
-      if (state
+      if (state && !pet_p4_conversation_active(state)
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
           && !active_global_exit_binding(state, event_name)) {

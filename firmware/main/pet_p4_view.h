@@ -25,6 +25,9 @@ typedef struct {
   pet_p4_view_status_t status;
   bool show_bubble;
   bool compact_bubble;
+  bool realtime_conversation;
+  bool conversation_history;
+  unsigned long long caption_since_ms;
   // Main-page recording feedback when there is no Session card to host it.
   bool show_voice_overlay;
 } pet_p4_view_model_t;

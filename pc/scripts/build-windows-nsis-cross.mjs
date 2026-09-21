@@ -1,8 +1,8 @@
 /**
  * [Input] A cargo-xwin-built Pet Manager x64 executable and prepared firmware, Node, audited LGPL FFmpeg, notice/source, bridge, and WebView resource sources.
- * [Output] A current-user NSIS installer with exact validated Windows P4 firmware, install-relative Node and LGPL FFmpeg resources, complete corresponding source/notices, and embedded WebView2 bootstrapper.
+ * [Output] A current-user NSIS installer (explicit INTERNAL filename when requested) with exact validated Windows P4 firmware, install-relative Node and LGPL FFmpeg resources, complete corresponding source/notices, and embedded WebView2 bootstrapper.
  * [Pos] Reproducible macOS-to-Windows installer bundler used after `build:win:portable`.
- * [Sync] If this file changes, update `scripts/.folder.md` and `docs/desktop-packaging.md`.
+ * [Sync] If this file changes, update `scripts/.folder.md` and `docs/runtime-dependencies.md`.
  */
 
 import {
@@ -45,7 +45,9 @@ const appExeSource = resolve(
     || join(releaseRoot, "pet-manager-tauri.exe"),
 );
 const appExeName = "Pet Manager.exe";
-const installerName = `Pet_Manager_${version}_x64-setup.exe`;
+const flavor = process.env.PET_MANAGER_WINDOWS_INSTALLER_FLAVOR || "";
+if (flavor && flavor !== "INTERNAL") throw new Error("Unsupported Windows installer flavor");
+const installerName = `Pet_Manager_${version}${flavor ? `_${flavor}` : ""}_x64-setup.exe`;
 const installerPath = join(bundleRoot, installerName);
 const webviewBootstrapperUrl =
   "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
@@ -190,6 +192,9 @@ copyTree(
 mkdirSync(join(stageRoot, "bridge", "runtime"), { recursive: true });
 copyFileSync(windowsNode, join(stageRoot, "bridge", "runtime", "node.exe"));
 mkdirSync(join(stageRoot, "tools"), { recursive: true });
+mkdirSync(join(stageRoot, "licenses"), { recursive: true });
+copyFileSync(join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), join(stageRoot, "THIRD_PARTY_NOTICES.md"));
+copyFileSync(join(repositoryRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"), join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"));
 copyFileSync(windowsFfmpeg, join(stageRoot, "tools", "ffmpeg.exe"));
 for (const notice of ["ffmpeg.LICENSE", "ffmpeg.README", "ffmpeg.SOURCE.txt", "zlib.LICENSE"]) {
   copyFileSync(
@@ -209,6 +214,8 @@ copyTree(
 
 const requiredResources = [
   bundledFirmwareDestination,
+  join(stageRoot, "THIRD_PARTY_NOTICES.md"),
+  join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"),
   join(stageRoot, "bridge", "runtime", "node.exe"),
   join(stageRoot, "tools", "ffmpeg.exe"),
   join(stageRoot, "tools", "ffmpeg.LICENSE"),
@@ -224,6 +231,8 @@ const requiredResources = [
   join(stageRoot, "builtin-clawpkgs", "tomato-clock"),
   join(stageRoot, "builtin-clawpkgs", "drink-reminder"),
   join(stageRoot, "builtin-clawpkgs", "token-usage"),
+  join(stageRoot, "builtin-clawpkgs", "stock-watchlist", "component.json"),
+  join(stageRoot, "builtin-clawpkgs", "stock-watchlist", "runtime", "widget.json"),
   join(stageRoot, "skills", "petui", "SKILL.md"),
 ];
 for (const path of requiredResources) {

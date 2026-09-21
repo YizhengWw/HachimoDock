@@ -410,6 +410,71 @@ class ClaimedMechanicsTests(unittest.TestCase):
         self.assertTrue(any("assets/ 只允许" in error for error in errors), errors)
 
 
+class LiveDataTests(unittest.TestCase):
+    def fixture(self):
+        dashboard = {"title": "实时列表", "headline": "等待数据", "visualStyle": "clean", "visualPalette": "ocean", "visualLayout": "tool", "visualSprite": "gauge"}
+        return {
+            "component.json": {"id": "test-live-data", "name": "实时列表", "kind": "tool", "version": "1.0.0", "description": "展示 PC 数据并翻页。"},
+            "negative-screen.json": {"dashboard": dashboard},
+            "share.json": {"title": "实时列表"},
+            "buttons.json": [
+                {"action": "previous", "control": "前方摇杆", "event": "knob.rotate_ccw", "label": "上一页"},
+                {"action": "next", "control": "前方摇杆", "event": "knob.rotate_cw", "label": "下一页"},
+                {"action": "home", "control": "SW1", "event": "button.sw1.short_press", "label": "首页"}],
+            "runtime/widget.json": {"schema_version": 1, "engine": "p4-bounded-runtime-v4", "vars": {"page": {"type": "int", "init": 0}},
+                "states": ["view"], "initial_state": "view", "data": {"source": "stocks.watchlist", "page_var": "page"},
+                "transitions": [{"on": "previous", "from": "*", "inc": {"page": -1}}, {"on": "next", "from": "*", "inc": {"page": 1}}, {"on": "home", "from": "*", "set": {"page": 0}}],
+                "tick": [], "dashboard": dashboard}}
+
+    def run_values(self, values, capabilities=None):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_fixture(root, values)
+            return run_smoke_test(root, capabilities)
+
+    def test_live_list_covers_all_row_counts_and_real_controls(self):
+        result = self.run_values(self.fixture())
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["mode"], "data-list")
+        self.assertEqual([s["rows"] for s in result["scenarios"]], [0, 1, 6, 11, 16, 20])
+        self.assertEqual(result["visibleActions"], ["home", "next", "previous"])
+        self.assertFalse(result["networkVerified"])
+
+    def test_live_list_rejects_invalid_data_contract(self):
+        for data in (None, {}, {"source": "https://example.com", "page_var": "page"},
+                     {"source": "stocks.watchlist", "page_var": "missing"},
+                     {"source": "stocks.watchlist", "page_var": "page", "refreshInterval": 2000}):
+            with self.subTest(data=data):
+                values = self.fixture()
+                values["runtime/widget.json"]["data"] = data
+                result = self.run_values(values)
+                self.assertFalse(result["ok"])
+                self.assertTrue(any(".data" in e for e in result["errors"]), result)
+        values = self.fixture()
+        caps = VALIDATOR.load_capabilities(None)
+        caps.pop("widgetData")
+        result = self.run_values(values, caps)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("p4-data-list-v1" in e for e in result["errors"]), result)
+        for field in ("scene", "game"):
+            values = self.fixture()
+            values["runtime/widget.json"][field] = None
+            self.assertFalse(self.run_values(values)["ok"])
+
+    def test_dead_controls_and_unreachable_pages_fail_publication_gate(self):
+        values = self.fixture()
+        values["runtime/widget.json"]["transitions"][1]["inc"]["page"] = 0
+        result = self.run_values(values)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("next" in e for e in result["errors"]), result)
+        values = self.fixture()
+        values["runtime/widget.json"]["transitions"][0]["inc"]["page"] = -2
+        values["runtime/widget.json"]["transitions"][1]["inc"]["page"] = 2
+        result = self.run_values(values)
+        self.assertFalse(result["ok"])
+        self.assertTrue(any("不可达" in e for e in result["errors"]), result)
+
+
 class GameplaySmokeTests(unittest.TestCase):
     def smoke_values(self, values: dict[str, object]) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as temporary:

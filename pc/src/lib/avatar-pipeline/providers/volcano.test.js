@@ -1,6 +1,6 @@
 /**
  * [Input] Volcano Ark image-to-video task payload builder.
- * [Output] Node regression coverage for Ark v3 first/last-frame task payload shape, diagnostics, and account-actionable errors.
+ * [Output] Regression coverage for Ark payloads, stage-specific image moderation, conservative portrait classification, manual MP4 guidance, model access and non-retryable failures.
  * [Pos] test node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -14,6 +14,7 @@ import {
   runVolcanoFamily,
   isVolcanoModelRejected,
   clearVolcanoModelRejections,
+  getVolcanoInputImageRejection,
 } from "./volcano.js";
 
 test("Seedance 2.0 payload includes matching first and last frame references", () => {
@@ -39,6 +40,67 @@ test("Seedance 2.0 payload includes matching first and last frame references", (
   assert.equal(payload.watermark, false);
   assert.equal(payload.content[1].role, "first_frame");
   assert.equal(payload.content[2].role, "last_frame");
+});
+
+test("image policy rejection does not retry or poison the model cache", async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  const error = { code: "InputImageSensitiveContentDetected.PolicyViolation", message: "input image may relate to copyright restrictions. Request id: test-policy" };
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ error }, { status: 400 });
+  };
+  try {
+    const config = { apiKey: "test-policy-key", model: "doubao-seedance-test" };
+    for (let i = 0; i < 2; i++) {
+      await assert.rejects(runVolcanoFamily({ config, prompt: "move" }), (err) => {
+        assert.match(err.message, /参考图未通过版权审核/);
+        assert.match(err.message, /Request id: test-policy/);
+        assert.equal(getVolcanoInputImageRejection(err)?.code, error.code);
+        return true;
+      });
+      assert.equal(calls, i + 1);
+      assert.equal(isVolcanoModelRejected(config.apiKey, config.model), false);
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+test("only explicit image moderation stops a shared image, including bounded error bodies", () => {
+  const raw = 'volcano submit HTTP 400: {"error":{"code":"InputImageSensitiveContentDetected.PolicyViolation","message":"copyright restrictions ';
+  assert.match(getVolcanoInputImageRejection(raw + "x".repeat(500))?.message, /版权审核/);
+  for (const code of ["InputTextSensitiveContentDetected.PolicyViolation", "OutputVideoSensitiveContentDetected", "InvalidParameter", "BadRequest"]) {
+    assert.equal(getVolcanoInputImageRejection(JSON.stringify({ error: { code, message: "copyright" } })), null);
+  }
+  assert.match(getVolcanoInputImageRejection(JSON.stringify({ error: { code: "InputImageSensitiveContentDetected", message: "policy" } }))?.message, /内容审核/);
+});
+
+test("moderation identifies the failed stage without treating every policy error as a portrait", () => {
+  const rejection = (message, prefix = "volcano submit HTTP 400: ", code = "InputImageSensitiveContentDetected.PolicyViolation") =>
+    getVolcanoInputImageRejection(prefix + JSON.stringify({ error: { code, message } }));
+  const copyright = rejection("input image may relate to copyright restrictions");
+  assert.equal(copyright.category, "copyright");
+  assert.match(copyright.message, /^图生视频失败：/);
+  assert.match(copyright.message, /不能单独确认是人像问题/);
+  assert.match(copyright.message, /暂未接入该素材库/);
+  const portrait = rejection("The input image contains a real person.");
+  assert.equal(portrait.category, "portrait");
+  assert.match(portrait.message, /参考图未通过人像审核/);
+  assert.doesNotMatch(portrait.message, /不能单独确认/);
+  const privacy = rejection("input image violates policy", undefined, "InputImageSensitiveContentDetected.PrivacyInformation");
+  assert.equal(privacy.category, "content");
+  const edit = rejection("copyright restrictions", "Ark image edit (doubao-seedream-test) HTTP 400: ");
+  assert.match(edit.message, /^图片背景处理（生图）失败：/);
+  assert.doesNotMatch(edit.message, /图生视频失败|Seedance/);
+});
+
+test("real provider privacy rejection offers the existing manual video upload workflow", () => {
+  const raw = 'volcano submit HTTP 400: {"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation","message":"The request failed because the input image content[1] content[2] may contain real person."}}';
+  const rejection = getVolcanoInputImageRejection(raw);
+  assert.equal(rejection.category, "portrait");
+  assert.match(rejection.message, /可能包含真人或人脸/);
+  assert.match(rejection.message, /自行生成动态形象并导出 MP4/);
+  assert.match(rejection.message, /形象画廊 → 新建自定义形象 → 自定义上传视频/);
+  assert.match(rejection.message, /其他动作.*上传 MP4 替换/);
 });
 
 test("Seedance 1.5 payload includes prompt flags plus matching first and last frame references", () => {

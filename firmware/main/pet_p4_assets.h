@@ -21,6 +21,7 @@ typedef struct {
   char family[PET_P4_ASSET_FAMILY_MAX];
   char path[PET_P4_ASSET_PATH_MAX];
   char audio_path[PET_P4_ASSET_PATH_MAX];
+  bool audio_custom;
   uint32_t frame_sizes[PET_P4_ASSET_CATALOG_MAX_FRAMES];
   uint32_t stream_bytes;
   uint16_t frames;

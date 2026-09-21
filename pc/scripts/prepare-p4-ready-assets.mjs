@@ -494,7 +494,7 @@ export function prepareBuiltInP4Ready({ ffmpegPath = "", allowTranscode = true }
       sourceAssets.push({ family, videoSha256: videoHash, durationMs });
 
       const audioSource = join(clipsDir, `${family}.wav`);
-      if (existsSync(audioSource)) {
+      if (!appearance.systemCues && existsSync(audioSource)) {
         const audioBytes = readFileSync(audioSource);
         const audioHash = sha256(audioBytes);
         const audioDevicePath = `p4/audio/${family}.wav`;
@@ -558,6 +558,7 @@ export function prepareBuiltInP4Ready({ ffmpegPath = "", allowTranscode = true }
       fps: appearance.fps,
       families,
     };
+    if (appearance.systemCues) manifest.systemCues = true;
     const identity = Buffer.from(stableJson(manifest), "utf8");
     manifest.packId = computePackId(payloadAssets, identity);
     const expectedPackId = String(appearance.packId || "").trim();

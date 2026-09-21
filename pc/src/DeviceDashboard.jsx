@@ -26,7 +26,8 @@
  *          MiMoCode-only macOS final-text delivery plus Return at the captured current caret,
  *          app-shell/native-operation-owned macOS Accessibility consent,
  *          shared first-visit onboarding state with a reopenable page guide,
- *          and an ESP32-P4 A/B firmware update entry.
+ *          an ESP32-P4 A/B firmware update entry, shared current-key instructions,
+ *          and a persona editor preserved while visiting API settings.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -43,11 +44,14 @@ import PageShell from "./shell/PageShell.jsx";
 import Card from "./shell/Card.jsx";
 import Button from "./shell/Button.jsx";
 import { useDeviceContext } from "./shell/DeviceContext.jsx";
+import { buildUsageHelp } from "./lib/usage-help.js";
+import PersonaVoiceModal from "./PersonaVoiceModal.jsx";
 import { useToast } from "./shell/ToastStack.jsx";
 import DeviceStatusBar from "./dashboard/DeviceStatusBar.jsx";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
+import RealtimeChatPanel, { realtimeStateLabel } from "./dashboard/RealtimeChatPanel.jsx";
 import { useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
 import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
 import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
@@ -95,7 +99,7 @@ export const DEFAULT_BUTTON_ACTIONS = {
   p4_sw1_short: "page_enter",
   p4_sw1_long: "voice_ptt",
   p4_sw2_short: "component_center",
-  p4_sw2_long: "disabled",
+  p4_sw2_long: "realtime_chat",
   p4_sw3_short: "page_back",
   p4_sw3_long: "disabled",
   p4_encoder_press: "page_enter",
@@ -116,14 +120,15 @@ export const VOICE_BUTTON_OPTIONS = P4_VOICE_BUTTON_OPTIONS;
 
 export const BUTTON_FUNCTION_OPTIONS = [
   { id: "agent_prompt", label: "发送自定义指令", detail: "按下对应手势后，将该按钮下方填写的指令直接发送给当前 Code Agent。" },
-  { id: "voice_ptt", label: "语音输入", detail: "长按开始录音，松开后只写入草稿；短按全局确认键才发送。" },
+  { id: "voice_ptt", label: "语音输入", detail: "绑定到长按：按住说话，松开追加到输入框，确认后发送。" },
+  { id: "realtime_chat", label: "实时对话", detail: "在宠物界面触发后开始聊天，再次触发结束。组件运行时请先返回宠物界面。" },
   { id: "session_previous", label: "上一个", detail: "宠物界面切换到上一个会话气泡；组件中心切换到上一个组件。" },
   { id: "session_next", label: "下一个", detail: "宠物界面切换到下一个会话气泡；组件中心切换到下一个组件。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },
-  { id: "component_center", label: "切换宠物/组件", detail: "在宠物界面与组件中心之间双向切换；组件运行时不接管 SW2。" },
-  { id: "page_enter", label: "确认", detail: "在组件中心启动当前选中的组件；组件已打开时优先执行组件自己的按键映射。" },
+  { id: "component_center", label: "切换宠物/组件", detail: "切换宠物界面和组件列表；组件运行时请先返回。" },
+  { id: "page_enter", label: "确认", detail: "发送语音输入的文字，或打开选中的组件；组件内按其玩法操作。" },
   { id: "page_back", label: "返回（取消）", detail: "取消当前选择，或从当前组件返回上一级。" },
-  { id: "disabled", label: "不绑定", detail: "下发 disabled，让新版板端忽略该输入；不会继续触发系统切页或负一屏操作。" },
+  { id: "disabled", label: "不绑定", detail: "不为这个操作分配功能。" },
   { id: "system_page", label: "系统切页", detail: "保持 main / stats 页面切换，适合旋钮短按。" },
   { id: "system_reset", label: "系统重置", detail: "保留长按重启或重置配网等板端默认能力。" },
   { id: "volume_adjust", label: "音量调节", detail: "旋钮旋转调节系统总音量，屏幕顶部短暂显示音量条。切页可继续用屏幕滑动。" },
@@ -149,6 +154,7 @@ export const BOARD_BUTTON_CONTROL_ROWS = [
 
 const P4_CUSTOM_ACTION_OPTIONS = [
   "agent_prompt",
+  "realtime_chat",
   "session_previous",
   "session_next",
   "session_clear",
@@ -161,7 +167,7 @@ export const P4_BUTTON_CONTROL_ROWS = [
   { id: "p4_sw1_short", controlId: "p4_sw1", label: "SW1 短按", event: "button.sw1.short_press", defaultAction: "page_enter", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw1_long", controlId: "p4_sw1", label: "SW1 长按", event: "button.sw1.long_press", holdEvent: "button.sw1.hold", voiceTriggerId: P4_DEFAULT_VOICE_TRIGGER, defaultAction: "voice_ptt", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_sw2_short", controlId: "p4_sw2", label: "SW2 短按", event: "button.sw2.short_press", defaultAction: "component_center", defaultValue: P4_DEFAULT_PROMPT, actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
-  { id: "p4_sw2_long", controlId: "p4_sw2", label: "SW2 长按", event: "button.sw2.long_press", holdEvent: "button.sw2.hold", voiceTriggerId: "sw2.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
+  { id: "p4_sw2_long", controlId: "p4_sw2", label: "SW2 长按", event: "button.sw2.long_press", holdEvent: "button.sw2.hold", voiceTriggerId: "sw2.hold", defaultAction: "realtime_chat", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_sw3_short", controlId: "p4_sw3", label: "SW3 短按", event: "button.sw3.short_press", defaultAction: "page_back", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
   { id: "p4_sw3_long", controlId: "p4_sw3", label: "SW3 长按", event: "button.sw3.long_press", holdEvent: "button.sw3.hold", voiceTriggerId: "sw3.hold", defaultAction: "disabled", voiceFallbackAction: "disabled", actionOptions: ["voice_ptt", ...P4_CUSTOM_ACTION_OPTIONS], supportsValue: true },
   { id: "p4_joystick_up", controlId: "p4_joystick", label: "摇杆向上", event: "joystick.up", defaultAction: "session_previous", actionOptions: P4_CUSTOM_ACTION_OPTIONS, supportsValue: true },
@@ -744,7 +750,8 @@ function voiceReducer(state, action) {
 
 // ---------- Component ----------
 
-export default function DeviceDashboard({ active = true, binding, onUnbind, onOpenApiSettings }) {
+export default function DeviceDashboard({ active = true, binding, onUnbind, onOpenApiSettings, onOpenGallery }) {
+  const [editingPersona, setEditingPersona] = useState(null);
   // Native signaling now runs off the UI thread. Keep start/stop ordering
   // across auto-rearm, button configuration and manual toggles.
   const audioSignalQueueRef = useRef(Promise.resolve());
@@ -762,6 +769,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     currentDisplay,
     agentScan,
     refreshAgents,
+    realtimeChat,
+    setUsageHelp,
   } = useDeviceContext();
   const { push } = useToast();
 
@@ -774,8 +783,12 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   });
   const [voiceConfig, setVoiceConfig] = useState(loadVoiceConfigFromStorage);
   const voiceConfigRef = useRef(voiceConfig);
+  // 实时对话键是否已绑到某个按键（提示文案用；真正的按键事件由 Rust 处理）
+  const realtimeChatKeyBound = Object.values(voiceConfig?.buttonActions || {}).includes("realtime_chat");
   voiceConfigRef.current = voiceConfig;
   const [voiceConfigDirty, setVoiceConfigDirty] = useState(false);
+  const usageHelp = useMemo(() => buildUsageHelp(buttonControlRowsForRuntime(usb.runtime), voiceConfig.buttonActions, voiceConfig.enabled, voiceConfigDirty), [usb.runtime, voiceConfig, voiceConfigDirty]);
+  useEffect(() => { setUsageHelp(usageHelp); }, [usageHelp, setUsageHelp]);
   const [voiceConfigOtaState, setVoiceConfigOtaState] = useState({ pending: false, tone: "", message: "" });
   const [buttonConfigHydratedFor, setButtonConfigHydratedFor] = useState("");
   const [guideOpen, setGuideOpen] = useState(false);
@@ -1111,7 +1124,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       }
       saveVoiceConfigToStorage(next);
       setVoiceConfigDirty(true);
-      setVoiceConfigOtaState({ pending: false, tone: "warning", message: "已保存到客户端；按钮配置需要通过 USB OTA 下发到板端后才会生效。" });
+      setVoiceConfigOtaState({ pending: false, tone: "warning", message: "修改已保存在电脑上，点击「同步到设备」后生效。" });
       return next;
     });
   }, [isP4Runtime]);
@@ -1125,7 +1138,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     const requestedRuntimeVoiceEnabled = requested.voiceEnabled;
     const requestedVoiceTriggerId = requested.voiceButton;
     if (!usb.connected) {
-      setVoiceConfigOtaState({ pending: false, tone: "warning", message: "需要先通过 USB 连接设备，才能把按钮配置 OTA 到板端。" });
+      setVoiceConfigOtaState({ pending: false, tone: "warning", message: "请先通过 USB 连接设备，再同步按键配置。" });
       return;
     }
     const targetBoardDeviceId = onlineBoardDeviceId || usb.boardDeviceId || binding.boardDeviceId;
@@ -1133,7 +1146,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       setVoiceConfigOtaState({ pending: false, tone: "error", message: "未找到可用的板子 ID，请先完成设备绑定。" });
       return;
     }
-    setVoiceConfigOtaState({ pending: true, tone: "", message: "正在通过 USB OTA 下发完整按钮配置到板端..." });
+    setVoiceConfigOtaState({ pending: true, tone: "", message: "正在同步按键配置，请保持设备连接…" });
     try {
       const ack = await dispatchBoardButtonConfig({
         boardDeviceId: targetBoardDeviceId,
@@ -1143,7 +1156,6 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         voiceButton: requestedVoiceTriggerId,
         voiceEnabled: requestedRuntimeVoiceEnabled,
       });
-      let audioTransport = "";
       let voiceSetupWarning = "";
       try {
         if (isP4Runtime && requestedRuntimeVoiceEnabled) {
@@ -1162,7 +1174,6 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
             voiceButton: requestedVoiceTriggerId,
           });
           if (!audio?.usbSent) throw new Error(audio?.usbError || "设备麦克风信令未通过 USB 送达");
-          audioTransport = "，设备麦克风已启用";
           voiceDispatch({ type: "set_audio_bridge_state", enabled: true, ok: true, message: "设备麦克风已通过 USB 接入" });
         } else if (voiceState.audioBridgeEnabled) {
           await sendAudioBridgeSignal({
@@ -1190,7 +1201,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         tone: voiceSetupWarning ? "warning" : "success",
         message: voiceSetupWarning
           ? `按钮配置已写入板端（${Number.isFinite(bindingCount) ? bindingCount : 0} 项）；语音通道未就绪：${voiceSetupWarning}`
-          : `按钮配置已写入板端（${Number.isFinite(bindingCount) ? bindingCount : 0} 项${audioTransport}）。`,
+          : "按钮配置已同步到设备，可以按新的设置操作了。",
       });
     } catch (err) {
       setVoiceConfigOtaState({ pending: false, tone: "error", message: `按钮配置下发失败: ${err}` });
@@ -1444,10 +1455,9 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
 
   // Session, voice, and device synchronization must keep running across tabs,
   // but the dashboard's large control tree and media previews do not.
-  if (!active) return null;
-
   return (
-    <PageShell
+    <>
+    {active && <PageShell
       title="桌搭控制台"
       help={hasKnownRuntime ? () => setGuideOpen(true) : undefined}
       actions={
@@ -1475,6 +1485,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       <Card>
         <DeviceStatusBar />
       </Card>
+
+      {realtimeChat?.error && <div role="alert" className="message-banner message-banner--error">
+        实时对话失败：{realtimeChat.error}。详情与诊断日志见下方「实时对话」。
+      </div>}
 
       <Card
         title="Agent与形象"
@@ -1542,6 +1556,14 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         />
       </Card.Collapsible>
 
+      <Card.Collapsible
+        title="实时对话"
+        summary={realtimeChat?.active ? `进行中 · ${realtimeStateLabel(realtimeChat.state)}` : "按设备上的「实时对话」键和当前形象聊天"}
+        defaultOpen
+      >
+        <RealtimeChatPanel keyBound={realtimeChatKeyBound} onOpenApiSettings={onOpenApiSettings} onOpenGallery={onOpenGallery} onOpenPersona={() => setEditingPersona(currentDisplay?.appearance)} />
+      </Card.Collapsible>
+
       <DeviceGuideModal
         isOpen={guideOpen}
         onClose={() => setGuideOpen(false)}
@@ -1565,6 +1587,12 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         onInputConfigReset={onInputConfigReset}
         expectedBoardDeviceId={diagnosticsTargetBoardDeviceId}
       />
-    </PageShell>
+    </PageShell>}
+    {editingPersona && <div hidden={!active}><PersonaVoiceModal
+      appearance={editingPersona} onClose={() => setEditingPersona(null)}
+      onOpenApiSettings={onOpenApiSettings}
+      onSaved={() => { setEditingPersona(null); push({ tone: "success", title: "人设与声音已保存", message: "正在对话时，将从下一轮回复开始使用新设置。" }); }}
+    /></div>}
+    </>
   );
 }

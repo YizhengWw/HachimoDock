@@ -126,6 +126,7 @@ static unsigned int g_asset_cache_revision;
 static uint16_t *g_session_overlay_cache;
 static uint64_t g_session_overlay_signature;
 static bool g_session_overlay_cache_valid;
+static bool g_last_realtime_conversation;
 static bool g_session_overlay_cache_allocation_failed;
 static uint8_t g_session_overlay_row_run_count[PET_P4_UI_HEIGHT];
 static uint16_t g_session_overlay_row_run_start[PET_P4_UI_HEIGHT][PET_P4_SESSION_CACHE_MAX_RUNS];
@@ -2326,13 +2327,49 @@ static void draw_bubble(const pet_p4_view_model_t *view, unsigned long long now_
     const char *body = view && view->body ? view->body : "";
     uint16_t ink = rgb565(28, 31, 31);
     uint16_t muted = rgb565(92, 98, 96);
-    uint16_t selection = rgb565(25, 151, 99);
+    bool realtime = view && view->realtime_conversation;
+    uint16_t selection = realtime ? rgb565(42, 119, 225) : rgb565(25, 151, 99);
     pet_p4_view_status_t status = view ? view->status : PET_P4_VIEW_STATUS_IDLE;
-    draw_session_card_panel(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, true, selection);
+    if (!realtime) draw_session_card_panel(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, true, selection);
+    if (realtime) {
+      // Same card geometry, surface and shadow; replace only the selected outline.
+      fill_round_rect(x - 2, y - 2, w + 4, h + 4, PET_P4_SESSION_CARD_RADIUS + 2, rgb565(170, 205, 250));
+      fill_round_rect(x + 2, y + 5, w, h, PET_P4_SESSION_CARD_RADIUS, rgb565(46, 50, 48));
+      fill_round_rect(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, selection);
+      fill_round_rect(x + 4, y + 4, w - 8, h - 8, PET_P4_SESSION_CARD_RADIUS - 4, rgb565(237, 249, 242));
+    }
     fill_round_rect(x + 10, y + 14, 7, h - 28, 2, selection);
     draw_text_line_vcenter(title, x + 30, y + 10, 38, w - 82, ink, 2, true);
-    if (body[0]) draw_card_body_lines(body, x + 30, y + 50, w - 60, muted);
-    draw_status_marker(status, now_ms, x + w - 26, y + 26);
+    if (body[0]) {
+      if (realtime) {
+        // Roll through pairs of wrapped lines without allocating or cutting UTF-8.
+        const char *pages[32];
+        unsigned int count = 0;
+        const char *cursor = body;
+        while (*cursor && count < 32) {
+          pages[count++] = cursor;
+          for (int line = 0; line < 2 && *cursor; line++) {
+            int width = 0;
+            const char *start = cursor;
+            while (*cursor) {
+              const char *next = cursor;
+              uint32_t cp = utf8_next(&next);
+              int advance = medium_glyph_width(cp, utf8_peek(next));
+              advance = advance > 0 ? advance + 1 : 0;
+              if (width + advance > w - 60) break;
+              width += advance;
+              cursor = next;
+            }
+            if (cursor == start) { utf8_next(&cursor); }
+          }
+        }
+        unsigned long long elapsed = now_ms >= view->caption_since_ms ? now_ms - view->caption_since_ms : 0;
+        unsigned int page = count > 0 ? (unsigned int) ((elapsed / 2800ULL) % count) : 0;
+        draw_card_body_lines(count ? pages[page] : body, x + 30, y + 50, w - 60, muted);
+      } else draw_card_body_lines(body, x + 30, y + 50, w - 60, muted);
+    }
+    if (realtime) draw_text_line_vcenter(view->conversation_history ? "回看" : "对话", x + w - 78, y + 14, 30, 64, selection, 1, true);
+    else draw_status_marker(status, now_ms, x + w - 26, y + 26);
     return;
   }
 
@@ -3776,6 +3813,32 @@ static void render_pixel_miniapp_page(const pet_p4_miniapp_view_t *app) {
 }
 
 
+static void render_data_miniapp_page(const pet_p4_miniapp_view_t *app) {
+  const pet_p4_data_view_t *data = &app->data;
+  const uint16_t bg = rgb565(7, 12, 18), ink = rgb565(236, 243, 251), muted = rgb565(147, 165, 182);
+  const uint16_t accent = rgb565(76, 167, 250);
+  fill_rect(0, 0, 640, 480, bg);
+  draw_text_line(app->title, 24, 18, data->date[0] ? 346 : 490, ink, 2, true);
+  if (data->date[0]) draw_text_line(data->date, 384, 22, 156, muted, 1, true);
+  char page[16]; snprintf(page, sizeof(page), "%u/%u", data->page + 1, data->pages);
+  draw_text_line(page, 554, 22, 70, accent, 1, true);
+  fill_rect(24, 57, 592, 1, rgb565(43, 59, 76));
+  for (int i = 0; i < data->count; i++) {
+    const pet_p4_data_row_t *r = &data->rows[i];
+    int y = 74 + i * 61;
+    uint16_t tone = data->stale ? muted : r->tone > 0 ? rgb565(255, 100, 102) : r->tone < 0 ? rgb565(79, 212, 149) : ink;
+    draw_text_line(r->label, 24, y, 235, ink, 1, true);
+    draw_text_line(r->value, 270, y, 176, tone, 2, true);
+    draw_text_line(r->detail, 465, y + 2, 153, tone, 1, true);
+    draw_text_line(r->meta, 24, y + 29, 592, muted, 1, true);
+    fill_rect(24, y + 53, 592, 1, rgb565(28, 40, 51));
+  }
+  if (!data->count) draw_text_line("等待数据", 24, 135, 590, ink, 2, true);
+  const char *status = !data->received ? "请连接 PC 并打开 Pet Manager" : data->stale ? "数据已过期，请检查 PC 或 USB 连接" : data->message;
+  draw_text_line(status, 24, 391, 592, data->stale || !strcmp(data->status, "error") ? rgb565(255, 186, 86) : muted, 1, true);
+  draw_text_line(app->footer, 24, 437, 592, accent, 1, true);
+}
+
 static void render_miniapp_page(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
@@ -3783,6 +3846,7 @@ static void render_miniapp_page(
   pet_p4_miniapp_view_t snapshot = {0};
   bool available = pet_p4_miniapp_get_view(&snapshot);
   const pet_p4_miniapp_view_t *app = available ? &snapshot : NULL;
+  if (app && app->active && app->data.enabled) { render_data_miniapp_page(app); return; }
   uint16_t background = rgb565(5, 7, 6);
   uint16_t panel = rgb565(11, 14, 13);
   uint16_t panel_outline = rgb565(52, 58, 53);
@@ -4193,6 +4257,13 @@ esp_err_t pet_p4_renderer_render(
     g_framebuffer_initialized = true;
   }
   const char *page = view && view->page ? view->page : "main";
+  bool realtime_mode = view && view->realtime_conversation;
+  if (realtime_mode != g_last_realtime_conversation) {
+    // Even a missing/failed appearance must not leave old Agent cards beneath the chat.
+    fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
+    g_session_overlay_cache_valid = false;
+    g_last_realtime_conversation = realtime_mode;
+  }
   if (strcmp(page, "components") == 0) {
     render_component_center_page();
   } else if (strcmp(page, "app") == 0) {
@@ -4201,7 +4272,8 @@ esp_err_t pet_p4_renderer_render(
     if (g_last_render_page[0] && strcmp(g_last_render_page, "main") != 0) {
       fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     }
-    bool show_session_queue = state && state->session_queue_count > 0;
+    bool realtime = view && view->realtime_conversation;
+    bool show_session_queue = !realtime && state && state->session_queue_count > 0;
     int64_t asset_started_us = esp_timer_get_time();
     bool drew_asset = render_asset_pet_frame(state, view, now_ms);
     overlay_started_us = esp_timer_get_time();
@@ -4214,7 +4286,8 @@ esp_err_t pet_p4_renderer_render(
     }
     if (view && view->show_voice_overlay) draw_standalone_voice_overlay();
     else if (!show_session_queue) draw_bubble(view, now_ms);
-    draw_session_queue(state, now_ms);
+    if (!realtime) draw_session_queue(state, now_ms);
+    else g_session_overlay_cache_valid = false;
   }
   draw_touch_feedback(state, now_ms);
   if (strcmp(page, "app") != 0) draw_page_indicator(page);

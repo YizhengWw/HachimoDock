@@ -238,12 +238,12 @@ function transcriptMessage(payload, phase, composerMode) {
   }
   if (phase === "draft_ready") {
     if (composerMode === "focused-input") {
-      return "语音文字已写入 MiMoCode；请短按确认键发送（默认 SW3）。";
+      return "语音文字已写入 MiMoCode，不会自动发送。";
     }
     if (composerMode === "agent-bus") {
-      return "语音文字已识别为待发送草稿；请短按确认键发送（默认 SW3）。";
+      return "语音文字已识别为待发送草稿，不会自动发送。";
     }
-    return `语音文字已写入 ${visibleAgentLabel} 输入框；请短按确认键发送（默认 SW3）。`;
+    return `语音文字已追加到 ${visibleAgentLabel} 输入框，不会自动发送。`;
   }
   if (phase === "submitting") {
     if (composerMode === "visible") return `已收到确认键，正在通过 ${visibleAgentLabel} 输入框发送...`;

@@ -371,6 +371,20 @@ fn validate_p4_widget_vars_shape(files: &HashMap<String, Vec<u8>>, errors: &mut 
     );
 }
 
+fn validate_widget_data(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    let Some(widget) = files.get("runtime/widget.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok()) else { return; };
+    let Some(data) = widget.get("data") else { return; };
+    let source = data.get("source").and_then(|v| v.as_str()).unwrap_or("");
+    let page = data.get("page_var").and_then(|v| v.as_str()).unwrap_or("");
+    if !data.as_object().is_some_and(|v| v.len() == 2 && v.keys().all(|k| ["source", "page_var"].contains(&k.as_str())))
+        || source.is_empty() || source.len() > 47 || !source.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
+        || widget.get("engine").and_then(|v| v.as_str()) != Some("p4-bounded-runtime-v4")
+        || widget.get("scene").is_some() || widget.get("game").is_some()
+        || widget.get("vars").and_then(|v| v.get(page)).and_then(|v| v.get("type")).and_then(|v| v.as_str()) != Some("int") {
+        errors.push("runtime/widget.json.data 需要受控 source 和整数 page_var；仅用于 v4 列表工具，不能混用 scene/game".into());
+    }
+}
+
 fn p4_widget_effect_count(rule: &serde_json::Value) -> usize {
     ["set", "inc"]
         .into_iter()
@@ -1278,6 +1292,7 @@ fn build_manifest_preview(
     validate_component_buttons(files, errors);
     validate_p4_compact_json_sizes(files, errors);
     validate_p4_widget_vars_shape(files, errors);
+    validate_widget_data(files, errors);
     validate_p4_widget_effect_bounds(files, errors);
     validate_component_game(files, errors);
     /* Read dashboard. Most slots are flat strings; `progress` may be an object

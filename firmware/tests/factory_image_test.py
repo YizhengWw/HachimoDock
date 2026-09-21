@@ -161,6 +161,7 @@ def test_factory_reuses_the_desktop_bundled_p4_ready_pack(tmp_path):
 def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_path):
     config = json.loads((RUNTIME / "factory-config.json").read_text(encoding="utf-8"))
     expected_ids = [
+        "stock-watchlist",
         "two-key-pong",
         "bloomfrog_companion",
         "flappy-bird",
@@ -179,7 +180,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     spiffs_tree.mkdir()
     summary = factory.build_builtin_component_tree(RUNTIME, config, spiffs_tree)
     assert summary["count"] == len(expected_ids)
-    assert summary["defaultActiveId"] == "two-key-pong"
+    assert summary["defaultActiveId"] == "stock-watchlist"
     assert summary["spriteFiles"] == 1
     assert summary["physicalFiles"] == len(expected_ids) * 2 + 2
     assert not (spiffs_tree / "p4-miniapp-id.txt").exists()
@@ -189,7 +190,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     )
     assert catalog["version"] == 3
     assert catalog["sequence"] == 1
-    assert catalog["activeWidgetId"] == "two-key-pong"
+    assert catalog["activeWidgetId"] == "stock-watchlist"
     assert [item["widgetId"] for item in catalog["items"]] == expected_ids
     assert [item["slot"] for item in catalog["items"]] == list(range(len(expected_ids)))
     assert [item["packageGeneration"] for item in catalog["items"]] == [0] * len(expected_ids)
@@ -214,11 +215,15 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
         for slot in range(len(expected_ids))
     )
 
+    stock_widget = json.loads((spiffs_tree / "p4w00.json").read_text(encoding="utf-8"))
+    assert stock_widget["data"]["source"] == "stocks.watchlist"
+    assert stock_widget["dashboard"]["headline"] == "等待数据"
+    assert "hk01810" not in json.dumps(stock_widget)
     two_key_widget = json.loads(
-        (spiffs_tree / "p4w00.json").read_text(encoding="utf-8")
+        (spiffs_tree / "p4w01.json").read_text(encoding="utf-8")
     )
     two_key_buttons = json.loads(
-        (spiffs_tree / "p4b00.json").read_text(encoding="utf-8")
+        (spiffs_tree / "p4b01.json").read_text(encoding="utf-8")
     )
     assert two_key_widget["engine"] == "p4-bounded-runtime-v3"
     assert two_key_widget["scene"]["grid"] == {"width": 16, "height": 16}
@@ -234,15 +239,15 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     ]
 
     frog_widget = json.loads(
-        (spiffs_tree / "p4w01.json").read_text(encoding="utf-8")
+        (spiffs_tree / "p4w02.json").read_text(encoding="utf-8")
     )
-    frog_sprite = (spiffs_tree / "p4s01-0-0.bin").read_bytes()
+    frog_sprite = (spiffs_tree / "p4s02-0-0.bin").read_bytes()
     assert frog_widget["dashboard"]["title"] == "蛙蛙养成"
     assert frog_sprite.startswith(b"P4S1")
-    assert catalog["items"][1]["spritesChecksum"] != "00000000"
+    assert catalog["items"][2]["spritesChecksum"] != "00000000"
 
     token_widget = json.loads(
-        (spiffs_tree / "p4w07.json").read_text(encoding="utf-8")
+        (spiffs_tree / "p4w08.json").read_text(encoding="utf-8")
     )
     assert "readers" not in token_widget
     assert "fetchers" not in token_widget

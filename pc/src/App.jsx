@@ -2,6 +2,7 @@
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
  * [Output] Pet Manager desktop app shell with a native macOS Accessibility consent request at startup, first-level device/gallery/component-center/API-configuration sidebar tabs plus an inline version-gated bundled-firmware updater, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
  * [Pos] component node in pc/src
+ * Generation notifications distinguish reference-image rejection with retained partial results from full success.
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
@@ -13,6 +14,7 @@ import {
   MonitorSmartphone,
   Blocks,
   KeyRound,
+  Home,
 } from "lucide-react";
 import DeviceSetup from "./DeviceSetup";
 import DeviceDashboard from "./DeviceDashboard";
@@ -21,6 +23,7 @@ import CustomAvatarWizard from "./CustomAvatarWizard";
 import AppearanceDetail from "./AppearanceDetail";
 import ComponentCenter from "./ComponentCenter";
 import ApiSettings from "./ApiSettings";
+import SmartHome from "./SmartHome.jsx";
 import { DeviceContextProvider, useDeviceContext } from "./shell/DeviceContext.jsx";
 import ToastStack, { ToastProvider, useToast } from "./shell/ToastStack.jsx";
 import ContextRail from "./shell/ContextRail.jsx";
@@ -46,7 +49,7 @@ function hasTauriRuntime() {
 }
 
 export default function App() {
-  const [view, setView] = useState("loading"); // loading | dashboard | setup | gallery | wizard | detail | components | api
+  const [view, setView] = useState("loading"); // loading | dashboard | setup | gallery | wizard | detail | components | home | api
   const [binding, setBinding] = useState(null);
   const [detailAppearanceId, setDetailAppearanceId] = useState("");
   const [apiReturnView, setApiReturnView] = useState("");
@@ -146,7 +149,7 @@ export default function App() {
   const galleryViews = new Set(["gallery", "wizard", "detail"]);
   const activeTab = view === "api"
     ? "api"
-    : view === "components"
+    : view === "home" ? "home" : view === "components"
       ? "components"
       : galleryViews.has(view)
         ? "gallery"
@@ -252,9 +255,9 @@ function AppInner({
         tone: s.status === "completed" ? "success" : "error",
         title:
           s.status === "completed"
-            ? `「${s.appearanceName}」生成完成`
+            ? `「${s.appearanceName}」${s.progress?.referenceImageError ? "部分生成完成" : "生成完成"}`
             : `「${s.appearanceName}」生成失败`,
-        message: s.status === "failed" ? s.error : "",
+        message: s.status === "failed" ? s.error : s.progress?.referenceImageError ? s.progress.message : "",
         ttl: 0,
         onDismiss: () => acknowledgeGenerationTask(s.completionEpoch),
         action: s.appearanceId
@@ -336,6 +339,9 @@ function AppInner({
               <Blocks size={16} />
               <span className="sidebar-nav-label">组件中心</span>
             </button>
+            <button type="button" className={`sidebar-nav__item ${activeTab === "home" ? "is-active" : ""}`} onClick={() => setView("home")} title="智能家居">
+              <Home size={16} /><span className="sidebar-nav-label">智能家居</span>
+            </button>
             <button
               type="button"
               className={`sidebar-nav__item ${activeTab === "api" ? "is-active" : ""}`}
@@ -368,12 +374,15 @@ function AppInner({
                 onOpenApiSettings={handleOpenApiSettings}
               />
             )}
-            {view === "gallery" && (
+            {(view === "gallery" || (view === "api" && apiReturnView === "gallery")) && (
+              <div hidden={view !== "gallery"}>
               <AppearanceGallery
                 binding={binding}
                 onEnterWizard={handleEnterWizard}
                 onOpenDetail={handleOpenDetail}
+                onOpenApiSettings={handleOpenApiSettings}
               />
+              </div>
             )}
             {(view === "wizard" || (view === "api" && apiReturnView === "wizard")) && (
               <div hidden={view !== "wizard"}>
@@ -400,6 +409,7 @@ function AppInner({
             {view === "api" && (
               <ApiSettings onBack={handleApiSettingsBack} />
             )}
+            {view === "home" && <SmartHome />}
           </main>
         </section>
       </div>

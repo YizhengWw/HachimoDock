@@ -1,6 +1,6 @@
 ---
 name: petui
-description: Generate, validate, and publish petui desktop-pet components and bounded PNG sprite assets for the ESP32-P4 640x480 negative screen. Use when a user asks for a desk-pet widget, petAgent component, OpenClaw component, negative-screen tool or game, PNG sprite animation, .clawpkg package, or wants an existing component repaired and added to Pet Manager's formal local component library.
+description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, PC-fed live-data widgets such as stock watchlists, and bounded PNG sprite assets as .clawpkg packages. Use for new components or repairs to existing Pet Manager components; live data requires an implemented PC data source.
 ---
 
 # petui
@@ -13,6 +13,7 @@ description: Generate, validate, and publish petui desktop-pet components and bo
 2. 判断需求属于 `game` 还是 `tool`：
    - 有目标、玩家输入、即时反馈、局面变化和回合结算时，使用 `game`。
    - 以计时、提醒、追踪、展示、查询或控制为主要价值时，使用 `tool`。
+   - 展示行情等实时数据时，另读 [references/live-data.md](references/live-data.md)，确认 PC 数据源与设备能力；组件只订阅数据，不自行联网。
 3. 先判断这是新建组件还是优化/修复现有组件：
    - 新建组件才创建新的 `component.json.id`。
    - 优化、修复或继续迭代现有组件时，先读取用户指定的那个组件，并原样保留它的 `component.json.id`；除非用户明确要求另存为新组件，否则禁止生成新 ID。显示名称相同不能代替 ID 相同。
@@ -43,13 +44,14 @@ description: Generate, validate, and publish petui desktop-pet components and bo
    python <skill-dir>/scripts/validate_generated_widget.py <component-dir>
    ```
 
-10. 如果是游戏，执行确定性玩法自测；带 `scene` 的互动工具也执行同一命令验证每个输入与 tick 的可见效果：
+10. 游戏、带 `scene` 的互动工具、声明 `data` 的实时列表均执行自测：
 
    ```bash
    python <skill-dir>/scripts/smoke_test_widget_game.py <component-dir>
    ```
 
    游戏自测必须从真实输入映射出发，跑通开始、每个玩法动作的即时可见反馈、自动推进、得分或进展、成功/失败结算和重开。互动工具必须让每个声明输入在可达状态中产生即时可见变化，并验证声明的 tick/自动运动确实推进画面。只验证 action 名存在、速度字段变化或单帧动画不算通过。
+   实时列表自测覆盖 0/1/6/11/16/20 行的分页可达性与真实按键反馈；它不验证网络取价、时效或设备画面，这些必须另外验收，不能把结构/模拟通过写成实时链路已通过。
 11. 修复全部结构、素材和玩法错误。使用 PNG 时还要逐条核对没有素材缺失、格式、尺寸、帧数、总像素、文件大小或帧间闪烁风险。只有结构校验与适用的场景/玩法自测退出码都为 `0` 时才允许发布；发布器还会重复执行自测，不能跳过。
 12. 原子发布到正式本地组件库：
 
@@ -72,6 +74,7 @@ description: Generate, validate, and publish petui desktop-pet components and bo
 - 游戏的 `component.json.description` 不是宣传口号：必须简要说明怎么玩、怎样得分或完成、何时结束。组件中心会在它下方根据 `buttons.json` 自动补充当前操作方法，因此描述不得写死可被用户重新映射的物理键位。
 - 所有新组件都声明顶层 `engine: "p4-bounded-runtime-v4"`。`game/tool` 只是产品分类，底层运行时相同；v3 只用于读取和维护历史包。
 - 先用变量、状态、transition、tick 和 dashboard 表达需求；只有确实需要坐标、移动、碰撞或边界行为时才增加 `scene`。
+- 实时数据工具遵循契约 5.1 与 `references/live-data.md`；当前已实现 `stocks.watchlist`，其他 source 先确认或补齐 PC 提供器。股票默认项、刷新周期、鉴权都属于 PC，不写入组件包，不假装任意 URL 可以直接工作。
 - 新小游戏使用通用 `scene`，不得声明旧版 `game.type=blocks|snake|flappy`；旧版 `game` 仅用于读取和维护兼容包。
 - 文案出现移动、飞行、射击、子弹、敌人或碰撞时，runtime 必须真实实现对应 scene 机制；不得只在 Dashboard 中描述不存在的玩法。
 - 新游戏的核心视觉元素默认使用受控横向 PNG sprite sheet：玩家/主角必须优先使用 PNG，主要敌人或目标在配额允许时也使用 PNG；最多 4 个精灵、每个 1-8 帧、单帧 8-64 像素、1-20 fps、全部帧合计最多 4096 像素、单个源 PNG 不超过 128 KiB。PNG 只作为静态素材，不能包含脚本；PC 会预编译后随组件事务下发。

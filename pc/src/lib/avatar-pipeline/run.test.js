@@ -1,7 +1,7 @@
 /**
  * [Input] provider config fragments used by the avatar pipeline runner.
  * [Output] Node regression coverage for choosing a valid thinking-model name, custom-generation family filtering,
- *          single-state progress forwarding, and building single-state retry manifests.
+ *          single-state retries, shared-image submission stopping, partial success and cancellation.
  * [Pos] test node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -15,12 +15,91 @@ import {
   buildSingleFamilyManifest,
   resolveArkBackgroundConfig,
   resolveThinkingModelName,
+  runAvatarPipeline,
 } from "./run.js";
 import { DEFAULT_THINKING_MODEL } from "./thinking-model.js";
 import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 import * as familyModule from "./families.js";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
+
+async function simulateBatch({ code = "InputImageSensitiveContentDetected.PolicyViolation", pollFailure = false, successes = false, abort = false } = {}) {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.error;
+  const controller = new AbortController();
+  let submissions = 0;
+  const saved = [];
+  const progress = [];
+  const failure = { code, message: "input may relate to copyright restrictions. Request id: simulated" };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).endsWith("/responses")) return Response.json({ output_text: JSON.stringify({
+      persona: {}, prompts: familyModule.CUSTOM_GENERATION_FAMILIES.map(({ family }) => ({ family, prompt: "move" })),
+    }) });
+    if (init.method === "POST") {
+      submissions++;
+      if (abort) controller.abort();
+      if (pollFailure || (successes && submissions > 1)) return Response.json({ id: `task-${submissions}` });
+      return Response.json({ error: failure }, { status: 400 });
+    }
+    if (String(url).includes("/tasks/")) {
+      // Let the first submission rejection reach the scheduler before in-flight successes finish.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      if (pollFailure) return Response.json({ status: "failed", padding: "x".repeat(600), error: failure });
+      return Response.json({ status: "succeeded", content: { video_url: "https://video.example.test/result.mp4" } });
+    }
+    if (String(url) === "https://video.example.test/result.mp4") return new Response(new Uint8Array([1, 2, 3]));
+    throw new Error(`Unexpected test request: ${url}`);
+  };
+  console.error = () => {};
+  try {
+    const result = await runAvatarPipeline({
+      imageFile: new File([new Uint8Array([1, 2])], "test.png", { type: "image/png" }),
+      providerConfig: { provider: "volcengine", apiKey: "test-batch-key", model: "doubao-seedance-2-0-fast-test" },
+      skipProcessing: true,
+      signal: controller.signal,
+      onProgress: (value) => progress.push(value),
+      onFamilyDone: async ({ family }) => saved.push(family),
+    });
+    return { result, submissions, saved, progress };
+  } finally { globalThis.fetch = originalFetch; console.error = originalLog; }
+}
+
+test("shared reference rejection stops unsubmitted actions and completes progress", async () => {
+  for (const pollFailure of [false, true]) {
+    const { result, submissions, progress } = await simulateBatch({ pollFailure });
+    assert.equal(submissions, 3);
+    assert.equal(result.families.length, familyModule.CUSTOM_GENERATION_FAMILIES.length);
+    assert.equal(result.families.filter((f) => f.skipped).length, result.families.length - 3);
+    assert.ok(result.families.every((f) => !f.ok && /版权审核/.test(f.error)));
+    assert.equal(progress.at(-1).completed, progress.at(-1).total);
+    assert.match(progress.at(-1).message, /参考图未通过版权审核/);
+    assert.match(progress.at(-1).message, /成功生成 0 个动作/);
+  }
+});
+
+test("already submitted successes are saved and a new batch is not blocked", async () => {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { result, submissions, saved, progress } = await simulateBatch({ successes: true });
+    assert.equal(submissions, 3);
+    assert.equal(saved.length, 2);
+    assert.match(progress.at(-1).message, /成功生成 2 个动作/);
+    assert.match(progress.at(-1).referenceImageError, /版权审核/);
+    assert.equal(result.families.filter((f) => f.ok).length, 2);
+    assert.deepEqual(saved.map((f) => f.videoBytes), [new Uint8Array([1, 2, 3]), new Uint8Array([1, 2, 3])]);
+  }
+});
+
+test("per-action text/output and parameter failures do not stop unrelated actions", async () => {
+  for (const code of ["InputTextSensitiveContentDetected.PolicyViolation", "OutputVideoSensitiveContentDetected", "InvalidParameter"]) {
+    const { result, submissions } = await simulateBatch({ code });
+    assert.equal(submissions, familyModule.CUSTOM_GENERATION_FAMILIES.length);
+    assert.ok(result.families.every((f) => !f.skipped));
+  }
+});
+
+test("user cancellation still propagates", async () => {
+  await assert.rejects(simulateBatch({ abort: true }), { name: "AbortError" });
+});
 
 function readSource(fileName) {
   return readFileSync(join(srcDir, fileName), "utf8");

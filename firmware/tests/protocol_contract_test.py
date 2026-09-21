@@ -241,7 +241,8 @@ def test_firmware_contract_accepts_p4_assets_and_rejects_linux_mp4_ota():
     assert "mbedtls" in cmake
     assert "lvgl" in cmake
     assert "linux mp4/wav assets are not supported on esp-p4" in source
-    assert "g_line_buffer[32768]" in read("main/pet_p4_main.c")
+    assert "#define PET_P4_PROTOCOL_LINE_BUFFER_BYTES 32768" in read("main/pet_p4_main.c")
+    assert "g_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES" in read("main/pet_p4_main.c")
 
 
 def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
@@ -693,6 +694,7 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     protocol_doc = read("protocol.md")
 
     builtin_ids = [
+        "stock-watchlist",
         "two-key-pong",
         "bloomfrog_companion",
         "flappy-bird",
@@ -731,7 +733,11 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     assert "commit_builtin_package" in miniapp
     assert "new_component && !g_builtin_sync_in_progress" in miniapp
     assert "builtin_bundle_contains_id" in miniapp
-    assert "User-created packages remain ahead of product defaults" in miniapp
+    assert "later installs still prepend normally" in miniapp
+    assert "next_catalog[0] = installed;" in miniapp
+    assert "catalog_index = 0;" in miniapp
+    assert 'catalog_find(g_catalog, g_catalog_count, "stock-watchlist")' in miniapp
+    assert "cJSON_GetArraySize(components) != 9" in miniapp
     assert '"falling-catch"' in miniapp
     assert "restore_active_after_builtin_sync" in miniapp
     assert "reorder_catalog_for_builtin_bundle(components)" in miniapp
@@ -1109,7 +1115,7 @@ def test_p4_conversation_queue_is_synced_and_rendered_with_pixel_ellipsis():
     assert "pet_p4_view_status_t marker_status = session_view_status(item->state)" in renderer
     assert "draw_working_markers || marker_status != PET_P4_VIEW_STATUS_WORKING" in renderer
     assert "draw_status_marker(marker_status, now_ms, x + w - 26, y + 26)" in renderer
-    assert "bool show_session_queue = state && state->session_queue_count > 0;" in renderer
+    assert "bool show_session_queue = !realtime && state && state->session_queue_count > 0;" in renderer
     assert "bool needs_ellipsis = ellipsis && utf8_text_width(cursor, -1, scale) > max_px" in renderer
     assert "bool needs_ellipsis = ellipsis && utf8_text_width_medium(cursor) > max_px" in renderer
     assert "static bool glyph_visual_bounds(" in renderer
@@ -1619,7 +1625,7 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(255, 163, 31)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.53-p4")' in project
+    assert 'set(PROJECT_VER "0.7.63-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1701,7 +1707,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.53-p4")' in project
+    assert 'set(PROJECT_VER "0.7.63-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2476,3 +2482,22 @@ if __name__ == "__main__":
     for test in tests:
         test()
         print(f"ok {test.__name__}")
+
+
+def test_p4_realtime_stream_ring_is_allocated_in_psram_not_static_internal_ram():
+    """0.7.54 把 96 KB 对话播放环形缓冲放成静态数组，占片内 RAM 导致启动自检失败回滚；
+    必须走 PSRAM 懒分配。"""
+    audio = read_required("main/pet_p4_audio.c")
+    assert "static uint8_t g_stream_ring[" not in audio
+    assert "static uint8_t *g_stream_ring;" in audio
+    assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in audio
+    assert "if (!stream_ring_ensure()) return ESP_ERR_NO_MEM;" in audio
+    assert '#include "esp_heap_caps.h"' in audio
+
+
+def test_realtime_speaker_uses_full_scale_and_reports_readback():
+    audio = read("main/pet_p4_audio.c")
+    assert "#define PET_P4_AUDIO_PLAYBACK_VOLUME 100" in audio
+    assert "esp_codec_dev_set_out_vol(g_speaker, PET_P4_AUDIO_PLAYBACK_VOLUME)" in audio
+    assert "esp_codec_dev_get_out_vol(g_speaker, &output_volume)" in audio
+    assert 'cJSON_AddNumberToObject(payload, "playbackVolume", output_volume)' in audio

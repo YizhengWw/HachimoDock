@@ -15,6 +15,7 @@
 #include "esp_err.h"
 #include "pet_p4_game.h"
 #include "pet_p4_stats.h"
+#include "pet_p4_widget_data.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,9 @@ typedef struct {
   char visual_sprite[20];
   pet_p4_game_frame_t game;
   uint32_t revision;
+  char data_source[48];
+  int32_t data_page;
+  pet_p4_data_view_t data;
 } pet_p4_miniapp_view_t;
 
 typedef struct {
