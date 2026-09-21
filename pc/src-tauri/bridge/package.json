@@ -1,0 +1,17 @@
+{
+  "name": "pet-manager-managed-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Managed Node bridge resources bundled by the Pet Manager Tauri client.",
+  "scripts": {
+    "bridge": "npm --prefix packages/clawd-backend-service run bridge",
+    "test": "node --test test/*.test.js",
+    "test:backend": "npm --prefix packages/clawd-backend-service test",
+    "install:claude-hooks": "npm --prefix packages/clawd-backend-service run install:claude-hooks",
+    "install:gemini-hooks": "npm --prefix packages/clawd-backend-service run install:gemini-hooks",
+    "install:cursor-hooks": "npm --prefix packages/clawd-backend-service run install:cursor-hooks"
+  },
+  "author": "wangwu50",
+  "license": "UNLICENSED",
+  "type": "commonjs"
+}

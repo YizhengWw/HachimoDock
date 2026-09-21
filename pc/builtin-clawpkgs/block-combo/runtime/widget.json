@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "result"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "ready",
+      "on": "blocks.start",
+      "to": "playing",
+      "set": {
+        "score": 0
+      }
+    },
+    {
+      "from": "result",
+      "on": "blocks.start",
+      "to": "playing",
+      "set": {
+        "score": 0
+      }
+    },
+    {
+      "from": "playing",
+      "on": "blocks.left"
+    },
+    {
+      "from": "playing",
+      "on": "blocks.right"
+    },
+    {
+      "from": "playing",
+      "on": "blocks.rotate"
+    },
+    {
+      "from": "playing",
+      "on": "blocks.drop"
+    }
+  ],
+  "tick": [],
+  "game": {
+    "type": "blocks",
+    "tick_ms": 480,
+    "playing_state": "playing",
+    "result_state": "result",
+    "score_var": "score",
+    "actions": {
+      "start": "blocks.start",
+      "left": "blocks.left",
+      "right": "blocks.right",
+      "rotate": "blocks.rotate",
+      "drop": "blocks.drop"
+    }
+  },
+  "dashboard": {
+    "title": "像素方块",
+    "eyebrow": {
+      "switch_state": {
+        "ready": "准备开始",
+        "playing": "自动下落",
+        "result": "本轮结束"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "ready": "按 SW1 开始",
+        "playing": "方块下落中",
+        "result": "堆满结束"
+      }
+    },
+    "metricLabel": "分数",
+    "metricValue": {
+      "var": "score"
+    },
+    "note": {
+      "switch_state": {
+        "ready": "READY",
+        "playing": "PLAY",
+        "result": "GAME OVER"
+      }
+    },
+    "footer": {
+      "switch_state": {
+        "ready": "SW1开始 · 摇杆四向操作 · 全局键退出",
+        "playing": "摇杆四向操作 · 全局键退出",
+        "result": "SW1重开 · 全局键退出"
+      }
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "arcade",
+    "visualLayout": "arcade",
+    "visualSprite": {
+      "switch_state": {
+        "ready": "blocks",
+        "playing": "blocks",
+        "result": "trophy"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "agent-session-bus",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coding-agent session and input bus for Claude Code, Codex, OpenClaw, and MiMoCode.",
+  "author": "wangwu50",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./adapters/claude-code": "./src/adapters/claude-code.js",
+    "./adapters/codex": "./src/adapters/codex.js",
+    "./adapters/openclaw": "./src/adapters/openclaw.js",
+    "./adapters/mimocode": "./src/adapters/mimocode.js",
+    "./adapters/mock": "./src/adapters/mock.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node src/cli.js"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "result"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "ready",
+      "on": "snake.start",
+      "to": "playing",
+      "set": {
+        "score": 0
+      }
+    },
+    {
+      "from": "result",
+      "on": "snake.start",
+      "to": "playing",
+      "set": {
+        "score": 0
+      }
+    },
+    {
+      "from": "playing",
+      "on": "snake.turn_left"
+    },
+    {
+      "from": "playing",
+      "on": "snake.turn_right"
+    }
+  ],
+  "tick": [],
+  "game": {
+    "type": "snake",
+    "tick_ms": 220,
+    "playing_state": "playing",
+    "result_state": "result",
+    "score_var": "score",
+    "actions": {
+      "start": "snake.start",
+      "left": "snake.turn_left",
+      "right": "snake.turn_right"
+    }
+  },
+  "dashboard": {
+    "title": "像素贪吃蛇",
+    "eyebrow": {
+      "switch_state": {
+        "ready": "准备开始",
+        "playing": "持续前进",
+        "result": "本轮结束"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "ready": "按 SW1 开始",
+        "playing": "寻找食物",
+        "result": "碰撞结束"
+      }
+    },
+    "metricLabel": "食物",
+    "metricValue": {
+      "var": "score"
+    },
+    "note": {
+      "switch_state": {
+        "ready": "READY",
+        "playing": "PLAY",
+        "result": "GAME OVER"
+      }
+    },
+    "footer": {
+      "switch_state": {
+        "ready": "SW1开始 · 摇杆左右转向 · 全局键退出",
+        "playing": "摇杆左右转向 · 全局键退出",
+        "result": "SW1重开 · 全局键退出"
+      }
+    },
+    "visualStyle": "pixel",
+    "visualPalette": "mint",
+    "visualLayout": "arcade",
+    "visualSprite": {
+      "switch_state": {
+        "ready": "snake",
+        "playing": "snake",
+        "result": "trophy"
+      }
+    }
+  }
+}

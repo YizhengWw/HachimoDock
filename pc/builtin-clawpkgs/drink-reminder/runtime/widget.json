@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {
+    "remaining_min": { "type": "int", "init": 60 },
+    "interval_min": { "type": "int", "init": 60 },
+    "drink_count_today": { "type": "int", "init": 0 }
+  },
+  "states": ["counting", "paused", "due"],
+  "initial_state": "counting",
+  "pages": [
+    { "id": "next" },
+    { "id": "today" }
+  ],
+  "initial_page": "next",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "reminder.acknowledge",
+      "to": "counting",
+      "set": { "remaining_min": 60 },
+      "inc": { "drink_count_today": 1 }
+    },
+    {
+      "from": "counting",
+      "on": "reminder.pause_resume",
+      "to": "paused"
+    },
+    {
+      "from": "due",
+      "on": "reminder.pause_resume",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "reminder.pause_resume",
+      "to": "counting"
+    },
+    {
+      "from": "*",
+      "on": "reminder.switch_view",
+      "page": "next"
+    }
+  ],
+  "tick": [
+    {
+      "every_ms": 60000,
+      "while_state": "counting",
+      "inc": { "remaining_min": -1 },
+      "when": { "var": "remaining_min", "lte": 0 },
+      "then": {
+        "to": "due",
+        "set": { "remaining_min": 0 }
+      }
+    }
+  ],
+  "dashboard": {
+    "title": "喝水提醒",
+    "eyebrow": {
+      "switch_page": {
+        "next": "距离下次喝水",
+        "today": "今日记录"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "counting": "补水倒计时",
+        "paused": "提醒已暂停",
+        "due": "该喝水啦"
+      }
+    },
+    "metricLabel": {
+      "switch_page": {
+        "next": "剩余",
+        "today": "已记录"
+      }
+    },
+    "metricValue": {
+      "switch_page": {
+        "next": { "var": "remaining_min" },
+        "today": { "var": "drink_count_today" }
+      }
+    },
+    "metricUnit": {
+      "switch_page": {
+        "next": "分钟",
+        "today": "次"
+      }
+    },
+    "badge": {
+      "var": "drink_count_today"
+    },
+    "note": {
+      "switch_page": {
+        "next": "每 60 分钟提醒一次",
+        "today": "SW1 记录一次喝水"
+      }
+    },
+    "footer": {
+      "switch_state": {
+        "counting": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出",
+        "paused": "SW1我喝了 · SW2恢复 · 摇杆右切换 · 全局键退出",
+        "due": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出"
+      }
+    },
+    "progress": {
+      "pct_of": "remaining_min",
+      "of_max": "interval_min",
+      "label": "距提醒"
+    },
+    "visualStyle": "pixel",
+    "visualPalette": {
+      "switch_state": {
+        "counting": "mint",
+        "paused": "arcade",
+        "due": "sunset"
+      }
+    },
+    "visualLayout": "tool",
+    "visualSprite": {
+      "switch_state": {
+        "counting": "droplet",
+        "paused": "timer",
+        "due": "droplet"
+      }
+    }
+  }
+}

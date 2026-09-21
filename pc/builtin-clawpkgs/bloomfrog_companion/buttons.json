@@ -1,0 +1,38 @@
+[
+  {
+    "action": "move_up",
+    "control": "前方摇杆",
+    "event": "joystick.up",
+    "label": "向上走"
+  },
+  {
+    "action": "move_down",
+    "control": "前方摇杆",
+    "event": "joystick.down",
+    "label": "向下走"
+  },
+  {
+    "action": "move_left",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw",
+    "label": "向左走"
+  },
+  {
+    "action": "move_right",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw",
+    "label": "向右走"
+  },
+  {
+    "action": "pet_pet",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "抚摸"
+  },
+  {
+    "action": "feed_pet",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "喂食"
+  }
+]

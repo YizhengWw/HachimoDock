@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v3",
+  "vars": {"score":{"type":"int","init":0}},
+  "states": ["ready","playing","result"],
+  "initial_state": "ready",
+  "transitions": [
+    {"on":"shift_left","from":"playing","to":"playing"},
+    {"on":"shift_right","from":"playing","to":"playing"},
+    {"on":"start","from":"ready","to":"playing"},
+    {"on":"start","from":"result","to":"playing"}
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "双键接球",
+    "eyebrow": {"switch_state":{"ready":"经典电子乒乓","playing":"经典电子乒乓","result":"本局结束"}},
+    "headline": {"switch_state":{"ready":"按 SW1 开始","playing":"守住底线","result":"漏球了"}},
+    "metricLabel": "连续接球",
+    "metricValue": {"var":"score"},
+    "metricUnit": "次",
+    "footer": {"switch_state":{"ready":"SW1开始 · 摇杆左右移动 · 全局键退出","playing":"摇杆左右移动 · 全局键退出","result":"SW1重开 · 全局键退出"}},
+    "visualStyle": "pixel",
+    "visualPalette": "mono",
+    "visualLayout": "scoreboard",
+    "visualSprite": "trophy"
+  },
+  "scene": {
+    "tick_ms": 170,
+    "active_state": "playing",
+    "result_state": "result",
+    "score_var": "score",
+    "grid": {"width":16,"height":16},
+    "entities": [
+      {"id":"bat","x":6,"y":13,"width":4,"height":1,"shape":"paddle","tone":2,"bounds":"clamp","collidable":true},
+      {"id":"orb","x":4,"y":3,"width":2,"height":2,"shape":"ball","tone":4,"vx":1,"vy":1,"bounds":"clamp","collidable":true}
+    ],
+    "rules": [
+      {"on":"start","do":[{"op":"restart"}]},
+      {"on":"shift_left","do":[{"op":"move","entity":"bat","dx":-2,"dy":0}]},
+      {"on":"shift_right","do":[{"op":"move","entity":"bat","dx":2,"dy":0}]},
+      {"on":"edge","entity":"orb","edge":"left","do":[{"op":"bounce","entity":"orb","axis":"x"}]},
+      {"on":"edge","entity":"orb","edge":"right","do":[{"op":"bounce","entity":"orb","axis":"x"}]},
+      {"on":"edge","entity":"orb","edge":"top","do":[{"op":"bounce","entity":"orb","axis":"y"}]},
+      {"on":"collision","entity":"orb","with":"bat","do":[{"op":"bounce","entity":"orb","axis":"y"},{"op":"score","add":1}]},
+      {"on":"edge","entity":"orb","edge":"bottom","do":[{"op":"stop"}]}
+    ]
+  }
+}

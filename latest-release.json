@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "product": "HachimoDock Pet Manager",
+  "desktopVersion": "0.1.79",
+  "firmwareVersion": "0.7.63-p4",
+  "sourceCommit": "a65850f7a421ead7afa926a8c6600193f6eb2918",
+  "firmwareBuildId": "0.7.63-p4+9af200c6fc5b",
+  "firmwareSourceCommit": "a65850f7a421ead7afa926a8c6600193f6eb2918",
+  "firmwareBuildProvenance": "Firmware build ID identifies an isolated local source snapshot. Firmware inputs match firmwareSourceCommit; documentation-only differences do not affect the binary.",
+  "publicSourceIncluded": true,
+  "embeddedInternalCredentials": false,
+  "embeddedEnterpriseCa": false,
+  "embeddedFixedProxy": false,
+  "flashingTools": {
+    "python": "3.10+",
+    "esptool": "5.4.0"
+  },
+  "firmwareVariants": [
+    {
+      "chipFamily": "v1",
+      "chipRevisionMin": 1,
+      "chipRevisionMax": 199,
+      "hardwareValidation": "build-and-host-regressions-passed; full-release-hardware-validation-pending",
+      "sha256": "f596d634c90931c9c5d665fa8a5337282a138b2a660a9b590348c36577cd4a2e"
+    },
+    {
+      "chipFamily": "v3",
+      "chipRevisionMin": 300,
+      "chipRevisionMax": 399,
+      "hardwareValidation": "build-and-host-regressions-passed; full-release-hardware-validation-pending",
+      "sha256": "a1bea8f128d0811038d8f114debf891e0a600082c9c0bf297979cacab496292a"
+    }
+  ],
+  "validation": {
+    "frontendPassed": 611,
+    "frontendSkipped": 1,
+    "bridgePassed": 188,
+    "firmwareHostPassed": 134,
+    "firmwareSubtestsPassed": 5,
+    "smartHomeBrowserRegression": true,
+    "publicSourceSecretScan": true,
+    "installerPayloadScan": true,
+    "macOSSigning": "local-ad-hoc-not-notarized",
+    "windowsRuntimeTestThisBuild": false
+  },
+  "artifacts": [
+    {
+      "role": "mac",
+      "file": "HachimoDock-Pet-Manager_0.1.79_macOS-arm64.dmg",
+      "bytes": 102837661,
+      "sha256": "e7ce8955ed4b643f9705b6a8f98f54d0d73e50abea2d89afb377df1ff92988f8"
+    },
+    {
+      "role": "windows",
+      "file": "HachimoDock-Pet-Manager_0.1.79_Windows-x64-setup.exe",
+      "bytes": 89340632,
+      "sha256": "2c90f2bd3ed4dcb673fe3f7e9de394fbdac439843400ff059cbf04f866cd32dc"
+    },
+    {
+      "role": "factoryPackage",
+      "file": "HachimoDock-P4-v1_0.7.63-p4_Factory-Flasher.zip",
+      "chipFamily": "v1",
+      "bytes": 19854609,
+      "sha256": "b0180f0c96b3324b2933f869e58ab61c7ef72281f2ef7bf460e0a37623545fd3"
+    },
+    {
+      "role": "factoryPackage",
+      "file": "HachimoDock-P4-v3_0.7.63-p4_Factory-Flasher.zip",
+      "chipFamily": "v3",
+      "bytes": 19870676,
+      "sha256": "c61f6505446b4c38de07f9af13c6f0c5440482a2586d706c66ffd5dfc0588d1d"
+    },
+    {
+      "role": "ffmpegSource",
+      "file": "FFmpeg-8.1.2-source.tar.xz",
+      "bytes": 11710924,
+      "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
+    },
+    {
+      "role": "license",
+      "file": "LICENSE",
+      "bytes": 7607,
+      "sha256": "f410049813a24b574b39af6dd4807c3e0a0432fe41081b768ef3fae4e0f1fd3a"
+    },
+    {
+      "role": "third-party-notices",
+      "file": "THIRD_PARTY_NOTICES.md",
+      "bytes": 5887,
+      "sha256": "5a5b1a38767c79b30e9c901335c4501ade86ab8e8ecf01953d93e17e96d32631"
+    },
+    {
+      "role": "license",
+      "file": "Xiaomi-Miloco-LICENSE.md",
+      "bytes": 6009,
+      "sha256": "376dd562aa127c36a75f39887b1a1cd7c47859f21f097e8a8f1b7bab0ea79a27"
+    },
+    {
+      "role": "license",
+      "file": "Espressif-ESP-SR-LICENSE.txt",
+      "bytes": 1188,
+      "sha256": "923e6274ea64b226c4f0cb9fc29bda915ae343fd6a8fc290ff5e0daaa85f8813"
+    }
+  ]
+}

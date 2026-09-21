@@ -1,0 +1,20 @@
+{
+  "dashboard": {
+    "title": "蛙蛙养成",
+    "eyebrow": "植物系桌宠",
+    "headline": "来陪我玩吧！",
+    "metricLabel": "亲密度",
+    "metricValue": "30",
+    "metricUnit": "芽",
+    "note": "抚摸 +1，喂食 +10",
+    "footer": "摇杆移动 · 互动养成 · 全局键退出",
+    "progress": {
+      "value": 30,
+      "label": "相伴成长"
+    },
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star"
+  }
+}
