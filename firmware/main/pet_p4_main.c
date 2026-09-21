@@ -33,6 +33,7 @@
 
 #include "pet_p4_lcd.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_audio_frontend.h"
 #include "pet_p4_diagnostics.h"
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
@@ -57,9 +58,11 @@ static const char *TAG = "pet-p4";
 #define PET_P4_MAIN_RX_HEALTH_TIMEOUT_MS 1000ULL
 
 static pet_p4_runtime_state_t g_state;
-static char g_line_buffer[32768];
+#define PET_P4_PROTOCOL_LINE_BUFFER_BYTES 32768
+// RX tasks parse/copy these buffers in task context; they are not DMA buffers.
+static char *g_line_buffer;
 static size_t g_line_used;
-static char g_uart_line_buffer[32768];
+static char *g_uart_line_buffer;
 static size_t g_uart_line_used;
 static SemaphoreHandle_t g_render_mutex;
 static SemaphoreHandle_t g_transport_mutex;
@@ -143,53 +146,96 @@ static bool rx_tasks_healthy(void) {
     && now - uart_last <= timeout;
 }
 
-static void usb_write_all(const char *data, size_t len) {
+static void usb_queue_all(const char *data, size_t len) {
   size_t written = 0;
   while (written < len) {
     int n = usb_serial_jtag_write_bytes(data + written, len - written, pdMS_TO_TICKS(20));
     if (n <= 0) break;
     written += (size_t) n;
   }
+}
+
+static void usb_write_all(const char *data, size_t len) {
+  usb_queue_all(data, len);
   (void) usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(100));
 }
 
-static void uart_write_all(const char *data, size_t len) {
+static void uart_queue_all(const char *data, size_t len) {
   size_t written = 0;
   while (written < len) {
     int n = uart_write_bytes(PET_P4_UART_NUM, data + written, len - written);
     if (n <= 0) break;
     written += (size_t) n;
   }
+}
+
+static void uart_write_all(const char *data, size_t len) {
+  uart_queue_all(data, len);
   (void) uart_wait_tx_done(PET_P4_UART_NUM, pdMS_TO_TICKS(100));
 }
 
 static int transport_log_vprintf(const char *format, va_list args) {
   if (g_transport_mutex) xSemaphoreTake(g_transport_mutex, portMAX_DELAY);
+  // Only streaming audio leaves queued data behind. Do not let the console's
+  // direct FIFO writes splice a log into its JSON frame; drop a debug log if a
+  // disconnected host cannot drain, rather than corrupting or stalling audio.
+  if (pet_p4_audio_active()) {
+    bool pending = uart_is_driver_installed(PET_P4_UART_NUM)
+      && uart_wait_tx_done(PET_P4_UART_NUM, pdMS_TO_TICKS(20)) != ESP_OK;
+    if (usb_serial_jtag_is_driver_installed() && usb_protocol_seen())
+      pending |= usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(20)) != ESP_OK;
+    if (pending) {
+      if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
+      return 0;
+    }
+  }
   int written = vprintf(format, args);
   fflush(stdout);
   if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
   return written;
 }
 
-static void transport_send_line(const char *line, void *ctx) {
+static void transport_send_line_impl(const char *line, void *ctx, bool drain) {
   pet_p4_transport_route_t route = ctx
     ? *((const pet_p4_transport_route_t *) ctx)
     : PET_P4_TRANSPORT_BROADCAST;
   if (!line) return;
   if (g_transport_mutex) xSemaphoreTake(g_transport_mutex, portMAX_DELAY);
   if (route == PET_P4_TRANSPORT_BROADCAST || route == PET_P4_TRANSPORT_UART) {
-    uart_write_all(line, strlen(line));
-    uart_write_all("\n", 1);
+    if (drain) {
+      uart_write_all(line, strlen(line));
+      uart_write_all("\n", 1);
+    } else {
+      uart_queue_all(line, strlen(line));
+      uart_queue_all("\n", 1);
+    }
   }
   if (route == PET_P4_TRANSPORT_USB_SERIAL_JTAG
       || (route == PET_P4_TRANSPORT_BROADCAST && usb_protocol_seen())) {
-    usb_write_all(line, strlen(line));
-    usb_write_all("\n", 1);
+    if (drain) {
+      usb_write_all(line, strlen(line));
+      usb_write_all("\n", 1);
+    } else {
+      usb_queue_all(line, strlen(line));
+      usb_queue_all("\n", 1);
+    }
   }
   if (route == PET_P4_TRANSPORT_BROADCAST) {
     pet_p4_native_usb_send_json_line(line, NULL);
   }
   if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
+}
+
+static void transport_send_line(const char *line, void *ctx) {
+  const char audio_prefix[] = "{\"topic\":\"audio/";
+  bool audio = line && strncmp(line, audio_prefix, sizeof(audio_prefix) - 1) == 0;
+  transport_send_line_impl(line, ctx, !audio);
+}
+
+static void transport_send_audio_line(const char *line, void *ctx) {
+  // Driver queues copy each frame; draining twice per 20 ms frame stalls capture.
+  // The transport mutex still prevents JSON/console interleaving.
+  transport_send_line_impl(line, ctx, false);
 }
 
 static void send_screenshot_chunk(
@@ -511,7 +557,7 @@ static void usb_rx_task(void *arg) {
         (size_t) len,
         g_line_buffer,
         &g_line_used,
-        sizeof(g_line_buffer),
+        PET_P4_PROTOCOL_LINE_BUFFER_BYTES,
         &raw_mode,
         (void *) &g_usb_serial_jtag_route
       );
@@ -532,7 +578,7 @@ static void uart_rx_task(void *arg) {
         (size_t) len,
         g_uart_line_buffer,
         &g_uart_line_used,
-        sizeof(g_uart_line_buffer),
+        PET_P4_PROTOCOL_LINE_BUFFER_BYTES,
         &raw_mode,
         (void *) &g_uart_route
       );
@@ -557,6 +603,9 @@ void app_main(void) {
     ESP_LOGW(TAG, "LCD boot backlight could not be hidden: %s", esp_err_to_name(backlight_hide_err));
   }
   ESP_ERROR_CHECK(nvs_flash_init());
+  g_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  g_uart_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  ESP_ERROR_CHECK(g_line_buffer && g_uart_line_buffer ? ESP_OK : ESP_ERR_NO_MEM);
   g_render_mutex = xSemaphoreCreateMutex();
   ESP_ERROR_CHECK(g_render_mutex ? ESP_OK : ESP_ERR_NO_MEM);
   g_transport_mutex = xSemaphoreCreateMutex();
@@ -621,7 +670,7 @@ void app_main(void) {
     ESP_LOGW(TAG, "P4 touchscreen unavailable, keeping buttons and display alive: %s",
              esp_err_to_name(touch_err));
   }
-  esp_err_t audio_err = pet_p4_audio_init(board_device_id, transport_send_line, NULL);
+  esp_err_t audio_err = pet_p4_audio_init(board_device_id, transport_send_audio_line, NULL);
   if (audio_err != ESP_OK) {
     ESP_LOGW(TAG, "P4 microphone unavailable, keeping non-voice controls alive: %s",
              esp_err_to_name(audio_err));
@@ -683,6 +732,8 @@ void app_main(void) {
     ESP_LOGE(TAG, "transport RX task creation failed usb=%ld uart=%ld",
              (long) usb_rx_created, (long) uart_rx_created);
   }
+  // Optional DSP must not take RAM needed to create display/USB tasks.
+  if (pet_p4_audio_ready() && pet_p4_audio_playback_ready()) (void)pet_p4_afe_init();
   ESP_LOGI(TAG, "Pet Manager ESP-P4 USB Serial/JTAG, USB-UART and native USB runtime ready");
   xSemaphoreTake(g_state_mutex, portMAX_DELAY);
   pet_p4_send_hello(&g_state, transport_send_line, NULL);
@@ -723,15 +774,16 @@ void app_main(void) {
     if (g_state.last_update_ms != last_logged_update) {
       pet_p4_view_model_t view;
       pet_p4_build_view_model(&g_state, &view);
-      ESP_LOGI(
+      // Animation updates can arrive every frame; keep them out of the normal
+      // UART protocol stream and never log dialogue/Agent bubble contents.
+      ESP_LOGD(
         TAG,
-        "view page=%s agent=%s status=%d compact=%d title=%s body=%s",
+        "view page=%s agent=%s status=%d compact=%d realtime=%d",
         view.page,
         view.agent,
         (int) view.status,
         view.compact_bubble ? 1 : 0,
-        view.title ? view.title : "",
-        view.body ? view.body : ""
+        view.realtime_conversation ? 1 : 0
       );
       last_logged_update = g_state.last_update_ms;
     }

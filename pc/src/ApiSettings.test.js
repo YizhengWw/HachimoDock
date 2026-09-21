@@ -1,6 +1,6 @@
 /**
  * [Input] ApiSettings page, App routing, feature pages, and shared stylesheet source.
- * [Output] Static regression coverage for centralized API-key ownership, official Volcengine key-acquisition links, immediate saved-ASR broadcasts, prompt-free macOS private-file disclosure, sidebar routing, feature-page status links, and responsive settings layout.
+ * [Output] Static regression coverage for centralized API-key ownership, subtitle-level speech key guide, immediate saved-ASR broadcasts, sidebar routing, feature-page status links, and responsive settings layout.
  * [Pos] test node in pc/src
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -13,6 +13,15 @@ import { dirname, join } from "node:path";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const readSource = (file) => readFileSync(join(srcDir, file), "utf8");
+
+test("LLM scope explanation belongs to header and usage spacing is page-scoped", () => {
+  const page=readSource("ApiSettings.jsx");
+  assert.match(page, /title="对话大模型" subtitle="[^"]*不影响 ChatGPT、Claude 等 Agent 的语音输入/);
+  assert.doesNotMatch(page, /<p[^>]*>此配置用于和宠物聊天/);
+  assert.match(page, /className="api-settings-page"/);
+  assert.match(readSource("styles.css"), /\.api-settings-page \.usage-help \{ margin: 0; \}/);
+  assert.match(readSource("styles.css"), /\.api-settings-page \.card__subtitle \{ max-width: none;/);
+});
 
 test("API settings owns voice and generation credential inputs", () => {
   const source = readSource("ApiSettings.jsx");
@@ -27,9 +36,10 @@ test("API settings owns voice and generation credential inputs", () => {
   assert.match(source, /type=\{showSecrets \? "text" : "password"\}/);
   assert.match(source, /saveProviderConfig/);
   assert.match(source, /emitApiConfigurationUpdated/);
-  assert.match(source, /macOS 不使用钥匙串/);
-  assert.match(source, /仅由当前用户读取，不额外加密/);
-  assert.match(source, /https:\/\/docs\.volcengine\.com\/docs\/6561\/2628951\?lang=zh/);
+  assert.doesNotMatch(source, /macOS 不使用钥匙串|仅由当前用户读取，不额外加密|无需选择模型版本|火山引擎豆包语音（识别 \+ 合成）/);
+  assert.doesNotMatch(source, /2628951/);
+  assert.match(source, /title="语音识别与合成"\s+subtitle=\{\([\s\S]*?识别与合成共用一个 API Key[\s\S]*?href="https:\/\/docs\.volcengine\.com\/docs\/DoubaoVoice\/APIKeyUsage\?lang=zh"[\s\S]*?Key 获取方式[\s\S]*?actions=\{/);
+  assert.match(source, /<details>[\s\S]*ASR 2\.0 和 TTS 2\.0/);
   assert.match(source, /https:\/\/ark\.volcengine\.com\/model\/detail\?name=doubao-seedance-2-0-mini/);
   assert.match(source, /provider\.id === "volcengine"/);
   assert.equal((source.match(/Key 获取方式/g) || []).length, 2);

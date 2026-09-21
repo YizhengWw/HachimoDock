@@ -1,7 +1,7 @@
 /**
  * [Input] per-family prompt + image payload + Volcengine Ark API-key/model-name config.
  * [Output] submitted task id, model-specific Ark v3 first/last-frame payload,
- *          account-actionable submit errors with expiring/resettable model rejections,
+ *          stage-specific reference-image moderation/portrait and manual MP4 upload guidance, plus expiring/resettable model rejections,
  *          explicit video parameters, polled status, and downloaded MP4 bytes.
  * [Pos] provider node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update this header.
@@ -186,7 +186,7 @@ export function buildVolcanoTaskDiagnostics(payload) {
 }
 
 function parseVolcanoErrorEnvelope(message) {
-  const raw = String(message || "");
+  const raw = String(message || "").split(/\n(?:Volcano payload summary:|诊断摘要：)/)[0];
   const jsonStart = raw.indexOf("{");
   if (jsonStart < 0) return null;
   try {
@@ -196,8 +196,42 @@ function parseVolcanoErrorEnvelope(message) {
   }
 }
 
+// Only an explicit input-image code can stop a batch sharing that image.
+// Text/output moderation is per action, and must not block unrelated actions.
+export function getVolcanoInputImageRejection(error) {
+  const raw = String(error?.message || error || "").split(/\n(?:Volcano payload summary:|诊断摘要：)/)[0];
+  const envelope = parseVolcanoErrorEnvelope(raw);
+  const detail = envelope?.error || envelope?.data?.error || envelope?.task?.error;
+  // readJsonOrThrow bounds error bodies; still recognize an explicit code in
+  // the error object if a long provider message was truncated mid-JSON.
+  const truncatedCode = !envelope && /"error"\s*:\s*\{\s*"code"\s*:\s*"(InputImageSensitiveContentDetected(?:\.[^"\\]+)?)"/.exec(raw)?.[1];
+  const code = String(detail?.code || truncatedCode || "");
+  if (!/^InputImageSensitiveContentDetected(?:\.|$)/.test(code)) return null;
+  const providerMessage = String(detail?.message || (truncatedCode ? raw : ""));
+  const copyright = /copyright/i.test(providerMessage);
+  // A generic policy/privacy code alone does not establish that a face caused
+  // the rejection. Only report portraits as confirmed when the provider says so.
+  const portrait = /(?:contains?|containing|detected|depicts?|includes?|involving)\s+(?:a\s+|an\s+)?(?:real[- ](?:person|people|human)|human\s+face)|真人(?:人像|人脸)|真实人物/i.test(providerMessage);
+  const imageEdit = /Ark image edit\s*\(/i.test(raw);
+  const reason = portrait
+    ? "参考图未通过人像审核：火山引擎提示图片可能包含真人或人脸。"
+    : copyright
+    ? "参考图未通过版权审核：火山引擎认为该图片可能涉及版权限制。请更换原创或已获授权的参考图；若为自有或已授权素材，可联系火山引擎申请复核。"
+    : "参考图未通过内容审核：火山引擎拒绝了这张参考图。请使用符合平台要求的素材；如有异议，可联系火山引擎申请复核。";
+  const guidance = imageEdit ? "" : [
+    "你也可以使用有权使用的素材，自行生成动态形象并导出 MP4，在「形象画廊 → 新建自定义形象 → 自定义上传视频」中上传；其他动作可在形象详情页通过「上传 MP4 替换」补充。",
+    portrait ? "" : "若参考图包含真人照片，可能涉及人像授权限制；本次错误码不能单独确认是人像问题。",
+    "Seedance 2.0 真人素材可通过火山可信素材库完成真人认证与肖像授权后使用；本客户端暂未接入该素材库。",
+    "反复重试、修改分辨率或时长不能解决授权审核问题。",
+  ].filter(Boolean).join("");
+  const message = `${imageEdit ? "图片背景处理（生图）失败" : "图生视频失败"}：${reason}${guidance}`;
+  return { code, message, category: portrait ? "portrait" : copyright ? "copyright" : "content" };
+}
+
 export function normalizeVolcanoSubmitErrorMessage(message, model) {
   const raw = String(message || "");
+  const imageRejection = getVolcanoInputImageRejection(raw);
+  if (imageRejection) return `${imageRejection.message}\n原始错误：${raw}`;
   const envelope = parseVolcanoErrorEnvelope(raw);
   const code = String(envelope?.error?.code || "");
   const providerMessage = String(envelope?.error?.message || "");
@@ -366,6 +400,13 @@ async function pollUntilTerminal({ apiKey, baseUrl, taskId, signal, onPoll }) {
       return { status, videoUrl, raw: json };
     }
     if (TERMINAL_FAIL.has(status)) {
+      // Do not truncate away the error code (or copyright reason) in a large task envelope.
+      const detail = json?.error || json?.data?.error || json?.task?.error;
+      if (detail) {
+        throw new Error(normalizeVolcanoSubmitErrorMessage(
+          `volcano task ${status}: ${JSON.stringify({ error: detail })}`,
+        ));
+      }
       throw new Error(`volcano task ${status}: ${JSON.stringify(json).slice(0, 300)}`);
     }
     if (!STILL_RUNNING.has(status) && status !== "") {

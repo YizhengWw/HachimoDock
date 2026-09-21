@@ -238,6 +238,10 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
 
     /* Setup I2S peripheral */
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(CONFIG_BSP_I2S_NUM, I2S_ROLE_MASTER);
+    /* 30 ms at 16 kHz: bound queued playback after an interrupt and keep the
+     * microphone/playback reference close without a 90 ms DMA backlog. */
+    chan_cfg.dma_desc_num = 3;
+    chan_cfg.dma_frame_num = 160;
     chan_cfg.auto_clear = true; // Auto clear the legacy data in the DMA buffer
     BSP_ERROR_CHECK_RETURN_ERR(i2s_new_channel(&chan_cfg, &i2s_tx_chan, &i2s_rx_chan));
 

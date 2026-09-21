@@ -1,6 +1,6 @@
 /*
  * [Input] ESP32-P4 microphone PCM (16 kHz mono S16LE) and a Volcengine API key from environment, user storage, without embedded credentials.
- * [Output] User-config-first credential resolution, platform-specific persistence, and VAD-segmented streaming partial/final transcripts using the BigModel ASR WebSocket API.
+ * [Output] Platform-specific shared speech-key persistence and ASR 2.0 streaming partial/final transcripts; legacy resource selections normalize to 2.0 on read/save.
  * [Pos] Tauri-side cloud ASR provider for device push-to-talk.
  */
 
@@ -21,18 +21,15 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep_until, timeout, Instant as TokioInstant};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::Message;
-use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
 pub const DEFAULT_ENDPOINT: &str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async";
 pub const DEFAULT_RESOURCE_ID: &str = "volc.seedasr.sauc.duration";
-const INTERNAL_ASR_API_KEY: Option<&str> = None;
 
 #[cfg(windows)]
 const KEYRING_SERVICE: &str = "claw-pet-manager";
@@ -64,7 +61,7 @@ const SERIALIZATION_JSON: u8 = 0x1;
 const COMPRESSION_NONE: u8 = 0x0;
 const COMPRESSION_GZIP: u8 = 0x1;
 
-type CloudSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type CloudSocket = crate::llm_network::CloudSocket;
 type SpeechCallback = Arc<dyn Fn(StreamingSpeechEvent) + Send + Sync>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -387,7 +384,8 @@ fn normalize_resource_id(value: &str) -> Result<String, String> {
     if value.len() > 128 || !value.starts_with("volc.") || value.chars().any(char::is_whitespace) {
         return Err("火山引擎 ASR Resource ID 格式无效".to_string());
     }
-    Ok(value.to_string())
+    // All supported speech input uses ASR 2.0; migrate stored 1.0/resource overrides on read.
+    Ok(DEFAULT_RESOURCE_ID.to_string())
 }
 
 fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
@@ -407,7 +405,7 @@ fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
 }
 
 fn runtime_config_from_internal_build() -> Option<RuntimeAsrConfig> {
-    runtime_config_from_embedded_key(INTERNAL_ASR_API_KEY)
+    runtime_config_from_embedded_key(crate::internal_credentials::speech_key())
 }
 
 fn runtime_config_from_embedded_key(api_key: Option<&str>) -> Option<RuntimeAsrConfig> {
@@ -419,6 +417,12 @@ fn runtime_config_from_embedded_key(api_key: Option<&str>) -> Option<RuntimeAsrC
         api_key: api_key.to_string(),
         resource_id: DEFAULT_RESOURCE_ID.to_string(),
     })
+}
+
+/// The Doubao speech API key the ASR module resolved (stored, env, or internal build).
+/// Realtime chat reuses it for Seed TTS when no separate TTS key is configured.
+pub fn stored_api_key() -> Option<String> {
+    load_runtime_config().ok().map(|config| config.api_key).filter(|key| !key.trim().is_empty())
 }
 
 fn load_runtime_config() -> Result<RuntimeAsrConfig, String> {
@@ -709,13 +713,12 @@ async fn connect_cloud_socket(config: &RuntimeAsrConfig) -> Result<(CloudSocket,
     insert_header(&mut request, "X-Api-Sequence", "-1")?;
     insert_header(&mut request, "X-Api-Connect-Id", &connect_id)?;
 
-    let connected = timeout(CONNECT_TIMEOUT, connect_async(request))
+    let connected = timeout(CONNECT_TIMEOUT, crate::llm_network::connect_websocket(request))
         .await
         .map_err(|_| "连接火山引擎 ASR 超时".to_string())?
         .map_err(|error| format!("连接火山引擎 ASR 失败: {error}"))?;
     let (socket, response) = connected;
     let log_id = response
-        .headers()
         .get("X-Tt-Logid")
         .and_then(|value| value.to_str().ok())
         .unwrap_or_default()
@@ -1129,6 +1132,7 @@ mod tests {
 
     #[test]
     fn resource_id_rejects_header_injection() {
+        assert_eq!(normalize_resource_id("volc.bigasr.sauc.duration").unwrap(), DEFAULT_RESOURCE_ID);
         assert!(normalize_resource_id("volc.seedasr.sauc.duration\r\nX-Test: bad").is_err());
         assert_eq!(
             normalize_resource_id("").unwrap(),
@@ -1207,6 +1211,18 @@ mod tests {
             StreamingSpeechEvent::Final { revision: 3, text, .. }
                 if text == "你好，继续任务"
         ));
+    }
+
+    #[test]
+    fn empty_terminal_packet_keeps_the_last_nonempty_partial() {
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = events.clone();
+        let callback: SpeechCallback = Arc::new(move |event| captured.lock().unwrap().push(event));
+        let mut state = TranscriptState::default();
+        state.emit("请继续".into(), false, &callback);
+        state.emit(String::new(), false, &callback);
+        state.emit(String::new(), true, &callback);
+        assert!(matches!(events.lock().unwrap().last(), Some(StreamingSpeechEvent::Final {text, ..}) if text == "请继续"));
     }
 
     #[tokio::test]

@@ -18,6 +18,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { prepareBuiltInP4Ready } from "./prepare-p4-ready-assets.mjs";
+import { cleanSkillBytecode } from "./clean-skill-bytecode.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "../..");
@@ -378,7 +379,11 @@ function validateBundledP4Firmware(target, firmwareName, expectedMin, expectedMa
   }
   const buildId = readFirmwareBuildId(firmware, version);
   const cleanBuildPattern = new RegExp(`^${version.replaceAll(".", "\\.")}\\+[0-9a-f]{12}$`);
-  if (!cleanBuildPattern.test(buildId)) {
+  // Explicit private-development packaging only. Keep the truthful -dirty
+  // identity; ordinary/public builds must still use clean release firmware.
+  const internalDevelopment = process.argv.includes("--internal-development-firmware")
+    && new RegExp(`^${version.replaceAll(".", "\\.")}\\+[0-9a-f]{12}-dirty$`).test(buildId);
+  if (!cleanBuildPattern.test(buildId) && !internalDevelopment) {
     throw new Error(
       `PC 内置固件必须来自干净的 12 位 Git 提交，当前 buildId：${buildId || "(missing)"}`,
     );
@@ -410,6 +415,8 @@ function ensureBridgeDependencies() {
 }
 
 const target = requestedTarget(process.argv.slice(2), process.platform);
+// Python validation may leave bytecode containing absolute build-machine paths.
+cleanSkillBytecode(join(repositoryRoot, "pc", "skills", "petui"));
 const targetArch = requestedArch(target, process.platform, process.arch);
 const runtimeName = target === "windows" ? "node.exe" : "node";
 const targetRuntime = join(generatedRuntime, runtimeName);

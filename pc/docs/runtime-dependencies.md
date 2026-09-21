@@ -20,3 +20,5 @@ FFmpeg 为独立可执行文件。可从HachimoDock **v0.1.52** 安装包取得�
 需要自行重编译 FFmpeg 时，使用随包 README 的完整构建参数及对应源码，并在审查后更新 `scripts/prepare-desktop-resources.mjs` 中目标哈希；不要删除来源与许可校验。自行编译的文件可能具有不同的 SHA-256，需要同步更新校验值。
 
 编译客户端不需要云服务 Key；运行语音识别或形象生成时，再在客户端配置所用服务。
+
+内部 Windows 包：在完成内部版主程序构建后，使用 `PET_MANAGER_WINDOWS_INSTALLER_FLAVOR=INTERNAL node scripts/build-windows-nsis-cross.mjs` 生成带 `INTERNAL` 标记的 NSIS 安装包，避免与外发包混淆。该参数仅标记安装包名称，不会注入 Key 或证书，也不能代替内部版构建及凭据检查。外发构建不要设置此参数。

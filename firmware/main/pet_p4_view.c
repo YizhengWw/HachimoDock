@@ -1,4 +1,5 @@
 #include "pet_p4_view.h"
+#include "pet_p4_conversation.h"
 
 #include <string.h>
 
@@ -47,11 +48,42 @@ static bool should_wait_for_session_card(const pet_p4_runtime_state_t *state) {
   return status_from_state(state) != PET_P4_VIEW_STATUS_IDLE;
 }
 
+static const char *conversation_hint(const char *conversation_state) {
+  if (!strcmp(conversation_state, "listening")) return "我在听…";
+  if (!strcmp(conversation_state, "thinking")) return "想一想…";
+  if (!strcmp(conversation_state, "speaking")) return "准备回答…";
+  return "准备中…";
+}
+
 void pet_p4_build_view_model(const pet_p4_runtime_state_t *state, pet_p4_view_model_t *out) {
   if (!out) return;
   memset(out, 0, sizeof(*out));
   out->page = state && state->screen_page[0] ? state->screen_page : "main";
   out->agent = state ? state->active_agent : "";
+  if (pet_p4_conversation_active(state)) {
+    /* 实时对话独占气泡：只显示当前说话方，不与 Agent 会话叠加。 */
+    out->page = "main";
+    out->agent = "";
+    out->realtime_conversation = true;
+    out->caption_since_ms = state->conversation_caption_since_ms;
+    out->title = state->conversation_user ? "你" : state->conversation_name[0] ? state->conversation_name : "宠物";
+    out->body = state->conversation_text[0]
+      ? state->conversation_text
+      : conversation_hint(state->conversation_state);
+    out->stats_json = "";
+    int cursor = state->conversation_history_cursor;
+    if (cursor >= 0 && cursor < (int) state->conversation_history_count) {
+      out->conversation_history = true;
+      out->title = state->conversation_history[cursor].user ? "你" : state->conversation_name;
+      out->body = state->conversation_history[cursor].text;
+    }
+    out->status = !strcmp(state->conversation_state, "error") ? PET_P4_VIEW_STATUS_ERROR : !strcmp(state->conversation_state, "listening")
+      ? PET_P4_VIEW_STATUS_WAITING
+      : PET_P4_VIEW_STATUS_WORKING;
+    out->show_bubble = true;
+    out->compact_bubble = false;
+    return;
+  }
   out->title = state && state->current_title[0] ? state->current_title : out->agent;
   out->body = state ? state->current_speech : "";
   out->stats_json = state ? state->stats_json : "";

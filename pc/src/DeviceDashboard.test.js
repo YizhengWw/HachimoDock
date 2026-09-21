@@ -213,7 +213,7 @@ test("voice button configuration groups physical controls before device sync", (
   assert.doesNotMatch(source, /import Switch from "\.\.\/shell\/Switch"/);
   assert.match(source, /同步到设备/);
   assert.match(source, /待同步/);
-  assert.match(dashboard, /label:\s*"不绑定"[\s\S]*忽略该输入/);
+  assert.match(dashboard, /label:\s*"不绑定"[\s\S]*不为这个操作分配功能/);
 
   assert.match(css, /\.switch\s*\{/);
   assert.match(css, /\.board-button-panel__workspace\s*\{/);
@@ -278,7 +278,7 @@ test("ESP32-P4 exposes button presses plus all four joystick directions", () => 
   assert.match(dashboard, /export const DEFAULT_BUTTON_ACTIONS = \{[\s\S]*?p4_sw1_short:\s*"page_enter"/);
   assert.match(dashboard, /p4_sw1_long:\s*"voice_ptt"/);
   assert.match(dashboard, /p4_sw2_short:\s*"component_center"/);
-  assert.match(dashboard, /p4_sw2_long:\s*"disabled"/);
+  assert.match(dashboard.match(/export const DEFAULT_BUTTON_ACTIONS = \{([\s\S]*?)\};/)[1], /p4_sw2_long:\s*"realtime_chat"/);
   assert.match(dashboard, /export const DEFAULT_BUTTON_ACTIONS = \{[\s\S]*?p4_sw3_short:\s*"page_back"/);
   assert.match(dashboard, /p4_sw3_long:\s*"disabled"/);
   assert.match(dashboard, /p4_encoder_press:\s*"page_enter"/);

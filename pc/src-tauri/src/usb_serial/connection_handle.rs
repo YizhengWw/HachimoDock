@@ -1,6 +1,6 @@
 /*
  * [Input] Serial port names/baud rates plus verified connection metadata.
- * [Output] Paired reader/writer handles, retry-safe opens, and owned live connection state.
+ * [Output] Paired reader/writer handles (overlapped on Windows), retry-safe opens, and owned live connection state.
  * [Pos] OS handle and connection-ownership boundary beneath usb_serial.rs.
  * [Sync] If this file changes, update `pc/.folder.md`.
  */
@@ -46,6 +46,7 @@ pub(super) struct UsbConnection {
     pub(super) capabilities: Value,
     pub(super) connected: bool,
     pub(super) cancel_reader: Arc<AtomicBool>,
+    pub(super) capture_active: Arc<AtomicBool>,
 }
 
 pub(super) fn serial_open_error_is_transient(error: &str) -> bool {
@@ -57,9 +58,8 @@ pub(super) fn serial_open_error_is_transient(error: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn clear_serial_handle_inheritance(port: &serialport::COMPort) -> Result<(), String> {
+fn clear_serial_handle_inheritance(port: &impl std::os::windows::io::AsRawHandle) -> Result<(), String> {
     use std::ffi::c_void;
-    use std::os::windows::io::AsRawHandle;
 
     const HANDLE_FLAG_INHERIT: u32 = 0x0000_0001;
 
@@ -81,10 +81,7 @@ fn clear_serial_handle_inheritance(port: &serialport::COMPort) -> Result<(), Str
 
 #[cfg(windows)]
 fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
-    let port = serialport::new(port_name, baud)
-        .dtr_on_open(false)
-        .timeout(SERIAL_IO_TIMEOUT)
-        .open_native()
+    let port = super::windows_serial::WindowsSerialPort::open(port_name, baud, SERIAL_IO_TIMEOUT)
         .map_err(|error| error.to_string())?;
     clear_serial_handle_inheritance(&port)?;
 

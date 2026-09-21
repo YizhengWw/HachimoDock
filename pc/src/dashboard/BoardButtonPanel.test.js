@@ -16,6 +16,10 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(here, "BoardButtonPanel.jsx"), "utf8");
 
+test("common button operations are expanded on first render", () => {
+  assert.match(source, /<details open>\s*<summary>常用操作/);
+});
+
 test("BoardButtonPanel exports a default React component", () => {
   assert.match(source, /export default function BoardButtonPanel\s*\(/);
 });

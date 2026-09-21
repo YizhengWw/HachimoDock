@@ -196,7 +196,7 @@ export default function ChannelMatrixCard() {
           <div className="channel-matrix-sync__copy">
             <UploadCloud size={15} />
             <div>
-              <strong>形象素材下发中</strong>
+              <strong>正在切换形象</strong>
               <span>{syncProgress.text}</span>
             </div>
           </div>

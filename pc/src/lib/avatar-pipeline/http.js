@@ -40,12 +40,12 @@ function isMissingTauriCommand(err) {
 
 function buildTransportError(err, { url, method, label }) {
   const raw = err?.message || String(err);
-  if (/Failed to fetch|NetworkError|TypeError/i.test(raw)) {
-    return new Error(
-      `无法连接到 ${url}（${method} via ${label}）。请检查 Base URL、网络、证书，或确认当前运行的是桌面版 Pet Manager。原始错误: ${raw}`,
-    );
-  }
-  return new Error(`${method} ${url} via ${label} failed: ${raw}`);
+  // Rust supplies sanitized, actionable errors. Do not add signed URLs or dump
+  // native/plugin exceptions, which can contain query credentials and proxy URLs.
+  const hint = label === "tauri-invoke" || label === "download-bytes"
+    ? raw.replace(/https?:\/\/[^\s）)]+/gi, "[服务地址]")
+    : "请检查网络、证书及 API 配置中的云服务网络设置。";
+  return new Error(`云服务请求失败：${hint}`);
 }
 
 async function getTauriInvoke() {
@@ -109,8 +109,9 @@ export async function pipelineFetch(input, init = {}) {
       });
     } catch (err) {
       if (!isMissingTauriCommand(err)) {
-        console.error(`[pipelineFetch/tauri-invoke] ${method} ${url} ->`, err);
-        throw buildTransportError(err, { url, method, label: "tauri-invoke" });
+        const safeError = buildTransportError(err, { url, method, label: "tauri-invoke" });
+        console.error("[pipelineFetch/tauri-invoke]", safeError.message);
+        throw safeError;
       }
       console.warn("[pipelineFetch] http_request_text unavailable, falling back:", err);
     }
@@ -122,8 +123,9 @@ export async function pipelineFetch(input, init = {}) {
     const impl = tauriFetch || fetch;
     return await impl(input, init);
   } catch (err) {
-    console.error(`[pipelineFetch/${label}] ${method} ${url} ->`, err);
-    throw buildTransportError(err, { url, method, label });
+    const safeError = buildTransportError(err, { url, method, label });
+    console.error(`[pipelineFetch/${label}]`, safeError.message);
+    throw safeError;
   }
 }
 
@@ -198,15 +200,18 @@ export async function downloadBinary(url, signal) {
   if (invoke) {
     try {
       const bytes = await invoke("download_bytes", { url });
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     } catch (err) {
-      console.error(`[downloadBinary/tauri] ${url} ->`, err);
-      throw buildTransportError(err, { url, method: "GET", label: "download-bytes" });
+      if (err?.name === "AbortError") throw err;
+      const safeError = buildTransportError(err, { url, method: "GET", label: "download-bytes" });
+      console.error("[downloadBinary/tauri]", safeError.message);
+      throw safeError;
     }
   }
   const response = await pipelineFetch(url, { method: "GET", signal });
   if (!response.ok) {
-    throw new Error(`download HTTP ${response.status} for ${url}`);
+    throw new Error(`素材下载失败（HTTP ${response.status}）`);
   }
   const buf = await response.arrayBuffer();
   return new Uint8Array(buf);

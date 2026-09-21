@@ -15,9 +15,11 @@
  */
 
 #include "pet_p4_protocol.h"
+#include "pet_p4_conversation.h"
 #include "pet_p4_transport_config.h"
 
 #include <errno.h>
+#include <math.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +36,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_audio_frontend.h"
 #include "pet_p4_build_info.h"
 #include "pet_p4_diagnostics.h"
 #include "pet_p4_input.h"
@@ -780,6 +783,8 @@ static void send_asset_slot_query_ack(
   int active_slot = pet_p4_asset_active_slot();
   cJSON_AddStringToObject(payload, "transferId", transfer_id ? transfer_id : "");
   cJSON_AddStringToObject(payload, "phase", "slot-query");
+  cJSON_AddBoolToObject(payload, "builtinProtected", true);
+  cJSON_AddBoolToObject(payload, "systemCues", true);
   cJSON_AddBoolToObject(payload, "ok", true);
   if (slot_is_valid(active_slot)) cJSON_AddNumberToObject(payload, "activeSlot", active_slot);
   for (int slot = 0; slot < PET_P4_ASSET_SLOT_COUNT; slot += 1) {
@@ -1435,6 +1440,16 @@ void pet_p4_state_init(pet_p4_runtime_state_t *state, const char *board_device_i
 
 void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_ms) {
   if (!state) return;
+  if (state->conversation_error_until_ms && now_ms >= state->conversation_error_until_ms) {
+    pet_p4_conversation_clear(state);
+  }
+  if (pet_p4_conversation_active(state) && state->host_last_seen_ms
+      && now_ms > state->host_last_seen_ms + PET_P4_HOST_HEARTBEAT_TIMEOUT_MS) {
+    (void) pet_p4_audio_conversation_set(false, true);
+    pet_p4_conversation_clear(state);
+  }
+  pet_p4_conversation_advance(state, pet_p4_audio_stream_played_bytes(),
+    pet_p4_audio_stream_playing(), now_ms);
   unsigned int retained = 0;
   bool queue_changed = false;
   bool snapshot_stale = state->session_snapshot_last_seen_ms > 0
@@ -1519,6 +1534,13 @@ const char *pet_p4_state_effective_lifecycle(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
 ) {
+  /* 实时对话覆盖动画：听→waiting_user，想→working，说→welcome。 */
+  if (state && state->conversation_state[0] && strcmp(state->conversation_state, "ended") != 0) {
+    if (!strcmp(state->conversation_state, "listening")) return "notification";
+    if (!strcmp(state->conversation_state, "thinking")) return "thinking";
+    if (!strcmp(state->conversation_state, "speaking")) return "welcome";
+    return "idle";
+  }
   const char *lifecycle = runtime_lifecycle(state);
   const char *session_lifecycle = selected_session_lifecycle(state);
   if (session_lifecycle) lifecycle = session_lifecycle;
@@ -1777,6 +1799,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v2"));
   cJSON_AddItemToObject(capabilities, "widgetScenes", widget_scenes);
   cJSON_AddBoolToObject(capabilities, "widgetSprites", true);
+  cJSON_AddStringToObject(capabilities, "widgetData", "p4-data-list-v1");
   cJSON_AddNumberToObject(capabilities, "componentCatalogMax", PET_P4_MINIAPP_CATALOG_MAX);
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"));
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"));
@@ -1876,6 +1899,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(appearance, "builtinSlot", 0);
   cJSON_AddNumberToObject(appearance, "customSlot", PET_P4_RAW_APPEARANCE_SLOT);
   cJSON_AddBoolToObject(appearance, "builtinProtected", true);
+  cJSON_AddBoolToObject(appearance, "systemCues", true);
   cJSON_AddBoolToObject(
     appearance,
     "rawSlot0",
@@ -1908,6 +1932,10 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(features, "componentCenter", true);
   cJSON_AddBoolToObject(features, "voiceCapture", audio_ready);
   cJSON_AddBoolToObject(features, "audioPlayback", audio_playback_ready);
+  cJSON_AddBoolToObject(features, "conversationSubtitles", true);
+  cJSON_AddBoolToObject(features, "audioAec", pet_p4_afe_ready());
+  cJSON_AddBoolToObject(features, "audioVad", pet_p4_afe_ready());
+  cJSON_AddBoolToObject(features, "audioFullDuplex", pet_p4_afe_ready());
   cJSON_AddBoolToObject(features, "touchInput", touch_ready);
   cJSON_AddBoolToObject(features, "touchGestures", touch_ready);
   cJSON_AddBoolToObject(features, "firmwareOta", true);
@@ -2386,6 +2414,7 @@ bool pet_p4_handle_line(
     }
   } else if (strcmp(topic, "control/command") == 0
              && strcmp(json_string(payload, "type"), "audio_bridge") == 0) {
+    pet_p4_audio_set_transport(send_line, ctx);
     const char *action = json_string(payload, "action");
     esp_err_t audio_err = ESP_ERR_INVALID_ARG;
     if (strcmp(action, "start") == 0) {
@@ -2402,6 +2431,7 @@ bool pet_p4_handle_line(
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "audio/control") == 0) {
+    pet_p4_audio_set_transport(send_line, ctx);
     const char *action = json_string(payload, "action");
     esp_err_t audio_err = ESP_ERR_INVALID_ARG;
     if (strcmp(action, "start") == 0) {
@@ -2420,6 +2450,90 @@ bool pet_p4_handle_line(
   } else if (strcmp(topic, "audio/query") == 0) {
     pet_p4_audio_send_status();
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/conversation") == 0) {
+    pet_p4_audio_set_transport(send_line, ctx);
+    /* 实时对话：持续采集（不再等长按），半双工时播放期间不上行。 */
+    const cJSON *enabled_item = cJSON_GetObjectItemCaseSensitive(payload, "enabled");
+    const cJSON *half_item = cJSON_GetObjectItemCaseSensitive(payload, "halfDuplex");
+    bool enabled = cJSON_IsBool(enabled_item) ? cJSON_IsTrue(enabled_item) : false;
+    bool half_duplex = cJSON_IsBool(half_item) ? cJSON_IsTrue(half_item) : true;
+    esp_err_t conv_err = pet_p4_audio_conversation_set(enabled, half_duplex);
+    pet_p4_audio_diagnostic(enabled ? "conversation_start" : "conversation_end", json_string(payload, "sessionId"), 0, conv_err == ESP_OK);
+    if (!enabled) {
+      pet_p4_conversation_clear(state);
+    }
+    if (conv_err != ESP_OK) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "audio_conversation_failed",
+                        "conversation capture is not ready");
+      cJSON_Delete(root);
+      return false;
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/play_begin") == 0) {
+    pet_p4_conversation_playback_begin(state, json_string(payload, "sessionId"));
+    esp_err_t play_err = pet_p4_audio_stream_begin(json_string(payload, "sessionId"));
+    if (play_err != ESP_OK) {
+      pet_p4_audio_diagnostic("playback_rejected", json_string(payload, "sessionId"), 0, false);
+      send_protocol_ack(send_line, ctx, topic, payload, false, "audio_playback_failed",
+                        "speaker playback is not ready");
+      cJSON_Delete(root);
+      return false;
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/play_chunk") == 0) {
+    if (!pet_p4_audio_stream_matches(json_string(payload, "sessionId"))) {
+      /* A cancelled turn can have already crossed USB. Ignore it, never append
+       * old PCM to a newer reply or terminate the new conversation. */
+      send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+      cJSON_Delete(root);
+      return true;
+    }
+    const char *data = json_string(payload, "data");
+    size_t data_len = strlen(data);
+    if (data_len == 0 || data_len > PET_P4_AUDIO_STREAM_CHUNK_B64_MAX) {
+      pet_p4_audio_diagnostic("chunk_invalid", json_string(payload, "sessionId"), data_len, false);
+      send_protocol_ack(send_line, ctx, topic, payload, false, "audio_chunk_invalid",
+                        "play_chunk data missing or too large");
+      cJSON_Delete(root);
+      return false;
+    }
+    static uint8_t decoded[PET_P4_AUDIO_STREAM_CHUNK_MAX];
+    size_t decoded_len = 0;
+    if (mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
+                              (const unsigned char *) data, data_len) != 0
+        || pet_p4_audio_stream_push(decoded, decoded_len) != ESP_OK) {
+      pet_p4_audio_diagnostic("chunk_rejected", json_string(payload, "sessionId"), decoded_len, false);
+      send_protocol_ack(send_line, ctx, topic, payload, false, "audio_chunk_rejected",
+                        "play_chunk could not be buffered");
+      cJSON_Delete(root);
+      return false;
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/play_end") == 0) {
+    if (pet_p4_audio_stream_matches(json_string(payload, "sessionId"))) (void) pet_p4_audio_stream_end();
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/play_subtitle") == 0) {
+    const cJSON *offset = cJSON_GetObjectItemCaseSensitive(payload, "offsetBytes");
+    bool valid = cJSON_IsNumber(offset) && isfinite(offset->valuedouble)
+      && offset->valuedouble >= 0 && offset->valuedouble <= 4294967294.0
+      && offset->valuedouble == (double) (unsigned int) offset->valuedouble;
+    bool accepted = valid && pet_p4_conversation_queue_cue(state, json_string(payload, "sessionId"),
+      (unsigned int) offset->valuedouble, json_string(payload, "text"));
+    if (!accepted) send_protocol_ack(send_line, ctx, topic, payload, false, "invalid_subtitle", "invalid playback subtitle");
+    else send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "audio/play_flush") == 0) {
+    pet_p4_conversation_playback_begin(state, "");
+    pet_p4_audio_stream_flush();
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "ui/conversation") == 0) {
+    bool phase_changed = strcmp(state->conversation_state, json_string(payload, "state")) != 0;
+    bool accepted = pet_p4_conversation_update(state, json_string(payload, "sessionId"),
+      json_string(payload, "state"), json_string(payload, "name"), json_string(payload, "text"),
+      strcmp(json_string(payload, "role"), "user") == 0,
+      cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "final")), esp_timer_get_time() / 1000ULL);
+    bool failed = strcmp(state->conversation_state, "error") == 0;
+    if (accepted && phase_changed) pet_p4_audio_diagnostic(failed ? "conversation_failed" : "conversation_state", json_string(payload, "sessionId"), 0, !failed);
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "system/heartbeat") == 0) {
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (pet_p4_diagnostics_handle_topic(topic, payload, state, send_line, ctx)) {
@@ -2428,6 +2542,13 @@ bool pet_p4_handle_line(
     state->last_update_ms += 1;
   } else if (strncmp(topic, "asset/", 6) == 0) {
     handle_asset_topic(state, topic, payload, send_line, ctx);
+  } else if (strcmp(topic, "widget/data") == 0) {
+    if (!pet_p4_widget_data_apply(payload, esp_timer_get_time() / 1000ULL)) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "invalid_widget_data", "data snapshot rejected");
+      cJSON_Delete(root); return false;
+    }
+    state->last_update_ms += 1;
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strncmp(topic, "widget/", 7) == 0) {
     if (!handle_widget_topic(state, topic, payload, send_line, ctx)) {
       cJSON_Delete(root);

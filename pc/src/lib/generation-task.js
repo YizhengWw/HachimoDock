@@ -1,7 +1,7 @@
 /**
  * [Input] Wizard hands off `{ imageFile, providerConfig, ... }`; UI subscribes to state.
  * [Output] Module-level singleton that owns the current custom avatar-generation run so it
- *   survives navigation, reports filtered-family progress and concise provider errors,
+ *   survives navigation, distinguishes reference-image moderation and skipped actions,
  *   and guards terminal-result acknowledgement by completion epoch.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI component subscribing
@@ -10,6 +10,7 @@
 
 import { resolveThinkingModelName, runAvatarPipeline } from "./avatar-pipeline/run.js";
 import { CUSTOM_GENERATION_FAMILIES } from "./avatar-pipeline/families.js";
+import { getVolcanoInputImageRejection } from "./avatar-pipeline/providers/volcano.js";
 import { replaceFamilyVideo, saveAppearance } from "./appearance-store.js";
 
 /**
@@ -162,6 +163,8 @@ export function normalizeGenerationErrorMessage(error) {
   if (raw.startsWith("生成失败：所有动作都没有生成成功。")) {
     return truncateMessage(raw, 1200);
   }
+  const imageRejection = getVolcanoInputImageRejection(raw);
+  if (imageRejection) return imageRejection.message;
   const primary = extractPrimaryError(raw);
   if (!primary) return "生成失败：未收到具体错误信息。";
 
@@ -226,7 +229,9 @@ export function summarizeFamilyFailures(families) {
   const unique = Array.from(groups.values());
   if (unique.length === 1) {
     const [item] = unique;
-    const lines = [`失败原因：${item.message}`, `影响动作：${item.families.slice(0, 8).join("、")}`];
+    const lines = [`失败原因：${item.message}`, `影响动作：${item.families.join("、")}`];
+    const skipped = failedFamilies.filter((family) => family.skipped).length;
+    if (skipped) lines.push(`已停止提交剩余 ${skipped} 个动作（共用参考图未通过审核）；已完成的结果保留。`);
     if (item.diagnostic) lines.push(item.diagnostic);
     return `\n${lines.join("\n")}`;
   }

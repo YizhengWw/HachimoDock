@@ -3,7 +3,7 @@
  * [Output] Runtime-aware hardware-control workspace with the device map above
  *          physical-order SVG control cards, inline button/joystick gesture editors,
  *          repeatable actions across gestures, per-gesture Code Agent prompts,
- *          multi-trigger voice-input row hints, and USB sync feedback.
+ *          multi-trigger voice-input row hints, current-key usage instructions, and USB sync feedback.
  * [Pos] component node in pc/src/dashboard
  * [Sync] If this file changes, update `pc/src/dashboard/.folder.md`.
  */
@@ -18,6 +18,7 @@ import {
   buttonControlRowsForRuntime,
 } from "../DeviceDashboard.jsx";
 import Button from "../shell/Button";
+import { buildUsageHelp, friendlyControlLabel } from "../lib/usage-help.js";
 
 const CONTROL_GROUP_META = {
   p4_sw1: { label: "SW1", detail: "左侧按键" },
@@ -152,6 +153,7 @@ export default function BoardButtonPanel({
   const controlRows = buttonControlRowsForRuntime(runtime);
   const isP4Runtime = String(runtime || "").toLowerCase() === "esp-p4";
   const controlGroups = groupControlRows(controlRows, isP4Runtime);
+  const help = buildUsageHelp(controlRows, buttonActions, voiceConfig?.enabled, voiceConfigDirty);
 
   if (controlRows.length === 0) {
     return (
@@ -228,6 +230,22 @@ export default function BoardButtonPanel({
           {voiceConfigOtaState.message}
         </div>
       )}
+
+      <div className="usage-help">
+        <p>为按键和摇杆选择功能，修改后点击「同步到设备」生效。同一个按键可以分别设置短按和长按。</p>
+        <details open>
+          <summary>常用操作 · 按当前配置显示{voiceConfigDirty ? "（待同步）" : ""}</summary>
+          <dl className="usage-help__operations">
+            <dt>语音输入</dt><dd>{help.voice} {help.confirm}</dd>
+            <dt>宠物／组件切换</dt><dd>{help.component}</dd>
+            <dt>选择并打开组件</dt><dd>{help.select}；{help.enter}</dd>
+            <dt>退出组件</dt><dd>{help.back} 组件内的其他操作以「怎么玩」为准。</dd>
+            <dt>实时对话</dt><dd>{help.chat} 等它说完再说。</dd>
+            <dt>查看会话</dt><dd>{help.sessions}</dd>
+          </dl>
+          <p>使用语音功能时，请保持设备连接电脑，并让 Pet Manager 持续运行。</p>
+        </details>
+      </div>
 
       <div className={`board-button-panel__workspace${isP4Runtime ? " board-button-panel__workspace--p4" : ""}`}>
         <section className="board-button-panel__left" aria-label="设备控件导航">
@@ -345,7 +363,7 @@ export default function BoardButtonPanel({
                     )}
                   />
                   <span>
-                    <strong>{group.label}</strong>
+                    <strong>{friendlyControlLabel(group.label)}</strong>
                     <small>
                       {group.id === "p4_joystick"
                         ? "上、下、左、右与中按分别配置"
@@ -392,7 +410,7 @@ export default function BoardButtonPanel({
                               id={fieldId}
                               className="voice-button-action-select"
                               value={currentActionId}
-                              aria-label={`${group.label}${gestureLabel(row, group)}功能`}
+                              aria-label={`${friendlyControlLabel(group.label)}${gestureLabel(row, group)}功能`}
                               onChange={(event) => onButtonActionChange(row, event.target.value)}
                             >
                               {allowedOptions.map((option) => {

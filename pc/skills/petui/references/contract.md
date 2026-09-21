@@ -22,6 +22,7 @@
   "widgetScene": "p4-grid-scene-v2",
   "widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"],
   "widgetSprites": true,
+  "widgetData": "p4-data-list-v1",
   "widgetGamePresets": ["blocks", "snake", "flappy"],
   "touchInput": { "ready": false }
 }
@@ -176,6 +177,31 @@ screen.region.long_press
 - `runtime/widget.json` 紧凑 JSON 不超过 4095 字节。
 - `buttons.json` 紧凑 JSON 不超过 2047 字节。
 - P4 第三方组件不声明任意 `fetchers` 或 `readers`。实时数据只能使用产品已经提供的 bridge 变量。
+
+### 5.1 可选 PC 实时数据列表
+
+仅支持 `widgetData: "p4-data-list-v1"` 的新固件可以在 v4 工具 runtime 中声明
+`"data": {"source": "stocks.watchlist", "page_var": "list_page"}`。
+`page_var` 必须引用已声明的 int 变量，初值 0 表示第一页；增减变量切页，固件按实际页数循环。
+`source` 为 1–47 位小写 ASCII 字母、数字、点、短横线或下划线；data 仅允许这两个字段，
+不能与 scene/game 混用。旧固件必须拒绝安装，不能假设所有 v4 设备都支持实时数据。
+
+首个产品数据源为 `stocks.watchlist`：PC 组件中心管理最多 20 只自选股及顺序，
+PC 保持运行并通过 USB 下发腾讯行情；组件不存放股票名单、Key、任意 URL 或请求脚本。
+设备每页显示 5 行。通用行包含 label/value/detail/meta/tone；股票适配器分别映射
+名称、价格、涨跌幅、代码币种及数据状态、正负色彩。当前行情顶部统一显示日期，行内不显示时刻；
+只有 value/detail（股价/涨跌幅）按 tone 着色，label/meta 保持正常色。PC 详情保留原始行情时间。
+其他来源必须先有真实产品适配器，
+不能仅改 source 名就宣称支持天气等数据。
+
+Dashboard 使用 clean/tool，提供 title/footer；初始预览使用“等待数据”，不填示例价格。
+摇杆左右通过普通 transition 增减 page_var；可用 SW1 将其置 0 回到首页。
+自动取价由 PC 后台服务负责，不用 runtime tick 模拟价格，不声明设备端手动刷新。
+数据只存于设备 RAM，不反复写 flash；断连/PC 退出后最多 30 秒标记过期，保留最后结果。
+上游失败与单只行情缺失同样明确标注，不把旧价格当实时价格。
+行情时间来自数据源，不以请求时间冒充行情时间。
+PC 数据源、刷新与验收边界见 [live-data.md](live-data.md)。实时列表也必须通过现有自测脚本的分页测试；
+模拟通过不等于完成网络、断连恢复或真机显示验收。
 
 ## 6. 通用 Scene
 

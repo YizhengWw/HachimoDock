@@ -7,7 +7,7 @@
 #define PET_P4_WORKING_VARIANT_FALLBACK_MS 4800ULL
 #define PET_P4_WELCOME_MIN_MS 1200ULL
 
-static const char *canonical_lifecycle(const char *lifecycle) {
+const char *pet_p4_canonical_lifecycle(const char *lifecycle) {
   if (!lifecycle || !lifecycle[0]) return "idle";
   if (!strcmp(lifecycle, "active") || !strcmp(lifecycle, "thinking") || !strcmp(lifecycle, "tool_running")) {
     return "working";
@@ -136,7 +136,7 @@ int pet_p4_behavior_select(
   uint32_t asset_revision,
   uint64_t now_ms
 ) {
-  const char *canonical = canonical_lifecycle(lifecycle);
+  const char *canonical = pet_p4_canonical_lifecycle(lifecycle);
   int index;
   if (!behavior || !catalog || catalog->count == 0) return -1;
 

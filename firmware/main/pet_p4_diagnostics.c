@@ -167,6 +167,12 @@ static void send_status(
   cJSON_AddNumberToObject(memory, "freeHeapBytes", esp_get_free_heap_size());
   cJSON_AddNumberToObject(memory, "minimumFreeHeapBytes", esp_get_minimum_free_heap_size());
   cJSON_AddNumberToObject(memory, "freePsramBytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+  cJSON_AddNumberToObject(memory, "freeInternalBytes", heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(memory, "largestInternalBlockBytes", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(memory, "minimumFreeInternalBytes", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(memory, "freeDmaBytes", heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+  cJSON_AddNumberToObject(memory, "largestDmaBlockBytes", heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL));
+  cJSON_AddNumberToObject(memory, "largestPsramBlockBytes", heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
   cJSON_AddNumberToObject(
     memory,
     "minimumFreePsramBytes",

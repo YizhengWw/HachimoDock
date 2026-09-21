@@ -464,7 +464,8 @@ test("bound dashboard keeps its controller mounted but drops visual content off-
 
   assert.match(app, /\{binding && \(\s*<DeviceDashboard[\s\S]*active=\{isDashboard\}/);
   assert.doesNotMatch(app, /\{isDashboard && binding && \(/);
-  assert.match(dashboard, /if \(!active\) return null;/);
+  assert.match(dashboard, /\{active && <PageShell/);
+  assert.match(dashboard, /editingPersona && <div hidden=\{!active\}><PersonaVoiceModal/);
 });
 
 test("appearance detail receives the current board binding for exact native USB sync", () => {

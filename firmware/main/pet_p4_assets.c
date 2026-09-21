@@ -243,6 +243,10 @@ static bool json_parse_family(
       if (!have_path) return false;
     } else if (strcmp(key, "audioPath") == 0) {
       if (!json_parse_string(json, candidate.audio_path, sizeof(candidate.audio_path))) return false;
+    } else if (strcmp(key, "audioSource") == 0) {
+      char source[16];
+      if (!json_parse_string(json, source, sizeof(source))) return false;
+      candidate.audio_custom = strcmp(source, "custom") == 0;
     } else if (strcmp(key, "fps") == 0) {
       uint32_t fps = 0;
       if (!json_parse_u32(json, &fps) || fps > UINT16_MAX) return false;

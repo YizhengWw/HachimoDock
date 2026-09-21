@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically exercise a generated PetUI game loop or interactive tool scene.
+"""Deterministically exercise PetUI games, interactive scenes, or live-data pagination.
 
 The simulator mirrors the bounded P4 scene primitives closely enough to reject
 packages whose JSON is valid but whose controls, movement, scoring, result, or
@@ -519,10 +519,60 @@ def smoke_test_tool_scene(
     }
 
 
+def smoke_test_data_list(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> dict[str, Any]:
+    """Exercise real transitions with synthetic row counts, never network/quote data."""
+    page_var = runtime["data"]["page_var"]
+    actions = [binding["action"] for binding in buttons]
+    transitions = runtime.get("transitions", [])
+    initial = (runtime["initial_state"], int(runtime["vars"][page_var].get("init", 0)))
+    visible_actions: set[str] = set()
+    errors: list[str] = []
+    scenarios = []
+    for row_count in (0, 1, 6, 11, 16, 20):
+        page_count = max(1, (row_count + 4) // 5)
+        pending = deque([(initial, 0)])
+        visited = {initial}
+        pages = {initial[1] % page_count}
+        while pending and len(visited) < 512:
+            (state, page), depth = pending.popleft()
+            if depth >= MAX_SEARCH_DEPTH:
+                continue
+            for action in actions:
+                next_state, next_page = state, page
+                for transition in transitions:
+                    if transition.get("on") != action or transition.get("from") not in ("*", state):
+                        continue
+                    next_state = transition.get("to", state)
+                    if page_var in transition.get("set", {}):
+                        next_page = int(transition["set"][page_var])
+                    next_page = clamp(next_page + int(transition.get("inc", {}).get(page_var, 0)), -1_000_000_000, 1_000_000_000)
+                    break
+                if next_page % page_count != page % page_count:
+                    visible_actions.add(action)
+                pages.add(next_page % page_count)
+                key = (next_state, next_page)
+                if key not in visited:
+                    visited.add(key)
+                    pending.append((key, depth + 1))
+        if pages != set(range(page_count)):
+            errors.append(f"{row_count} 行时存在不可达数据页：{sorted(set(range(page_count)) - pages)}")
+        if pending:
+            errors.append("分页状态探索超过有界上限，无法完成验证")
+        scenarios.append({"rows": row_count, "pages": page_count, "reachablePages": sorted(pages)})
+    for action in actions:
+        if action not in visible_actions:
+            errors.append(f"列表动作 {action} 没有可达的翻页反馈")
+    return {"ok": not errors, "mode": "data-list", "source": runtime["data"]["source"],
+            "scenarios": scenarios, "visibleActions": sorted(visible_actions), "errors": errors,
+            "networkVerified": False, "deviceVerified": False}
+
+
 def smoke_test_game(widget_dir: Path) -> dict[str, Any]:
     runtime = load_json(widget_dir / "runtime" / "widget.json")
     manifest = load_json(widget_dir / "component.json")
     buttons = load_json(widget_dir / "buttons.json")
+    if isinstance(runtime.get("data"), dict):
+        return smoke_test_data_list(runtime, buttons)
     if manifest.get("kind") != "game":
         if isinstance(runtime.get("scene"), dict):
             return smoke_test_tool_scene(manifest, runtime, buttons)
@@ -680,7 +730,7 @@ def run_smoke_test(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="模拟并验证 PetUI 游戏闭环或互动工具场景")
+    parser = argparse.ArgumentParser(description="模拟验证 PetUI 游戏闭环、互动场景或实时列表分页")
     parser.add_argument("widget_dir", type=Path)
     parser.add_argument("--capabilities", type=Path)
     parser.add_argument("--json", action="store_true")

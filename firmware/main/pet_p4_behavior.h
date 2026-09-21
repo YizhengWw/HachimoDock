@@ -20,6 +20,7 @@ typedef struct {
 } pet_p4_behavior_t;
 
 void pet_p4_behavior_init(pet_p4_behavior_t *behavior);
+const char *pet_p4_canonical_lifecycle(const char *lifecycle);
 int pet_p4_behavior_select(
   pet_p4_behavior_t *behavior,
   const pet_p4_asset_catalog_t *catalog,

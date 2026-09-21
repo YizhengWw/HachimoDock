@@ -59,7 +59,7 @@ test("appearance store persists and clears per-family WAV cues in the manifest",
   assert.match(source, /export async function replaceFamilyAudioCue/);
   assert.match(source, /const audioRel = `\$\{dir\}\/\$\{VIDEO_DIR\}\/\$\{family\}\.wav`;/);
   assert.match(source, /await writeFile\(audioRel, audioBytes, \{ baseDir: BaseDirectory\.AppLocalData \}\);/);
-  assert.match(source, /manifest\.families\[idx\] = \{ \.\.\.manifest\.families\[idx\], audioPath: audioRel \};/);
+  assert.match(source, /manifest\.families\[idx\] = \{ \.\.\.manifest\.families\[idx\], audioPath: audioRel, audioSource: "custom" \};/);
   assert.match(source, /export async function removeFamilyAudioCue/);
   assert.match(source, /delete manifest\.families\[idx\]\.audioPath;/);
   assert.match(source, /export async function readAudioAsBlobUrl\(audioPath\)/);

@@ -93,7 +93,8 @@ test("Shows live P4 device microphone relay and recognition status", () => {
   assert.match(source, /composerMode === "focused-input"/);
   assert.match(source, /isMimocodeVoice/);
   assert.match(source, /保持 MiMoCode 终端在前台/);
-  assert.match(source, /短按确认键（默认 SW3）才发送/);
+  assert.match(source, /usageHelp\.confirm/);
+  assert.doesNotMatch(source, /默认 SW3/);
 });
 
 test("Guides ChatGPT（Codex） and Claude foreground failures with macOS and Windows Dev tips", () => {
@@ -111,7 +112,8 @@ test("Guides ChatGPT（Codex） and Claude foreground failures with macOS and Wi
   assert.match(source, /pc\\src-tauri\\target\\debug\\pet-manager-tauri\.exe/);
   assert.match(source, /Windows 不需要把 Pet Manager 添加到“辅助功能”列表/);
   assert.match(source, /相同权限级别/);
-  assert.match(source, /⌘⇧G/);
+  assert.match(source, /选择「应用程序」中的 Pet Manager/);
+  assert.match(source, /import\.meta\.env\.DEV && <code>/);
   assert.match(source, /invoke\("check_codex_accessibility_permission"\)/);
   assert.match(source, /invoke\("request_codex_accessibility_permission"\)/);
   const requestAccessibility = source.match(
@@ -165,7 +167,7 @@ test("Combines primary status and actions while pairing settings and diagnostics
   assert.match(source, /formatVoiceUserMessage/);
   assert.match(source, /设备未收到语音监听指令，请确认 USB 连接后重试/);
   assert.match(source, /draft_ready: "草稿待确认"/);
-  assert.match(source, /短按确认键（默认 SW3）才发送/);
+  assert.match(source, /usageHelp\.confirm/);
   assert.match(css, /\.voice-panel__command\s*\{/);
   assert.match(css, /\.voice-panel__advanced-grid\s*\{/);
   assert.match(css, /\.voice-panel__advanced-summary\s*\{/);

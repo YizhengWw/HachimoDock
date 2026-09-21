@@ -1,0 +1,24 @@
+.stock-watchlist { margin-bottom: 18px; border: 1px solid #e3e6ed; border-radius: 14px; background: #fff; overflow: hidden; }
+.stock-watchlist summary { padding: 16px 20px; font-weight: 600; cursor: pointer; }
+.stock-watchlist summary span { margin-left: 12px; font-weight: 400; }
+.stock-watchlist__body { padding: 0 20px 16px; }
+.stock-watchlist__body p { margin: 0 0 12px; line-height: 1.6; }
+.stock-watchlist__add { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.stock-watchlist__add select, .stock-watchlist__add input { padding: 9px 12px; border: 1px solid #e0e3eb; border-radius: 8px; background: #fff; color: inherit; font: inherit; }
+.stock-watchlist__add input { flex: 1; min-width: 140px; }
+.stock-watchlist__table { overflow: auto; max-height: 350px; margin-bottom: 12px; }
+.stock-watchlist table { width: 100%; border-collapse: collapse; font-size: 13px; text-align: left; }
+.stock-watchlist th, .stock-watchlist td { padding: 10px 8px; border-bottom: 1px solid #f0f1f5; white-space: nowrap; }
+.stock-watchlist th { color: #858b9b; font-weight: 400; }
+.stock-watchlist td small { display: block; color: #858b9b; font-size: 11px; }
+.stock-watchlist__controls { display: flex; gap: 3px; }
+.stock-watchlist__notice { color: #b85b14; background: #fff5eb; padding: 8px 12px; border-radius: 8px; }
+.stock-watchlist .stock-up { color: #e44e50; }
+.stock-watchlist .stock-down { color: #139763; }
+.stock-watchlist button:disabled { opacity: .45; cursor: not-allowed; }
+.stock-watchlist__search { margin-bottom: 12px; max-height: 260px; overflow-y: auto; }
+.stock-watchlist__result { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid #edf0f5; background: #f8f9fc; color: inherit; text-align: left; cursor: pointer; }
+.stock-watchlist__result strong { overflow-wrap: anywhere; }
+.stock-watchlist__result span { color: #858b9b; font-size: 12px; }
+.stock-watchlist__result small { margin-left: auto; color: #f97316; white-space: nowrap; }
+.stock-watchlist__result:hover:not(:disabled) { background: #fff3e9; }

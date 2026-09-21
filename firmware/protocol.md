@@ -1,5 +1,17 @@
 # ESP-P4 USB Protocol
 
+## PC 推送的组件实时数据（0.7.60-p4）
+
+能力 `widgetData: "p4-data-list-v1"` 表示支持 `widget/data` 完整快照。
+payload 为 `schema/source/ttlMs/status/message/rows`；最多 20 行、每页 5 行，
+4 个命名数据源保存在 RAM。校验全部成功才替换，失败不续期；有效期使用设备单调时钟。
+0.7.61-p4 起可选 `date` 字段接收 `YYYY-MM-DD`，只在列表顶部绘制；省略时保持旧发送端兼容。每行名称和元信息保持普通颜色，仅 value/detail 使用 tone。
+列表组件在 v4 runtime 声明 `data.source` 与整数 `data.page_var`，无需修改旧组件。
+PC 在文件传输占锁时推迟快照，过期数据明确提示，不启用设备网络。
+完整字段约束、股票提供器与隐私边界见 [实时数据说明](../pc/docs/widget-live-data.md)。
+
+## Transport
+
 The P4 runtime keeps one JSON object per line over the ESP32-P4 USB-UART path
 for flashing, rescue, and early logs. When the board Type-C jumper is switched
 to the ESP32-P4 native USB OTG path, runtime data should use the high-speed
@@ -13,6 +25,20 @@ transport:
 ```
 
 ## Handshake
+
+### Duplex audio capability extension
+
+`features.audioAec`, `audioVad`, `audioFullDuplex` are true only when the
+ESP-SR microphone/reference pipeline initializes. A compatible client requests
+`audio/conversation` with `halfDuplex:false`; missing capability retains the
+legacy half-duplex behavior. `audio/status` reports live AEC availability.
+Processed `audio/chunk` carries `aec:true` and boolean `vadSpeech` alongside
+the unchanged 640-byte PCM/checksum fields. Raw capture is never marked AEC.
+Runtime AEC failure emits `aec_fallback` and gates playback capture; the PC
+stops a duplex session rather than recognizing raw loudspeaker echo.
+Late `audio/play_chunk` and `audio/play_end` for an inactive playback session
+are ignored after cancellation; they cannot append to a new reply. See
+`pc/docs/realtime-duplex.md` for acoustic acceptance criteria.
 
 Firmware 0.7.51 reports the actual silicon revision as an integer
 `major * 100 + minor` in `capabilities.firmwareUpdate.chipRevision` and in
@@ -514,6 +540,9 @@ PC to board:
   `retainedSessionCount`, firmware, `buildId`, `gitSha`, `buildDirty`,
   `protocolSchema`, and running partition on
   `diagnostics/status`.
+  `memory` additionally separates `freeInternalBytes`, `minimumFreeInternalBytes`,
+  `largestInternalBlockBytes`, `freeDmaBytes`, `largestDmaBlockBytes` and
+  `largestPsramBlockBytes`: free PSRAM is not interchangeable with internal/DMA RAM.
 - `system/reset-inputs`: restores the safe SW1/SW2/SW3/encoder defaults and
   replies on `diagnostics/action`. It does not erase appearance assets.
 - `system/reboot`: acknowledges on `diagnostics/action`, then performs a delayed
@@ -593,13 +622,14 @@ before restart, leaving enough time for the desktop's 3-second commit timeout
 and one idempotent retry to receive the cached commit result.
 
 The A/B application image contains the canonical runtime/button JSON and bounded
-sprite files for all eight built-in components. On first boot of each clean firmware build,
+sprite files for all nine built-in components. On first boot of each firmware build,
 `pet_p4_miniapp_sync_builtins` compares compacted package checksums with the
 existing A/B component catalog, replaces changed same-id built-ins, adds missing
 ones if slots are available, removes retired `falling-catch`, and restores the
-previous active component (or defaults to `two-key-pong`). User-created packages
-remain ahead of firmware defaults; when no user package exists, `two-key-pong`
-and `bloomfrog_companion` occupy the first and second positions. A build-id marker is
+previous active component (or defaults to `stock-watchlist`). The stock component
+is initially first after migration, not pinned: later installs prepend normally.
+User-created packages remain ahead of the other firmware defaults;
+`two-key-pong` and `bloomfrog_companion` lead the remaining builtins. A build-id marker is
 written only after the migration completes, so an interrupted migration retries
 on the next boot. Component ids outside the firmware-owned list are preserved.
 
@@ -810,6 +840,63 @@ local voice-service relay at `127.0.0.1:50001`. `audio/error` terminates the
 current session. `audioCapture.codec` reports `ES7210`, `ES8311`, or
 `unavailable` according to the initialized capture path.
 
+## Realtime Conversation Audio
+
+Firmware 0.7.57 implements a realtime persona conversation mode on top of the PTT
+stream. The PC owns VAD, ASR, the persona LLM and TTS; the board only captures,
+plays, and shows a HUD.
+
+PC to board:
+
+```json
+{"topic":"audio/conversation","payload":{"enabled":true,"halfDuplex":true,"sessionId":"rtc-1"}}
+{"topic":"audio/play_begin","payload":{"sessionId":"rtc-1-turn","sampleRate":16000,"channels":1,"format":"pcm_s16le"}}
+{"topic":"audio/play_chunk","payload":{"sessionId":"rtc-1-turn","seq":0,"bytes":3200,"data":"<base64 PCM S16LE 16 kHz mono>"}}
+{"topic":"audio/play_end","payload":{"sessionId":"rtc-1-turn","bytes":64000}}
+{"topic":"audio/play_flush","payload":{"sessionId":"rtc-1"}}
+{"topic":"ui/conversation","payload":{"sessionId":"rtc-1","state":"listening","name":"小西","text":""}}
+```
+
+- `audio/conversation` with `enabled:true` starts continuous microphone capture
+  (same `audio/begin` / `audio/chunk` / `audio/end` framing, `audio/begin`
+  carries `"conversation":true`, no 30 s cap). With `halfDuplex:true` the board
+  keeps reading the microphone but drops frames while the speaker is playing and
+  for 250 ms afterwards. `enabled:false` stops capture, flushes playback and
+  clears the HUD.
+- `audio/play_begin` opens a streamed playback turn; `audio/play_chunk` carries
+  up to 4096 decoded bytes per line into a 3 s ring buffer; playback starts once
+  200 ms are buffered (or immediately on `play_end`), and `play_flush` drops
+  everything for barge-in / session end. State WAV cues yield while a stream is
+  active. `audio/status` gains `conversation`, `streamActive` and
+  `streamBufferedMs`.
+- `audio/diagnostic` reports metadata-only lifecycle/error events (event, sessionId,
+  sequence, bytes, bufferedMs, uptimeMs, ok). The PC persists these alongside its
+  own realtime diagnostics; no PCM or dialogue text is logged. `audio/status.playbackVolume`
+  reports the codec volume readback (100 / 0 dB in 0.7.57, shared by v1 and v3). `audio/status`
+  adds `streamUnderruns` and `streamReceivedBytes`.
+- `capabilities.features.conversationSubtitles:true` advertises synchronized captions.
+  `ui/conversation` accepts `sessionId`, `state`, `name`, `text`, `role` (`user` or
+  `pet`) and `final` (boolean). It owns the main-page bubble while active; Agent
+  session cards and statistics remain hidden but continue updating in the background.
+  The existing card style uses a blue outline. Listening displays live ASR text;
+  replies display only the pet's current sentence, never a retained user summary.
+  `state:"error"` displays `text` as a failure hint for 8 seconds. The animation
+  family follows the state — `listening`
+  → `waiting_user`, `thinking` → `working`, `speaking` → `welcome`. `state:"ended"`
+  clears it. Host disconnection also clears captions and restores Agent display.
+- `audio/play_subtitle` carries `{sessionId,offsetBytes,text}` after `audio/play_begin`
+  and before its sentence's PCM. The ID must match the playback turn, and the offset
+  is an even unsigned byte count from that turn's beginning (16 kHz mono S16LE).
+  The device advances captions using consumed PCM, not elapsed wall time. Up to 12
+  pending cues and 8 finalized captions of at most 511 UTF-8 bytes are held in RAM;
+  overflow/invalid cues are rejected. `audio/play_flush` discards pending cues.
+  Joystick/touch navigation only reviews this bounded history; new captions restore
+  the live view. Exiting clears all caption/history text. No dialogue text is logged.
+- The `realtime_chat` input action is emitted as a normal `input/event`; the PC
+  starts conversations only from `main` (the pet screen). While active, it consumes
+  all input from that board; the realtime shortcut or configured back action ends
+  the conversation, and other keys cannot submit text or change Agent sessions.
+
 ## Protocol ACK/NACK
 
 While USB serial is connected, Pet Manager sends `system/heartbeat` every two
@@ -993,3 +1080,8 @@ PPA writes for the next frame from mutating memory still being copied by the
 LCD DMA path after a delayed refresh.
 Session-card overlays are likewise cached by queue content and selected index,
 with only animated working markers redrawn per frame.
+# 公共状态提示音（0.7.63+）
+
+设备能力 `appearance.systemCues: true` 表示默认完成、错误、等待用户音效由固件公共资源提供，不依赖形象内是否存在对应视频。完成音保持四组、每组三声。新形象 manifest 可声明 `systemCues: true`，默认不含 WAV；`families[].audioPath` 配合 `audioSource: "custom"` 表示专属音效，缺失/无效时公共音效兜底。旧 manifest 保持兼容，已知旧默认 WAV 按内容指纹迁移，不按文件名猜测用户音效。
+
+内置形象切换使用现有 `asset/slot-query` 与 `asset/activate`：仅对设备声明 `builtinProtected` 的内置形象请求，选择有效 slot 0，并使用设备返回的 packId 激活；不要求与 PC 内置 packId 相等。槽位无效时停止并报错，不能回退成写入自定义槽位。普通自定义包仍严格校验 packId。

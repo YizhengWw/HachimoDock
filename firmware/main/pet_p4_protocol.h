@@ -38,6 +38,18 @@ extern "C" {
 #define PET_P4_HOST_HEARTBEAT_TIMEOUT_MS 6000ULL
 #define PET_P4_SESSION_SNAPSHOT_TIMEOUT_MS 30000ULL
 #define PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS 15000ULL
+#define PET_P4_CONVERSATION_HISTORY_MAX 8
+#define PET_P4_CONVERSATION_CUES_MAX 12
+
+typedef struct {
+  char text[PET_P4_SPEECH_MAX];
+  bool user;
+} pet_p4_conversation_caption_t;
+
+typedef struct {
+  unsigned int offset_bytes;
+  char text[PET_P4_SPEECH_MAX];
+} pet_p4_conversation_cue_t;
 
 typedef void (*pet_p4_send_line_fn)(const char *line, void *ctx);
 
@@ -73,6 +85,21 @@ typedef struct {
   bool session_voice_active;
   unsigned long long session_snapshot_last_seen_ms;
   char screen_page[PET_P4_PAGE_MAX];
+  /* 实时对话（2026-09-18）：PC 经 ui/conversation 驱动的 HUD 与动画覆盖；
+   * state 为空或 "ended" 时不生效。 */
+  char conversation_state[PET_P4_STATE_MAX];
+  char conversation_name[PET_P4_AGENT_MAX];
+  char conversation_text[PET_P4_SPEECH_MAX];
+  unsigned long long conversation_error_until_ms;
+  char conversation_id[PET_P4_DEVICE_ID_MAX];
+  char conversation_playback_id[128];
+  bool conversation_user;
+  unsigned long long conversation_caption_since_ms;
+  pet_p4_conversation_caption_t conversation_history[PET_P4_CONVERSATION_HISTORY_MAX];
+  unsigned int conversation_history_count;
+  int conversation_history_cursor; /* -1 follows the current speaker */
+  pet_p4_conversation_cue_t conversation_cues[PET_P4_CONVERSATION_CUES_MAX];
+  unsigned int conversation_cue_count;
   char stats_json[PET_P4_STATS_MAX];
   pet_p4_stats_model_t stats;
   char asset_manifest_json[PET_P4_ASSET_MANIFEST_MAX];

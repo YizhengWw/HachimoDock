@@ -3,12 +3,13 @@
  * [Output] Renders the shared device preview, including palette/layout-aware
  *          classic dashboards, palette-keyed pixel tool panels, static pixel
  *          presets, richer clean-scene silhouettes, safe animated PNG sprites,
- *          and viewport-bounded P4 blocks/snake/flappy previews.
+ *          viewport-bounded P4 blocks/snake/flappy previews, and read-only default-stock covers.
  * [Pos] component node in pc/src/component-center
  * [Sync] If this file changes, update `pc/src/component-center/.folder.md`.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import StockScreenPreview from "./StockScreenPreview.jsx";
 import {
   Activity,
   Clock3,
@@ -904,6 +905,7 @@ export default function DeviceScreenPreview({ component, className = "" }) {
   const animationActive = usePreviewAnimationAllowed(previewRef, Boolean(component));
   if (!component) return null;
   const dashboard = component.dashboard || {};
+  const isStocks = component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist";
   const progress = normalizeProgress(dashboard.progress);
   const isPixel = dashboard.visualStyle === "pixel";
   const isClean = dashboard.visualStyle === "clean";
@@ -919,14 +921,14 @@ export default function DeviceScreenPreview({ component, className = "" }) {
   return (
     <div
       ref={previewRef}
-      className={`component-device-screen ${usesCanvasShell ? "component-device-screen--pixel" : ""} ${isClean ? "component-device-screen--clean" : ""} ${isPixelTool ? "component-device-screen--pixel-tool" : ""} ${className}`.trim()}
+      className={`component-device-screen ${isStocks ? "component-device-screen--stocks" : ""} ${usesCanvasShell ? "component-device-screen--pixel" : ""} ${isClean ? "component-device-screen--clean" : ""} ${isPixelTool ? "component-device-screen--pixel-tool" : ""} ${className}`.trim()}
       data-widget={component.id}
       data-visual-style={isPixel ? "pixel" : (isClean ? "clean" : "classic")}
       data-palette={palette}
       data-layout={layout}
       aria-label={`${component.name || ""} 设备屏预览`}
     >
-      {usesCanvasShell ? (
+      {isStocks ? <StockScreenPreview active={animationActive} /> : usesCanvasShell ? (
         isPixelTool ? (
           <PixelToolPreview component={component} dashboard={dashboard} progress={progress} />
         ) : (

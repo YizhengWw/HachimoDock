@@ -36,7 +36,8 @@
  *          scans prefer /dev/cu.* callout ports to avoid blocking /dev/tty.*
  *          opens, reconnects cancel stale reader clones before reopening, and
  *          connection_handle owns paired serial resources and keeps Windows
- *          handles non-inheritable by Bridge child processes;
+ *          handles non-inheritable by Bridge child processes; windows_serial
+ *          opens overlapped RX/TX with separate completion events;
  *          background probes use bounded handshakes and per-adapter retry backoff;
  *          failed heartbeat writes mark stale connections for auto-reconnect;
  *          ignored hardware coverage verifies active-set-driven terminal-card
@@ -60,6 +61,10 @@ use std::time::{Duration, Instant};
 
 mod appearance_transaction;
 mod connection_handle;
+mod live_audio_pacing;
+use live_audio_pacing::write_serial_live_frame;
+#[cfg(windows)]
+mod windows_serial;
 mod firmware_transaction;
 mod firmware_chip;
 pub(crate) use firmware_chip::{bundled_resource_for_chip, chip_target_from_device, P4ChipTarget};
@@ -71,7 +76,7 @@ mod widget_transaction;
 
 use appearance_transaction::{
     asset_checksum_hex, build_asset_file_commit_payload, compute_p4_pack_id,
-    digest_appearance_assets, p4_pack_id_from_assets, p4_raw_transfer_fallback_slot,
+    digest_appearance_assets, p4_pack_id_from_assets, p4_raw_transfer_fallback_slot, p4_builtin_slot,
     parse_missing_asset_ack_phase, parse_p4_appearance_slot_state,
     plan_appearance_sync_from_digests, should_retry_appearance_with_legacy_full_sync,
     AppearanceAssetAckPhase, AppearanceAssetDigest, AppearanceAssetEntry, AppearanceFullSyncMode,
@@ -651,6 +656,19 @@ fn write_serial_bytes_paced(
     }
 }
 
+fn observe_serial_capture(active: &AtomicBool, topic: &str, payload: &serde_json::Value) {
+    match topic {
+        "audio/begin" | "audio/chunk" => active.store(true, Ordering::Release),
+        "audio/end" => active.store(false, Ordering::Release),
+        "audio/status" => {
+            if let Some(value) = payload.get("active").and_then(serde_json::Value::as_bool) {
+                active.store(value || payload.get("conversation").and_then(serde_json::Value::as_bool) == Some(true), Ordering::Release);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn usb_serial_device_prefers_high_speed(device: &UsbDeviceInfo) -> bool {
     if device.vid == 0x1a86 || device.vid == 0x303a {
         return true;
@@ -975,6 +993,7 @@ pub fn sync_appearance_p4_native<F>(
     appearance_dir: &std::path::Path,
     _app_data_dir: &std::path::Path,
     expected_board_device_id: &str,
+    use_device_builtin: bool,
     cancel_requested: &AtomicBool,
     on_progress: F,
 ) -> Result<(u32, u64, bool), String>
@@ -985,7 +1004,32 @@ where
         return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
     }
     let mut transport = NativeUsbP4Transport::open(expected_board_device_id)?;
+    if use_device_builtin {
+        let id = format!("builtin-{}", uuid::Uuid::new_v4());
+        transport.send_json_value(&serde_json::json!({"topic":"asset/slot-query","payload":{"transferId":id}}))?;
+        let ack = transport.wait_asset_ack_timeout(&id,"slot-query",None,cancel_requested,ASSET_STAT_TIMEOUT)?;
+        if ack["builtinProtected"] != true {
+            return Err("设备尚未声明受保护的内置形象，请先升级固件；未自动重传。".into());
+        }
+        let state = parse_p4_appearance_slot_state(&ack)?;
+        let slot = p4_builtin_slot(&state)?;
+        if state.active_slot != Some(slot.slot) {
+            transport.send_json_value(&serde_json::json!({"topic":"asset/activate","payload":{"transferId":id,"slot":slot.slot,"packId":slot.pack_id}}))?;
+            transport.wait_asset_ack_timeout(&id,"activate",None,cancel_requested,ASSET_STAT_TIMEOUT)?;
+        }
+        transfer_log::record("appearance","builtin_activated",serde_json::json!({"files":0,"bytes":0,"transport":"native-usb"}));
+        on_progress(0,0,0,0);
+        return Ok((0,0,true));
+    }
     let assets = load_prepared_p4_appearance_pack(appearance_dir)?;
+    if prepared_p4_requires_system_cues(appearance_dir)? {
+        let id = format!("cue-check-{}", uuid::Uuid::new_v4());
+        transport.send_json_value(&serde_json::json!({"topic":"asset/slot-query","payload":{"transferId":id}}))?;
+        let ack = transport.wait_asset_ack_timeout(&id,"slot-query",None,cancel_requested,ASSET_STAT_TIMEOUT)?;
+        if ack["systemCues"] != true {
+            return Err("此形象使用公共提示音，请先升级设备固件至 0.7.63 或更新版本。".into());
+        }
+    }
     if cancel_requested.load(Ordering::SeqCst) {
         return Err(APPEARANCE_SYNC_CANCELLED_ERROR.to_string());
     }
@@ -1489,6 +1533,7 @@ impl UsbSerialManager {
 
         let connection_id = self.next_connection_id.fetch_add(1, Ordering::SeqCst) + 1;
         let cancel_reader = Arc::new(AtomicBool::new(false));
+        let capture_active = Arc::new(AtomicBool::new(false));
 
         let mut connection = UsbConnection {
             connection_id,
@@ -1507,6 +1552,7 @@ impl UsbSerialManager {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::clone(&cancel_reader),
+            capture_active: Arc::clone(&capture_active),
         };
         apply_hello_payload_to_connection(&mut connection, &probed.hello.payload);
         let initial_hello = probed.hello.clone();
@@ -1569,6 +1615,7 @@ impl UsbSerialManager {
                 };
 
                 resolve_asset_ack(&asset_ack_waiters, &msg.topic, &msg.payload);
+                observe_serial_capture(&capture_active, &msg.topic, &msg.payload);
                 resolve_widget_ack(&widget_ack_waiters, &msg.topic, &msg.payload);
                 resolve_firmware_ack(&firmware_ack_waiters, &msg.topic, &msg.payload);
                 resolve_firmware_status(&firmware_status_waiters, &msg.topic, &msg.payload);
@@ -1596,7 +1643,7 @@ impl UsbSerialManager {
                                 apply_hello_payload_to_connection(c, &msg.payload);
                                 cache_usb_status(&status_snapshot, Some(c));
                                 let _ = c.writer.write_all(ack.as_bytes());
-                                let _ = c.writer.flush();
+                                if !capture_active.load(Ordering::Acquire) { let _ = c.writer.flush(); }
                             }
                         }
                     }
@@ -1635,6 +1682,12 @@ impl UsbSerialManager {
     /// Send a message to the device
     pub fn send(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
         self.send_inner(topic, payload, true, None, None, None)
+    }
+
+    /// Low-priority snapshots never interleave with firmware/widget/appearance transfers.
+    pub(crate) fn send_widget_data(&self, board: &str, payload: &serde_json::Value) -> Result<(), String> {
+        let _guard = self.asset_transfer_guard.try_lock().map_err(|_| "设备正在传输，稍后更新行情")?;
+        self.send_to_board(board, "widget/data", payload)
     }
 
     /// Send without flush - for streaming bulk data.
@@ -1730,9 +1783,21 @@ impl UsbSerialManager {
             (conn.baud_rate >= P4_USB_UART_BAUD && conn.runtime.eq_ignore_ascii_case("esp-p4"))
                 .then_some(P4_CH343_SERIAL_WRITE_SLICE_BYTES)
         });
+        let audio_frame = topic.starts_with("audio/") || topic == "ui/conversation";
+        if (topic == "audio/conversation" && payload.get("enabled").and_then(serde_json::Value::as_bool) == Some(true))
+            || (topic == "audio/control" && payload.get("action").and_then(serde_json::Value::as_str) == Some("start")) {
+            conn.capture_active.store(true, Ordering::Release);
+        }
+        let bulk_frame = topic.starts_with("asset/") || topic.starts_with("firmware/");
+        let live_frame = audio_frame || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
         let write_result = {
-            let _pause = SerialReaderPause::new(&self.serial_body_write_active);
+            let _pause = (!live_frame).then(|| SerialReaderPause::new(&self.serial_body_write_active));
             (|| {
+                if live_frame {
+                    return write_serial_live_frame(conn.writer.as_mut(), bytes,
+                        paced_slice_bytes.unwrap_or(bytes.len()), P4_CH343_SERIAL_WRITE_GAP)
+                        .map_err(|error| format!("Live serial write failed: {error}"));
+                }
                 if let Some(write_slice_bytes) = paced_slice_bytes {
                     write_serial_bytes_paced(
                         conn.writer.as_mut(),
@@ -2364,10 +2429,29 @@ impl UsbSerialManager {
                 P4_FIRMWARE_COMMIT_ACK_TIMEOUT,
             ) {
                 Ok(ack) => {
+                    transfer_log::record(
+                        "firmware",
+                        "commit_acknowledged",
+                        serde_json::json!({
+                            "transferId": transfer_id.as_str(),
+                            "attempt": attempt,
+                            "ack": ack.clone(),
+                        }),
+                    );
                     commit_ack = Some(ack);
                     break;
                 }
                 Err(FirmwareCommandError::Rejected(error)) => {
+                    transfer_log::record(
+                        "firmware",
+                        "transaction_failed",
+                        serde_json::json!({
+                            "transferId": transfer_id.as_str(),
+                            "phase": "commit",
+                            "attempt": attempt,
+                            "error": error.as_str(),
+                        }),
+                    );
                     self.best_effort_firmware_abort(
                         &expected_board_device_id,
                         firmware_connection_id,
@@ -2377,6 +2461,15 @@ impl UsbSerialManager {
                 }
                 Err(error) => {
                     last_commit_delivery_error = error.to_string();
+                    transfer_log::record(
+                        "firmware",
+                        "commit_attempt_failed",
+                        serde_json::json!({
+                            "transferId": transfer_id.as_str(),
+                            "attempt": attempt,
+                            "error": last_commit_delivery_error.as_str(),
+                        }),
+                    );
                     eprintln!(
                         "[usb-firmware-ota] commit delivery attempt={}/{} error={}",
                         attempt, P4_FIRMWARE_COMMIT_MAX_ATTEMPTS, last_commit_delivery_error
@@ -2405,7 +2498,19 @@ impl UsbSerialManager {
             &mut reconnect,
             &on_progress,
             total_bytes,
-        )?;
+        )
+        .map_err(|error| {
+            transfer_log::record(
+                "firmware",
+                "transaction_failed",
+                serde_json::json!({
+                    "transferId": transfer_id.as_str(),
+                    "phase": "validate",
+                    "error": error.as_str(),
+                }),
+            );
+            error
+        })?;
 
         transfer_log::record(
             "firmware",
@@ -2512,6 +2617,11 @@ impl UsbSerialManager {
             {
                 force_reconnect = false;
                 if let Err(error) = reconnect() {
+                    transfer_log::record(
+                        "firmware",
+                        "validation_reconnect_failed",
+                        serde_json::json!({ "boardDeviceId": expected_board_device_id, "error": error.as_str() }),
+                    );
                     last_observation = error;
                     thread::sleep(Duration::from_millis(400));
                     continue;
@@ -2539,19 +2649,65 @@ impl UsbSerialManager {
                     Ok(Some(verified)) => return Ok(verified),
                     Ok(None) => {
                         last_observation = "new firmware is still pending validation".to_string();
+
+                        transfer_log::record(
+
+                            "firmware",
+
+                            "validation_pending",
+
+                            serde_json::json!({
+
+                                "boardDeviceId": expected_board_device_id,
+
+                                "expectedVersion": expected_version,
+
+                                "baselineBootCount": baseline_boot_count,
+
+                                "diagnostics": diagnostics.clone(),
+
+                            }),
+
+                        );
                     }
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        transfer_log::record(
+                            "firmware",
+                            "validation_rejected",
+                            serde_json::json!({
+                                "boardDeviceId": expected_board_device_id,
+                                "error": error.as_str(),
+                                "diagnostics": diagnostics.clone(),
+                            }),
+                        );
+                        return Err(error);
+                    }
                 },
                 Err(error) => {
+                    transfer_log::record(
+                        "firmware",
+                        "validation_query_failed",
+                        serde_json::json!({ "boardDeviceId": expected_board_device_id, "error": error.as_str() }),
+                    );
                     last_observation = error;
                 }
             }
             thread::sleep(Duration::from_millis(500));
         }
 
-        Err(format!(
+        let error = format!(
             "timed out waiting for board {expected_board_device_id} to reconnect with firmware {expected_version} in imageState=valid: {last_observation}"
-        ))
+        );
+        transfer_log::record(
+            "firmware",
+            "validation_timeout",
+            serde_json::json!({
+                "boardDeviceId": expected_board_device_id,
+                "expectedVersion": expected_version,
+                "lastObservation": last_observation.as_str(),
+            }),
+        );
+        Err(error)
     }
 
     fn best_effort_firmware_abort(
@@ -3718,6 +3874,11 @@ impl UsbSerialManager {
             .map(|(_, bytes)| bytes.as_slice())
             .ok_or_else(|| "component package is missing runtime/widget.json".to_string())?;
         let compiled_sprites = prepare_p4_widget_sprite_files(widget_dir, widget_source)?;
+        let widget_definition: serde_json::Value = serde_json::from_slice(widget_source).map_err(|e| e.to_string())?;
+        if widget_definition.get("data").is_some()
+            && self.status().capabilities.get("widgetData").and_then(serde_json::Value::as_str) != Some(crate::widget_data::PROTOCOL) {
+            return Err("设备固件尚不支持实时数据组件，请先升级固件".into());
+        }
         entries.retain(|(relative_path, _)| !relative_path.starts_with("assets/"));
         entries.extend(compiled_sprites);
 
@@ -4098,6 +4259,7 @@ impl UsbSerialManager {
         appearance_dir: &std::path::Path,
         app_data_dir: &std::path::Path,
         expected_board_device_id: &str,
+        use_device_builtin: bool,
         on_progress: F,
     ) -> Result<(u32, u64, bool), String>
     where
@@ -4114,6 +4276,7 @@ impl UsbSerialManager {
                 appearance_dir,
                 app_data_dir,
                 expected_board_device_id,
+                use_device_builtin,
                 &self.appearance_sync_cancel_requested,
                 &on_progress,
             ) {
@@ -4128,6 +4291,19 @@ impl UsbSerialManager {
             }
         }
 
+        if use_device_builtin {
+            let started = Instant::now();
+            let id = format!("builtin-{}", uuid::Uuid::new_v4());
+            let state = self.query_p4_appearance_slots(&id)?;
+            let slot = p4_builtin_slot(&state)?;
+            self.ensure_appearance_sync_not_cancelled(None)?;
+            if state.active_slot != Some(slot.slot) {
+                self.activate_p4_appearance_slot(&id, slot.slot, &slot.pack_id)?;
+            }
+            transfer_log::record("appearance","builtin_activated",serde_json::json!({"files":0,"bytes":0,"elapsedMs":started.elapsed().as_millis()}));
+            on_progress(0,0,0,0);
+            return Ok((0,0,true));
+        }
         let _ = app_data_dir;
         let assets = load_prepared_p4_appearance_pack(appearance_dir)?;
         self.ensure_appearance_sync_not_cancelled(None)?;
@@ -4464,6 +4640,7 @@ impl UsbSerialManager {
         appearance_dir: &std::path::Path,
         app_data_dir: &std::path::Path,
         expected_board_device_id: &str,
+        use_device_builtin: bool,
         on_progress: F,
     ) -> Result<(u32, u64, bool), String>
     where
@@ -4477,6 +4654,7 @@ impl UsbSerialManager {
             appearance_dir,
             app_data_dir,
             expected_board_device_id,
+            use_device_builtin,
             self.appearance_sync_cancel_requested.as_ref(),
             on_progress,
         )
@@ -4985,6 +5163,13 @@ pub fn inspect_prepared_p4_appearance(
         .map(|(_, prepared)| prepared)
 }
 
+pub fn prepared_p4_requires_system_cues(appearance_dir: &Path) -> Result<bool, String> {
+    let bytes = std::fs::read(p4_ready_profile_root(appearance_dir).join("p4/manifest.json"))
+        .map_err(|e| e.to_string())?;
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    Ok(manifest["systemCues"] == true)
+}
+
 pub fn prepare_p4_appearance(
     appearance_dir: &Path,
     app_data_dir: &Path,
@@ -5313,6 +5498,7 @@ fn build_p4_h264_manifest(
             });
             if let Some(audio_path) = spec.audio_device_path.as_deref() {
                 family["audioPath"] = serde_json::json!(audio_path);
+                family["audioSource"] = serde_json::json!("custom");
             }
             family
         })
@@ -5320,6 +5506,7 @@ fn build_p4_h264_manifest(
 
     serde_json::json!({
         "format": "p4-h264-v1",
+        "systemCues": true,
         "packId": pack_id,
         "codec": "h264",
         "container": "annex-b",
@@ -5877,7 +6064,7 @@ where
                 shared_videos.insert(source_sha256, (device_path.clone(), exported.clone()));
                 (device_path, exported)
             };
-        let audio_device_path = if let Some(audio_path) = family_audio_path(
+        let audio_device_path = if let Some(audio_path) = p4_custom_audio_path(
             family,
             &family_name,
             &video_path,
@@ -5915,6 +6102,16 @@ where
         P4_APPEARANCE_HEIGHT,
         P4_APPEARANCE_FPS,
     )
+}
+
+fn p4_custom_audio_path(
+    family: &serde_json::Value, family_name: &str, video_path: &Path,
+    appearance_dir: &Path, app_data_dir: &Path,
+) -> Option<PathBuf> {
+    // Implicit sibling WAVs were injected defaults. Only explicit user audio
+    // travels with a new P4 pack; Linux's legacy asset path stays unchanged.
+    if family["audioSource"] == "default" || family["audioPath"].as_str().is_none() { return None; }
+    family_audio_path(family, family_name, video_path, appearance_dir, app_data_dir)
 }
 
 fn export_p4_h264_stream(
@@ -6097,7 +6294,111 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn protected_builtin_selection_ignores_desktop_hash_but_never_uses_custom_slot() {
+        use super::*;
+        let state = P4AppearanceSlotState { active_slot:Some(1), slots:vec![
+            P4AppearanceSlot {slot:0,pack_id:"old-factory-hash".into()},
+            P4AppearanceSlot {slot:1,pack_id:"new-desktop-hash".into()}] };
+        assert_eq!(p4_builtin_slot(&state).unwrap().slot, 0);
+        assert_eq!(p4_builtin_slot(&state).unwrap().pack_id,"old-factory-hash");
+        let missing = P4AppearanceSlotState {active_slot:Some(1),slots:vec![state.slots[1].clone()]};
+        assert!(p4_builtin_slot(&missing).is_err());
+    }
+
+    #[test]
+    fn new_p4_packs_exclude_implicit_defaults_and_keep_explicit_overrides() {
+        use super::*;
+        let tmp=tempfile::tempdir().unwrap();
+        let video=tmp.path().join("done.mp4");
+        std::fs::write(&video,b"video").unwrap();
+        std::fs::write(video.with_extension("wav"),p4_test_wav()).unwrap();
+        let implicit=serde_json::json!({"family":"done","ok":true});
+        assert!(p4_custom_audio_path(&implicit,"done",&video,tmp.path(),tmp.path()).is_none());
+        let default=serde_json::json!({"audioPath":"done.wav","audioSource":"default"});
+        assert!(p4_custom_audio_path(&default,"done",&video,tmp.path(),tmp.path()).is_none());
+        for source in [serde_json::json!({"audioPath":"done.wav"}),serde_json::json!({"audioPath":"done.wav","audioSource":"custom"})] {
+            assert_eq!(p4_custom_audio_path(&source,"done",&video,tmp.path(),tmp.path()),Some(video.with_extension("wav")));
+        }
+    }
+
+    #[test]
+    fn changing_default_wav_does_not_change_p4_pack_identity() {
+        use super::*;
+        let tmp=tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("done.mp4"),b"video").unwrap();
+        let build=|family:serde_json::Value, name:&str| {
+            let assets=stage_p4_appearance_pack_with_exporter(&[family],tmp.path(),tmp.path(),&tmp.path().join(name),|_, output| {
+                std::fs::write(output,b"stream").unwrap();
+                Ok(P4ExportedStream{frames:1,stream_bytes:6,fps:15,frame_duration_ms:67,duration_ms:67})
+            }).unwrap();
+            p4_pack_id_from_assets(&assets).unwrap()
+        };
+        let family=serde_json::json!({"family":"done","ok":true});
+        std::fs::write(tmp.path().join("done.wav"),p4_test_wav()).unwrap();
+        let first=build(family.clone(),"first");
+        let mut other=p4_test_wav(); *other.last_mut().unwrap() ^= 1;
+        std::fs::write(tmp.path().join("done.wav"),&other).unwrap();
+        assert_eq!(first,build(family,"second"));
+        let custom=serde_json::json!({"family":"done","ok":true,"audioPath":"done.wav"});
+        let third=build(custom.clone(),"third");
+        assert_ne!(first,third);
+        std::fs::write(tmp.path().join("done.wav"),p4_test_wav()).unwrap();
+        assert_ne!(third,build(custom,"fourth"));
+    }
     use super::*;
+
+    #[test]
+    fn live_audio_keeps_reader_running_and_never_drains_but_bulk_is_unchanged() {
+        struct CheckedWriter { pause: Arc<AtomicBool>, expected: Arc<AtomicBool>, stats: Arc<Mutex<PacedWriterState>> }
+        impl Write for CheckedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                assert_eq!(self.pause.load(Ordering::Acquire), self.expected.load(Ordering::Acquire));
+                self.stats.lock().unwrap().writes.push(bytes.to_vec()); Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                assert!(self.expected.load(Ordering::Acquire), "live traffic must not drain");
+                self.stats.lock().unwrap().flushes += 1; Ok(())
+            }
+        }
+        let manager = UsbSerialManager::new();
+        let stats = Arc::new(Mutex::new(PacedWriterState::default()));
+        let expected = Arc::new(AtomicBool::new(false));
+        let active = Arc::new(AtomicBool::new(false));
+        *manager.connection.lock().unwrap() = Some(UsbConnection {
+            connection_id: 1, port_name: "test".into(), baud_rate: P4_USB_UART_BAUD,
+            writer: Box::new(CheckedWriter {pause: manager.serial_body_write_active.clone(), expected: expected.clone(), stats: stats.clone()}),
+            board_device_id: "p4-test".into(), runtime: "esp-p4".into(), device_model: String::new(),
+            firmware: String::new(), build_id: String::new(), git_sha: String::new(), build_dirty: false,
+            protocol_schema: 7, wire_protocol: String::new(), capabilities: serde_json::Value::Null,
+            connected: true, cancel_reader: Arc::new(AtomicBool::new(false)), capture_active: active.clone(),
+        });
+        manager.send("audio/conversation", &serde_json::json!({"enabled":true})).unwrap();
+        assert!(active.load(Ordering::Acquire));
+        manager.send("audio/play_chunk", &serde_json::json!({"data":"a".repeat(4000)})).unwrap();
+        manager.send("system/heartbeat", &serde_json::json!({})).unwrap();
+        manager.send("ui/conversation", &serde_json::json!({"state":"speaking"})).unwrap();
+        assert_eq!(stats.lock().unwrap().flushes, 0);
+        expected.store(true, Ordering::Release);
+        manager.send("firmware/query", &serde_json::json!({})).unwrap();
+        assert!(stats.lock().unwrap().flushes > 0);
+        assert!(!manager.serial_body_write_active.load(Ordering::Acquire));
+        observe_serial_capture(&active, "audio/end", &serde_json::json!({}));
+        assert!(!active.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn capture_state_follows_device_without_cross_connection_leakage() {
+        let active = AtomicBool::new(false);
+        observe_serial_capture(&active, "audio/begin", &serde_json::json!({}));
+        assert!(active.load(Ordering::Acquire));
+        observe_serial_capture(&active, "audio/status", &serde_json::json!({"active":false,"conversation":true}));
+        assert!(active.load(Ordering::Acquire));
+        observe_serial_capture(&active, "audio/status", &serde_json::json!({"active":false,"conversation":false}));
+        assert!(!active.load(Ordering::Acquire));
+        observe_serial_capture(&active, "audio/status", &serde_json::json!({}));
+        assert!(!active.load(Ordering::Acquire));
+    }
 
     #[test]
     fn status_returns_the_last_snapshot_while_the_writer_lock_is_busy() {
@@ -6120,6 +6421,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
 
         assert_eq!(manager.status().port_name, "COM21");
@@ -6164,6 +6466,7 @@ mod tests {
                 protocol_schema: 7, wire_protocol: "pet-usb-jsonl-v3".into(),
                 capabilities: serde_json::json!({"firmwareUpdate":{"chipRevision":revision}}),
                 connected: true, cancel_reader: Arc::new(AtomicBool::new(false)),
+                capture_active: Arc::new(AtomicBool::new(false)),
             });
             let image = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("firmware/esp32-p4").join(name);
             let result = manager.update_firmware(&image, "p4-test",
@@ -6254,6 +6557,7 @@ mod tests {
             }),
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
         manager.begin_appearance_sync().unwrap();
         assert!(manager.cancel_appearance_sync());
@@ -6706,6 +7010,7 @@ mod tests {
                 capabilities: serde_json::Value::Null,
                 connected: true,
                 cancel_reader: Arc::new(AtomicBool::new(false)),
+                capture_active: Arc::new(AtomicBool::new(false)),
             });
         }
         let waiters = Arc::clone(&manager.asset_ack_waiters);
@@ -6760,6 +7065,7 @@ mod tests {
                 capabilities: serde_json::Value::Null,
                 connected: true,
                 cancel_reader: Arc::new(AtomicBool::new(false)),
+                capture_active: Arc::new(AtomicBool::new(false)),
             });
         }
         let waiters = Arc::clone(&manager.asset_ack_waiters);
@@ -6855,6 +7161,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
 
         manager.recover_raw_asset_stream(4096).unwrap();
@@ -6948,6 +7255,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         };
         let payload = serde_json::json!({
             "boardDeviceId": "p4-devkit-001",
@@ -7000,6 +7308,7 @@ mod tests {
             capabilities: serde_json::json!({ "usbOnly": true }),
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         };
 
         apply_hello_payload_to_connection(
@@ -7185,7 +7494,9 @@ mod tests {
         let prepared = inspect_prepared_p4_appearance(&appearance_dir).unwrap();
         assert_eq!(prepared.profile, "v9-640x480-15fps-225f-h264-crf27");
         assert_eq!(prepared.pack_id.len(), 64);
-        assert_eq!(prepared.file_count, 20);
+        assert_eq!(prepared.file_count, 17);
+        assert!(prepared_p4_requires_system_cues(&appearance_dir).unwrap());
+        assert!(load_prepared_p4_appearance_pack(&appearance_dir).unwrap().iter().all(|a| a.kind != "p4-audio"));
         assert!(prepared.byte_count > 5_000_000);
     }
 
@@ -7438,9 +7749,10 @@ mod tests {
         std::fs::create_dir_all(&app_data_dir).unwrap();
         std::fs::write(appearance_dir.join("idle.default.mp4"), b"fake mp4").unwrap();
         std::fs::write(appearance_dir.join("idle.default.wav"), p4_test_wav()).unwrap();
+        std::fs::write(app_data_dir.join("custom.wav"), p4_test_wav()).unwrap();
 
         let families = vec![
-            serde_json::json!({"family": "idle.default", "ok": true}),
+            serde_json::json!({"family": "idle.default", "ok": true, "audioPath":"custom.wav"}),
             serde_json::json!({"family": "broken", "ok": false}),
         ];
 
@@ -7851,6 +8163,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
 
         assert!(manager
@@ -7887,6 +8200,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
         let bindings = (0..16)
             .map(|index| {
@@ -8215,6 +8529,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
         let payload = serde_json::json!({
             "transferId": "firmware-1",
@@ -8274,6 +8589,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
 
         let error = manager
@@ -8310,6 +8626,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
         let status_waiters = Arc::clone(&manager.firmware_status_waiters);
         let ack_waiters = Arc::clone(&manager.firmware_ack_waiters);
@@ -8384,6 +8701,7 @@ mod tests {
             capabilities: serde_json::Value::Null,
             connected: true,
             cancel_reader: Arc::new(AtomicBool::new(false)),
+            capture_active: Arc::new(AtomicBool::new(false)),
         });
 
         let waiters = Arc::clone(&manager.firmware_ack_waiters);
@@ -8487,6 +8805,13 @@ mod tests {
         assert_eq!(manager.status().runtime, "esp-p4");
         let expected_board_device_id = manager.status().board_device_id;
         assert!(!expected_board_device_id.is_empty());
+        if let Ok(expected) = std::env::var("P4_EXPECTED_BOARD_ID") {
+            assert_eq!(expected_board_device_id, expected, "refusing OTA to a different board");
+        }
+        manager.send_to_board(&expected_board_device_id, "audio/conversation", &serde_json::json!({"enabled":false})).expect("stop test audio before OTA");
+        let before = manager.query_diagnostics(&expected_board_device_id).unwrap();
+        eprintln!("[p4-firmware-hil] before chip={} firmware={} partition={}",
+            before["runtime"]["chipRevision"], before["runtime"]["firmware"], before["runtime"]["runningPartition"]);
         let reconnect_manager = manager.clone();
         let reconnect_port_name = port_name.clone();
         let reconnect_board_device_id = expected_board_device_id.clone();
@@ -8537,6 +8862,9 @@ mod tests {
             result.bytes,
             std::fs::metadata(&firmware_path).unwrap().len()
         );
+        let after = manager.query_diagnostics(&expected_board_device_id).unwrap();
+        eprintln!("[p4-firmware-hil] after chip={} firmware={} partition={} state={}",
+            after["runtime"]["chipRevision"], after["runtime"]["firmware"], after["runtime"]["runningPartition"], after["runtime"]["imageState"]);
         manager.disconnect();
     }
 
@@ -8604,6 +8932,7 @@ mod tests {
                 &appearance_dir,
                 &app_data_dir,
                 &board_device_id,
+                false,
                 |files, total, bytes, total_bytes| {
                     if files == total || bytes == total_bytes || bytes % (256 * 1024) < 16 * 1024 {
                         eprintln!(

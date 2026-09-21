@@ -2,7 +2,7 @@
  * [Input] CustomAvatarWizard generation-config source.
  * [Output] Static Node regression coverage for reusable full-generation wizard steps,
  *          shared provider-config-backed Volcano Ark credential readiness, 1.5-first defaults,
- *          activation guidance, product-fit dropdown model names, inline progress support, and fixed reference upload sizing.
+ *          activation/manual MP4 upload guidance, product-fit dropdown model names, inline progress support, and fixed reference upload sizing.
  * [Pos] test node in pc/src
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -25,6 +25,16 @@ function extractCssRule(css, selector) {
   assert.ok(match, `Expected to find ${selector} CSS rule`);
   return match.groups.body;
 }
+
+test("generation explains portrait authorization and independent video moderation before submission", () => {
+  const wizard = readSource("CustomAvatarWizard.jsx");
+  assert.match(wizard, /真人照片可能触发 Seedance 的人像或版权审核/);
+  assert.match(wizard, /当前客户端暂未接入可信素材库/);
+  assert.match(wizard, /图片背景处理成功不代表图生视频审核通过/);
+  assert.match(wizard, /自行生成动态形象并导出 MP4/);
+  assert.match(wizard, /形象画廊 → 新建自定义形象 → 自定义上传视频/);
+  assert.match(wizard, /上传 MP4 替换/);
+});
 
 test("full avatar generation exposes reusable step UI for single-state modal regeneration", () => {
   const wizard = readSource("CustomAvatarWizard.jsx");

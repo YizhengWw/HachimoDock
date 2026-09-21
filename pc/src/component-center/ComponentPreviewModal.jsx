@@ -6,6 +6,7 @@
  *          dedicated button-mapping workspace, duplicate-input guard, consolidated
  *          sync-impact panel without ambiguous current-component replacement copy,
  *          dynamic global-return guidance, repeatable sync/update, and one consolidated delete entry.
+ *          Stock-source components also host the full-width watchlist/typeahead editor.
  * [Pos] component node in pc/src/component-center
  * [Sync] If this file changes, update `pc/src/component-center/.folder.md`.
  */
@@ -16,9 +17,11 @@ import Button from "../shell/Button";
 import { buildComponentPlayGuide } from "./binding-labels";
 import { componentKindLabel, resolveComponentKind } from "./CandidateCard";
 import DeviceScreenPreview from "./DeviceScreenPreview";
+import StockWatchlist from "./StockWatchlist.jsx";
 
 export default function ComponentPreviewModal({
   component,
+  usb,
   kind,
   isLocal,
   isInstalled = false,
@@ -133,6 +136,9 @@ export default function ComponentPreviewModal({
           </Button>
         </div>
         <div className="modal-body">
+          {(component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist") && (
+            <StockWatchlist key={component.id} usb={usb} />
+          )}
           <div className="component-preview-modal__layout">
             <aside className="component-preview-modal__overview" aria-label="组件预览与说明">
               <div className="component-preview-modal__screen">

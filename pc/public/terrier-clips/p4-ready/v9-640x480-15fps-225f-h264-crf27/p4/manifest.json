@@ -1,6 +1,6 @@
 {
   "format": "p4-h264-v1",
-  "packId": "d468a7bea959f7e98102fbce16cabb1b89dcb602d77fbe5a869204e58e139e01",
+  "packId": "0509b28de7e7cee192e6d4a6939fc833af71a8f83cf37de2fe02f21d8bf0dba7",
   "codec": "h264",
   "container": "annex-b",
   "width": 640,
@@ -14,8 +14,7 @@
       "streamBytes": 369013,
       "fps": 15,
       "frameDurationMs": 67,
-      "durationMs": 10080,
-      "audioPath": "p4/audio/done.wav"
+      "durationMs": 10080
     },
     {
       "family": "error",
@@ -24,8 +23,7 @@
       "streamBytes": 538821,
       "fps": 15,
       "frameDurationMs": 68,
-      "durationMs": 15130,
-      "audioPath": "p4/audio/error.wav"
+      "durationMs": 15130
     },
     {
       "family": "idle.begging",
@@ -115,8 +113,7 @@
       "streamBytes": 487466,
       "fps": 15,
       "frameDurationMs": 68,
-      "durationMs": 15130,
-      "audioPath": "p4/audio/waiting_user.wav"
+      "durationMs": 15130
     },
     {
       "family": "welcome",
@@ -154,5 +151,6 @@
       "frameDurationMs": 67,
       "durationMs": 12130
     }
-  ]
+  ],
+  "systemCues": true
 }

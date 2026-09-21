@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import {
   componentCreatedAtMs,
   sortComponentsByCreatedAt,
+  mergeComponentCatalog,
 } from "./library-order.js";
 
 test("component library sorts mixed records by creation time newest first", () => {
@@ -24,6 +25,17 @@ test("component library sorts mixed records by creation time newest first", () =
     "builtin-new",
     "builtin-old",
   ]);
+});
+
+test("stocks lead default builtins but are not pinned above newly published components", () => {
+  const stock = { id: "stock-watchlist", version: "1.1.0" };
+  const builtins = [stock, { id: "pong" }, { id: "frog" }];
+  const published = [{ id: "custom-new" }, { id: "stock-watchlist", version: "1.0.0" }, { id: "frog", version: "custom" }];
+  const result = mergeComponentCatalog(published, builtins);
+  assert.deepEqual(result.map((item) => item.id), ["custom-new", "stock-watchlist", "frog", "pong"]);
+  assert.equal(result[1], published[1]);
+  assert.equal(result[2].version, "custom");
+  assert.deepEqual(mergeComponentCatalog([], builtins), builtins);
 });
 
 test("component library keeps source order for equal or missing creation times", () => {

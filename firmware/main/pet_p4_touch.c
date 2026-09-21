@@ -1,4 +1,5 @@
 #include "pet_p4_touch.h"
+#include "pet_p4_conversation.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -250,6 +251,13 @@ static void process_touch_event(
   void *ctx,
   const pet_p4_touch_event_t *event
 ) {
+  if (pet_p4_conversation_active(state)) {
+    if (event->gesture == PET_P4_TOUCH_SWIPE_LEFT || event->gesture == PET_P4_TOUCH_SWIPE_UP)
+      pet_p4_conversation_move(state, -1, event->ts_ms);
+    else if (event->gesture == PET_P4_TOUCH_SWIPE_RIGHT || event->gesture == PET_P4_TOUCH_SWIPE_DOWN)
+      pet_p4_conversation_move(state, 1, event->ts_ms);
+    return;
+  }
   bool handled_locally = false;
   char action[PET_P4_MINIAPP_ACTION_MAX] = {0};
   if (gesture_is_swipe(event->gesture)) {

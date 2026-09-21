@@ -3,7 +3,7 @@
  * [Output] On success persists via `lib/appearance-store.js`, with clear GIF first-frame copy,
  *          fixed-size reference upload preview, unified field help, shared provider-config persistence with read-only credential readiness linked to the API configuration page,
  *          live API-key-scoped Ark video model selection and persisted video parameters plus Seedream cloud background editing,
- *          fast low-resolution defaults, reusable step components, optional inline progress, and preflight generation requirements.
+ *          fast low-resolution defaults, reusable step components, optional inline progress, and preflight generation/portrait authorization requirements with a manual MP4 upload alternative.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -596,6 +596,13 @@ export function AvatarWizardStep2({
         </span>
       </label>
 
+      {isVolcengine && (
+        <p className="muted small">
+          真人照片可能触发 Seedance 的人像或版权审核。真人素材需按火山要求完成认证与肖像授权；当前客户端暂未接入可信素材库。
+          图片背景处理成功不代表图生视频审核通过。建议使用符合平台要求的原创、已获授权素材；重复重试无法解决授权问题。
+          你也可以使用有权使用的素材，自行生成动态形象并导出 MP4，在「形象画廊 → 新建自定义形象 → 自定义上传视频」中上传；其他动作可在形象详情页通过「上传 MP4 替换」补充。
+        </p>
+      )}
       {isVolcengine && <VideoGenerationSettings value={videoParameters} onChange={onVideoParameters} fastGeneration={fastGeneration} />}
 
       {submitError && (

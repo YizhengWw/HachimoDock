@@ -123,6 +123,7 @@ STRING_VAR_MAX_BYTES = 63
 WIDGET_INT_MIN = -1_000_000_000
 WIDGET_INT_MAX = 1_000_000_000
 DEFAULT_CAPABILITIES = {
+    "widgetData": "p4-data-list-v1",
     "widgetRuntime": RUNTIME_ENGINE,
     "widgetRuntimes": [RUNTIME_ENGINE_V3, RUNTIME_ENGINE],
     "widgetScene": SCENE_ENGINE,
@@ -911,6 +912,23 @@ def validate_runtime(
     elif not capability_supports(capabilities, "widgetRuntime", "widgetRuntimes", runtime_engine):
         errors.append(f"目标能力不支持统一组件运行时: {runtime_engine}")
     variables = runtime.get("vars")
+    data = runtime.get("data")
+    if "data" in runtime:
+        if (
+            not only_keys(data, {"source", "page_var"})
+            or not isinstance(data.get("source"), str)
+            or re.fullmatch(r"[a-z0-9_.-]{1,47}", data.get("source", "")) is None
+            or not isinstance(data.get("page_var"), str)
+            or not isinstance(variables, dict)
+            or not isinstance(variables.get(data.get("page_var")), dict)
+            or variables[data["page_var"]].get("type") != "int"
+            or runtime_engine != RUNTIME_ENGINE
+            or "scene" in runtime or "game" in runtime
+            or kind != "tool"
+        ):
+            errors.append("runtime/widget.json.data 需要受控 source 和整数 page_var，只用于 v4 列表工具")
+        if capabilities.get("widgetData") != "p4-data-list-v1":
+            errors.append("目标固件不支持 p4-data-list-v1，请先升级固件")
     if not isinstance(variables, dict):
         errors.append("runtime/widget.json.vars 必须是对象；无变量时使用 {}")
         variables = {}

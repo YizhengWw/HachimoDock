@@ -1246,6 +1246,17 @@ select:focus-visible {
 
 /* === API configuration =============================================== */
 
+.api-settings-page .page-shell__body { gap: 16px; }
+.api-settings-page .card__header { padding: 14px 20px; }
+.api-settings-page .card__body { padding: 12px 20px 16px; gap: 10px; }
+.api-settings-page .card__subtitle { max-width: none; line-height: 1.65; }
+.api-settings-page .usage-help { margin: 0; }
+.api-settings-page .usage-help > p { margin: 0 0 3px; }
+.api-settings-page .usage-help summary { padding: 2px 0; }
+.api-settings-page .usage-help details[open] { margin-bottom: 2px; }
+.api-settings-page .api-settings__presets { margin: 0; }
+.api-settings-page .api-settings__preset-summary { margin: 0; padding: 0; }
+
 .api-settings__page-actions {
   display: flex;
   align-items: center;
@@ -1376,9 +1387,16 @@ select:focus-visible {
   align-items: end;
 }
 
+.llm-network-settings { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px; }
+.llm-network-settings summary { cursor: pointer; font-weight: 600; }
+.llm-network-settings__actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.llm-network-settings__results { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+
 .api-settings__form--asr {
   grid-template-columns: minmax(180px, 0.72fr) minmax(240px, 1.28fr) auto;
 }
+
+.api-settings__form--speech { grid-template-columns: minmax(240px, 1fr) auto; }
 
 .api-settings__secret-input {
   padding: 0 11px;
@@ -14270,3 +14288,193 @@ select:focus-visible {
     width: 100%;
   }
 }
+
+/* ---- 人设与声音（2026-09-18 实时对话方案 P0） ---- */
+.appearance-card-actions {
+  gap: var(--space-2);
+}
+
+.appearance-card__persona {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dim, #6b6b6b);
+}
+
+.appearance-card__persona--missing {
+  color: var(--accent, #f97316);
+  font-weight: 600;
+}
+
+.persona-voice-modal .modal-body {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+}
+
+.persona-voice-modal__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: var(--space-4, 16px);
+}
+
+.persona-voice-modal__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+.persona-voice-modal__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  margin-bottom: 2px;
+}
+
+.persona-voice-modal__templates {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.persona-voice-modal__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2, 8px);
+}
+
+.persona-voice-modal__range {
+  width: 100%;
+  accent-color: var(--accent, #f97316);
+}
+
+.persona-voice-modal__preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding-top: var(--space-2, 8px);
+  border-top: 1px solid var(--line);
+}
+
+.persona-voice-modal__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+}
+
+.persona-voice-modal__footer-actions {
+  display: flex;
+  gap: var(--space-2, 8px);
+}
+
+.ui-field__error {
+  color: var(--danger, #db3b2b);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .persona-voice-modal__grid,
+  .persona-voice-modal__row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---- 实时对话卡片（设备页） ---- */
+.realtime-chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.realtime-chat-panel__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+}
+
+.realtime-chat-panel__persona {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.realtime-chat-panel__warn {
+  color: var(--accent, #f97316);
+  font-weight: 600;
+}
+
+.realtime-chat-panel__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.realtime-chat-panel__state.is-listening { color: #1b7f4a; border-color: #8fd4ac; }
+.realtime-chat-panel__state.is-thinking { color: #b26a00; border-color: #f2c26b; }
+.realtime-chat-panel__state.is-speaking { color: #1d5fbf; border-color: #9cc0f2; }
+
+.realtime-chat-panel__dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--r, 8px);
+  background: var(--panel2, #f6f6f4);
+  font-size: 13px;
+}
+
+.realtime-chat-panel__actions {
+  display: flex;
+  gap: var(--space-2, 8px);
+}
+
+/* ---- API 配置：对话大模型预设与语音合成子区（2026-09-18） ---- */
+.api-settings__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-2, 8px);
+}
+
+.api-settings__preset.is-active {
+  border-color: var(--accent, #f97316);
+  color: var(--accent, #f97316);
+  font-weight: 700;
+}
+
+.api-settings__preset-summary {
+  grid-column: 1 / -1;
+  padding: 6px 0;
+}
+
+.api-settings__subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  margin-top: var(--space-3, 12px);
+  padding-top: var(--space-2, 8px);
+  border-top: 1px solid var(--line);
+}
+/* Shared product guidance: concise summary, details on demand. */
+.usage-help { color: var(--text-muted, #727985); font-size: 12px; line-height: 1.65; margin: 10px 0 16px; overflow-wrap: anywhere; }
+.usage-help p { margin: 5px 0; }
+.usage-help strong { color: var(--text-primary, #20242b); }
+.usage-help summary { cursor: pointer; color: var(--text-primary, #20242b); padding: 4px 0; }
+.usage-help summary:focus-visible { outline: 2px solid #ff7900; outline-offset: 3px; border-radius: 3px; }
+.usage-help__notice { color: #9a5800; }
+.usage-help__operations { display: grid; grid-template-columns: minmax(90px, auto) 1fr; gap: 7px 14px; }
+.usage-help__operations dt { font-weight: 600; color: var(--text-primary, #20242b); }
+.usage-help__operations dd { margin: 0; }
+@media (max-width: 620px) { .usage-help__operations { grid-template-columns: 1fr; gap: 3px; } .usage-help__operations dd { margin-bottom: 8px; } }
