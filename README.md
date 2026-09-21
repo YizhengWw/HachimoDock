@@ -30,8 +30,6 @@
   </p>
 </div>
 
-![HachimoDock（哈基米机）产品图](https://image.lceda.cn/oshwhub/pullImage/2d5070cc50b04dbbaaa4e3152aaadf4f.jpg)
-
 ## 项目简介
 
 HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件和开源硬件方案。它把电脑里正在运行的 Agent Session 实时同步到桌面小屏，让 AI 的思考、执行、完成和报错状态变成看得见的宠物动画与气泡；实体按键、四向摇杆和麦克风又能把操作与语音送回 Agent。
