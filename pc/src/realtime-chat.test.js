@@ -19,6 +19,39 @@ const srcDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(srcDir, "..", "..");
 const read = (relative) => readFileSync(join(repoRoot, relative), "utf8");
 
+test("device realtime status labels omit question marks and unsupported ellipsis", () => {
+  const rtc=read("pc/src-tauri/src/realtime_chat.rs");
+  const labels=[...rtc.matchAll(/hud\([^;\n]*,\s*"([^"\n]*)"\);/g)].map(match=>match[1]);
+  for (const expected of ["准备中", "正在处理", "正在联网查询", "刚才没说成，请再说一遍"]) {
+    assert.ok(labels.includes(expected), expected);
+  }
+  for (const label of labels) assert.doesNotMatch(label, /[?？…]/);
+  const hints=read("firmware/main/pet_p4_view.c").split("static const char *conversation_hint(")[1].split("void pet_p4_build_view_model")[0];
+  for (const [,label] of hints.matchAll(/return "([^"]*)"/g)) assert.doesNotMatch(label, /[?？…]/);
+});
+
+test("reply audio is cancelled only after ASR verifies two characters or explicit stop", () => {
+  const rtc = read("pc/src-tauri/src/realtime_chat.rs");
+  const verified = rtc.slice(rtc.indexOf("async fn verify_barge_in_with"), rtc.indexOf("/// Capture remains polled"));
+  assert.match(verified, /if !has_barge_in_text\(&text\) \{ continue; \}/);
+  assert.doesNotMatch(verified, /PlayerCmd::Flush|tts\.interrupt/);
+  assert.match(verified, /BARGE_CONFIRM_TIMEOUT/);
+  assert.match(verified, /BARGE_CONFIRM_MAX_FRAMES/);
+  assert.match(verified, /barge_candidate/);
+  assert.match(verified, /barge_rejected/);
+  assert.match(verified, /barge_confirmed/);
+  assert.match(rtc, /\(Some\('停'\), None\)/);
+  assert.match(rtc, /recognizer = Some\(speech.recognizer\); asr_rx = Some\(speech.events\)/);
+  assert.match(rtc, /if !speech.reply_completed \{/);
+  assert.match(rtc, /recognizer_terminal = speech.terminal/);
+  assert.match(rtc, /if !recognizer_terminal \{/);
+  const stop = rtc.slice(rtc.indexOf("if is_explicit_stop(&text)"), rtc.indexOf("turns += 1;"));
+  assert.match(stop, /voice_stop/);
+  assert.match(stop, /continue;/);
+  assert.doesNotMatch(stop, /answer_turn|tts\.speak/);
+  assert.doesNotMatch(rtc, /没听清，请再说一次/);
+});
+
 test("start payload carries the assembled system prompt, greeting and camelCase voice spec", () => {
   const input = buildRealtimeChatStartInput(
     { id: "a1", name: "Torti", description: "一只乌龟", personaVoice: undefined },

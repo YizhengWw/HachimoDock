@@ -1,6 +1,6 @@
 /**
  * [Input] ApiSettings page, App routing, feature pages, and shared stylesheet source.
- * [Output] Static regression coverage for centralized API-key ownership, subtitle-level speech key guide, immediate saved-ASR broadcasts, sidebar routing, feature-page status links, and responsive settings layout.
+ * [Output] Editable LLM model/default regression coverage plus centralized API-key ownership, speech key guide, saved-ASR broadcasts, routing and responsive layout.
  * [Pos] test node in pc/src
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -10,9 +10,79 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { LLM_PRESETS, DEFAULT_LLM_PROVIDER, selectLlmProvider, changeLlmEndpoint, describeLlmPreset } from "./lib/api-configuration.js";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const readSource = (file) => readFileSync(join(srcDir, file), "utf8");
+
+test("fresh configuration selects Doubao and search toggle is saved", () => {
+  assert.equal(DEFAULT_LLM_PROVIDER,"doubao");
+  const page=readSource("ApiSettings.jsx");
+  assert.match(page,/llmProvider: DEFAULT_LLM_PROVIDER/);
+  assert.match(page,/llmWebSearch: voiceChat.llmWebSearch/);
+  assert.match(page,/llmWebSearch: status\?\.llmWebSearch !== false/);
+});
+
+test("switching chat providers clears draft, masked key and configured state", () => {
+  const providers = [...LLM_PRESETS.map(p => p.id), "custom"];
+  for (const from of providers) for (const to of providers) {
+    const current = { llmProvider: from, llmApiKey: "test-draft", llmApiKeyMasked: "tes…mask",
+      llmConfigured: true, llmTone: "success", llmMessage: "已配置" };
+    const next = selectLlmProvider(current, to);
+    if (from === to) { assert.equal(next, current); continue; }
+    assert.equal(next.llmApiKey, ""); assert.equal(next.llmApiKeyMasked, "");
+    assert.equal(next.llmConfigured, false); assert.equal(next.llmTone, "muted");
+    assert.match(next.llmMessage, /不会沿用/);
+    assert.equal(current.llmApiKey, "test-draft");
+  }
+});
+
+test("custom endpoint changes invalidate credentials, formatting changes do not", () => {
+  const current = { llmProvider: "custom", llmBaseUrl: "https://example.invalid/v1",
+    llmApiKey: "test-draft", llmApiKeyMasked: "tes…mask", llmConfigured: true };
+  for (const url of ["https://another.invalid/v1", "https://example.invalid/v2", ""]) {
+    const next = changeLlmEndpoint(current, url);
+    assert.equal(next.llmApiKey, ""); assert.equal(next.llmApiKeyMasked, "");
+    assert.equal(next.llmConfigured, false); assert.equal(next.llmBaseUrl, url);
+  }
+  assert.equal(changeLlmEndpoint(current, " https://example.invalid/v1/ ").llmApiKey, "test-draft");
+});
+
+test("provider and custom endpoint switches restore only their own saved masks", () => {
+  const masks = { deepseek: "ds…0001", doubao: "db…0002", mimo: "mi…0003",
+    "custom:https://one.invalid/v1": "one…0004", "custom:https://two.invalid/v1": "two…0005" };
+  const current = { llmProvider: "deepseek", llmApiKey: "unsaved-test-draft", llmApiKeyMasks: masks,
+    llmCustomBaseUrl: "https://one.invalid/v1" };
+  for (const provider of ["doubao", "mimo"]) {
+    const next = selectLlmProvider(current, provider);
+    assert.equal(next.llmApiKey, ""); assert.equal(next.llmApiKeyMasked, masks[provider]);
+    assert.equal(next.llmConfigured, true);
+    assert.equal(selectLlmProvider(next, "deepseek").llmApiKeyMasked, masks.deepseek);
+  }
+  const custom = selectLlmProvider(current, "custom");
+  assert.equal(custom.llmBaseUrl, "https://one.invalid/v1");
+  assert.equal(custom.llmApiKeyMasked, "one…0004");
+  assert.equal(changeLlmEndpoint(custom, "https://two.invalid/v1/").llmApiKeyMasked, "two…0005");
+  assert.equal(changeLlmEndpoint(custom, "https://unknown.invalid").llmConfigured, false);
+});
+
+test("chat model names are editable for presets and provider changes use their own defaults", () => {
+  assert.deepEqual(LLM_PRESETS.map(({ model }) => model), ["deepseek-flash", "doubao-seed-2-0-lite-260428", "mimo-v2.6-flash"]);
+  const current = { llmProvider: "deepseek", llmModel: "my-deepseek-model", llmBaseUrl: "old", llmApiKey: "" };
+  assert.equal(selectLlmProvider(current, "deepseek"), current);
+  for (const preset of LLM_PRESETS.slice(1)) {
+    const next = selectLlmProvider(current, preset.id);
+    assert.equal(next.llmModel, preset.model);
+    assert.equal(next.llmBaseUrl, preset.baseUrl);
+  }
+  assert.equal(selectLlmProvider(current, "custom").llmModel, "");
+  assert.match(describeLlmPreset("mimo", "my-model"), /MiMo · my-model/);
+  assert.match(describeLlmPreset("mimo", "  "), /mimo-v2\.6/);
+  const page = readSource("ApiSettings.jsx");
+  assert.match(page, /llmModel: voiceChat\.llmModel\.trim\(\)/);
+  assert.doesNotMatch(page, /llmModel: custom \?/);
+  assert.match(page, /\)\}\s*<label[^>]*htmlFor="api-settings-llm-model"/);
+});
 
 test("LLM scope explanation belongs to header and usage spacing is page-scoped", () => {
   const page=readSource("ApiSettings.jsx");

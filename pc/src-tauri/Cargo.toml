@@ -1,6 +1,6 @@
 [package]
 name = "pet-manager-tauri"
-version = "0.1.79"
+version = "0.1.82"
 description = "pet-manager Tauri client"
 authors = ["pet-manager contributors"]
 license-file = "../../LICENSE"
@@ -23,7 +23,7 @@ tauri-build = { version = "2", features = [] }
 cpal = "0.15"
 libc = "0.2"
 # `protocol-asset` is required by main for serving local widget assets.
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2.11.1", features = ["protocol-asset"] }
 tauri-plugin-fs = "2"
 tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"

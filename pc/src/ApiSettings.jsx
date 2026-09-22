@@ -1,6 +1,6 @@
 /**
  * [Input] Shared avatar provider configs including persisted video parameters, native Volcengine ASR credential commands, and optional return navigation.
- * [Output] Shared speech Key and fixed ASR/TTS 2.0, user-facing feature setup and current-key instructions; LLM provider presets and generation credentials. Saved ASR changes are immediately broadcast, with save vs. test results distinguished.
+ * [Output] Shared speech Key and fixed ASR/TTS 2.0, user-facing setup guidance; editable LLM model names with provider defaults and generation credentials. Saved ASR changes are immediately broadcast, with save vs. test results distinguished.
  * [Pos] top-level page node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -31,7 +31,10 @@ import {
 } from "./lib/avatar-pipeline/provider-config.js";
 import {
   LLM_PRESETS,
+  DEFAULT_LLM_PROVIDER,
   describeLlmPreset,
+  selectLlmProvider,
+  changeLlmEndpoint,
   emitApiConfigurationUpdated,
   providerCredentialsConfigured,
 } from "./lib/api-configuration.js";
@@ -72,16 +75,19 @@ export default function ApiSettings({ onBack }) {
     tone: "muted",
     message: "正在读取语音识别配置…",
   });
-  // 实时对话（2026-09-18）：对话大模型三预设（只填 Key）+ 豆包 Seed TTS 2.0（默认复用识别 Key）
+  // 实时对话：服务预填默认模型并允许修改；豆包 Seed TTS 2.0 复用识别 Key。
   const [voiceChat, setVoiceChat] = useState({
     loading: true,
     llmPending: false,
     llmConfigured: false,
-    llmProvider: LLM_PRESETS[0].id,
+    llmProvider: DEFAULT_LLM_PROVIDER,
     llmBaseUrl: "",
-    llmModel: "",
+    llmModel: LLM_PRESETS.find(preset => preset.id === DEFAULT_LLM_PROVIDER).model,
+    llmWebSearch: true,
     llmApiKey: "",
     llmApiKeyMasked: "",
+    llmApiKeyMasks: {},
+    llmCustomBaseUrl: "",
     llmTone: "muted",
     llmMessage: "正在读取对话大模型配置…",
   });
@@ -92,10 +98,13 @@ export default function ApiSettings({ onBack }) {
       ...patch,
       loading: false,
       llmConfigured: status?.llmConfigured === true,
+      llmWebSearch: status?.llmWebSearch !== false,
       llmProvider: status?.llmProvider || current.llmProvider,
       llmBaseUrl: status?.llmBaseUrl || "",
       llmModel: status?.llmModel || "",
       llmApiKeyMasked: status?.llmApiKeyMasked || "",
+      llmApiKeyMasks: status?.llmApiKeyMasks || {},
+      llmCustomBaseUrl: status?.llmCustomBaseUrl || "",
     }));
   };
 
@@ -106,8 +115,9 @@ export default function ApiSettings({ onBack }) {
       const status = await invoke("save_voice_chat_settings", {
         input: {
           llmProvider: voiceChat.llmProvider,
+          llmWebSearch: voiceChat.llmWebSearch,
           llmBaseUrl: custom ? voiceChat.llmBaseUrl : null,
-          llmModel: custom ? voiceChat.llmModel : null,
+          llmModel: voiceChat.llmModel.trim(),
           llmApiKey: voiceChat.llmApiKey.trim() || null,
         },
       });
@@ -369,7 +379,7 @@ export default function ApiSettings({ onBack }) {
               role="radio"
               aria-checked={voiceChat.llmProvider === preset.id}
               className={"btn-ghost btn-sm api-settings__preset" + (voiceChat.llmProvider === preset.id ? " is-active" : "")}
-              onClick={() => setVoiceChat((current) => ({ ...current, llmProvider: preset.id }))}
+              onClick={() => setVoiceChat((current) => selectLlmProvider(current, preset.id))}
               disabled={voiceChat.llmPending || voiceChat.loading}
             >
               {preset.label}
@@ -385,28 +395,31 @@ export default function ApiSettings({ onBack }) {
                   id="api-settings-llm-url"
                   className="ui-control"
                   value={voiceChat.llmBaseUrl}
-                  onChange={(event) => setVoiceChat((current) => ({ ...current, llmBaseUrl: event.target.value }))}
+                  onChange={(event) => setVoiceChat((current) => changeLlmEndpoint(current, event.target.value))}
                   placeholder="https://your-endpoint/v1"
-                  disabled={voiceChat.llmPending || voiceChat.loading}
-                />
-              </label>
-              <label className="ui-field" htmlFor="api-settings-llm-model">
-                <span className="ui-field__label">模型</span>
-                <input
-                  id="api-settings-llm-model"
-                  className="ui-control"
-                  value={voiceChat.llmModel}
-                  onChange={(event) => setVoiceChat((current) => ({ ...current, llmModel: event.target.value }))}
-                  placeholder="model-name"
                   disabled={voiceChat.llmPending || voiceChat.loading}
                 />
               </label>
             </>
           ) : (
             <div className="api-settings__preset-summary muted small">
-              {describeLlmPreset(voiceChat.llmProvider)}
+              {describeLlmPreset(voiceChat.llmProvider, voiceChat.llmModel)}
             </div>
           )}
+          <label className="ui-field" htmlFor="api-settings-llm-model">
+            <span className="ui-field__label">模型名称 / 接入点 ID</span>
+            <input
+              id="api-settings-llm-model"
+              aria-label="模型名称 / 接入点 ID"
+              className="ui-control"
+              value={voiceChat.llmModel}
+              onChange={(event) => setVoiceChat((current) => ({ ...current, llmModel: event.target.value }))}
+              placeholder={LLM_PRESETS.find((preset) => preset.id === voiceChat.llmProvider)?.model || "model-name"}
+              disabled={voiceChat.llmPending || voiceChat.loading}
+              aria-describedby="api-settings-llm-model-help"
+            />
+            <span id="api-settings-llm-model-help" className="muted small">可填写账号已开通的模型名称或接入点 ID；留空使用默认模型。</span>
+          </label>
           <label className="ui-field" htmlFor="api-settings-llm-key">
             <span className="ui-field__label">API Key</span>
             <input
@@ -436,6 +449,12 @@ export default function ApiSettings({ onBack }) {
             : <CheckCircle2 size={13} />}
           {voiceChat.llmMessage}
         </div>
+        <label className="ui-field api-settings__search-option">
+          <span><input type="checkbox" checked={voiceChat.llmWebSearch}
+            disabled={voiceChat.llmPending || voiceChat.loading}
+            onChange={event => setVoiceChat(current => ({ ...current, llmWebSearch: event.target.checked }))} /> 按需联网检索</span>
+          <span className="muted small">询问最新消息时查询，闲聊和家居控制不查询。使用当前服务商的 Key；模型需支持原生搜索，账号可能需开通权限并产生额外费用。查询后由宠物直接回答。修改后点击保存，下次开始聊天生效。</span>
+        </label>
         <LlmNetworkSettings />
       </Card>
 

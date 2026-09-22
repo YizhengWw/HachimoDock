@@ -7,7 +7,8 @@
  *          `ui/conversation` HUD updates, `realtime-chat-state` events for the UI, and the
  *          `realtime-chat-request` event that lets the UI resolve the active appearance when the
  *          board key is pressed. AEC/VAD-capable boards stay listening during replies;
- *          barge-in cancels generation, TTS and queued playback. Older boards use half-duplex.
+ *          candidate speech is checked by streaming ASR before barge-in cancels generation,
+ *          TTS and queued playback. Empty/noise candidates leave the reply intact.
  * [Pos] Tauri-side orchestrator for 实时对话; independent from the Agent Session Bus voice path.
  * [Sync] Update `pc/.folder.md` and `pc/docs/realtime-chat.md`; wire changes also update `firmware/protocol.md`.
  */
@@ -53,6 +54,8 @@ const VAD_NOISE_RATIO: f32 = 2.6;
 // evaluated on every frame while the speaker is active.
 const PROCESSED_VAD_ABS_MIN: f32 = 160.0;
 const PROCESSED_SPEECH_START_FRAMES: usize = 8; // 160 ms; reject brief AEC onset transients
+const BARGE_CONFIRM_TIMEOUT: Duration = Duration::from_secs(3);
+const BARGE_CONFIRM_MAX_FRAMES: usize = 150; // bounded even when Windows delivers queued frames in a burst
 const LISTENING_VAD_ABS_MIN: f32 = 96.0;
 const LISTENING_SPEECH_START_FRAMES: usize = 5; // 100 ms; reject isolated low-energy hints
 const PREVIEW_MAX_SECONDS: u64 = 20;
@@ -111,6 +114,26 @@ pub struct RealtimeChatStatus {
     pub reason: String,
     pub started_at_ms: u64,
     pub turns: u32,
+    pub search_state: String,
+    pub search_error: String,
+}
+
+fn clear_search(status: &mut RealtimeChatStatus) {
+    status.search_state.clear();
+    status.search_error.clear();
+}
+
+fn update_search(status: &mut RealtimeChatStatus, event: crate::web_search::Event) {
+    match event {
+        crate::web_search::Event::Started => { clear_search(status); status.search_state="searching".into(); },
+        crate::web_search::Event::Finished(_) => {
+            // Sources stay inside the read-only tool result, not the PC UI snapshot.
+            status.search_state="completed".into(); status.search_error.clear();
+        },
+        crate::web_search::Event::Failed(error) => {
+            clear_search(status); status.search_state="failed".into(); status.search_error=error;
+        },
+    }
 }
 
 enum Input {
@@ -730,7 +753,7 @@ async fn run_session(
     let mut deferred_audio = VecDeque::new();
     diagnostics::record(&session.id, "audio_mode", json!({"state":if duplex {"full_duplex"} else {"half_duplex"}}));
 
-    hud(&usb, &board, &session.id, "preparing", &name, "准备中…");
+    hud(&usb, &board, &session.id, "preparing", &name, "准备中");
 
     // Validate TTS with the actual greeting before enabling continuous microphone capture.
     let greeting = input.greeting.trim().to_string();
@@ -750,11 +773,11 @@ async fn run_session(
         let _ = player.send(PlayerCmd::Begin(format!("{}-greeting", session.id)));
         let _ = player.send(PlayerCmd::Subtitle(greeting.clone()));
         let _ = player.send(PlayerCmd::Pcm(greeting_pcm));
-        match listen_during_reply(async {wait_playback(&player).await; Ok(())}, &mut rx, &mut deferred_audio, &mut vad, duplex).await {
+        match listen_with_verified_barge_in(async {wait_playback(&player).await; Ok(())}, &mut rx, &mut deferred_audio, &mut vad, duplex).await {
             Ok(frames) => pending_speech = frames,
             Err(error) => {finish(&app, &usb, &session, "audio", &error).await; return;}
         }
-        if pending_speech.is_some() { let _ = player.send(PlayerCmd::Flush); }
+        if pending_speech.as_ref().is_some_and(|speech| !speech.reply_completed) { let _ = player.send(PlayerCmd::Flush); }
     }
     if !duplex || greeting.is_empty() {
         send_board(&usb, &board, "audio/conversation", json!({ "enabled": true, "halfDuplex": !duplex, "sessionId": session.id }));
@@ -771,6 +794,7 @@ async fn run_session(
     let mut latest_asr = String::new();
     let mut displayed_asr = String::new();
     let mut final_asr: Option<String> = None;
+    let mut recognizer_terminal = false;
     let mut caption_sent_at = Instant::now();
 
     loop {
@@ -778,24 +802,16 @@ async fn run_session(
             reason = "cancelled".into();
             break;
         }
-        if let Some(frames) = pending_speech.take() {
-            latest_asr.clear(); displayed_asr.clear(); final_asr = None;
+        if let Some(speech) = pending_speech.take() {
+            latest_asr = speech.text; displayed_asr.clear();
+            recognizer_terminal = speech.terminal;
+            final_asr = speech.terminal.then(|| latest_asr.clone());
             last_activity = Instant::now();
-            let (tx, events) = mpsc::unbounded_channel();
-            match StreamingSpeechRecognizer::start(move |event| {let _ = tx.send(event);}) {
-                Ok(rec) => {
-                    capture_stats = AsrCaptureStats::default();
-                    for frame in frames {
-                        if let Err(error) = rec.push_pcm(&frame) {finish(&app,&usb,&session,"asr",&error).await; return;}
-                        capture_stats.observe(&frame);
-                    }
-                    recognizer = Some(rec); asr_rx = Some(events);
-                    publish(&app, &session, |s| {s.state="listening".into(); s.transcript.clear();});
-                    user_caption(&usb,&board,&session.id,&name,"",false);
-                    diagnostics::record(&session.id,"asr_started",json!({"turn":turns+1}));
-                }
-                Err(error) => {finish(&app,&usb,&session,"asr",&error).await; return;}
-            }
+            capture_stats = speech.stats;
+            recognizer = Some(speech.recognizer); asr_rx = Some(speech.events);
+            publish(&app, &session, |s| {s.state="listening".into(); s.transcript = latest_asr.clone();});
+            user_caption(&usb,&board,&session.id,&name,&latest_asr,false);
+            diagnostics::record(&session.id,"asr_started",json!({"turn":turns+1,"reason":"confirmed_barge_in"}));
         }
         match apply_pending_persona(&session, &mut input, &mut tts).await {
             Ok(true) => {
@@ -814,8 +830,12 @@ async fn run_session(
         if let Some(events) = asr_rx.as_mut() {
             while let Ok(event) = events.try_recv() {
                 match event {
-                    StreamingSpeechEvent::Partial { text, .. } => latest_asr = text,
-                    StreamingSpeechEvent::Final { text, .. } => { latest_asr = text.clone(); final_asr = Some(text); }
+                    StreamingSpeechEvent::Partial { text, .. } => { if !text.trim().is_empty() { latest_asr = text; } }
+                    StreamingSpeechEvent::Final { text, .. } => {
+                        if !text.trim().is_empty() { latest_asr = text; }
+                        final_asr = Some(latest_asr.clone());
+                        recognizer_terminal = true;
+                    }
                     StreamingSpeechEvent::Error(error) => {
                         finish(&app, &usb, &session, "asr", &error).await;
                         return;
@@ -830,7 +850,12 @@ async fn run_session(
                 caption_sent_at = Instant::now();
             }
         }
-        let next = if let Some(item) = deferred_audio.pop_front() { item } else { match timeout(Duration::from_millis(500), rx.recv()).await {
+        // A terminal ASR packet closes its worker. Finalize immediately rather
+        // than writing more PCM into a closed recognizer or waiting for USB input.
+        // This sentinel is control flow only: it is never sent to ASR or logged as audio.
+        let next = if recognizer_terminal && recognizer.is_some() {
+            Input::Pcm(vec![0; FRAME_BYTES], Some(false))
+        } else if let Some(item) = deferred_audio.pop_front() { item } else { match timeout(Duration::from_millis(500), rx.recv()).await {
             Ok(Some(item)) => item,
             Ok(None) => { reason = "closed".into(); break; }
             Err(_) => continue,
@@ -838,12 +863,15 @@ async fn run_session(
         match next {
             Input::Pcm(pcm, speech) => {
                 for frame in pcm.chunks(FRAME_BYTES) {
-                    match vad.step_in_context(frame, speech, VadContext::Listening) {
+                    let step = if recognizer_terminal { vad.reset(); VadStep::End }
+                        else { vad.step_in_context(frame, speech, VadContext::Listening) };
+                    match step {
                         VadStep::Idle => {}
                         VadStep::Start(preroll) => {
                             latest_asr.clear();
                             displayed_asr.clear();
                             final_asr = None;
+                            recognizer_terminal = false;
                             user_caption(&usb, &board, &session.id, &name, "", false);
                             last_activity = Instant::now();
                             let (tx, rx_events) = mpsc::unbounded_channel();
@@ -880,13 +908,16 @@ async fn run_session(
                             let Some(rec) = recognizer.take() else { continue };
                             let Some(mut events) = asr_rx.take() else { continue };
                             let asr_finish_at = Instant::now();
-                            if let Err(error) = rec.push_pcm(frame).and_then(|_| rec.finish()) {
-                                finish(&app, &usb, &session, "asr", &error).await; return;
+                            if !recognizer_terminal {
+                                if let Err(error) = rec.push_pcm(frame).and_then(|_| rec.finish()) {
+                                    finish(&app, &usb, &session, "asr", &error).await; return;
+                                }
+                                capture_stats.observe(frame);
                             }
-                            capture_stats.observe(frame);
+                            recognizer_terminal = false;
                             capture_stats.record(&session.id, turns+1);
                             publish(&app, &session, |s| s.state = "thinking".into());
-                            hud(&usb, &board, &session.id, "thinking", &name, "正在处理…");
+                            hud(&usb, &board, &session.id, "thinking", &name, "正在处理");
                             let final_result = match final_asr.take() {
                                 Some(text) => Ok(text),
                                 None => await_with_capture(await_final_text(&mut events, latest_asr.clone()), &mut rx, &mut deferred_audio, duplex).await,
@@ -903,7 +934,18 @@ async fn run_session(
                             if text.is_empty() {
                                 diagnostics::record(&session.id, "asr_empty", json!({"turn":turns+1,"elapsedMs":asr_finish_at.elapsed().as_millis(),"reason":"no_transcript"}));
                                 publish(&app, &session, |s| s.state = "listening".into());
-                                hud(&usb, &board, &session.id, "listening", &name, "没听清，请再说一次");
+                                // VAD can be triggered by environmental noise. No transcript is
+                                // not proof the user spoke; keep listening without blaming them.
+                                hud(&usb, &board, &session.id, "listening", &name, "");
+                                continue;
+                            }
+                            if is_explicit_stop(&text) {
+                                // Stop means stop speaking, not a new LLM request
+                                // that starts another spoken acknowledgement.
+                                diagnostics::record(&session.id,"voice_stop",json!({"turn":turns,"chars":1}));
+                                vad.reset();
+                                publish(&app, &session, |s| {s.state="listening".into(); s.transcript=text.clone();});
+                                hud(&usb, &board, &session.id, "listening", &name, "");
                                 continue;
                             }
                             turns += 1;
@@ -919,17 +961,20 @@ async fn run_session(
                             publish(&app, &session, |s| { s.transcript = user_text.clone(); s.turns = turns; });
                             diagnostics::record(&session.id, "asr_final", json!({"turn":turns,"chars":user_text.chars().count(),"elapsedMs":asr_finish_at.elapsed().as_millis()}));
                             vad.reset();
-                            match listen_during_reply(answer_turn(&app, &usb, &session, &llm_cfg, &input.system_prompt, &mut history, &user_text, &mut tts, &player, volume, &name), &mut rx, &mut deferred_audio, &mut vad, duplex).await {
-                                Ok(Some(frames)) => {
-                                    // The reply future is now dropped: aborts LLM and TTS callbacks.
-                                    let _ = player.send(PlayerCmd::Flush);
-                                    tts.interrupt();
-                                    crate::smart_home::cancel_voice_session(&session.id);
-                                    diagnostics::record(&session.id,"barge_in",json!({"turn":turns,"bytes":frames.iter().map(Vec::len).sum::<usize>()}));
-                                    history.push(ChatTurn{role:"user".into(),content:user_text.clone()});
-                                    history.push(ChatTurn{role:"assistant".into(),content:"[回复被用户打断；已发出的设备操作不会撤回，也不可自动重复。]".into()});
-                                    persona_llm::trim_history(&mut history);
-                                    pending_speech = Some(frames);
+                            match listen_with_verified_barge_in(answer_turn(&app, &usb, &session, &llm_cfg, &input.system_prompt, &mut history, &user_text, &mut tts, &player, volume, &name), &mut rx, &mut deferred_audio, &mut vad, duplex).await {
+                                Ok(Some(speech)) => {
+                                    if !speech.reply_completed {
+                                        // The reply future is now dropped: aborts LLM and TTS callbacks.
+                                        publish(&app, &session, clear_search);
+                                        let _ = player.send(PlayerCmd::Flush);
+                                        tts.interrupt();
+                                        crate::smart_home::cancel_voice_session(&session.id);
+                                        diagnostics::record(&session.id,"barge_in",json!({"turn":turns,"bytes":speech.stats.frames*FRAME_BYTES,"reason":"asr_confirmed"}));
+                                        history.push(ChatTurn{role:"user".into(),content:user_text.clone()});
+                                        history.push(ChatTurn{role:"assistant".into(),content:"[回复被用户打断；已发出的设备操作不会撤回，也不可自动重复。]".into()});
+                                        persona_llm::trim_history(&mut history);
+                                    }
+                                    pending_speech = Some(speech);
                                 }
                                 Ok(None) => {}
                                 Err(error) => {
@@ -937,7 +982,7 @@ async fn run_session(
                                     crate::smart_home::clear_voice_pending(&session.id).await;
                                     let _ = player.send(PlayerCmd::Flush);
                                     publish(&app, &session, |s| s.error = error.clone());
-                                    hud(&usb, &board, &session.id, "listening", &name, "刚才没说成，再说一遍？");
+                                    hud(&usb, &board, &session.id, "listening", &name, "刚才没说成，请再说一遍");
                                 }
                             }
                             if !duplex {
@@ -946,7 +991,7 @@ async fn run_session(
                                 vad.reset();
                             }
                             last_activity = Instant::now();
-                            publish(&app, &session, |s| s.state = "listening".into());
+                            publish(&app, &session, |s| { s.state = "listening".into(); if s.search_state=="searching" {clear_search(s);} });
                             hud(&usb, &board, &session.id, "listening", &name, "");
                         }
                     }
@@ -959,9 +1004,139 @@ async fn run_session(
     finish(&app, &usb, &session, &reason, "").await;
 }
 
+/// Streaming ASR is speculative until it yields at least two meaningful characters
+/// or the explicit single-character stop command “停”.
+/// The same recognizer is then handed to the conversation loop, preserving the
+/// first syllables without replaying PCM or opening a second cloud request.
+struct VerifiedSpeech {
+    recognizer: StreamingSpeechRecognizer,
+    events: mpsc::UnboundedReceiver<StreamingSpeechEvent>,
+    stats: AsrCaptureStats,
+    text: String,
+    reply_completed: bool,
+    terminal: bool,
+}
+
+fn is_explicit_stop(text: &str) -> bool {
+    let mut chars = text.chars().filter(|ch| ch.is_alphanumeric());
+    chars.next() == Some('停') && chars.next().is_none()
+}
+
+fn has_barge_in_text(text: &str) -> bool {
+    let mut chars = text.chars().filter(|ch| ch.is_alphanumeric());
+    match (chars.next(), chars.next()) {
+        (Some('停'), None) | (Some(_), Some(_)) => true,
+        _ => false,
+    }
+}
+
+fn start_barge_probe(frames: Vec<Vec<u8>>) -> Result<VerifiedSpeech, String> {
+    let (tx, events) = mpsc::unbounded_channel();
+    let recognizer = StreamingSpeechRecognizer::start(move |event| { let _ = tx.send(event); })?;
+    let mut stats = AsrCaptureStats::default();
+    for frame in frames {
+        recognizer.push_pcm(&frame)?;
+        stats.observe(&frame);
+    }
+    Ok(VerifiedSpeech { recognizer, events, stats, text: String::new(), reply_completed: false, terminal: false })
+}
+
+async fn listen_with_verified_barge_in<F>(reply: F, rx: &mut mpsc::Receiver<Input>, deferred: &mut VecDeque<Input>, vad: &mut Vad, duplex: bool)
+    -> Result<Option<VerifiedSpeech>, String>
+where F: std::future::Future<Output=Result<(), String>> {
+    verify_barge_in_with(reply, rx, deferred, vad, duplex, start_barge_probe).await
+}
+
+async fn verify_barge_in_with<F, S>(reply: F, rx: &mut mpsc::Receiver<Input>, deferred: &mut VecDeque<Input>, vad: &mut Vad, duplex: bool, mut start: S)
+    -> Result<Option<VerifiedSpeech>, String>
+where F: std::future::Future<Output=Result<(), String>>,
+      S: FnMut(Vec<Vec<u8>>) -> Result<VerifiedSpeech, String> {
+    if !duplex { reply.await?; return Ok(None); }
+    tokio::pin!(reply);
+    loop {
+        // Borrow, don't drop the reply future when VAD finds a candidate. Until
+        // ASR confirms it, synthesis, queued PCM and the current sentence survive.
+        let Some(frames) = listen_during_reply(reply.as_mut(), rx, deferred, vad, true).await? else { return Ok(None); };
+        diagnostics::record(&vad.diagnostic_session, "barge_candidate", json!({"frames":frames.len(),"bufferedMs":deferred.len()*20}));
+        let mut probe = match start(frames) {
+            Ok(probe) => probe,
+            Err(error) => {
+                diagnostics::record(&vad.diagnostic_session,"barge_rejected",json!({"reason":"asr_start_failed","errorKind":diagnostics::error_kind(&error)}));
+                vad.reset();
+                continue;
+            }
+        };
+        let started = Instant::now();
+        let deadline = tokio::time::sleep(BARGE_CONFIRM_TIMEOUT);
+        tokio::pin!(deadline);
+        let mut added_frames = 0;
+        let mut rejection = "no_transcript";
+        loop {
+            // Poll ASR and the reply even when Windows has delivered a burst of
+            // retained frames. A backlog must not starve confirmation or playback.
+            tokio::select! {
+                biased;
+                _ = &mut deadline => { rejection = "confirmation_timeout"; break; }
+                event = probe.events.recv() => match event {
+                    Some(event @ (StreamingSpeechEvent::Partial { .. } | StreamingSpeechEvent::Final { .. })) => {
+                        let (text, terminal) = match event {
+                            StreamingSpeechEvent::Partial {text,..} => (text,false),
+                            StreamingSpeechEvent::Final {text,..} => (text,true),
+                            _ => unreachable!(),
+                        };
+                        // Terminal empty/single-character candidates cannot improve.
+                        // Reject now instead of leaving a completed stream polling.
+                        if terminal && !has_barge_in_text(&text) { break; }
+                        if !has_barge_in_text(&text) { continue; }
+                        probe.text = text;
+                        probe.terminal = terminal;
+                        // The candidate may have ended while waiting for cloud ASR.
+                        // Continue with the SAME stream; ordinary silence detection
+                        // sends its final marker once, without losing later speech.
+                        vad.in_speech = true;
+                        vad.silence_run = 0;
+                        vad.speech_started.get_or_insert_with(Instant::now);
+                        diagnostics::record(&vad.diagnostic_session,"barge_confirmed",json!({"chars":probe.text.chars().filter(|ch|ch.is_alphanumeric()).count(),"elapsedMs":started.elapsed().as_millis(),"frames":probe.stats.frames}));
+                        return Ok(Some(probe));
+                    }
+                    Some(StreamingSpeechEvent::Error(error)) => {
+                        diagnostics::record(&vad.diagnostic_session,"barge_probe_error",json!({"errorKind":diagnostics::error_kind(&error)}));
+                        rejection = "asr_error"; break;
+                    }
+                    Some(StreamingSpeechEvent::Ready) => {},
+                    None => break,
+                },
+                result = &mut reply, if !probe.reply_completed => {
+                    result?;
+                    probe.reply_completed = true;
+                    vad.reply_tail_until = Some(Instant::now() + POST_SPEAK_GUARD);
+                }
+                incoming = async { if let Some(frame) = deferred.pop_front() { Some(frame) } else { rx.recv().await } } => {
+                    let Some(Input::Pcm(pcm, speech)) = incoming else { return Err("设备收音通道关闭".into()); };
+                    if speech.is_none() || pcm.len() != FRAME_BYTES { return Err("设备 AEC/VAD 音频帧无效".into()); }
+                    if let Err(error) = probe.recognizer.push_pcm(&pcm) {
+                        diagnostics::record(&vad.diagnostic_session,"barge_probe_error",json!({"errorKind":diagnostics::error_kind(&error)}));
+                        rejection = "asr_error"; break;
+                    }
+                    probe.stats.observe(&pcm);
+                    added_frames += 1;
+                    // Keep feeding silence to streaming ASR; an empty VAD end is
+                    // never itself permission to cancel the reply.
+                    let _ = vad.step_with_hint(&pcm, speech);
+                    if added_frames >= BARGE_CONFIRM_MAX_FRAMES { rejection = "confirmation_audio_limit"; break; }
+                }
+            }
+        }
+        diagnostics::record(&vad.diagnostic_session,"barge_rejected",json!({"reason":rejection,"elapsedMs":started.elapsed().as_millis(),"frames":probe.stats.frames}));
+        probe.recognizer.cancel();
+        vad.reset();
+        if probe.reply_completed { return Ok(None); }
+    }
+}
+
 /// Capture remains polled while the reply is thinking, synthesizing or playing.
-/// Only AEC/VAD-tagged device PCM enables this branch. Dropping `reply` aborts
-/// all its child work; the caller then fences queued playback before starting ASR.
+/// Only AEC/VAD-tagged device PCM enables this branch. The verification wrapper
+/// borrows `reply` here, so finding a candidate does not cancel playback.
 async fn listen_during_reply<F>(reply: F, rx: &mut mpsc::Receiver<Input>, deferred: &mut VecDeque<Input>, vad: &mut Vad, duplex: bool)
     -> Result<Option<Vec<Vec<u8>>>, String>
 where F: std::future::Future<Output=Result<(), String>> {
@@ -1057,8 +1232,8 @@ async fn await_final_text(events: &mut mpsc::UnboundedReceiver<StreamingSpeechEv
             return if latest.is_empty() { Err("语音识别结果超时".into()) } else { Ok(latest) };
         }
         match timeout(remaining, events.recv()).await {
-            Ok(Some(StreamingSpeechEvent::Final { text, .. })) => return Ok(text),
-            Ok(Some(StreamingSpeechEvent::Partial { text, .. })) => latest = text,
+            Ok(Some(StreamingSpeechEvent::Final { text, .. })) => return Ok(if text.trim().is_empty() { latest } else { text }),
+            Ok(Some(StreamingSpeechEvent::Partial { text, .. })) => { if !text.trim().is_empty() { latest = text; } }
             Ok(Some(StreamingSpeechEvent::Error(error))) => {
                 return Err(error);
             }
@@ -1083,7 +1258,12 @@ async fn answer_turn(
     name: &str,
 ) -> Result<(), String> {
     let board = session.board_device_id.clone();
-    let (sentence_tx, mut sentence_rx) = mpsc::unbounded_channel::<String>();
+    enum ReplyEvent { Sentence(String), Search(crate::web_search::Event) }
+    // This receiver belongs only to this reply. Dropping it on a verified
+    // interruption makes late events unreachable by subsequent turns.
+    let (sentence_tx, mut sentence_rx) = mpsc::unbounded_channel::<ReplyEvent>();
+    let search_tx=sentence_tx.clone();
+    publish(app,session,|s| {clear_search(s); s.reply.clear(); s.error.clear();});
     let mut splitter = SentenceSplitter::default();
     let llm_cfg = llm_cfg.clone();
     let prompt = system_prompt.to_string();
@@ -1095,7 +1275,7 @@ async fn answer_turn(
     let llm_task = tokio::spawn(async move {
         let mut first_delta = true;
         let mut first_sentence = true;
-        let result = persona_llm::stream_chat_in_session(&llm_cfg, &prompt, &history_snapshot, &user, Some(&log_session), |delta| {
+        let result = persona_llm::stream_chat_with_search(&llm_cfg, &prompt, &history_snapshot, &user, Some(&log_session), |delta| {
             if first_delta {
                 diagnostics::record(&log_session, "llm_first_delta", json!({"elapsedMs":turn_started.elapsed().as_millis()}));
                 first_delta = false;
@@ -1105,15 +1285,15 @@ async fn answer_turn(
                     diagnostics::record(&log_session, "llm_first_sentence", json!({"elapsedMs":turn_started.elapsed().as_millis()}));
                     first_sentence = false;
                 }
-                let _ = sentence_tx.send(sentence);
+                let _ = sentence_tx.send(ReplyEvent::Sentence(sentence));
             }
-        })
+        }, |event| {let _ = search_tx.send(ReplyEvent::Search(event));})
         .await;
         if let Some(rest) = splitter.flush() {
             if first_sentence {
                 diagnostics::record(&log_session, "llm_first_sentence", json!({"elapsedMs":turn_started.elapsed().as_millis()}));
             }
-            let _ = sentence_tx.send(rest);
+            let _ = sentence_tx.send(ReplyEvent::Sentence(rest));
         }
         result
     });
@@ -1124,10 +1304,20 @@ async fn answer_turn(
     let turn_id = format!("{}-{}", session.id, now_ms());
     let mut spoken = false;
     let mut reply = String::new();
-    while let Some(sentence) = sentence_rx.recv().await {
+    while let Some(event) = sentence_rx.recv().await {
         if session.cancelled.load(Ordering::SeqCst) {
             break;
         }
+        let sentence=match event {
+            ReplyEvent::Sentence(sentence)=>sentence,
+            ReplyEvent::Search(event)=>{
+                if matches!(event,crate::web_search::Event::Started) {
+                    hud(usb,&board,&session.id,"thinking",name,"正在联网查询");
+                }
+                publish(app,session,|s|update_search(s,event));
+                continue;
+            },
+        };
         let clean = persona_llm::clean_spoken_text(&sentence);
         if clean.is_empty() {
             continue;
@@ -1221,6 +1411,7 @@ async fn finish(app: &AppHandle, usb: &UsbSerialManager, session: &Arc<Session>,
     let error = error.to_string();
     publish(app, session, |s| {
         s.active = false;
+        if s.search_state=="searching" {clear_search(s);}
         s.state = "ended".into();
         s.reason = reason.clone();
         if !error.is_empty() {
@@ -1290,7 +1481,160 @@ pub async fn clear_voice_chat_secret(which: String) -> Result<voice_chat_setting
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn search_status_resets_between_turns_and_on_failure() {
+        use super::*;
+        let mut status=RealtimeChatStatus::default();
+        update_search(&mut status,crate::web_search::Event::Started);
+        assert_eq!(status.search_state,"searching");
+        update_search(&mut status,crate::web_search::Event::Finished(crate::web_search::SearchResult{
+            summary:"not sent to UI".into(), sources:vec![crate::web_search::Source{url:"https://example.com".into(),..Default::default()}],retrieved_at:"2026-09-22".into()
+        }));
+        assert_eq!(status.search_state,"completed");
+        let snapshot=serde_json::to_string(&status).unwrap();
+        assert!(!snapshot.contains("not sent to UI") && !snapshot.contains("https://example.com"));
+        assert!(!snapshot.contains("searchSources") && !snapshot.contains("searchRetrievedAt"));
+        clear_search(&mut status); assert!(status.search_state.is_empty());
+        update_search(&mut status,crate::web_search::Event::Failed("未授权".into()));
+        assert_eq!(status.search_state,"failed");
+        update_search(&mut status,crate::web_search::Event::Started); assert!(status.search_error.is_empty());
+    }
     use super::*;
+
+    fn fake_barge_probe(frames: Vec<Vec<u8>>, texts: &[&str], keep_events_open: bool) -> (VerifiedSpeech, impl Sized) {
+        let (recognizer, sink) = StreamingSpeechRecognizer::test_sink();
+        let (tx, events) = mpsc::unbounded_channel();
+        for (revision, text) in texts.iter().enumerate() {
+            tx.send(StreamingSpeechEvent::Partial { revision: revision as u64, text: (*text).into(), confidence: None }).unwrap();
+        }
+        let mut stats = AsrCaptureStats::default();
+        for frame in frames { recognizer.push_pcm(&frame).unwrap(); stats.observe(&frame); }
+        (VerifiedSpeech { recognizer, events, stats, text: String::new(), reply_completed: false, terminal: false },
+            (sink, if keep_events_open { Some(tx) } else { None }))
+    }
+
+    #[test]
+    fn barge_in_needs_two_real_characters_or_explicit_stop() {
+        for text in ["", "  ", "……！", "嗯", "啊，！", "a", "🙂🙂"] { assert!(!has_barge_in_text(text), "{text}"); }
+        for text in ["停", " 停！ ", "停下", "等 一 下！", "你好", "OK", "换歌"] { assert!(has_barge_in_text(text), "{text}"); }
+        for text in ["停", " 停！ "] { assert!(is_explicit_stop(text)); }
+        for text in ["", "停下", "停止音乐", "等一下", "不停", "嗯"] { assert!(!is_explicit_stop(text)); }
+    }
+
+    #[test]
+    fn terminal_confirmation_is_handed_off_without_writing_a_closed_asr_stream() {
+        tauri::async_runtime::block_on(async {
+            for text in ["停", "换歌", "嗯", ""] {
+                let (_tx, mut rx) = mpsc::channel(1);
+                let mut deferred = (0..PROCESSED_SPEECH_START_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
+                let mut vad = Vad::new(); let mut guards = Vec::new();
+                let result = verify_barge_in_with(async { Ok(()) },&mut rx,&mut deferred,&mut vad,true,|frames| {
+                    let (mut probe, guard) = fake_barge_probe(frames,&[],false); guards.push(guard);
+                    let (tx, events) = mpsc::unbounded_channel(); probe.events=events;
+                    tx.send(StreamingSpeechEvent::Final {revision:1,text:text.into(),confidence:None}).unwrap();
+                    Ok(probe)
+                }).await.unwrap();
+                if has_barge_in_text(text) {
+                    let speech = result.unwrap(); assert!(speech.terminal); assert_eq!(speech.text,text);
+                } else { assert!(result.is_none()); }
+            }
+        });
+    }
+
+    #[test]
+    fn failed_or_timed_out_probe_keeps_the_original_reply_running() {
+        tauri::async_runtime::block_on(async {
+            for failure in ["start", "stream", "timeout"] {
+                let (_tx, mut rx) = mpsc::channel(1);
+                let mut deferred = (0..PROCESSED_SPEECH_START_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
+                let mut vad = Vad::new(); let mut guards = Vec::new();
+                let completed = Arc::new(AtomicBool::new(false)); let flag=completed.clone();
+                let reply = async move {flag.store(true,Ordering::SeqCst); Ok(())};
+                let result = timeout(BARGE_CONFIRM_TIMEOUT+Duration::from_secs(1), verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                    if failure=="start" {return Err("test ASR unavailable".into());}
+                    let (mut probe, guard)=fake_barge_probe(frames,&[],true); guards.push(guard);
+                    if failure=="stream" {
+                        let (tx, events)=mpsc::unbounded_channel(); probe.events=events;
+                        tx.send(StreamingSpeechEvent::Error("test ASR closed".into())).unwrap();
+                    }
+                    Ok(probe)
+                })).await.expect("candidate must be bounded").unwrap();
+                assert!(result.is_none()); assert!(completed.load(Ordering::SeqCst));
+            }
+        });
+    }
+
+    #[test]
+    fn noise_and_one_character_do_not_cancel_the_reply() {
+        tauri::async_runtime::block_on(async {
+            for texts in [vec![], vec!["嗯", "嗯，！"]] {
+                let (_tx, mut rx) = mpsc::channel(32);
+                let mut deferred = (0..PROCESSED_SPEECH_START_FRAMES).map(|_| Input::Pcm(frame(2500),Some(true))).collect();
+                let mut vad = Vad::new(); let mut guards = Vec::new();
+                let completed = Arc::new(AtomicBool::new(false)); let flag = completed.clone();
+                let reply = async move { flag.store(true,Ordering::SeqCst); Ok(()) };
+                let result = verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                    let (probe, guard) = fake_barge_probe(frames,&texts,false); guards.push(guard); Ok(probe)
+                }).await.unwrap();
+                assert!(result.is_none()); assert!(completed.load(Ordering::SeqCst));
+            }
+        });
+    }
+
+    #[test]
+    fn second_character_confirms_and_reuses_the_existing_asr_stream() {
+        tauri::async_runtime::block_on(async {
+            let (_tx, mut rx) = mpsc::channel(32);
+            let mut deferred = (0..PREROLL_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
+            let mut vad = Vad::new(); let mut guards = Vec::new(); let mut starts = 0;
+            let reply = std::future::pending::<Result<(),String>>();
+            let speech = verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                starts += 1;
+                let (probe, guard) = fake_barge_probe(frames,&["等", "等，", "等下"],true); guards.push(guard); Ok(probe)
+            }).await.unwrap().unwrap();
+            assert_eq!(starts,1); assert_eq!(speech.text,"等下"); assert!(!speech.reply_completed);
+            assert_eq!(speech.stats.frames,PROCESSED_SPEECH_START_FRAMES);
+            assert_eq!(deferred.len(),PREROLL_FRAMES-PROCESSED_SPEECH_START_FRAMES);
+            assert!(vad.in_speech); assert!(speech.recognizer.push_pcm(&frame(180)).is_ok());
+        });
+    }
+
+    #[test]
+    fn windows_style_audio_burst_without_text_does_not_cancel_or_grow_unbounded() {
+        tauri::async_runtime::block_on(async {
+            let (_tx, mut rx) = mpsc::channel(1);
+            let mut deferred = (0..(PROCESSED_SPEECH_START_FRAMES+BARGE_CONFIRM_MAX_FRAMES))
+                .map(|_| Input::Pcm(frame(2500),Some(true))).collect();
+            let mut vad = Vad::new(); let mut guards = Vec::new(); let mut starts = 0;
+            let result = verify_barge_in_with(async { Ok(()) },&mut rx,&mut deferred,&mut vad,true,|frames| {
+                starts += 1;
+                let (probe, guard) = fake_barge_probe(frames,&[],true); guards.push(guard); Ok(probe)
+            }).await.unwrap();
+            assert!(result.is_none()); assert_eq!(starts,1); assert!(deferred.is_empty());
+        });
+    }
+
+    #[test]
+    fn single_stop_interrupts_but_late_confirmation_does_not_recancel_a_finished_reply() {
+        tauri::async_runtime::block_on(async {
+            for finish_first in [false,true] {
+                let (_tx, mut rx) = mpsc::channel(1);
+                let mut deferred = (0..PROCESSED_SPEECH_START_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
+                let mut vad = Vad::new(); let mut guards = Vec::new();
+                let reply = async move { if !finish_first { std::future::pending::<()>().await; } Ok(()) };
+                let result = verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                    let (mut probe, guard) = fake_barge_probe(frames,&[],true); guards.push(guard);
+                    let (tx, events) = mpsc::unbounded_channel(); probe.events = events;
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        tx.send(StreamingSpeechEvent::Partial {revision:1,text:"停！".into(),confidence:None}).unwrap();
+                    });
+                    Ok(probe)
+                }).await.unwrap().unwrap();
+                assert_eq!(result.text,"停！"); assert_eq!(result.reply_completed,finish_first);
+            }
+        });
+    }
 
     #[test]
     fn listening_accepts_short_soft_speech_without_weakening_playback_gate() {
@@ -1503,6 +1847,10 @@ mod tests {
             let (tx, mut rx) = mpsc::unbounded_channel();
             drop(tx);
             assert_eq!(await_final_text(&mut rx, "已经显示的语音".into()).await.unwrap(), "已经显示的语音");
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            tx.send(StreamingSpeechEvent::Partial { revision: 1, text: " ".into(), confidence: None }).unwrap();
+            tx.send(StreamingSpeechEvent::Final { revision: 2, text: "".into(), confidence: None }).unwrap();
+            assert_eq!(await_final_text(&mut rx, "停下".into()).await.unwrap(), "停下");
             let (tx, mut rx) = mpsc::unbounded_channel();
             tx.send(StreamingSpeechEvent::Error("service failed".into())).unwrap();
             drop(tx);

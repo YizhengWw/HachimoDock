@@ -6,7 +6,8 @@
  *          (binary frames: 4-byte header, event, session id, payload), with connection reuse across
  *          sentences and a clean reset on provider errors.
  * [Pos] Tauri-side text-to-speech client for realtime persona chat and 人设与声音 preview.
- * [Sync] If the wire protocol or config surface changes, update `pc/docs/realtime-chat.md`.
+ * [Sync] If the wire protocol or config surface changes, update `ref/.folder.md` and
+ *        `docs/superpowers/specs/2026-09-18-realtime-persona-voice-chat-design.md` §8.
  */
 
 use futures_util::{SinkExt, StreamExt};

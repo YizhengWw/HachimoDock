@@ -25,15 +25,30 @@ import {
   validatePersonaVoice,
 } from "./persona-voice.js";
 
-test("built-in Terrier ships a factory persona and the default Doubao speaker", () => {
+test("built-in Terrier ships Peiqi 2.0 without changing the general voice default", () => {
   const factory = normalizePersonaVoice(null, { name: "西高地小狗", isBuiltin: true });
   assert.equal(factory.configured, true);
   assert.equal(factory.persona.display_name, "小西");
   assert.match(factory.persona.greeting, /汪/);
   assert.equal(factory.voice.provider, TTS_PROVIDER_DOUBAO);
-  assert.equal(factory.voice.speaker, DEFAULT_SPEAKER_ID);
-  assert.equal(BUILTIN_TERRIER_PERSONA_VOICE.voice.speaker, "zh_female_vv_uranus_bigtts");
+  assert.equal(factory.voice.speaker, "zh_female_peiqi_uranus_bigtts");
+  assert.equal(BUILTIN_TERRIER_PERSONA_VOICE.voice.speaker, factory.voice.speaker);
+  assert.equal(personaSummaryLabel(factory), "小西 · 佩奇猪 2.0");
+  assert.equal(DEFAULT_SPEAKER_ID, "zh_female_vv_uranus_bigtts");
+  assert.ok(DOUBAO_SPEAKERS.some((speaker) => speaker.id === factory.voice.speaker && speaker.label === "佩奇猪 2.0"));
   assert.ok(DOUBAO_SPEAKERS.some((speaker) => speaker.id === DEFAULT_SPEAKER_ID));
+});
+
+test("Terrier preserves saved voices and cloned voices while factory reset uses Peiqi", () => {
+  const saved={persona:{display_name:"我的小西",style:"沉稳"},voice:{speaker:DEFAULT_SPEAKER_ID,clone_speaker_id:"S_test_clone",speed:0.8,volume:0.7}};
+  const record=normalizePersonaVoice(saved,{isBuiltin:true});
+  assert.equal(record.voice.speaker,DEFAULT_SPEAKER_ID);
+  assert.equal(effectiveSpeakerId(record.voice),"S_test_clone");
+  assert.equal(record.voice.speed,0.8); assert.equal(record.voice.volume,0.7);
+  assert.equal(record.persona.display_name,"我的小西");
+  const reset=createDefaultPersonaVoice({isBuiltin:true});
+  assert.equal(effectiveSpeakerId(reset.voice),"zh_female_peiqi_uranus_bigtts");
+  assert.equal(reset.voice.clone_speaker_id,"");
 });
 
 test("a custom appearance without a document gets defaults but is reported as not configured", () => {
