@@ -30,7 +30,7 @@
     "test:bridge": "node scripts/run-node-tests.mjs src-tauri/bridge/test src-tauri/bridge/packages/agent-session-bus/test"
   },
   "dependencies": {
-    "@tauri-apps/api": "2.10.1",
+    "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.1",
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-http": "^2",
@@ -40,7 +40,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.10.1",
+    "@tauri-apps/cli": "2.11.1",
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^6.4.3"
   },
