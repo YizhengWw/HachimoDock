@@ -62,6 +62,7 @@ mod doubao_tts;
 mod pc_audio;
 mod pc_playback;
 mod persona_llm;
+mod web_search;
 mod miot_protocol;
 mod smart_home;
 mod smart_home_credentials;

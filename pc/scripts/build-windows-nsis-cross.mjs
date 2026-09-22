@@ -195,6 +195,7 @@ mkdirSync(join(stageRoot, "tools"), { recursive: true });
 mkdirSync(join(stageRoot, "licenses"), { recursive: true });
 copyFileSync(join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), join(stageRoot, "THIRD_PARTY_NOTICES.md"));
 copyFileSync(join(repositoryRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"), join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"));
+copyFileSync(join(repositoryRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"), join(stageRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"));
 copyFileSync(windowsFfmpeg, join(stageRoot, "tools", "ffmpeg.exe"));
 for (const notice of ["ffmpeg.LICENSE", "ffmpeg.README", "ffmpeg.SOURCE.txt", "zlib.LICENSE"]) {
   copyFileSync(

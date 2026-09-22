@@ -66,7 +66,7 @@ export const PERSONA_TEMPLATES = Object.freeze([
   },
 ]);
 
-/** 内置「西高地小狗」的出厂人设与音色（方案 §5.1，先跑通流程用）。 */
+/** 内置「西高地小狗」的出厂人设与佩奇猪 2.0 音色；不改变其他形象默认值。 */
 export const BUILTIN_TERRIER_PERSONA_VOICE = Object.freeze({
   persona: Object.freeze({
     schema_version: PERSONA_VOICE_SCHEMA_VERSION,
@@ -81,7 +81,7 @@ export const BUILTIN_TERRIER_PERSONA_VOICE = Object.freeze({
   }),
   voice: Object.freeze({
     provider: TTS_PROVIDER_DOUBAO,
-    speaker: DEFAULT_SPEAKER_ID,
+    speaker: "zh_female_peiqi_uranus_bigtts",
     clone_speaker_id: "",
     speed: 1.05,
     volume: 1.0,

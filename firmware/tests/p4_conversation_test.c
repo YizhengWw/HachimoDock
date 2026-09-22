@@ -6,7 +6,28 @@
 
 static pet_p4_runtime_state_t state;
 
+static void status_hints_have_no_trailing_punctuation(void) {
+  pet_p4_runtime_state_t hints = {0};
+  pet_p4_view_model_t view;
+  const char *phases[] = {"preparing", "listening", "thinking", "speaking"};
+  const char *labels[] = {"准备中", "我在听", "想一想", "准备回答"};
+  for (unsigned i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
+    assert(pet_p4_conversation_update(&hints, "hint-test", phases[i], "小西", "", false, false, i + 1));
+    pet_p4_build_view_model(&hints, &view);
+    assert(!strcmp(view.body, labels[i]));
+    assert(!strchr(view.body, '?') && !strstr(view.body, "？") && !strstr(view.body, "…"));
+  }
+  /* Real questions are captions, not status labels: preserve their punctuation. */
+  assert(pet_p4_conversation_update(&hints, "hint-test", "listening", "小西", "几点了？", true, true, 10));
+  pet_p4_build_view_model(&hints, &view);
+  assert(!strcmp(view.body, "几点了？"));
+  assert(pet_p4_conversation_update(&hints, "hint-test", "speaking", "小西", "还想问什么？", false, true, 11));
+  pet_p4_build_view_model(&hints, &view);
+  assert(!strcmp(view.body, "还想问什么？"));
+}
+
 int main(void) {
+  status_hints_have_no_trailing_punctuation();
   pet_p4_view_model_t view;
   strcpy(state.current_state, "working");
   strcpy(state.current_speech, "Agent latest");

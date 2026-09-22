@@ -49,10 +49,11 @@ static bool should_wait_for_session_card(const pet_p4_runtime_state_t *state) {
 }
 
 static const char *conversation_hint(const char *conversation_state) {
-  if (!strcmp(conversation_state, "listening")) return "我在听…";
-  if (!strcmp(conversation_state, "thinking")) return "想一想…";
-  if (!strcmp(conversation_state, "speaking")) return "准备回答…";
-  return "准备中…";
+  /* Status labels omit trailing punctuation; U+2026 is not in the device font. */
+  if (!strcmp(conversation_state, "listening")) return "我在听";
+  if (!strcmp(conversation_state, "thinking")) return "想一想";
+  if (!strcmp(conversation_state, "speaking")) return "准备回答";
+  return "准备中";
 }
 
 void pet_p4_build_view_model(const pet_p4_runtime_state_t *state, pet_p4_view_model_t *out) {

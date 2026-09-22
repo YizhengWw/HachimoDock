@@ -155,6 +155,14 @@ pub struct StreamingSpeechRecognizer {
 }
 
 impl StreamingSpeechRecognizer {
+    /// Offline orchestration tests retain the receiver; no keys, socket or device.
+    #[cfg(test)]
+    pub(crate) fn test_sink() -> (Self, impl Sized) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (Self { sender, cancelled: Arc::new(AtomicBool::new(false)),
+            finished: Arc::new(AtomicBool::new(false)) }, receiver)
+    }
+
     pub fn start(
         callback: impl Fn(StreamingSpeechEvent) + Send + Sync + 'static,
     ) -> Result<Self, String> {
