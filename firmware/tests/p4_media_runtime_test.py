@@ -5,7 +5,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 def test_media_sessions_queue_controls_and_watchdog(tmp_path):
-    cjson = Path.home() / ".platformio/packages/framework-espidf/components/json/cJSON"
+    cjson = ROOT / "tests/vendor/cjson"
     stubs = {
         "esp_err.h": "typedef int esp_err_t;\n#define ESP_OK 0\n",
         "esp_heap_caps.h": "#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 0\n#define MALLOC_CAP_8BIT 0\n#define heap_caps_malloc(n,c) malloc(n)\n",

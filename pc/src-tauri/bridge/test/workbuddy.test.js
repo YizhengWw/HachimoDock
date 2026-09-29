@@ -34,11 +34,13 @@ function fixture(t) {
   return { home, options, ...workbuddyPaths(options) };
 }
 test("WorkBuddy config remains isolated from CodeBuddy and Windows paths are discovered", () => {
-  assert.equal(workbuddyPaths({ home: "/fixture", env: { CODEBUDDY_CONFIG_DIR: "/other" } }).root, "/fixture/.workbuddy");
+  assert.equal(workbuddyPaths({ home: "/fixture", env: { CODEBUDDY_CONFIG_DIR: "/other" } }).root, path.join("/fixture", ".workbuddy"));
   assert.equal(workbuddyPaths({ home: "/fixture", env: { WORKBUDDY_CONFIG_DIR: "/custom" } }).root, "/custom");
   const win = workbuddyPaths({ home: "/fixture", platform: "win32", env: { LOCALAPPDATA: "/local", ProgramFiles: "/programs" } });
-  assert.ok(win.apps.some(p => p.endsWith("Programs/WorkBuddy/WorkBuddy.exe")));
-  assert.ok(win.apps.some(p => p.endsWith("/programs/WorkBuddy/WorkBuddy.exe")));
+  assert.deepEqual(win.apps, [
+    path.join("/local", "Programs", "WorkBuddy", "WorkBuddy.exe"),
+    path.join("/programs", "WorkBuddy", "WorkBuddy.exe"),
+  ]);
 });
 test("WorkBuddy hooks preserve user config, back up, update paths and are idempotent", t => {
   const f = fixture(t); fs.mkdirSync(f.root);

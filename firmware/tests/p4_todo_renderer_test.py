@@ -64,7 +64,7 @@ int main(void) {
             subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
                             "-I", str(ROOT / "main"),
                             "-I", str(ROOT / "tests/stubs/widget_data"),
-                            "-I", str(Path.home() / ".platformio/packages/framework-espidf/components/json/cJSON"),
+                            "-I", str(ROOT / "tests/vendor/cjson"),
                             str(file), "-o", str(exe)], check=True)
             subprocess.run([str(exe)], check=True)
 

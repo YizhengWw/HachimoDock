@@ -1,9 +1,7 @@
 """Execute the actual bounded-data C implementation with host lock stubs."""
 from pathlib import Path
-import os
 import subprocess
 import tempfile
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,10 +15,7 @@ def test_list_header_date_and_price_only_tone():
     assert "draw_text_line(r->meta, 24, y + 29, 592, muted," in renderer
 
 def test_widget_data_runtime():
-    idf = Path(os.environ.get("IDF_PATH", Path.home() / ".platformio/packages/framework-espidf"))
-    cjson = idf / "components/json/cJSON"
-    if not (cjson / "cJSON.c").exists():
-        pytest.skip("ESP-IDF cJSON source required for host runtime test")
+    cjson = ROOT / "tests/vendor/cjson"
     with tempfile.TemporaryDirectory() as tmp:
         exe = Path(tmp) / "widget-data-test"
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
