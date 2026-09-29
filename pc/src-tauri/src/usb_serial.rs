@@ -54,7 +54,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -62,6 +62,7 @@ use std::time::{Duration, Instant};
 mod appearance_transaction;
 mod connection_handle;
 mod live_audio_pacing;
+mod media_arbitration;
 use live_audio_pacing::write_serial_live_frame;
 #[cfg(windows)]
 mod windows_serial;
@@ -1255,6 +1256,7 @@ pub struct UsbSerialManager {
     desktop_device_id: Arc<Mutex<String>>,
     connect_guard: Arc<Mutex<()>>,
     asset_transfer_guard: Arc<Mutex<()>>,
+    media_requests_pending: Arc<AtomicUsize>,
     appearance_sync_active: Arc<AtomicBool>,
     appearance_sync_cancel_requested: Arc<AtomicBool>,
     serial_body_write_active: Arc<AtomicBool>,
@@ -1334,6 +1336,7 @@ impl UsbSerialManager {
             desktop_device_id: Arc::new(Mutex::new(String::new())),
             connect_guard: Arc::new(Mutex::new(())),
             asset_transfer_guard: Arc::new(Mutex::new(())),
+            media_requests_pending: Arc::new(AtomicUsize::new(0)),
             appearance_sync_active: Arc::new(AtomicBool::new(false)),
             appearance_sync_cancel_requested: Arc::new(AtomicBool::new(false)),
             serial_body_write_active: Arc::new(AtomicBool::new(false)),
@@ -1686,7 +1689,13 @@ impl UsbSerialManager {
 
     /// Low-priority snapshots never interleave with firmware/widget/appearance transfers.
     pub(crate) fn send_widget_data(&self, board: &str, payload: &serde_json::Value) -> Result<(), String> {
+        if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
+            return Err("音乐正在传输，稍后更新组件数据".into());
+        }
         let _guard = self.asset_transfer_guard.try_lock().map_err(|_| "设备正在传输，稍后更新行情")?;
+        if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
+            return Err("音乐正在传输，稍后更新组件数据".into());
+        }
         self.send_to_board(board, "widget/data", payload)
     }
 
@@ -1765,6 +1774,11 @@ impl UsbSerialManager {
             }
         }
 
+        // Background widgets must never delay duplex audio on the serial writer.
+        // Their providers retain the newest snapshot and retry after capture ends.
+        if topic == "widget/data" && conn.capture_active.load(Ordering::Acquire) {
+            return Err("语音通道使用中，稍后更新组件数据".into());
+        }
         let msg = serde_json::json!({
             "topic": topic,
             "payload": payload,
@@ -1783,13 +1797,17 @@ impl UsbSerialManager {
             (conn.baud_rate >= P4_USB_UART_BAUD && conn.runtime.eq_ignore_ascii_case("esp-p4"))
                 .then_some(P4_CH343_SERIAL_WRITE_SLICE_BYTES)
         });
-        let audio_frame = topic.starts_with("audio/") || topic == "ui/conversation";
+        let audio_frame = topic.starts_with("audio/") || topic.starts_with("media/") || topic == "ui/conversation";
         if (topic == "audio/conversation" && payload.get("enabled").and_then(serde_json::Value::as_bool) == Some(true))
             || (topic == "audio/control" && payload.get("action").and_then(serde_json::Value::as_str) == Some("start")) {
             conn.capture_active.store(true, Ordering::Release);
         }
         let bulk_frame = topic.starts_with("asset/") || topic.starts_with("firmware/");
-        let live_frame = audio_frame || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
+        // Replaceable widget snapshots share the audio-safe paced path. A
+        // driver's blocking drain can otherwise hold the mutex indefinitely
+        // even after media itself stopped using flush()/tcdrain().
+        let live_frame = audio_frame || topic == "widget/data"
+            || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
         let write_result = {
             let _pause = (!live_frame).then(|| SerialReaderPause::new(&self.serial_body_write_active));
             (|| {
@@ -1961,6 +1979,28 @@ impl UsbSerialManager {
                 .unwrap_or("device rejected the request")
                 .to_string());
         }
+        Ok(response)
+    }
+
+    pub(crate) fn media_request(&self, board: &str, topic: &str, mut payload: serde_json::Value) -> Result<serde_json::Value,String> {
+        let _priority = media_arbitration::PendingMedia::new(&self.media_requests_pending);
+        let started = Instant::now();
+        let guard = media_arbitration::acquire(&self.asset_transfer_guard, media_arbitration::WAIT_BUDGET);
+        if started.elapsed() >= Duration::from_millis(2) || guard.is_err() {
+            crate::realtime_chat_log::record("", "music_transport", serde_json::json!({
+                "stage":"lock_wait", "elapsedMs":started.elapsed().as_millis(), "ok":guard.is_ok()
+            }));
+        }
+        let _guard = guard?;
+        let request_id=format!("media-{}",uuid::Uuid::new_v4());
+        let (sender,receiver)=mpsc::channel();
+        payload["requestId"]=serde_json::json!(request_id);
+        self.device_response_waiters.lock().map_err(|_|"音乐回执队列不可用")?.push(DeviceResponseWaiter{request_id:request_id.clone(),response_topic:"media/status".into(),sender});
+        if let Err(e)=self.send_to_board(board,topic,&payload) {self.remove_device_response_waiter(&request_id,"media/status");return Err(e);}
+        let result=receiver.recv_timeout(Duration::from_secs(3));
+        self.remove_device_response_waiter(&request_id,"media/status");
+        let response=result.map_err(|_|"设备音乐响应超时，请检查连接及固件")?;
+        if response["ok"]!=true {return Err(response["message"].as_str().unwrap_or("设备拒绝音乐指令").into());}
         Ok(response)
     }
 
@@ -3875,6 +3915,17 @@ impl UsbSerialManager {
             .ok_or_else(|| "component package is missing runtime/widget.json".to_string())?;
         let compiled_sprites = prepare_p4_widget_sprite_files(widget_dir, widget_source)?;
         let widget_definition: serde_json::Value = serde_json::from_slice(widget_source).map_err(|e| e.to_string())?;
+        if widget_definition.get("instrument").is_some()
+            && self.status().capabilities.get("widgetInstrument").and_then(serde_json::Value::as_str) != Some("p4-instrument-v1") {
+            return Err("当前固件不支持本地木鱼音效，请先升级设备固件".into());
+        }
+        if widget_definition.get("media").is_some() && self.status().capabilities["widgetMedia"]!="p4-media-v1" {
+            return Err("当前固件不支持随身听，请先升级设备固件".into());
+        }
+        if widget_definition["transitions"].as_array().is_some_and(|rules| rules.iter().any(|r| r["on"] == "media.lyrics"))
+            && self.status().capabilities["widgetLyrics"] != "p4-lrc-v1" {
+            return Err("当前固件不支持歌词模式，请先升级设备固件".into());
+        }
         if widget_definition.get("data").is_some()
             && self.status().capabilities.get("widgetData").and_then(serde_json::Value::as_str) != Some(crate::widget_data::PROTOCOL) {
             return Err("设备固件尚不支持实时数据组件，请先升级固件".into());
@@ -4265,6 +4316,44 @@ impl UsbSerialManager {
     where
         F: Fn(u32, u32, u64, u64),
     {
+        self.sync_appearance_p4_with_stages(
+            appearance_dir,
+            app_data_dir,
+            expected_board_device_id,
+            use_device_builtin,
+            on_progress,
+            |_| {},
+        )
+    }
+
+    /// Same as `sync_appearance_p4`, and also names each pre-transfer step
+    /// (cache query, remote comparison, slot preparation, device flash
+    /// erase) so the UI is not a silent 0% before the first file byte.
+    pub fn sync_appearance_p4_with_stages<F, S>(
+        &self,
+        appearance_dir: &std::path::Path,
+        app_data_dir: &std::path::Path,
+        expected_board_device_id: &str,
+        use_device_builtin: bool,
+        on_progress: F,
+        on_stage: S,
+    ) -> Result<(u32, u64, bool), String>
+    where
+        F: Fn(u32, u32, u64, u64),
+        S: Fn(&'static str),
+    {
+        let sync_started = Instant::now();
+        let stage = |name: &'static str| {
+            transfer_log::record(
+                "appearance",
+                "stage",
+                serde_json::json!({
+                    "stage": name,
+                    "elapsedMs": sync_started.elapsed().as_millis() as u64,
+                }),
+            );
+            on_stage(name);
+        };
         let _asset_transfer_guard = self
             .asset_transfer_guard
             .lock()
@@ -4328,6 +4417,7 @@ impl UsbSerialManager {
             eprintln!("[usb-p4-ota] forcing full transfer for hardware validation");
         }
         if !force_full_sync && self.supports_p4_appearance_slot_reuse() {
+            stage("checking_cache");
             let cache_transfer_id = format!(
                 "p4-slot-{}",
                 std::time::SystemTime::now()
@@ -4362,6 +4452,7 @@ impl UsbSerialManager {
             }
         }
         if !force_full_sync {
+            stage("comparing_assets");
             let digests = digest_appearance_assets(&assets)?;
             match self.plan_incremental_appearance_sync(&digests, &[]) {
                 Ok(AppearanceSyncPlan::Skip) => {
@@ -4414,6 +4505,9 @@ impl UsbSerialManager {
                     .unwrap_or_default()
                     .as_millis()
             );
+            if use_raw_slot {
+                stage("preparing_slot");
+            }
             if use_raw_slot && self.prepare_p4_raw_transfer_slot(&transfer_id)? {
                 eprintln!(
                     "[usb-p4-ota] activated slot0 before full sync so raw slot1 remains the transfer target"
@@ -4449,11 +4543,25 @@ impl UsbSerialManager {
             );
             let transfer_started = Instant::now();
             self.run_serial_asset_transaction(&transfer_id, || {
+                // The board erases the target flash range and compacts SPIFFS
+                // before acknowledging begin; this is the longest silent step.
+                stage("preparing_storage");
+                let begin_started = Instant::now();
                 self.send_asset_begin_checked_with_raw_bytes(
                     &transfer_id,
                     total_bytes,
                     use_raw_slot.then_some(raw_bytes),
                 )?;
+                transfer_log::record(
+                    "appearance",
+                    "begin_acknowledged",
+                    serde_json::json!({
+                        "transferId": transfer_id.as_str(),
+                        "rawBytes": raw_bytes,
+                        "elapsedMs": begin_started.elapsed().as_millis() as u64,
+                    }),
+                );
+                stage("transferring");
 
                 let mut file_count: u32 = 0;
                 let mut byte_count: u64 = 0;
@@ -5517,7 +5625,7 @@ fn build_p4_h264_manifest(
     })
 }
 
-fn ffmpeg_container_duration_ms(stderr: &[u8]) -> Option<u64> {
+pub(crate) fn ffmpeg_container_duration_ms(stderr: &[u8]) -> Option<u64> {
     let text = String::from_utf8_lossy(stderr);
     let marker = "Duration: ";
     for line in text.lines() {
@@ -6270,6 +6378,7 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
         "屏幕点击" => ("屏幕区域", "screen.region.tap"),
         "屏幕长按" => ("屏幕区域", "screen.region.long_press"),
         "SW1 短按" => ("SW1", "button.sw1.short_press"),
+        "SW1 长按" => ("SW1", "button.sw1.long_press"),
         "SW2 短按" => ("SW2", "button.sw2.short_press"),
         "SW3 短按" => ("SW3", "button.sw3.short_press"),
         "摇杆中按短按" => ("前方摇杆", "button.encoder.short_press"),
@@ -6376,6 +6485,9 @@ mod tests {
         manager.send("audio/conversation", &serde_json::json!({"enabled":true})).unwrap();
         assert!(active.load(Ordering::Acquire));
         manager.send("audio/play_chunk", &serde_json::json!({"data":"a".repeat(4000)})).unwrap();
+        let previous_writes=stats.lock().unwrap().writes.len();
+        assert!(manager.send_widget_data("p4-test",&serde_json::json!({"source":"computer.status"})).is_err());
+        assert_eq!(stats.lock().unwrap().writes.len(),previous_writes,"widget traffic must yield to audio");
         manager.send("system/heartbeat", &serde_json::json!({})).unwrap();
         manager.send("ui/conversation", &serde_json::json!({"state":"speaking"})).unwrap();
         assert_eq!(stats.lock().unwrap().flushes, 0);
@@ -6385,6 +6497,10 @@ mod tests {
         assert!(!manager.serial_body_write_active.load(Ordering::Acquire));
         observe_serial_capture(&active, "audio/end", &serde_json::json!({}));
         assert!(!active.load(Ordering::Acquire));
+        expected.store(false, Ordering::Release);
+        let before_widget_flushes=stats.lock().unwrap().flushes;
+        manager.send_widget_data("p4-test",&serde_json::json!({"source":"computer.status"})).unwrap();
+        assert_eq!(stats.lock().unwrap().flushes,before_widget_flushes,"background widgets must not block in driver drain");
     }
 
     #[test]
@@ -6515,6 +6631,17 @@ mod tests {
     }
 
     #[test]
+    fn widget_snapshots_yield_to_media_and_priority_cleans_up_on_send_error() {
+        let manager = UsbSerialManager::new();
+        let priority = media_arbitration::PendingMedia::new(&manager.media_requests_pending);
+        assert!(manager.send_widget_data("test", &serde_json::json!({})).unwrap_err().contains("音乐正在传输"));
+        drop(priority);
+        assert!(manager.media_request("test", "media/query", serde_json::json!({})).is_err());
+        assert_eq!(manager.media_requests_pending.load(Ordering::SeqCst), 0);
+        assert!(manager.device_response_waiters.lock().unwrap().is_empty());
+    }
+
+    #[test]
     fn appearance_sync_cancellation_is_scoped_to_an_active_transfer() {
         let manager = UsbSerialManager::new();
         assert!(!manager.cancel_appearance_sync());
@@ -6579,6 +6706,7 @@ mod tests {
 
     #[test]
     fn usb_component_override_accepts_combined_encoder_rotation() {
+        assert_eq!(canonical_binding_for_control("SW1 长按"), Some(("SW1", "button.sw1.long_press")));
         assert_eq!(
             canonical_binding_for_control("旋钮双向旋转"),
             Some(("前方旋钮", "knob.rotate_cw / knob.rotate_ccw"))

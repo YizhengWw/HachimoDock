@@ -1,5 +1,5 @@
 /*
- * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
+ * [Input] A unique or current-visible ChatGPT（Codex）/Claude task, a pinned WorkBuddy composer, or a captured MiMoCode terminal caret, plus staged device speech and a later explicit Confirm action.
  * [Output] Read-only active-Agent detection, native consent with activation-ordered Accessibility-pane routing,
  *          activation-gated Chromium AX priming, AX-only stable/rebindable
  *          exact-session per-recording draft append with original-prefix preservation, including
@@ -16,7 +16,7 @@
 use accessibility::{AXAttribute, AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     error_string, kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint,
-    kAXValueTypeCGSize, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementGetPid,
+    kAXValueTypeCGSize, kAXValueTypeCFRange, AXValueCreate, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementGetPid,
     AXUIElementPostKeyboardEvent, AXUIElementRef, AXValueGetType, AXValueGetTypeID,
     AXValueGetValue, AXValueRef,
 };
@@ -24,7 +24,7 @@ use accessibility_sys::{
 use core_foundation::number::CFNumber;
 use core_foundation::{
     array::CFArray,
-    base::{CFType, TCFType},
+    base::{CFType, CFRange, TCFType},
     boolean::CFBoolean,
     dictionary::CFDictionary,
     string::CFString,
@@ -104,6 +104,7 @@ struct ComposerTarget {
 pub(super) enum MacosAgent {
     Codex,
     Claude,
+    WorkBuddy,
 }
 
 impl MacosAgent {
@@ -111,6 +112,7 @@ impl MacosAgent {
         match self {
             Self::Codex => "ChatGPT（Codex）",
             Self::Claude => "Claude",
+            Self::WorkBuddy => "WorkBuddy",
         }
     }
 }
@@ -137,6 +139,7 @@ fn agent_bundle_identifiers(agent: MacosAgent) -> &'static [&'static str] {
     match agent {
         MacosAgent::Codex => &["com.openai.codex", "com.openai.chat", "com.openai.chatgpt"],
         MacosAgent::Claude => &["com.anthropic.claudefordesktop", "com.anthropic.claude"],
+        MacosAgent::WorkBuddy => &["com.tencent.workbuddy.mac"],
     }
 }
 
@@ -144,6 +147,7 @@ fn agent_application_names(agent: MacosAgent) -> &'static [&'static str] {
     match agent {
         MacosAgent::Codex => &["Codex", "ChatGPT"],
         MacosAgent::Claude => &["Claude"],
+        MacosAgent::WorkBuddy => &["WorkBuddy"],
     }
 }
 
@@ -416,6 +420,36 @@ fn paste_focused_text(text: &str) -> Result<(), String> {
     Ok(())
 }
 
+// WorkBuddy must never emit global HID shortcuts: desktop screenshot tools can
+// intercept them before the editor sees them. Use a private source and a pinned
+// process destination; failure must not fall back to the global event stream.
+fn post_workbuddy_key(app: &AXUIElement, keycode: u16, flags: CGEventFlags) -> Result<(), String> {
+    let mut pid = 0;
+    if unsafe { AXUIElementGetPid(app.as_concrete_TypeRef(), &mut pid) } != kAXErrorSuccess || pid <= 0 {
+        return Err("无法确认 WorkBuddy 输入进程，未发送按键".into());
+    }
+    let source = CGEventSource::new(CGEventSourceStateID::Private)
+        .map_err(|_| "无法创建 WorkBuddy 定向输入事件".to_string())?;
+    for pressed in [true, false] {
+        let event = CGEvent::new_keyboard_event(source.clone(), keycode, pressed)
+            .map_err(|_| "无法创建 WorkBuddy 定向按键".to_string())?;
+        event.set_flags(flags);
+        event.post_to_pid(pid);
+    }
+    Ok(())
+}
+
+fn select_workbuddy_draft(composer: &AXUIElement) -> Result<(), String> {
+    // AX ranges count UTF-16 code units, including the editor's leading BOM.
+    // Setting selection does not bypass rich-editor input events like AXValue.
+    let range = CFRange::init(0, element_value(composer).encode_utf16().count() as isize);
+    let value = unsafe { AXValueCreate(kAXValueTypeCFRange, &range as *const CFRange as *const c_void) };
+    if value.is_null() { return Err("无法创建 WorkBuddy 输入框选区".into()); }
+    let value = unsafe { CFType::wrap_under_create_rule(value as _) };
+    composer.set_attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange")), value)
+        .map_err(|_| "WorkBuddy 输入框不支持安全选区，本次语音未写入".into())
+}
+
 fn ax_element_attribute(element: &AXUIElement, name: &str) -> Option<AXUIElement> {
     let attribute = AXAttribute::new(&CFString::new(name));
     let value: CFType = element.attribute(&attribute).ok()?;
@@ -638,6 +672,9 @@ fn session_deeplink(
 ) -> Result<String, String> {
     if agent == MacosAgent::Codex {
         return thread_deeplink(session_id);
+    }
+    if agent == MacosAgent::WorkBuddy {
+        return Err("请在 WorkBuddy 中打开目标对话；不使用未验证的会话深链".into());
     }
     let requested_deep_link = requested_deep_link.trim();
     if requested_deep_link.starts_with("claude://code/")
@@ -1068,33 +1105,39 @@ fn primed_agent_application_pids() -> &'static Mutex<HashSet<i32>> {
     PRIMED_PIDS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
-fn mark_agent_accessibility_primed(primed_pids: &mut HashSet<i32>, pid: i32) -> bool {
-    primed_pids.insert(pid)
+fn record_agent_accessibility_primed(primed_pids: &mut HashSet<i32>, pid: i32, succeeded: bool) {
+    if succeeded {
+        primed_pids.insert(pid);
+    }
 }
 
-fn prime_agent_accessibility_once(app: &AXUIElement, pid: i32) -> bool {
-    let should_prime = {
-        let mut primed_pids = primed_agent_application_pids()
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        mark_agent_accessibility_primed(&mut primed_pids, pid)
-    };
-    if !should_prime {
-        return false;
-    }
-
-    // Chromium-backed macOS apps keep their web accessibility tree lazy
-    // until an assistive client opts in. Rewriting these flags on every
-    // lookup can rebuild the tree between two consecutive window scans, so
-    // each running process is primed only once.
+fn enable_agent_accessibility(app: &AXUIElement) -> bool {
     let manual_accessibility = AXAttribute::new(&CFString::new("AXManualAccessibility"));
-    let _ = app.set_attribute(&manual_accessibility, CFBoolean::true_value().into_CFType());
+    let manual = app.set_attribute(&manual_accessibility, CFBoolean::true_value().into_CFType());
     let enhanced_accessibility = AXAttribute::new(&CFString::new("AXEnhancedUserInterface"));
-    let _ = app.set_attribute(
+    let enhanced = app.set_attribute(
         &enhanced_accessibility,
         CFBoolean::true_value().into_CFType(),
     );
-    true
+    manual.is_ok() || enhanced.is_ok()
+}
+
+fn prime_agent_accessibility_once(app: &AXUIElement, pid: i32) -> bool {
+    let mut primed_pids = primed_agent_application_pids()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if primed_pids.contains(&pid) {
+        return false;
+    }
+    // A background/cold Electron process can reject the opt-in. Never cache
+    // that failure as success for the lifetime of the process.
+    let succeeded = enable_agent_accessibility(app);
+    record_agent_accessibility_primed(&mut primed_pids, pid, succeeded);
+    succeeded
+}
+
+fn should_recover_workbuddy_tree(agent: MacosAgent, count: usize, attempted: bool) -> bool {
+    agent == MacosAgent::WorkBuddy && count == 0 && !attempted
 }
 
 fn wait_for_agent_windows(app: &AXUIElement) -> bool {
@@ -1160,6 +1203,7 @@ fn is_agent_primary_window_title(agent: MacosAgent, title: &str) -> bool {
     match agent {
         MacosAgent::Codex => matches!(title.as_str(), "codex" | "chatgpt"),
         MacosAgent::Claude => title == "claude",
+        MacosAgent::WorkBuddy => title == "workbuddy",
     }
 }
 
@@ -1184,6 +1228,9 @@ fn primary_agent_window(agent: MacosAgent) -> Result<CodexWindow, String> {
     } else {
         preferred
     };
+    if agent == MacosAgent::WorkBuddy && candidates.len() != 1 {
+        return Err("请保留一个 WorkBuddy 主窗口并打开目标对话，再重新开始语音输入".into());
+    }
     candidates
         .into_iter()
         // Recent Codex builds can expose a small utility surface titled
@@ -1275,6 +1322,14 @@ fn active_title_matches(window: &AXUIElement, expected_title: &str) -> bool {
 }
 
 fn focus_window(target: &CodexWindow) -> Result<(), String> {
+    // Do not repeatedly unminimize/activate/raise an already focused Electron
+    // window: ASR updates and readback must not churn its rendering/focus state.
+    if ax_element_attribute(&AXUIElement::system_wide(), "AXFocusedApplication")
+        .as_ref() == Some(&target.app)
+        && ax_element_attribute(&target.app, "AXFocusedWindow").as_ref() == Some(&target.window)
+    {
+        return Ok(());
+    }
     let minimized = AXAttribute::new(&CFString::new("AXMinimized"));
     let _ = target
         .window
@@ -1527,14 +1582,34 @@ fn is_composer_element(element: &AXUIElement) -> bool {
 
 fn composer_value(element: &AXUIElement) -> String {
     let value = element_value(element).replace("\r\n", "\n");
+    normalize_composer_value(&value)
+}
+
+fn normalize_composer_value(value: &str) -> String {
+    let value = value.trim_start_matches('\u{feff}');
+    if value.trim() == "今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令" {
+        return String::new();
+    }
     if is_placeholder(&value) {
         String::new()
     } else {
-        value
+        value.to_string()
     }
 }
 
-fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement, String), String> {
+fn workbuddy_selection_matches(selected: Option<&str>, expected: &str) -> bool {
+    selected.is_some_and(|value| {
+        let selected = normalize_composer_value(&value.replace("\r\n", "\n"));
+        // WorkBuddy exposes HTML paragraph breaks in AXValue but omits them
+        // from AXSelectedText (verified in its real multiline editor). Keep
+        // spaces/characters exact, and still require exact full-value readback
+        // after paste; do not treat an unavailable selection as empty.
+        selected == expected || (!expected.replace('\n', "").is_empty()
+            && selected.replace('\n', "") == expected.replace('\n', ""))
+    })
+}
+
+fn composer_candidates(window: &CodexWindow) -> Vec<(AXUIElement, String)> {
     let mut composers = Vec::new();
     for composer in walk_elements(&window.window, is_composer_element) {
         if !element_is_enabled(&composer) {
@@ -1543,6 +1618,10 @@ fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement
         let value = composer_value(&composer);
         composers.push((composer, value));
     }
+    composers
+}
+
+fn unique_composer(agent: MacosAgent, mut composers: Vec<(AXUIElement, String)>) -> Result<(AXUIElement, String), String> {
     if composers.len() != 1 {
         return Err(format!(
             "需要唯一的 {} macOS 输入框，实际找到 {} 个",
@@ -1551,6 +1630,10 @@ fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement
         ));
     }
     Ok(composers.remove(0))
+}
+
+fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement, String), String> {
+    unique_composer(agent, composer_candidates(window))
 }
 
 fn find_target(
@@ -1598,13 +1681,26 @@ fn find_target(
 fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, String> {
     let mut target = primary_or_launch_agent_window(agent)?;
     let deadline = Instant::now() + COMPOSER_STABILITY_TIMEOUT;
+    let mut recovery_attempted = false;
     loop {
         if let Ok(current) = primary_agent_window(agent) {
             target = current;
         }
         let result = (|| {
             focus_window(&target)?;
-            let (composer, value) = find_composer(agent, &target)?;
+            let candidates = composer_candidates(&target);
+            if should_recover_workbuddy_tree(agent, candidates.len(), recovery_attempted) {
+                recovery_attempted = true;
+                // One foreground recovery per recording, not every scan: a
+                // cached PID does not prove a newly loaded webview is ready.
+                // Do not reinitialize a healthy or ambiguous editor, send keys,
+                // select another conversation, or write until stability checks pass.
+                let enabled = enable_agent_accessibility(&target.app);
+                eprintln!("[composer] WorkBuddy empty tree: foreground recovery accepted={enabled}");
+                thread::sleep(COMPOSER_STABILITY_DELAY);
+                return Err("WorkBuddy 输入框尚未就绪，正在恢复辅助功能树".to_string());
+            }
+            let (composer, value) = unique_composer(agent, candidates)?;
             let candidate = ComposerTarget {
                 agent,
                 app: target.app.clone(),
@@ -1636,7 +1732,7 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
         };
         if Instant::now() >= deadline {
             return Err(format!(
-                "{} macOS 应用已置前，但输入框未稳定: {last_error}",
+                "{} macOS 应用已置前，但输入框未稳定: {last_error}；请点击目标对话输入框后重试（尚未写入或发送文字）",
                 agent.label()
             ));
         }
@@ -1659,9 +1755,18 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
             state.agent.label()
         ));
     };
-    focus_window(&window)?;
+    if state.agent == MacosAgent::WorkBuddy {
+        if !agent_is_frontmost(state.agent) {
+            return Err("WorkBuddy 已不在前台，已停止写入，请回到目标对话重新长按".into());
+        }
+    } else {
+        focus_window(&window)?;
+    }
     let (composer, value) = find_composer(state.agent, &window)?;
     if composer != pinned_composer {
+        if state.agent == MacosAgent::WorkBuddy {
+            return Err("WorkBuddy 输入框已变化，已停止写入并保留草稿，请在目标对话重新长按".into());
+        }
         if let Some(pinned) = state.current_visible_target.as_mut() {
             pinned.app = window.app.clone();
             pinned.window = window.window.clone();
@@ -1683,6 +1788,9 @@ fn focus_composer(target: &ComposerTarget) -> Result<(), String> {
         app: target.app.clone(),
         window: target.window.clone(),
     })?;
+    if ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() == Some(&target.composer) {
+        return Ok(());
+    }
     target
         .composer
         .set_attribute(&AXAttribute::focused(), CFBoolean::true_value())
@@ -1695,10 +1803,87 @@ fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), Stri
     if composer_value(&target.composer) != target.value {
         return Err("输入框内容在获取焦点后发生变化，已保留原文".into());
     }
-    target
-        .composer
-        .set_attribute(&AXAttribute::value(), CFString::new(&text).into_CFType())
-        .map_err(|error| format!("{} macOS 输入框写入失败: {error}", target.agent.label()))?;
+    if target.agent == MacosAgent::WorkBuddy {
+        // Its rich-text editor can expose writable AXValue while bypassing the
+        // editor's input events. Use a guarded native paste, never mutate AXValue.
+        let snapshot = PasteboardSnapshot::capture()?;
+        let result = (|| {
+            let assert_focus = || -> Result<(), String> {
+                if !agent_is_frontmost(target.agent)
+                    || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer)
+                    || composer_value(&target.composer) != target.value
+                {
+                    return Err("WorkBuddy 焦点或草稿已变化，已停止写入".into());
+                }
+                Ok(())
+            };
+            assert_focus()?;
+            let mut used_targeted_select = select_workbuddy_draft(&target.composer).is_err();
+            if used_targeted_select {
+                post_workbuddy_key(&target.app, 0, CGEventFlags::CGEventFlagCommand)?;
+            }
+            // Verify the editor applied its AX selection before native paste.
+            let mut selection_deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+            let mut selection_stable_since = None;
+            loop {
+                assert_focus()?;
+                let selected = target.composer
+                    .attribute(&AXAttribute::new(&CFString::new("AXSelectedText")))
+                    .ok()
+                    .and_then(|value: CFType| value.downcast::<CFString>())
+                    .map(|value| value.to_string());
+                if workbuddy_selection_matches(selected.as_deref(), &target.value) {
+                    // Give Chromium time to commit its selection before another
+                    // shortcut; one optimistic AX snapshot is not sufficient.
+                    if selection_stable_since.get_or_insert_with(Instant::now).elapsed()
+                        >= KEYBOARD_READBACK_DELAY
+                    {
+                        break;
+                    }
+                } else {
+                    selection_stable_since = None;
+                }
+                if Instant::now() >= selection_deadline {
+                    if !used_targeted_select {
+                        // Slate sometimes ignores AX ranges for multiline/emoji
+                        // drafts. Select inside this PID only, never via HID.
+                        post_workbuddy_key(&target.app, 0, CGEventFlags::CGEventFlagCommand)?;
+                        used_targeted_select = true;
+                        selection_stable_since = None;
+                        selection_deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+                        continue;
+                    }
+                    return Err("WorkBuddy 未确认选中输入框原文，本次语音未粘贴，请重新长按".into());
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            assert_focus()?;
+            if text.is_empty() {
+                post_workbuddy_key(&target.app, 51, CGEventFlags::CGEventFlagNull)?;
+                thread::sleep(KEYBOARD_READBACK_DELAY);
+            } else {
+                set_pasteboard_text(&text)?;
+                assert_focus()?;
+                post_workbuddy_key(&target.app, MAC_KEYCODE_V, CGEventFlags::CGEventFlagCommand)?;
+                thread::sleep(KEYBOARD_READBACK_DELAY);
+            }
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline {
+                if composer_value(&target.composer) == text {
+                    return Ok::<(), String>(());
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err("WorkBuddy 未确认语音文字写入；已停止操作，请检查当前草稿".into())
+        })();
+        snapshot.restore();
+        result?;
+    } else {
+        target
+            .composer
+            .set_attribute(&AXAttribute::value(), CFString::new(&text).into_CFType())
+            .map_err(|error| format!("{} macOS 输入框写入失败: {error}", target.agent.label()))?;
+    }
     let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
     while Instant::now() < deadline {
         if composer_value(&target.composer) == text {
@@ -1760,7 +1945,10 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
     let text = state.draft.desired(text);
     let mut last_error = String::new();
-    for _ in 0..2 {
+    // An uncertain native paste must never be repeated: a delayed first paste
+    // could otherwise duplicate the utterance on top of the retry.
+    let attempts = if state.agent == MacosAgent::WorkBuddy { 1 } else { 2 };
+    for _ in 0..attempts {
         match find_voice_target(state).and_then(|target| {
             if !state.draft.can_update(&target.value, &text) {
                 return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
@@ -1782,7 +1970,7 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
         }
     }
     Err(format!(
-        "{} macOS 前台语音更新重试后失败: {last_error}",
+        "{} macOS 前台语音更新失败: {last_error}",
         state.agent.label()
     ))
 }
@@ -1958,7 +2146,22 @@ fn wait_for_submit_readback(
                     return Ok(readback);
                 }
             }
-            Err(error) => last_error = error,
+            Err(error) => {
+                // Sending a first message may replace WorkBuddy's composer.
+                // Observe an empty successor only after submission; never rebind
+                // the write target or send again to that successor.
+                if state.agent == MacosAgent::WorkBuddy {
+                    if let Some(pinned) = state.current_visible_target.as_ref() {
+                        let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
+                        if let Ok((_, value)) = find_composer(state.agent, &window) {
+                            if value.is_empty() {
+                                return Ok(SubmitReadback::Confirmed);
+                            }
+                        }
+                    }
+                }
+                last_error = error;
+            }
         }
         if Instant::now() >= deadline {
             return Err(last_error);
@@ -2027,7 +2230,7 @@ pub(super) fn confirm_voice(
     }
 
     Err(format!(
-        "{} macOS 提交结果未确认；语音草稿保留在输入框中",
+        "{} macOS 提交结果未确认；请检查目标对话，避免重复发送",
         state.agent.label()
     ))
 }
@@ -2132,16 +2335,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workbuddy_input_never_uses_global_keyboard_delivery() {
+        let source = include_str!("codex_composer_macos.rs");
+        let target_keys = source.split("fn post_workbuddy_key(").nth(1).unwrap().split("fn select_workbuddy_draft(").next().unwrap();
+        assert!(target_keys.contains("CGEventSourceStateID::Private"));
+        assert!(target_keys.contains("event.post_to_pid(pid)"));
+        assert!(!target_keys.contains(".post(CGEventTapLocation::HID)"));
+        let writer = source.split("fn replace_composer_text(").nth(1).unwrap().split("pub(super) fn begin_voice(").next().unwrap();
+        assert!(writer.contains("select_workbuddy_draft(&target.composer)"));
+        assert!(!writer.contains("post_command_key("));
+        assert!(!writer.contains("post_keyboard_event("));
+        assert!(!writer.contains("paste_focused_text("));
+    }
+
+    #[test]
+    fn workbuddy_paste_requires_the_entire_original_draft_selected() {
+        assert!(!workbuddy_selection_matches(None, ""));
+        assert!(!workbuddy_selection_matches(Some(""), "查一下北京"));
+        assert!(!workbuddy_selection_matches(Some("北京"), "查一下北京"));
+        assert!(workbuddy_selection_matches(Some("查一下北京"), "查一下北京"));
+        assert!(workbuddy_selection_matches(Some("\u{feff}中文🙂\r\n第二行"), "中文🙂\n第二行"));
+        assert!(workbuddy_selection_matches(Some("中文🙂第二行"), "中文🙂\n第二行"));
+        assert!(!workbuddy_selection_matches(Some("中文🙂"), "中文🙂\n第二行"));
+        assert!(!workbuddy_selection_matches(Some(""), "\n"));
+        assert!(!workbuddy_selection_matches(Some("原文"), "原文 "));
+        assert!(workbuddy_selection_matches(Some("\u{feff}"), ""));
+    }
+
+    #[test]
+    fn workbuddy_identity_and_placeholder_are_isolated() {
+        assert_eq!(agent_bundle_identifiers(MacosAgent::WorkBuddy), &["com.tencent.workbuddy.mac"]);
+        assert_eq!(agent_application_names(MacosAgent::WorkBuddy), &["WorkBuddy"]);
+        assert!(is_agent_primary_window_title(MacosAgent::WorkBuddy, "WorkBuddy"));
+        assert!(!is_agent_primary_window_title(MacosAgent::WorkBuddy, "CodeBuddy"));
+        assert!(session_deeplink(MacosAgent::WorkBuddy, "id", "claude://code/id").is_err());
+        assert_eq!(normalize_composer_value("\u{feff}\n今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令"), "");
+        assert_eq!(normalize_composer_value("\u{feff}"), "");
+        assert_eq!(normalize_composer_value("已有草稿\n下一行"), "已有草稿\n下一行");
+    }
+
+    #[test]
     fn text_normalization_matches_windows_composer_contract() {
         assert_eq!(normalize_text("  hello\n world  "), "hello world");
     }
 
     #[test]
-    fn chromium_accessibility_is_primed_once_per_running_process() {
+    fn chromium_accessibility_only_caches_successful_initialization() {
         let mut primed_pids = HashSet::new();
-        assert!(mark_agent_accessibility_primed(&mut primed_pids, 101));
-        assert!(!mark_agent_accessibility_primed(&mut primed_pids, 101));
-        assert!(mark_agent_accessibility_primed(&mut primed_pids, 202));
+        record_agent_accessibility_primed(&mut primed_pids, 101, false);
+        assert!(!primed_pids.contains(&101));
+        record_agent_accessibility_primed(&mut primed_pids, 101, true);
+        record_agent_accessibility_primed(&mut primed_pids, 101, true);
+        assert_eq!(primed_pids.len(), 1);
+        record_agent_accessibility_primed(&mut primed_pids, 202, true);
+        assert_eq!(primed_pids.len(), 2);
+    }
+
+    #[test]
+    fn workbuddy_tree_recovery_is_bounded_and_never_resolves_ambiguity() {
+        assert!(should_recover_workbuddy_tree(MacosAgent::WorkBuddy, 0, false));
+        assert!(!should_recover_workbuddy_tree(MacosAgent::WorkBuddy, 0, true));
+        assert!(!should_recover_workbuddy_tree(MacosAgent::WorkBuddy, 1, false));
+        assert!(!should_recover_workbuddy_tree(MacosAgent::WorkBuddy, 2, false));
+        assert!(!should_recover_workbuddy_tree(MacosAgent::Codex, 0, false));
+        assert!(!should_recover_workbuddy_tree(MacosAgent::Claude, 0, false));
     }
 
     #[test]

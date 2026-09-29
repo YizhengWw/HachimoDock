@@ -70,6 +70,9 @@ typedef struct {
   char data_source[48];
   int32_t data_page;
   pet_p4_data_view_t data;
+  bool media;
+  bool instrument;
+  uint8_t effect_volume, ambience_volume;
 } pet_p4_miniapp_view_t;
 
 typedef struct {
@@ -81,6 +84,8 @@ typedef struct {
 esp_err_t pet_p4_miniapp_init(void);
 esp_err_t pet_p4_miniapp_sync_builtins(void);
 bool pet_p4_miniapp_active(void);
+bool pet_p4_miniapp_media_active(void);
+bool pet_p4_miniapp_instrument_config(uint8_t *effect, uint8_t *ambience);
 bool pet_p4_miniapp_active_id(char *out, size_t out_size);
 bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out);
 bool pet_p4_miniapp_get_sprites(pet_p4_miniapp_sprite_pack_t *out);
@@ -91,6 +96,7 @@ bool pet_p4_miniapp_catalog_get(size_t index, pet_p4_miniapp_catalog_entry_t *ou
 void pet_p4_miniapp_catalog_focus_active(void);
 bool pet_p4_miniapp_catalog_move(int delta);
 bool pet_p4_miniapp_catalog_activate_selected(void);
+bool pet_p4_miniapp_catalog_activate_id(const char *widget_id);
 bool pet_p4_miniapp_sync_stats(const pet_p4_stats_model_t *stats);
 void pet_p4_miniapp_process(uint64_t now_ms);
 bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms);

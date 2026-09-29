@@ -52,7 +52,7 @@ def test_realtime_renderer_and_input_never_use_agent_queue():
     assert "realtime ? rgb565(42, 119, 225)" in renderer
     inputs = (ROOT / "main/pet_p4_input.c").read_text()
     dispatch = inputs.split("static void dispatch_binding_event(", 1)[1]
-    assert dispatch.index("pet_p4_conversation_active(state)") < dispatch.index("active_global_exit_binding(state, event_name)")
+    assert dispatch.index("pet_p4_conversation_active(state)") < dispatch.index("active_global_priority_binding(state, event_name)")
     touch = (ROOT / "main/pet_p4_touch.c").read_text()
     assert "pet_p4_conversation_move(state" in touch
     main = (ROOT / "main/pet_p4_main.c").read_text()

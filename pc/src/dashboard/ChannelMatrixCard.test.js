@@ -114,7 +114,7 @@ test("USB appearance sync progress stays inline and survives dashboard tab unmou
   assert.doesNotMatch(source, /onProgress:\s*\(p\)\s*=>\s*push\(\{\s*tone:\s*"info"/);
   assert.match(source, /className="channel-matrix-sync"/);
   assert.match(source, /role="progressbar"/);
-  assert.match(source, /aria-valuenow=\{syncProgress\.percent\}/);
+  assert.match(source, /aria-valuenow=\{syncProgress\.indeterminate \? undefined : syncProgress\.percent\}/);
   assert.match(source, /cancelAppearanceSync/);
   assert.match(source, /handleCancelAppearanceSync/);
   assert.match(source, /aria-label="中断 USB 形象传输"/);
@@ -129,6 +129,17 @@ test("USB appearance sync progress stays inline and survives dashboard tab unmou
   assert.doesNotMatch(stripRule, /position:\s*(fixed|absolute)/);
   assert.match(cancelRule, /justify-self:\s*end/);
   assert.match(barRule, /width:\s*var\(--sync-progress\)/);
+});
+
+test("Follow-only switches are not presented as appearance transfers", () => {
+  // Same appearance on the device: no bytes move, so no percent and no abort.
+  assert.match(source, /const followOnly = appearance\.id === currentDisplay\.appearance\?\.id/);
+  assert.match(source, /syncProgress\.followOnly \? "正在切换跟随" : "正在切换形象"/);
+  assert.match(source, /\{!syncProgress\.followOnly && <Button/);
+  assert.match(source, /沿用设备当前的「\{appearanceName\}」，无需重新传输素材/);
+  // Pre-transfer device steps sweep instead of freezing at 0%.
+  assert.match(source, /syncProgress\.indeterminate \? "准备中"/);
+  assert.match(extractCssRule(styles, ".channel-matrix-sync__bar.is-indeterminate > span"), /animation:/);
 });
 
 test("AgentAppearancePickerModal subcomponent is declared in the same file", () => {

@@ -41,6 +41,7 @@
 #include "pet_p4_diagnostics.h"
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_media.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_raw_assets.h"
 #include "pet_p4_touch.h"
@@ -1800,6 +1801,9 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToObject(capabilities, "widgetScenes", widget_scenes);
   cJSON_AddBoolToObject(capabilities, "widgetSprites", true);
   cJSON_AddStringToObject(capabilities, "widgetData", "p4-data-list-v1");
+  cJSON_AddStringToObject(capabilities, "widgetMedia", "p4-media-v1");
+  cJSON_AddStringToObject(capabilities, "widgetInstrument", "p4-instrument-v1");
+  cJSON_AddStringToObject(capabilities, "widgetLyrics", "p4-lrc-v1");
   cJSON_AddNumberToObject(capabilities, "componentCatalogMax", PET_P4_MINIAPP_CATALOG_MAX);
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"));
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"));
@@ -2447,6 +2451,15 @@ bool pet_p4_handle_line(
       return false;
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (pet_p4_media_handle(topic,payload,send_line,ctx)) {
+    if(!strcmp(topic,"media/begin") && pet_p4_audio_music_active()
+       && pet_p4_audio_stream_matches(json_string(payload,"sessionId"))) {
+      if(!pet_p4_miniapp_media_active()) {
+        pet_p4_miniapp_catalog_activate_id("music-player");
+      }
+      if(pet_p4_miniapp_media_active())copy_text(state->screen_page,sizeof(state->screen_page),"app");
+    }
+    state->last_update_ms += 1;
   } else if (strcmp(topic, "audio/query") == 0) {
     pet_p4_audio_send_status();
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);

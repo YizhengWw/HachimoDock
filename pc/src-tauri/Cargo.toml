@@ -1,6 +1,6 @@
 [package]
 name = "pet-manager-tauri"
-version = "0.1.82"
+version = "0.1.101"
 description = "pet-manager Tauri client"
 authors = ["pet-manager contributors"]
 license-file = "../../LICENSE"
@@ -30,6 +30,7 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 encoding_rs = "0.8"
+sysinfo = { version = "0.39", default-features = false, features = ["system", "network"] }
 chrono = "0.4"
 chrono-tz = "0.10"
 reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-tls", "system-proxy"] }
@@ -39,7 +40,7 @@ futures-util = "0.3"
 tokio = { version = "1", features = ["sync", "time"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
 # image/webp decode for M13.1 codex-pet import (sprite sheet -> per-state MP4)
-image = { version = "0.25", default-features = false, features = ["webp", "png"] }
+image = { version = "0.25", default-features = false, features = ["webp", "png", "jpeg"] }
 # USB serial communication with claw-pet board
 serialport = "4"
 rusb = { version = "0.9", features = ["vendored"] }
@@ -64,11 +65,11 @@ keyring = { version = "3.6.3", features = ["apple-native"] }
 accessibility = "0.2"
 accessibility-sys = "0.2"
 core-foundation = "0.10"
-core-graphics = "0.24"
+core-graphics = { version = "0.24", features = ["elcapitan"] }
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSData", "NSPathUtilities", "NSString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSData", "NSPathUtilities", "NSString", "NSProcessInfo"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

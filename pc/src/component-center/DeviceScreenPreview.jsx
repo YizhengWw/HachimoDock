@@ -10,6 +10,10 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import StockScreenPreview from "./StockScreenPreview.jsx";
+import WoodenFishPreview from "./WoodenFishPreview.jsx";
+import { MusicScreenPreview } from "./MusicPlayer.jsx";
+import LocalDataScreenPreview from "./LocalDataScreenPreview.jsx";
+import { LOCAL_SOURCES } from "./local-widget-model.js";
 import {
   Activity,
   Clock3,
@@ -928,7 +932,7 @@ export default function DeviceScreenPreview({ component, className = "" }) {
       data-layout={layout}
       aria-label={`${component.name || ""} 设备屏预览`}
     >
-      {isStocks ? <StockScreenPreview active={animationActive} /> : usesCanvasShell ? (
+      {component.instrumentSource === "percussion.wooden-fish" ? <WoodenFishPreview active={animationActive} /> : component.mediaSource === "audio.player" || component.id === "music-player" ? <MusicScreenPreview active={animationActive} /> : LOCAL_SOURCES.has(component.dataSource) ? <LocalDataScreenPreview source={component.dataSource} name={component.name} active={animationActive} /> : isStocks ? <StockScreenPreview active={animationActive} /> : usesCanvasShell ? (
         isPixelTool ? (
           <PixelToolPreview component={component} dashboard={dashboard} progress={progress} />
         ) : (

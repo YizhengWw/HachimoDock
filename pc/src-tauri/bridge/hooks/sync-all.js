@@ -30,6 +30,9 @@ function syncAllHooks(options = {}) {
       return syncMiMoCodePlugin();
     });
   }
+  if (options.syncWorkBuddy === true) {
+    run("workbuddy", () => require("./workbuddy-install.js").syncWorkBuddyHooks());
+  }
 
   return outcomes;
 

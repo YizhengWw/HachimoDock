@@ -1,0 +1,28 @@
+.local-data-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 7% 6%;
+  background: #070b10;
+  color: #dbeef6;
+  font-size: clamp(8px, 1vw, 12px);
+}
+.local-data-screen[data-source="todos.upcoming"] { color: #d0f1e5; background: #080e0b; container-type: inline-size; padding: 4% 3.75%; }
+.local-data-screen header { display: flex; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid #ffffff24; }
+.local-data-screen header > span { opacity: .65; font-size: .85em; }
+.local-data-screen__rows { flex: 1; min-height: 0; display: grid; grid-template-rows: repeat(5, minmax(0, 1fr)); }
+.local-data-screen__rows > div { display: flex; justify-content: space-between; align-items: center; min-height: 0; gap: 8px; padding: 2px 0; border-bottom: 1px solid #ffffff12; line-height: 1.15; }
+.local-data-screen__rows > div > div { min-width: 0; }
+.local-data-screen__rows strong { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.local-data-screen__rows small { display: block; font-size: .8em; opacity: .58; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+.local-data-screen__rows span { text-align: right; flex-shrink: 0; color: #78bfe5; }
+.local-data-screen[data-source="todos.upcoming"] .local-data-screen__rows span { color: #84d6b5; }
+.local-data-screen > p { margin: auto; text-align: center; opacity: .65; }
+.local-data-screen footer { flex-shrink: 0; padding-top: 8px; font-size: .8em; opacity: .5; }
+.local-data-screen__rows > .local-todo-preview-row { display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 1px; color: #4ca7fa; font-size: 2.5cqw; }
+.local-data-screen__rows > .local-todo-preview-row.is-done { color: #4fd495; }
+.local-todo-preview-row > strong { font-size: 5cqw; line-height: 1.1; flex-shrink: 0; }
+.local-data-screen__rows > .local-todo-preview-row > div { display: flex; justify-content: space-between; gap: 8px; }
+.local-todo-preview-row small { max-width: none; opacity: 1; font-size: 1em; margin-top: 0; }
+.local-todo-preview-row small:first-child { color: #93a5b6; }

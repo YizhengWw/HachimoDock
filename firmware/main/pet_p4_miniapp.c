@@ -11,6 +11,8 @@
  */
 
 #include "pet_p4_miniapp.h"
+#include "pet_p4_media.h"
+#include "pet_p4_audio.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -208,6 +210,9 @@ typedef struct {
   pet_p4_miniapp_view_t view;
   char data_source[48];
   int8_t data_page_var;
+  bool media;
+  bool instrument;
+  uint8_t effect_volume, ambience_volume;
 } miniapp_runtime_t;
 
 typedef struct {
@@ -795,7 +800,7 @@ static bool visual_literal_allowed(int slot, const miniapp_value_t *value) {
       || strcmp(literal, "blocks") == 0 || strcmp(literal, "snake") == 0
       || strcmp(literal, "flappy") == 0
       || strcmp(literal, "mole-ready") == 0 || strcmp(literal, "mole-left") == 0
-      || strcmp(literal, "mole-center") == 0 || strcmp(literal, "mole-right") == 0;
+      || strcmp(literal, "mole-center") == 0 || strcmp(literal, "mole-right") == 0 || strcmp(literal,"music")==0;
   }
   return true;
 }
@@ -1168,6 +1173,10 @@ static void refresh_view(miniapp_runtime_t *runtime) {
   view->progress_percent = -1;
   view->revision = next_revision;
   copy_utf8(view->data_source, sizeof(view->data_source), runtime->data_source);
+  view->media=runtime->media;
+  view->instrument=runtime->instrument;
+  view->effect_volume=runtime->effect_volume;
+  view->ambience_volume=runtime->ambience_volume;
   if (runtime->data_source[0]) view->data_page = runtime->vars[runtime->data_page_var].int_value;
   copy_utf8(view->widget_id, sizeof(view->widget_id), runtime->widget_id);
   if (runtime->current_state >= 0) {
@@ -1225,7 +1234,7 @@ static bool parse_runtime(
   static const char *const allowed[] = {
     "schema_version", "vars", "states", "initial_state", "pages", "initial_page",
     "transitions", "tick", "dashboard", "fetchers", "readers", "engine", "scene",
-    "game", "data",
+    "game", "data", "media", "instrument",
   };
   cJSON *root;
   const cJSON *schema;
@@ -1276,6 +1285,50 @@ static bool parse_runtime(
   }
   if (!parse_vars(parsed, cJSON_GetObjectItemCaseSensitive(root, "vars"), error, error_size)) goto fail;
   const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+  const cJSON *media=cJSON_GetObjectItemCaseSensitive(root,"media");
+  const cJSON *instrument=cJSON_GetObjectItemCaseSensitive(root,"instrument");
+  if(instrument) {
+    static const char *const keys[]={"source","effect_volume","ambience_volume"};
+    const cJSON *effect=cJSON_GetObjectItemCaseSensitive(instrument,"effect_volume");
+    const cJSON *ambience=cJSON_GetObjectItemCaseSensitive(instrument,"ambience_volume");
+    const cJSON *rules=cJSON_GetObjectItemCaseSensitive(root,"transitions");
+    const cJSON *rule=cJSON_GetArrayItem(rules,0);
+    static const char *const rule_keys[]={"on","from"};
+    if(!runtime_v4 || data || media || scene || legacy_game || parsed->var_count
+       || cJSON_GetObjectItemCaseSensitive(root,"pages")
+       || cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(root,"tick"))
+       || !cJSON_IsObject(instrument) || !object_keys_allowed(instrument,keys,3)
+       || strcmp(json_string(instrument,"source"),"percussion.wooden-fish")
+       || !cJSON_IsNumber(effect) || effect->valuedouble!=effect->valueint || effect->valueint<0 || effect->valueint>100
+       || !cJSON_IsNumber(ambience) || ambience->valuedouble!=ambience->valueint || ambience->valueint<0 || ambience->valueint>100
+       || !cJSON_IsArray(rules) || cJSON_GetArraySize(rules)!=1 || !cJSON_IsObject(rule)
+       || !object_keys_allowed(rule,rule_keys,2) || strcmp(json_string(rule,"on"),"instrument.strike")
+       || strcmp(json_string(rule,"from"),"*")) {
+      set_error(error,error_size,"invalid bounded instrument surface");goto fail;
+    }
+    parsed->instrument=true;parsed->effect_volume=effect->valueint;parsed->ambience_volume=ambience->valueint;
+  }
+  if(media) {
+    static const char *const media_keys[]={"source"};
+    if(!runtime_v4 || data || scene || legacy_game || parsed->var_count || !cJSON_IsObject(media)
+       || cJSON_GetObjectItemCaseSensitive(root,"pages")
+       || cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(root,"tick"))
+       || !object_keys_allowed(media,media_keys,1)||strcmp(json_string(media,"source"),"audio.player")) {
+      set_error(error,error_size,"invalid media surface");goto fail;
+    }
+    parsed->media=true;
+    const cJSON *rules=cJSON_GetObjectItemCaseSensitive(root,"transitions");
+    static const char *const rule_keys[]={"on","from"};
+    static const char *const actions[]={"media.toggle","media.queue","media.previous","media.next","media.up","media.down","media.select","media.lyrics"};
+    const cJSON *rule=NULL;
+    cJSON_ArrayForEach(rule,rules) {
+      bool known=false;
+      for(size_t i=0;i<sizeof(actions)/sizeof(actions[0]);i++)if(!strcmp(json_string(rule,"on"),actions[i]))known=true;
+      if(!known||!object_keys_allowed(rule,rule_keys,2)||strcmp(json_string(rule,"from"),"*")) {
+        set_error(error,error_size,"invalid media action");goto fail;
+      }
+    }
+  }
   if (data) {
     static const char *const data_keys[] = {"source", "page_var"};
     const char *source = json_string(data, "source");
@@ -1395,6 +1448,18 @@ static bool sync_game_runtime(miniapp_runtime_t *runtime) {
 bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
   bool handled = false;
   if (!action || !action[0]) return false;
+  bool media=false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(g_runtime.active&&g_runtime.instrument) {
+    portEXIT_CRITICAL(&g_runtime_lock);
+    return !strcmp(action,"instrument.strike") && pet_p4_audio_instrument_strike(now_ms);
+  }
+  if(g_runtime.active&&g_runtime.media) {
+    for(int i=0;i<g_runtime.transition_count;i++)if(!strcmp(g_runtime.transitions[i].action,action))media=true;
+    if(!media) {portEXIT_CRITICAL(&g_runtime_lock);return false;}
+  }
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(media)return pet_p4_media_action(action);
   portENTER_CRITICAL(&g_runtime_lock);
   if (!g_runtime.active) goto done;
   for (int i = 0; i < g_runtime.transition_count; i += 1) {
@@ -1500,6 +1565,7 @@ bool pet_p4_miniapp_dispatch_input(
 }
 
 void pet_p4_miniapp_process(uint64_t now_ms) {
+  pet_p4_media_tick(now_ms);
   bool changed = false;
   portENTER_CRITICAL(&g_runtime_lock);
   if (!g_runtime.active) goto done;
@@ -1558,6 +1624,22 @@ bool pet_p4_miniapp_active(void) {
   bool active;
   portENTER_CRITICAL(&g_runtime_lock);
   active = g_runtime.active;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return active;
+}
+
+bool pet_p4_miniapp_media_active(void) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&g_runtime.media;
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+
+bool pet_p4_miniapp_instrument_config(uint8_t *effect, uint8_t *ambience) {
+  /* Control loops need two bytes, not a multi-kilobyte render snapshot. */
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active = g_runtime.active && g_runtime.instrument;
+  if (effect) *effect = active ? g_runtime.effect_volume : 0;
+  if (ambience) *ambience = active ? g_runtime.ambience_volume : 0;
   portEXIT_CRITICAL(&g_runtime_lock);
   return active;
 }
@@ -3150,10 +3232,27 @@ static bool load_catalog_runtime(
   return load_catalog_runtime_item(&g_catalog[index], runtime, false, error, error_size);
 }
 
+static bool catalog_entry_visible(size_t index) {
+  return index < g_catalog_count && strcmp(g_catalog[index].widget_id, "music-player") != 0;
+}
+
+static int catalog_visible_index(size_t visible_index) {
+  for (size_t i = 0; i < g_catalog_count; ++i) {
+    if (!catalog_entry_visible(i)) continue;
+    if (visible_index-- == 0) return (int)i;
+  }
+  return -1;
+}
+
+static int catalog_visible_preferred(int preferred) {
+  return preferred >= 0 && catalog_entry_visible((size_t)preferred)
+    ? preferred : catalog_visible_index(0);
+}
+
 static bool activate_catalog_index_in_memory(size_t index) {
   miniapp_runtime_t *next;
   char error[128] = {0};
-  if (index >= g_catalog_count) return false;
+  if (!catalog_entry_visible(index)) return false;
   next = (miniapp_runtime_t *) calloc(1, sizeof(*next));
   if (!next) return false;
   if (!load_catalog_runtime(index, next, error, sizeof(error))) {
@@ -3178,7 +3277,7 @@ static bool activate_catalog_index_in_memory(size_t index) {
 static bool activate_catalog_index(size_t index) {
   miniapp_runtime_t *next;
   char error[128] = {0};
-  if (index >= g_catalog_count) return false;
+  if (!catalog_entry_visible(index)) return false;
   next = (miniapp_runtime_t *) calloc(1, sizeof(*next));
   if (!next) return false;
   if (!load_catalog_runtime(index, next, error, sizeof(error))) {
@@ -3208,6 +3307,7 @@ static bool activate_catalog_index(size_t index) {
 }
 
 esp_err_t pet_p4_miniapp_init(void) {
+  pet_p4_media_init();
   char widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX + 1] = {0};
   char error[128] = {0};
   miniapp_catalog_snapshot_t *snapshot0;
@@ -3259,6 +3359,7 @@ esp_err_t pet_p4_miniapp_init(void) {
         && !persist_catalog_snapshot(g_catalog, g_catalog_count, widget_id)) {
       ESP_LOGW(TAG, "component catalog recovery could not be committed");
     }
+    preferred = catalog_visible_preferred(preferred);
     bool activated = preferred < 0 || activate_catalog_index_in_memory((size_t) preferred);
     ESP_LOGI(
       TAG,
@@ -3284,6 +3385,7 @@ esp_err_t pet_p4_miniapp_init(void) {
     }
     bool committed = persist_catalog_snapshot(g_catalog, g_catalog_count, widget_id);
     int preferred = catalog_find(g_catalog, g_catalog_count, widget_id);
+    preferred = catalog_visible_preferred(preferred);
     bool activated = preferred < 0 || activate_catalog_index_in_memory((size_t) preferred);
     free(snapshot0);
     free(snapshot1);
@@ -3340,13 +3442,15 @@ esp_err_t pet_p4_miniapp_init(void) {
   memset(&g_staging, 0, sizeof(g_staging));
   ESP_LOGI(TAG, "migrated bounded component id=%s states=%u vars=%u", g_runtime.widget_id,
            (unsigned int) g_runtime.state_count, (unsigned int) g_runtime.var_count);
+  if (!catalog_entry_visible(0)) memset(&g_runtime, 0, sizeof(g_runtime));
   return ESP_OK;
 }
 
 size_t pet_p4_miniapp_catalog_count(void) {
   size_t count;
   portENTER_CRITICAL(&g_runtime_lock);
-  count = g_catalog_count;
+  count = 0;
+  for (size_t i = 0; i < g_catalog_count; ++i) if (catalog_entry_visible(i)) ++count;
   portEXIT_CRITICAL(&g_runtime_lock);
   return count;
 }
@@ -3354,7 +3458,8 @@ size_t pet_p4_miniapp_catalog_count(void) {
 size_t pet_p4_miniapp_catalog_selected(void) {
   size_t selected;
   portENTER_CRITICAL(&g_runtime_lock);
-  selected = g_catalog_selected;
+  selected = 0;
+  for (size_t i = 0; i < g_catalog_selected; ++i) if (catalog_entry_visible(i)) ++selected;
   portEXIT_CRITICAL(&g_runtime_lock);
   return selected;
 }
@@ -3364,7 +3469,9 @@ bool pet_p4_miniapp_catalog_get(size_t index, pet_p4_miniapp_catalog_entry_t *ou
   if (!out) return false;
   memset(out, 0, sizeof(*out));
   portENTER_CRITICAL(&g_runtime_lock);
-  if (index < g_catalog_count) {
+  int raw_index = catalog_visible_index(index);
+  if (raw_index >= 0) {
+    index = (size_t)raw_index;
     copy_utf8(out->widget_id, sizeof(out->widget_id), g_catalog[index].widget_id);
     copy_utf8(out->title, sizeof(out->title), g_catalog[index].title);
     out->active = g_runtime.active
@@ -3378,7 +3485,7 @@ bool pet_p4_miniapp_catalog_get(size_t index, pet_p4_miniapp_catalog_entry_t *ou
 void pet_p4_miniapp_catalog_focus_active(void) {
   portENTER_CRITICAL(&g_runtime_lock);
   for (size_t i = 0; i < g_catalog_count; i += 1) {
-    if (g_runtime.active && strcmp(g_runtime.widget_id, g_catalog[i].widget_id) == 0) {
+    if (catalog_entry_visible(i) && g_runtime.active && strcmp(g_runtime.widget_id, g_catalog[i].widget_id) == 0) {
       g_catalog_selected = i;
       break;
     }
@@ -3391,20 +3498,31 @@ bool pet_p4_miniapp_catalog_move(int delta) {
   portENTER_CRITICAL(&g_runtime_lock);
   if (g_catalog_count > 0 && delta != 0) {
     size_t previous = g_catalog_selected;
-    if (delta > 0) {
-      g_catalog_selected = (g_catalog_selected + 1) % g_catalog_count;
-    } else {
-      g_catalog_selected = (g_catalog_selected + g_catalog_count - 1) % g_catalog_count;
+    for (size_t attempt = 0; attempt < g_catalog_count; ++attempt) {
+      g_catalog_selected = delta > 0 ? (g_catalog_selected + 1) % g_catalog_count
+        : (g_catalog_selected + g_catalog_count - 1) % g_catalog_count;
+      if (catalog_entry_visible(g_catalog_selected)) break;
     }
-    moved = previous != g_catalog_selected || g_catalog_count == 1;
+    moved = catalog_entry_visible(g_catalog_selected)
+      && (previous != g_catalog_selected || g_catalog_count == 1);
   }
   portEXIT_CRITICAL(&g_runtime_lock);
   return moved;
 }
 
 bool pet_p4_miniapp_catalog_activate_selected(void) {
-  size_t selected = pet_p4_miniapp_catalog_selected();
+  portENTER_CRITICAL(&g_runtime_lock);
+  size_t selected = g_catalog_selected;
+  portEXIT_CRITICAL(&g_runtime_lock);
   return activate_catalog_index(selected);
+}
+
+bool pet_p4_miniapp_catalog_activate_id(const char *widget_id) {
+  if (!widget_id || !widget_id[0]) return false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  int index = catalog_find(g_catalog, g_catalog_count, widget_id);
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return index >= 0 && activate_catalog_index((size_t) index);
 }
 
 static bool transfer_matches(const cJSON *payload) {
@@ -3415,6 +3533,10 @@ static bool transfer_matches(const cJSON *payload) {
 bool pet_p4_miniapp_install_begin(const cJSON *payload, char *error, size_t error_size) {
   const char *transfer_id = json_string(payload, "transferId");
   const char *widget_id = json_string(payload, "widgetId");
+  if (!g_builtin_sync_in_progress && strcmp(widget_id, "music-player") == 0) {
+    set_error(error, error_size, "music player is unavailable in this release");
+    return false;
+  }
   memset(&g_staging, 0, sizeof(g_staging));
   if (!safe_id(transfer_id, sizeof(g_staging.transfer_id))
       || !safe_widget_id(widget_id)) {
@@ -3826,6 +3948,7 @@ static bool restore_active_after_builtin_sync(const char *preferred_widget_id) {
     : -1;
   if (index < 0) index = catalog_find(g_catalog, g_catalog_count, "stock-watchlist");
   if (index < 0 && g_catalog_count > 0) index = 0;
+  index = catalog_visible_preferred(index);
   return index < 0 || activate_catalog_index((size_t) index);
 }
 
@@ -3845,11 +3968,16 @@ static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
   const cJSON *package;
   if (!cJSON_IsArray(components)) return false;
 
-  // Set the stock widget first during migration; later installs still prepend normally.
-  const int stock_index = catalog_find(g_catalog, g_catalog_count, "stock-watchlist");
-  if (stock_index >= 0) {
-    ordered[ordered_count++] = g_catalog[stock_index];
-    used[stock_index] = true;
+  // Set the default tool sequence during migration; later installs still prepend normally.
+  static const char *const default_tools[] = {
+    "stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status",
+  };
+  for (size_t i = 0; i < sizeof(default_tools) / sizeof(default_tools[0]); ++i) {
+    const int index = catalog_find(g_catalog, g_catalog_count, default_tools[i]);
+    if (index >= 0) {
+      ordered[ordered_count++] = g_catalog[index];
+      used[index] = true;
+    }
   }
   for (size_t index = 0; index < g_catalog_count; index += 1) {
     if (used[index] || builtin_bundle_contains_id(components, g_catalog[index].widget_id)) continue;
@@ -3882,6 +4010,7 @@ static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
 
 esp_err_t pet_p4_miniapp_sync_builtins(void) {
   char marker[128] = {0};
+  char expected_marker[128] = {0};
   char restore_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
   char error[160] = {0};
   cJSON *bundle = NULL;
@@ -3890,8 +4019,12 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
   bool catalog_changed = false;
   size_t updated = 0;
 
+  /* Dirty builds may share an identity while their bundled components change. */
+  snprintf(expected_marker, sizeof(expected_marker), "%s:%08lx", PET_P4_BUILD_ID,
+    (unsigned long) miniapp_checksum((const char *) pet_p4_builtin_components_json,
+      strlen((const char *) pet_p4_builtin_components_json)));
   if (read_file(MINIAPP_BUILTIN_MARKER_PATH, marker, sizeof(marker))
-      && strcmp(marker, PET_P4_BUILD_ID) == 0) {
+      && strcmp(marker, expected_marker) == 0) {
     return ESP_OK;
   }
   bundle = cJSON_Parse((const char *) pet_p4_builtin_components_json);
@@ -3901,7 +4034,8 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
       || !cJSON_IsNumber(bundle_version)
       || bundle_version->valueint != 1
       || !cJSON_IsArray(components)
-      || cJSON_GetArraySize(components) != 9) {
+      || cJSON_GetArraySize(components) < 1
+      || cJSON_GetArraySize(components) > PET_P4_MINIAPP_CATALOG_MAX) {
     cJSON_Delete(bundle);
     ESP_LOGW(TAG, "embedded built-in component bundle is invalid");
     return ESP_ERR_INVALID_RESPONSE;
@@ -3994,8 +4128,8 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
   if (!write_file_atomic(
         MINIAPP_BUILTIN_MARKER_TMP_PATH,
         MINIAPP_BUILTIN_MARKER_PATH,
-        PET_P4_BUILD_ID,
-        strlen(PET_P4_BUILD_ID)
+        expected_marker,
+        strlen(expected_marker)
       )) {
     ESP_LOGW(TAG, "built-in component marker could not be committed");
     cJSON_Delete(bundle);

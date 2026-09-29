@@ -37,6 +37,12 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_PCM_BYTES: usize = 32 * 1024 * 1024;
 
+fn retry_safe(emitted: usize, error: &str) -> bool {
+    let kind=crate::realtime_chat_log::error_kind(error);
+    emitted == 0 && !matches!(kind,"authentication"|"resource_permission"|"tts_resource_mismatch")
+        && (kind != "tts_session_rejected" || error.contains("speech_rate"))
+}
+
 // ---- protocol constants (mirrors the provider's Python reference) ----
 const MSG_FULL_CLIENT_REQUEST: u8 = 0b0001;
 const MSG_FULL_SERVER_RESPONSE: u8 = 0b1001;
@@ -367,24 +373,30 @@ impl DoubaoTtsClient {
                 continue;
             }
             let with_rate_hint = !self.rate_hint_rejected;
-            match timeout(SESSION_TIMEOUT, self.synthesize_once(clean, with_rate_hint, &mut on_pcm)).await {
+            let mut emitted = 0;
+            let result = timeout(SESSION_TIMEOUT, self.synthesize_once(clean, with_rate_hint, &mut |pcm| {
+                emitted += pcm.len(); on_pcm(pcm);
+            })).await;
+            match result {
                 Ok(Ok(total)) => return Ok(total),
                 Ok(Err(error)) => {
                     let lowered = error.to_lowercase();
                     if with_rate_hint && lowered.contains("speech_rate") {
                         self.rate_hint_rejected = true;
                     }
-                    crate::realtime_chat_log::record("", "tts_failed", json!({"errorKind":crate::realtime_chat_log::error_kind(&error)}));
+                    crate::realtime_chat_log::record("", "tts_failed", json!({"errorKind":crate::realtime_chat_log::error_kind(&error),"bytes":emitted}));
                     last_error = error;
                     self.reset().await;
                     // Configuration/permission errors cannot be fixed by repeating the same request.
                     if last_error.contains("mismatched") {
                         return Err("音色与语音资源不匹配，请在人设与声音中选择 TTS 2.0 音色（55000000）".into());
                     }
+                    if !retry_safe(emitted,&last_error) { return Err(last_error); }
                 }
                 Err(_) => {
                     last_error = "豆包 TTS 会话超时".to_string();
                     self.reset().await;
+                    if !retry_safe(emitted,&last_error) { return Err(last_error); }
                 }
             }
         }
@@ -404,6 +416,9 @@ impl DoubaoTtsClient {
             .await
             .map_err(|error| format!("StartSession 发送失败: {error}"))?;
         let started = Self::receive(socket).await?;
+        if started.msg_type == MSG_ERROR {
+            return Err(format!("协议错误 ({}): {}", started.error_code, redact(&String::from_utf8_lossy(&started.payload), &api_key)));
+        }
         if started.event == EVENT_SESSION_FAILED {
             return Err(format!("SessionFailed: {}", redact(&String::from_utf8_lossy(&started.payload), &api_key)));
         }
@@ -469,6 +484,15 @@ pub fn scale_pcm16(pcm: &mut [u8], gain: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_tts_never_repeats_already_emitted_audio() {
+        assert!(retry_safe(0,"connection closed"));
+        assert!(!retry_safe(640,"connection closed"));
+        assert!(!retry_safe(640,"timeout"));
+        assert!(!retry_safe(0,"SessionFailed: invalid text"));
+        assert!(!retry_safe(0,"401 authentication"));
+    }
 
     #[test]
     fn entire_catalog_preserves_speakers_and_routes_context_voices() {

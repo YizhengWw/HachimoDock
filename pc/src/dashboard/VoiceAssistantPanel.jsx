@@ -26,6 +26,8 @@ import Switch from "../shell/Switch";
 import UsageHelp from "../UsageHelp.jsx";
 import { useUsageHelp } from "../shell/DeviceContext.jsx";
 import { friendlyControlLabel } from "../lib/usage-help.js";
+import { deviceVoicePlatformWarning } from "../lib/agent-voice-capabilities.js";
+import { voiceFlowMessage } from "./useDeviceVoiceRouter.js";
 
 export function buildVoiceSummary(voiceConfig, selectedTrigger) {
   if (!voiceConfig?.enabled) return "未开启";
@@ -77,9 +79,9 @@ export function needsVisibleComposerGuidance(state) {
     flow.message,
     flow.composerError,
   ].filter((value) => typeof value === "string").join("\n");
-  const isVisibleDesktopAgent = ["codex", "claude-code"].includes(state?.selectedAgentId)
-    || ["codex", "claude-code"].includes(flow.agentId)
-    || /ChatGPT|Codex|Claude/i.test(details);
+  const isVisibleDesktopAgent = ["codex", "claude-code", "workbuddy"].includes(state?.selectedAgentId)
+    || ["codex", "claude-code", "workbuddy"].includes(flow.agentId)
+    || /ChatGPT|Codex|Claude|WorkBuddy/i.test(details);
   const isMimocode = state?.selectedAgentId === "mimocode"
     || flow.agentId === "mimocode"
     || /\bMiMoCode\b/i.test(details);
@@ -87,8 +89,8 @@ export function needsVisibleComposerGuidance(state) {
     /(macOS|Windows).*辅助功能/i.test(details)
     || /(macOS|Windows).*输入焦点无法确认/i.test(details)
     || /(macOS|Windows).*输入框已有用户草稿/i.test(details)
-    || /(ChatGPT（Codex）|Codex|Claude) 前台会话未定位/i.test(details)
-    || /(ChatGPT（Codex）|Codex|Claude) 前台提交失败/i.test(details)
+    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy) 前台会话未定位/i.test(details)
+    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy) 前台提交失败/i.test(details)
   );
 }
 
@@ -226,11 +228,15 @@ export default function VoiceAssistantPanel({
 
   const agents = Array.isArray(state.busStatus?.agents) ? state.busStatus.agents : [];
   const selectedAgent = agents.find((agent) => agent.agentId === state.selectedAgentId) || null;
-  const ready = selectedAgent?.ready === true;
+  const desktopPlatform = detectDesktopPlatform();
+  const platformWarning = deviceVoicePlatformWarning(state.selectedAgentId, desktopPlatform);
+  const ready = selectedAgent?.ready === true && !platformWarning;
   const voiceRunning = state.voiceRuntime?.running === true;
   let audioBlockingReason = null;
   if (!state.selectedAgentId) {
     audioBlockingReason = "请先在「当前展示」里选择一个渠道";
+  } else if (platformWarning) {
+    audioBlockingReason = platformWarning;
   } else if (state.voiceRuntime == null) {
     audioBlockingReason = "正在检查语音通道...";
   } else if (!voiceRunning) {
@@ -244,12 +250,11 @@ export default function VoiceAssistantPanel({
   const boardOffline = state.deviceOnline === false;
   const triggerLabel = friendlyControlLabel(selectedTrigger?.label || "未绑定快捷键");
   const voicePhase = state.deviceVoiceFlow?.phase || "idle";
-  const desktopPlatform = detectDesktopPlatform();
   const showAccessibilityGuidance = needsVisibleComposerGuidance(state);
   const isMimocodeVoice = state.selectedAgentId === "mimocode"
     || state.deviceVoiceFlow?.agentId === "mimocode";
   const visibleVoiceAgentId = state.deviceVoiceFlow?.agentId || state.selectedAgentId;
-  const visibleVoiceAgentLabel = visibleVoiceAgentId === "claude-code"
+  const visibleVoiceAgentLabel = visibleVoiceAgentId === "workbuddy" ? "WorkBuddy" : visibleVoiceAgentId === "claude-code"
     ? "Claude"
     : "ChatGPT（Codex）";
   const hasLiveActivity = voicePhase !== "idle"
@@ -479,7 +484,7 @@ export default function VoiceAssistantPanel({
             </span>
             <span className="voice-panel__advanced-copy">
               <strong>诊断与测试</strong>
-              <small>绕过麦克风与 ASR，直接验证当前 Agent 会话</small>
+              <small>{state.selectedAgentId === "workbuddy" ? "停止语音监听后，测试 WorkBuddy 草稿写入（不发送）" : "绕过麦克风与 ASR，直接验证当前 Agent 会话"}</small>
             </span>
             <span className="voice-panel__advanced-tag">高级</span>
             <ChevronDown
@@ -519,12 +524,12 @@ export default function VoiceAssistantPanel({
                 {state.mockInjectPending ? (
                   <>
                     <Loader size={14} className="spin" aria-hidden="true" />
-                    发送中...
+                    {state.selectedAgentId === "workbuddy" ? "写入中..." : "发送中..."}
                   </>
                 ) : (
                   <>
                     <Send size={14} aria-hidden="true" />
-                    发送到当前会话
+                    {state.selectedAgentId === "workbuddy" ? "只写入 WorkBuddy 草稿" : "发送到当前会话"}
                   </>
                 )}
               </button>
@@ -587,8 +592,14 @@ export default function VoiceAssistantPanel({
                 state.deviceVoiceFlow.updatedAt
                   ? `（${new Date(state.deviceVoiceFlow.updatedAt).toLocaleTimeString()}）`
                   : ""
-              }\n${formatVoiceUserMessage(state.deviceVoiceFlow.message)}${state.deviceVoiceFlow.phase === "draft_ready" ? ` ${usageHelp.confirm}` : ""}`}
+              }\n${formatVoiceUserMessage(voiceFlowMessage(state.deviceVoiceFlow))}${state.deviceVoiceFlow.phase === "draft_ready" ? ` ${usageHelp.confirm}` : ""}`}
             </div>
+          )}
+
+          {state.selectedAgentId === "workbuddy" && (
+            <p className="muted">
+              请先在 WorkBuddy 打开目标对话，并保留一个主窗口。松开语音键后，完整识别结果会一次追加到输入框，确认后发送；写入完成前请保持该对话在前台。设备切换气泡不会自动切换 WorkBuddy 桌面对话。
+            </p>
           )}
 
           {showAccessibilityGuidance && (
@@ -614,7 +625,7 @@ export default function VoiceAssistantPanel({
                 {desktopPlatform === "windows" ? (
                   <p>
                     Windows 不需要把 Pet Manager 添加到“辅助功能”列表。请让 Pet Manager
-                    与 {visibleVoiceAgentLabel} 使用相同权限级别，并保持 {visibleVoiceAgentLabel} 窗口可见、输入框为空。
+                    与 {visibleVoiceAgentLabel} 使用相同权限级别，并保持 {visibleVoiceAgentLabel} 窗口可见、输入框可编辑。
                   </p>
                 ) : accessibilityPermission.trusted === true ? (
                   <p>

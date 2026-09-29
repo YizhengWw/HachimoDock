@@ -32,6 +32,9 @@ use crate::voice_chat_settings;
 use crate::realtime_chat_log as diagnostics;
 use crate::volcengine_asr::{StreamingSpeechEvent, StreamingSpeechRecognizer};
 
+#[path = "realtime_barge.rs"]
+mod barge_policy;
+
 pub const STATE_EVENT: &str = "realtime-chat-state";
 pub const REQUEST_EVENT: &str = "realtime-chat-request";
 pub const ACTION_ID: &str = "realtime_chat";
@@ -290,6 +293,10 @@ pub fn route_device_audio(topic: &str, payload: &Value) -> bool {
 
 /// Called from the USB message dispatcher for `input/event`. Handles the `realtime_chat` action:
 /// a live session stops; otherwise the UI is asked to start one for the current appearance.
+fn realtime_entry_context(context: &str) -> bool {
+    matches!(context, "main" | "app" | "components")
+}
+
 pub fn handle_input_event(app: &AppHandle, payload: &Value) -> bool {
     if let Some(session) = active_session() {
         if payload.get("boardDeviceId").and_then(Value::as_str) == Some(session.board_device_id.as_str()) {
@@ -306,8 +313,9 @@ pub fn handle_input_event(app: &AppHandle, payload: &Value) -> bool {
         request_stop(&session, "key");
         return true;
     }
-    if context != "main" {
-        // The board already shows a hint when the pet screen is not open; nothing to start.
+    if !realtime_entry_context(&context) {
+        // Global realtime input works on all supported device pages. Unknown
+        // contexts still fail closed, rather than dispatching an Agent action.
         return true;
     }
     let _ = app.emit(REQUEST_EVENT, json!({ "boardDeviceId": board, "context": context, "at": now_ms() }));
@@ -413,6 +421,9 @@ struct Vad {
     metrics: VadMetrics,
     diagnostic_session: String,
     reply_tail_until: Option<Instant>,
+    session: Option<Arc<Session>>,
+    previous_user: String,
+    turn_started: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -450,7 +461,7 @@ enum VadStep {
 
 impl Vad {
     fn new() -> Self {
-        Self { noise: 200.0, processed_noise: 16.0, speech_run: 0, silence_run: 0, in_speech: false, preroll: Vec::new(), speech_started: None, soft_gap: 0, metrics: VadMetrics::default(), diagnostic_session: String::new(), reply_tail_until: None }
+        Self { noise: 200.0, processed_noise: 16.0, speech_run: 0, silence_run: 0, in_speech: false, preroll: Vec::new(), speech_started: None, soft_gap: 0, metrics: VadMetrics::default(), diagnostic_session: String::new(), reply_tail_until: None, session: None, previous_user: String::new(), turn_started: None }
     }
 
     fn rms(frame: &[u8]) -> f32 {
@@ -602,6 +613,15 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
     let epoch = Arc::new(AtomicU64::new(0));
     let player = Player { tx, epoch: epoch.clone() };
     thread::spawn(move || {
+        #[cfg(target_os = "macos")]
+        let _audio_activity = {
+            let activity = crate::realtime_audio_macos::AudioActivity::begin_on_player_thread();
+            diagnostics::record(&session.id, "playback_scheduling", json!({
+                "platform":"macos", "activity":"latency_critical", "qos":"user_initiated",
+                "qosApplied":activity.qos_error == 0, "qosError":activity.qos_error
+            }));
+            activity
+        };
         let mut current_epoch = 0;
         let mut turn_id = String::new();
         let mut pending: Vec<u8> = Vec::new();
@@ -749,6 +769,7 @@ async fn run_session(
     let duplex = session.duplex.load(Ordering::SeqCst);
     let mut vad = Vad::new();
     vad.diagnostic_session = session.id.clone();
+    vad.session = Some(session.clone());
     let mut pending_speech = None;
     let mut deferred_audio = VecDeque::new();
     diagnostics::record(&session.id, "audio_mode", json!({"state":if duplex {"full_duplex"} else {"half_duplex"}}));
@@ -797,7 +818,7 @@ async fn run_session(
     let mut recognizer_terminal = false;
     let mut caption_sent_at = Instant::now();
 
-    loop {
+    'conversation: loop {
         if session.cancelled.load(Ordering::SeqCst) {
             reason = "cancelled".into();
             break;
@@ -961,6 +982,8 @@ async fn run_session(
                             publish(&app, &session, |s| { s.transcript = user_text.clone(); s.turns = turns; });
                             diagnostics::record(&session.id, "asr_final", json!({"turn":turns,"chars":user_text.chars().count(),"elapsedMs":asr_finish_at.elapsed().as_millis()}));
                             vad.reset();
+                            vad.previous_user = user_text.clone();
+                            vad.turn_started = Some(Instant::now());
                             match listen_with_verified_barge_in(answer_turn(&app, &usb, &session, &llm_cfg, &input.system_prompt, &mut history, &user_text, &mut tts, &player, volume, &name), &mut rx, &mut deferred_audio, &mut vad, duplex).await {
                                 Ok(Some(speech)) => {
                                     if !speech.reply_completed {
@@ -971,7 +994,7 @@ async fn run_session(
                                         crate::smart_home::cancel_voice_session(&session.id);
                                         diagnostics::record(&session.id,"barge_in",json!({"turn":turns,"bytes":speech.stats.frames*FRAME_BYTES,"reason":"asr_confirmed"}));
                                         history.push(ChatTurn{role:"user".into(),content:user_text.clone()});
-                                        history.push(ChatTurn{role:"assistant".into(),content:"[回复被用户打断；已发出的设备操作不会撤回，也不可自动重复。]".into()});
+                                        history.push(persona_llm::interruption_turn());
                                         persona_llm::trim_history(&mut history);
                                     }
                                     pending_speech = Some(speech);
@@ -984,6 +1007,10 @@ async fn run_session(
                                     publish(&app, &session, |s| s.error = error.clone());
                                     hud(&usb, &board, &session.id, "listening", &name, "刚才没说成，请再说一遍");
                                 }
+                            }
+                            if pending_speech.is_none() && crate::music_player::take_voice_handoff() {
+                                reason = "music_playback".into();
+                                break 'conversation;
                             }
                             if !duplex {
                                 tokio::time::sleep(POST_SPEAK_GUARD).await;
@@ -1057,7 +1084,14 @@ where F: std::future::Future<Output=Result<(), String>>,
         // Borrow, don't drop the reply future when VAD finds a candidate. Until
         // ASR confirms it, synthesis, queued PCM and the current sentence survive.
         let Some(frames) = listen_during_reply(reply.as_mut(), rx, deferred, vad, true).await? else { return Ok(None); };
-        diagnostics::record(&vad.diagnostic_session, "barge_candidate", json!({"frames":frames.len(),"bufferedMs":deferred.len()*20}));
+        let candidate_phase=vad.session.as_ref().and_then(|s|s.status.lock().ok().map(|s|s.state.clone())).unwrap_or_else(||"thinking".into());
+        // Capture provenance now: cloud ASR may return seconds later. Measuring
+        // the tail window when the result arrives loses protection against the
+        // just-finished utterance and can cancel its pending todo write.
+        let previous_user = if barge_policy::protect_previous_tail(vad.turn_started.map(|t| t.elapsed())) {
+            vad.previous_user.clone()
+        } else { String::new() };
+        diagnostics::record(&vad.diagnostic_session, "barge_candidate", json!({"frames":frames.len(),"bufferedMs":deferred.len()*20,"state":candidate_phase}));
         let mut probe = match start(frames) {
             Ok(probe) => probe,
             Err(error) => {
@@ -1070,6 +1104,9 @@ where F: std::future::Future<Output=Result<(), String>>,
         let deadline = tokio::time::sleep(BARGE_CONFIRM_TIMEOUT);
         tokio::pin!(deadline);
         let mut added_frames = 0;
+        let mut voiced_frames = vad.speech_run;
+        let mut confirmation = barge_policy::Confirmation::default();
+        let mut input_finished = false;
         let mut rejection = "no_transcript";
         loop {
             // Poll ASR and the reply even when Windows has delivered a burst of
@@ -1079,15 +1116,22 @@ where F: std::future::Future<Output=Result<(), String>>,
                 _ = &mut deadline => { rejection = "confirmation_timeout"; break; }
                 event = probe.events.recv() => match event {
                     Some(event @ (StreamingSpeechEvent::Partial { .. } | StreamingSpeechEvent::Final { .. })) => {
-                        let (text, terminal) = match event {
-                            StreamingSpeechEvent::Partial {text,..} => (text,false),
-                            StreamingSpeechEvent::Final {text,..} => (text,true),
+                        let (text, terminal, confidence) = match event {
+                            StreamingSpeechEvent::Partial {text,confidence,..} => (text,false,confidence),
+                            StreamingSpeechEvent::Final {text,confidence,..} => (text,true,confidence),
                             _ => unreachable!(),
                         };
                         // Terminal empty/single-character candidates cannot improve.
                         // Reject now instead of leaving a completed stream polling.
                         if terminal && !has_barge_in_text(&text) { break; }
                         if !has_barge_in_text(&text) { continue; }
+                        if input_finished && !terminal { continue; }
+                        let (phase, reply_text) = vad.session.as_ref().and_then(|s| s.status.lock().ok().map(|s| (s.state.clone(),s.reply.clone())))
+                            .unwrap_or_else(|| ("thinking".into(),String::new()));
+                        if !confirmation.accept(&text, terminal, confidence, started.elapsed(), voiced_frames, &phase, &reply_text, &previous_user) {
+                            if terminal { rejection="unverified_speech"; break; }
+                            continue;
+                        }
                         probe.text = text;
                         probe.terminal = terminal;
                         // The candidate may have ended while waiting for cloud ASR.
@@ -1096,7 +1140,7 @@ where F: std::future::Future<Output=Result<(), String>>,
                         vad.in_speech = true;
                         vad.silence_run = 0;
                         vad.speech_started.get_or_insert_with(Instant::now);
-                        diagnostics::record(&vad.diagnostic_session,"barge_confirmed",json!({"chars":probe.text.chars().filter(|ch|ch.is_alphanumeric()).count(),"elapsedMs":started.elapsed().as_millis(),"frames":probe.stats.frames}));
+                        diagnostics::record(&vad.diagnostic_session,"barge_confirmed",json!({"chars":probe.text.chars().filter(|ch|ch.is_alphanumeric()).count(),"elapsedMs":started.elapsed().as_millis(),"frames":probe.stats.frames,"state":phase,"reason":if terminal {"final_transcript"} else if is_explicit_stop(&probe.text) {"explicit_stop"} else {"stable_transcript"}}));
                         return Ok(Some(probe));
                     }
                     Some(StreamingSpeechEvent::Error(error)) => {
@@ -1111,19 +1155,27 @@ where F: std::future::Future<Output=Result<(), String>>,
                     probe.reply_completed = true;
                     vad.reply_tail_until = Some(Instant::now() + POST_SPEAK_GUARD);
                 }
-                incoming = async { if let Some(frame) = deferred.pop_front() { Some(frame) } else { rx.recv().await } } => {
+                incoming = async { if !input_finished && !deferred.is_empty() { deferred.pop_front() } else { rx.recv().await } } => {
                     let Some(Input::Pcm(pcm, speech)) = incoming else { return Err("设备收音通道关闭".into()); };
                     if speech.is_none() || pcm.len() != FRAME_BYTES { return Err("设备 AEC/VAD 音频帧无效".into()); }
+                    if input_finished {
+                        if deferred.len() >= FINAL_CAPTURE_LIMIT { return Err("收音缓冲已满".into()); }
+                        deferred.push_back(Input::Pcm(pcm,speech));
+                        continue;
+                    }
                     if let Err(error) = probe.recognizer.push_pcm(&pcm) {
                         diagnostics::record(&vad.diagnostic_session,"barge_probe_error",json!({"errorKind":diagnostics::error_kind(&error)}));
                         rejection = "asr_error"; break;
                     }
                     probe.stats.observe(&pcm);
                     added_frames += 1;
+                    if speech == Some(true) && Vad::rms(&pcm) >= PROCESSED_VAD_ABS_MIN { voiced_frames += 1; }
                     // Keep feeding silence to streaming ASR; an empty VAD end is
                     // never itself permission to cancel the reply.
-                    let _ = vad.step_with_hint(&pcm, speech);
-                    if added_frames >= BARGE_CONFIRM_MAX_FRAMES { rejection = "confirmation_audio_limit"; break; }
+                    if matches!(vad.step_with_hint(&pcm, speech),VadStep::End) || added_frames >= BARGE_CONFIRM_MAX_FRAMES {
+                        if probe.recognizer.finish().is_err() { rejection="asr_error"; break; }
+                        input_finished=true;
+                    }
                 }
             }
         }
@@ -1319,6 +1371,10 @@ async fn answer_turn(
             },
         };
         let clean = persona_llm::clean_spoken_text(&sentence);
+        if persona_llm::is_internal_reply(&sentence) {
+            diagnostics::record(&session.id,"internal_reply_blocked",json!({"turn":session.status.lock().map(|s|s.turns).unwrap_or(0)}));
+            return Err("本轮回答异常，已拦截内部状态文案；请重新提问".into());
+        }
         if clean.is_empty() {
             continue;
         }
@@ -1379,6 +1435,10 @@ async fn speak_one_logged(tts: &mut DoubaoTtsClient, player: &Player, volume: f3
     })
     .await
     .map(|_| ())
+    .map_err(|error| {
+        diagnostics::record(session_id,"tts_turn_failed",json!({"errorKind":diagnostics::error_kind(&error)}));
+        format!("语音合成失败：{error}")
+    })
 }
 
 async fn wait_playback(player: &Player) {
@@ -1522,6 +1582,34 @@ mod tests {
     }
 
     #[test]
+    fn delayed_tail_asr_does_not_abort_the_pending_task() {
+        tauri::async_runtime::block_on(async {
+            let (_tx, mut rx) = mpsc::channel(1);
+            let mut deferred = (0..PROCESSED_SPEECH_START_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
+            let mut vad = Vad::new();
+            vad.previous_user = "帮我添加买火车票的待办".into();
+            vad.turn_started = Some(Instant::now());
+            let mut guards = Vec::new();
+            let completed = Arc::new(AtomicBool::new(false)); let flag = completed.clone();
+            let reply = async move {
+                tokio::time::sleep(Duration::from_millis(1200)).await;
+                flag.store(true, Ordering::SeqCst); Ok(())
+            };
+            let result = verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                let (mut probe, guard) = fake_barge_probe(frames,&[],true); guards.push(guard);
+                let (tx, events) = mpsc::unbounded_channel(); probe.events=events;
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(950)).await;
+                    let _ = tx.send(StreamingSpeechEvent::Final {revision:1,text:"的待办".into(),confidence:None});
+                });
+                Ok(probe)
+            }).await.unwrap();
+            assert!(result.is_none());
+            assert!(completed.load(Ordering::SeqCst));
+        });
+    }
+
+    #[test]
     fn terminal_confirmation_is_handed_off_without_writing_a_closed_asr_stream() {
         tauri::async_runtime::block_on(async {
             for text in ["停", "换歌", "嗯", ""] {
@@ -1582,7 +1670,7 @@ mod tests {
     }
 
     #[test]
-    fn second_character_confirms_and_reuses_the_existing_asr_stream() {
+    fn final_two_characters_confirm_and_reuse_the_existing_asr_stream() {
         tauri::async_runtime::block_on(async {
             let (_tx, mut rx) = mpsc::channel(32);
             let mut deferred = (0..PREROLL_FRAMES).map(|_| Input::Pcm(frame(180),Some(true))).collect();
@@ -1590,12 +1678,31 @@ mod tests {
             let reply = std::future::pending::<Result<(),String>>();
             let speech = verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
                 starts += 1;
-                let (probe, guard) = fake_barge_probe(frames,&["等", "等，", "等下"],true); guards.push(guard); Ok(probe)
+                let (mut probe, guard) = fake_barge_probe(frames,&[],true); guards.push(guard);
+                let (tx, events)=mpsc::unbounded_channel(); probe.events=events;
+                for text in ["等", "等，", "等下"] { tx.send(StreamingSpeechEvent::Partial{revision:1,text:text.into(),confidence:None}).unwrap(); }
+                tx.send(StreamingSpeechEvent::Final{revision:2,text:"等下".into(),confidence:None}).unwrap();
+                Ok(probe)
             }).await.unwrap().unwrap();
-            assert_eq!(starts,1); assert_eq!(speech.text,"等下"); assert!(!speech.reply_completed);
+            assert_eq!(starts,1); assert_eq!(speech.text,"等下"); assert!(speech.terminal); assert!(!speech.reply_completed);
             assert_eq!(speech.stats.frames,PROCESSED_SPEECH_START_FRAMES);
             assert_eq!(deferred.len(),PREROLL_FRAMES-PROCESSED_SPEECH_START_FRAMES);
             assert!(vad.in_speech); assert!(speech.recognizer.push_pcm(&frame(180)).is_ok());
+        });
+    }
+
+    #[test]
+    fn provisional_two_words_do_not_abort_waiting_tool_reply() {
+        tauri::async_runtime::block_on(async {
+            let (_tx, mut rx)=mpsc::channel(1);
+            let mut deferred=(0..PROCESSED_SPEECH_START_FRAMES).map(|_|Input::Pcm(frame(200),Some(true))).collect();
+            let mut vad=Vad::new(); let mut guards=Vec::new();
+            let completed=Arc::new(AtomicBool::new(false)); let flag=completed.clone();
+            let reply=async move { tokio::time::sleep(Duration::from_millis(30)).await; flag.store(true,Ordering::SeqCst); Ok(()) };
+            let result=verify_barge_in_with(reply,&mut rx,&mut deferred,&mut vad,true,|frames| {
+                let (probe,guard)=fake_barge_probe(frames,&["你好","谢谢"],false); guards.push(guard); Ok(probe)
+            }).await.unwrap();
+            assert!(result.is_none()); assert!(completed.load(Ordering::SeqCst));
         });
     }
 
@@ -2333,5 +2440,7 @@ mod tests {
     fn realtime_key_events_are_recognized_by_action_id() {
         let payload = json!({ "action": "realtime_chat", "context": "main", "boardDeviceId": "b1" });
         assert_eq!(payload.get("action").and_then(Value::as_str), Some(ACTION_ID));
+        for page in ["main", "app", "components"] { assert!(realtime_entry_context(page)); }
+        for page in ["", "unknown", "settings"] { assert!(!realtime_entry_context(page)); }
     }
 }

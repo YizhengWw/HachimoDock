@@ -37,6 +37,7 @@
 #include "pet_p4_diagnostics.h"
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_media.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_protocol.h"
 #include "pet_p4_transport_config.h"
@@ -760,6 +761,14 @@ void app_main(void) {
     pet_p4_state_process(&g_state, now_ms);
     pet_p4_touch_process(&g_state, transport_send_line, NULL);
     pet_p4_input_process(&g_state, transport_send_line, NULL);
+    uint8_t instrument_effect=0, instrument_ambience=0;
+    bool instrument_open=!strcmp(g_state.screen_page,"app")
+      &&pet_p4_miniapp_instrument_config(&instrument_effect,&instrument_ambience);
+    if(instrument_open && pet_p4_audio_music_active())
+      pet_p4_media_stop_background(transport_send_line,NULL);
+    pet_p4_audio_instrument_set(instrument_open&&!g_state.asset_transfer_active
+      &&!pet_p4_ota_transfer_active()&&!pet_p4_audio_conversation_active(),
+      instrument_effect,instrument_ambience);
     pet_p4_audio_process(&g_state, now_ms);
     firmware_transfer_active = pet_p4_ota_transfer_active();
     bool transfer_active = g_state.asset_transfer_active || firmware_transfer_active;

@@ -55,6 +55,11 @@
 mod clawpkg;
 mod widget_data;
 mod stock_quotes;
+mod todos;
+mod local_tools;
+mod music_player;
+mod media_codec;
+mod local_widget_data;
 mod codex_composer;
 mod codex_import;
 mod component_library;
@@ -70,6 +75,8 @@ mod llm_network;
 mod internal_credentials;
 mod voice_draft;
 mod realtime_chat;
+#[cfg(target_os = "macos")]
+mod realtime_audio_macos;
 mod realtime_chat_log;
 mod usb_audio;
 mod usb_serial;
@@ -594,11 +601,25 @@ fn p4_session_target_is_unique(
 }
 
 fn agent_uses_visible_composer(agent_id: &str) -> bool {
-    matches!(agent_id, "codex" | "claude-code")
+    matches!(agent_id, "codex" | "claude-code" | "workbuddy")
+}
+
+fn agent_streams_voice_draft(agent_id: &str) -> bool {
+    // WorkBuddy's rich-text editor requires native paste. Send one final result
+    // rather than repeatedly selecting/pasting every ASR hypothesis.
+    agent_uses_visible_composer(agent_id) && agent_id != "workbuddy"
+}
+
+fn device_voice_platform_block_reason(agent_id: &str, is_macos: bool) -> Option<&'static str> {
+    (agent_id == "mimocode" && !is_macos).then_some(
+        "MiMoCode 的按键语音输入目前仅支持 macOS 终端；当前系统可使用状态跟随与设备实时对话。",
+    )
 }
 
 fn visible_composer_agent_label(agent_id: &str) -> &'static str {
-    if agent_id == "claude-code" {
+    if agent_id == "workbuddy" {
+        "WorkBuddy"
+    } else if agent_id == "claude-code" {
         "Claude"
     } else {
         "ChatGPT（Codex）"
@@ -606,7 +627,7 @@ fn visible_composer_agent_label(agent_id: &str) -> &'static str {
 }
 
 fn should_locate_desktop_session(locate_desktop: bool, agent_id: &str) -> bool {
-    locate_desktop && agent_uses_visible_composer(agent_id)
+    locate_desktop && matches!(agent_id, "codex" | "claude-code")
 }
 
 #[tauri::command]
@@ -626,6 +647,25 @@ fn check_codex_accessibility_permission() -> serde_json::Value {
         },
         "trusted": trusted,
     })
+}
+
+#[tauri::command]
+async fn write_workbuddy_voice_test_draft(text: String) -> Result<(), String> {
+    if text.trim().is_empty() || text.chars().count() > 2048 {
+        return Err("请输入 1–2048 字的测试文本".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        // Serialize against recording startup. This diagnostic only exercises
+        // the production draft writer; never send Enter, call an Agent or ASR.
+        let active = active_device_voice_context().try_lock()
+            .map_err(|_| "请先结束设备语音输入再测试".to_string())?;
+        if active.is_some() { return Err("请先停止语音监听，再测试草稿写入".into()); }
+        let bridge = codex_composer::CodexComposerBridge::start_current("workbuddy", |_| {})?;
+        let result = bridge.update_confirmed(1, &text);
+        // Preserve the user's original draft even if readback is uncertain.
+        let released = bridge.preserve_draft();
+        result.and(released)
+    }).await.map_err(|_| "WorkBuddy 草稿测试线程异常".to_string())?
 }
 
 #[tauri::command]
@@ -677,8 +717,23 @@ struct DeviceVoiceContext {
     composer: Mutex<Option<codex_composer::CodexComposerBridge>>,
     composer_startup_complete: Mutex<bool>,
     composer_startup_ready: Condvar,
+    started_at: Instant,
     #[cfg(target_os = "macos")]
     focused_text_target: Mutex<Option<codex_composer::FocusedTextTarget>>,
+}
+
+// Push-to-talk latency timeline: fixed stage names and elapsed milliseconds
+// since audio/begin only; never transcripts, drafts or device identifiers.
+fn record_device_voice_timing(context: &DeviceVoiceContext, stage: &str, ok: bool) {
+    realtime_chat_log::record(
+        &context.utterance_id,
+        "device_voice_timing",
+        serde_json::json!({
+            "stage": stage,
+            "ok": ok,
+            "elapsedMs": context.started_at.elapsed().as_millis() as u64,
+        }),
+    );
 }
 
 const VISIBLE_COMPOSER_SUBMIT_TIMEOUT: Duration = Duration::from_secs(8);
@@ -777,7 +832,8 @@ fn should_use_current_visible_session(
     session_queue_empty: bool,
     agent_id: &str,
 ) -> bool {
-    agent_uses_visible_composer(agent_id) && (agent_is_frontmost || session_queue_empty)
+    agent_uses_visible_composer(agent_id)
+        && (agent_is_frontmost || session_queue_empty || agent_id == "workbuddy")
 }
 
 fn device_voice_uses_current_visible_session(context: &DeviceVoiceContext) -> bool {
@@ -788,7 +844,8 @@ fn device_voice_bound_target_is_addressable(
     session_queue_empty: bool,
     target: &P4SessionBinding,
 ) -> bool {
-    !session_queue_empty
+    target.agent_id != "workbuddy"
+        && !session_queue_empty
         && !target.session_id.is_empty()
         && !target.session_title.is_empty()
         && (target.agent_id == "claude-code"
@@ -1211,6 +1268,7 @@ fn stage_device_voice_final(
 
     if agent_uses_visible_composer(&context.target.agent_id) {
         wait_for_visible_composer_startup(&context);
+        record_device_voice_timing(&context, "composer_wait_done", true);
         if !device_voice_target_is_current(&context) {
             cancel_device_voice_context(
                 &context,
@@ -1223,8 +1281,36 @@ fn stage_device_voice_final(
     let composer_update = context.composer.lock().ok().and_then(|composer| {
         composer
             .as_ref()
-            .map(|bridge| bridge.update(revision, &text))
+            .map(|bridge| bridge.update_confirmed(revision, &text))
     });
+    record_device_voice_timing(
+        &context,
+        "draft_written",
+        matches!(composer_update, Some(Ok(()))),
+    );
+    if let Some(Err(error)) = &composer_update {
+        // Fixed category only; the raw error may quote draft text.
+        let kind = if error.contains("did not confirm") {
+            "readback_timeout"
+        } else if error.contains("edited outside") || error.contains("草稿已被其他操作修改") {
+            "external_edit"
+        } else if error.contains("changed during") {
+            "composer_changed"
+        } else if error.contains("前台") || error.contains("foreground") {
+            "lost_foreground"
+        } else if error.contains("keyboard focus") {
+            "focus_rejected"
+        } else if error.contains("未确认") {
+            "bridge_timeout"
+        } else {
+            "other"
+        };
+        realtime_chat_log::record(
+            &context.utterance_id,
+            "device_voice_timing",
+            serde_json::json!({ "stage": "draft_failed", "ok": false, "errorKind": kind }),
+        );
+    }
     let Some(update_result) = composer_update else {
         if agent_uses_visible_composer(&context.target.agent_id) {
             let agent_label = visible_composer_agent_label(&context.target.agent_id);
@@ -1262,6 +1348,9 @@ fn stage_device_voice_final(
             &format!("{agent_label} 语音草稿写入失败"),
             "VISIBLE_COMPOSER_DRAFT_FAILED",
         );
+        return;
+    }
+    if !device_voice_target_is_current(&context) {
         return;
     }
     context.draft_ready.store(true, Ordering::SeqCst);
@@ -1556,9 +1645,11 @@ fn start_device_voice_context(
         composer: Mutex::new(None),
         composer_startup_complete: Mutex::new(false),
         composer_startup_ready: Condvar::new(),
+        started_at: Instant::now(),
         #[cfg(target_os = "macos")]
         focused_text_target: Mutex::new(None),
     });
+    record_device_voice_timing(&context, "context_started", true);
 
     let previous = active_device_voice_context()
         .lock()
@@ -1575,6 +1666,10 @@ fn start_device_voice_context(
         }
     }
 
+    if let Some(reason) = device_voice_platform_block_reason(&context.target.agent_id, cfg!(target_os = "macos")) {
+        fail_device_voice_context(&context, reason);
+        return;
+    }
     emit_device_voice_transcript(&context, "listening", 0, "", false, true, "");
 
     #[cfg(target_os = "macos")]
@@ -1635,6 +1730,14 @@ fn start_device_voice_context(
                             *composer_error = event.error.clone();
                         }
                     }
+                    // Finalization owns its status until readback completes;
+                    // an asynchronous worker callback must not turn it back into
+                    // "listening" or hide a final delivery failure.
+                    if context.final_handled.load(Ordering::SeqCst)
+                        || context.cancelled.load(Ordering::SeqCst)
+                    {
+                        return;
+                    }
                     let revision = context.latest_revision.load(Ordering::SeqCst);
                     let text = context
                         .latest_text
@@ -1654,7 +1757,9 @@ fn start_device_voice_context(
                 let start_bound = |callback: Arc<
                     dyn Fn(codex_composer::CodexComposerEvent) + Send + Sync,
                 >| {
-                    if startup_context.target.agent_id == "claude-code" {
+                    if startup_context.target.agent_id == "workbuddy" {
+                        Err("请打开 WorkBuddy 的目标对话后再开始语音输入".to_string())
+                    } else if startup_context.target.agent_id == "claude-code" {
                         codex_composer::CodexComposerBridge::start_claude(
                             &startup_context.target.session_id,
                             &startup_context.target.session_title,
@@ -1696,6 +1801,7 @@ fn start_device_voice_context(
                 } else {
                     start_bound(callback.clone())
                 };
+                record_device_voice_timing(&startup_context, "composer_ready", composer_result.is_ok());
                 match composer_result {
                     Ok(composer) if startup_context.cancelled.load(Ordering::SeqCst) => {
                         composer.cancel();
@@ -1746,6 +1852,7 @@ fn start_device_voice_context(
         }
         match event {
             pc_audio::StreamingSpeechEvent::Ready => {
+                record_device_voice_timing(&context, "asr_ready", true);
                 emit_device_voice_transcript(&context, "listening", 0, "", false, true, "")
             }
             pc_audio::StreamingSpeechEvent::Partial {
@@ -1753,6 +1860,9 @@ fn start_device_voice_context(
                 text,
                 confidence,
             } => {
+                if context.final_handled.load(Ordering::SeqCst) {
+                    return;
+                }
                 context.latest_revision.store(revision, Ordering::SeqCst);
                 if let Ok(mut latest_text) = context.latest_text.lock() {
                     *latest_text = text.clone();
@@ -1760,12 +1870,14 @@ fn start_device_voice_context(
                 if let Ok(mut latest_confidence) = context.latest_confidence.lock() {
                     *latest_confidence = confidence;
                 }
-                if let Ok(composer) = context.composer.lock() {
-                    if let Some(composer) = composer.as_ref() {
-                        if let Err(error) = composer.update(revision, &text) {
-                            context.composer_visible.store(false, Ordering::SeqCst);
-                            if let Ok(mut composer_error) = context.composer_error.lock() {
-                                *composer_error = error;
+                if agent_streams_voice_draft(&context.target.agent_id) {
+                    if let Ok(composer) = context.composer.lock() {
+                        if let Some(composer) = composer.as_ref() {
+                            if let Err(error) = composer.update(revision, &text) {
+                                context.composer_visible.store(false, Ordering::SeqCst);
+                                if let Ok(mut composer_error) = context.composer_error.lock() {
+                                    *composer_error = error;
+                                }
                             }
                         }
                     }
@@ -1777,6 +1889,7 @@ fn start_device_voice_context(
                 text,
                 confidence,
             } => {
+                record_device_voice_timing(&context, "asr_final", !text.trim().is_empty());
                 if text.trim().is_empty() {
                     fail_device_voice_context(&context, "火山引擎云端识别未检测到有效语音");
                 } else {
@@ -1847,6 +1960,7 @@ fn finish_device_voice_context(completed: usb_audio::CompletedUsbAudio) {
         cancel_device_voice_context(&context, "completed audio did not match active utterance");
         return;
     }
+    record_device_voice_timing(&context, "audio_end", !completed.pcm.is_empty());
     if completed.pcm.is_empty() {
         fail_device_voice_context(&context, "设备没有返回可识别的麦克风音频");
         return;
@@ -2302,6 +2416,8 @@ fn handle_incoming_usb_message(
     payload: serde_json::Value,
 ) {
     resolve_button_config_ack(&topic, &payload);
+    music_player::observe_capture(&topic,&payload);
+    if topic == "media/event" { music_player::device_event(&payload); return; }
 
     // 实时对话进行中：设备麦克风流归实时对话，不进 PTT 语音输入链路。
     if (topic.starts_with("audio/") || topic == "protocol/ack") && realtime_chat::route_device_audio(&topic, &payload) {
@@ -2634,7 +2750,7 @@ const BRIDGE_LAUNCH_AGENT_LABEL: &str = "com.petmanager.status-bridge";
 const BRIDGE_WINDOWS_STARTUP_SCRIPT_NAME: &str = "Pet Manager Status Bridge.cmd";
 const USB_STATE_MAX_AGE_MS: u64 = 10 * 60 * 1000;
 const USB_BRIDGE_SCAN_MAX_FILES: usize = 64;
-const KNOWN_USB_STATE_SOURCES: [&str; 4] = ["claude-code", "codex", "openclaw", "mimocode"];
+const KNOWN_USB_STATE_SOURCES: [&str; 5] = ["claude-code", "codex", "openclaw", "mimocode", "workbuddy"];
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
@@ -4563,6 +4679,7 @@ fn ensure_bridge_runtime_blocking(
         .lock()
         .map_err(|_| "Bridge 生命周期锁异常，请重启 Pet Manager 后重试。".to_string())?;
     let force_restart = input.unwrap_or_default().force_restart;
+    let lifecycle_started = Instant::now();
     let config_path = get_bridge_profile_path()?;
     let raw_profile = read_bridge_profile(&config_path)?.unwrap_or_default();
     // Check if the profile was explicitly saved (has a real desktop_device_id),
@@ -4631,6 +4748,14 @@ fn ensure_bridge_runtime_blocking(
         stop_managed_bridge(&runtime_paths.pid_path);
         stop_legacy_bridge_runtime();
         thread::sleep(Duration::from_millis(180));
+        realtime_chat_log::record(
+            "",
+            "bridge_lifecycle",
+            serde_json::json!({
+                "stage": "stopped_for_restart",
+                "elapsedMs": lifecycle_started.elapsed().as_millis() as u64,
+            }),
+        );
     }
 
     stop_legacy_bridge_runtime();
@@ -4721,6 +4846,15 @@ fn ensure_bridge_runtime_blocking(
         }
     }
 
+    realtime_chat_log::record(
+        "",
+        "bridge_lifecycle",
+        serde_json::json!({
+            "stage": if force_restart { "restart_done" } else { "ensure_done" },
+            "ok": running,
+            "elapsedMs": lifecycle_started.elapsed().as_millis() as u64,
+        }),
+    );
     Ok(build_bridge_runtime_status(
         &profile,
         &runtime_paths,
@@ -5100,17 +5234,20 @@ struct AgentDiscoveryResponse {
 fn get_full_shell_path() -> Option<String> {
     #[cfg(unix)]
     {
-        let shell = env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-        let output = std::process::Command::new(&shell)
-            .args(["-l", "-c", "echo $PATH"])
-            .output()
-            .ok()?;
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() {
-            None
-        } else {
-            Some(path)
-        }
+        // A login shell can take seconds (nvm/conda profiles) and was spawned
+        // for every CLI lookup and Bridge launch; resolve it once per run.
+        static LOGIN_SHELL_PATH: OnceLock<Option<String>> = OnceLock::new();
+        LOGIN_SHELL_PATH
+            .get_or_init(|| {
+                let shell = env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+                let output = std::process::Command::new(&shell)
+                    .args(["-l", "-c", "echo $PATH"])
+                    .output()
+                    .ok()?;
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                (!path.is_empty()).then_some(path)
+            })
+            .clone()
     }
     #[cfg(windows)]
     {
@@ -5162,17 +5299,24 @@ fn get_full_path_from_registry() -> Option<String> {
 /// Discover npm's global bin directory by running `npm config get prefix`.
 /// Returns `<prefix>/bin` on unix, `<prefix>` on Windows (npm puts .cmd there directly).
 fn get_npm_global_bin() -> Option<PathBuf> {
-    let npm_name = if cfg!(windows) { "npm.cmd" } else { "npm" };
-    let output = command_for_host(npm_name)
-        .args(["config", "get", "prefix"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if prefix.is_empty() {
-        return None;
-    }
+    // `npm config get prefix` costs ~2 s on Windows and ran for every CLI
+    // lookup, i.e. twice per Bridge restart on each Agent follow switch. The
+    // configured prefix does not change while the app runs; cache only the
+    // prefix and keep checking the directory so later global installs appear.
+    static NPM_PREFIX: OnceLock<Option<String>> = OnceLock::new();
+    let prefix = NPM_PREFIX
+        .get_or_init(|| {
+            let npm_name = if cfg!(windows) { "npm.cmd" } else { "npm" };
+            let output = command_for_host(npm_name)
+                .args(["config", "get", "prefix"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+                .ok()?;
+            let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (!prefix.is_empty()).then_some(prefix)
+        })
+        .clone()?;
     let bin_dir = if cfg!(windows) {
         PathBuf::from(&prefix)
     } else {
@@ -5836,6 +5980,40 @@ fn detect_mimocode() -> DetectedAgent {
     }
 }
 
+fn workbuddy_config_dir(home: &Path) -> PathBuf {
+    std::env::var("WORKBUDDY_CONFIG_DIR").ok().filter(|s| !s.trim().is_empty())
+        .map(|s| PathBuf::from(s.trim())).unwrap_or_else(|| home.join(".workbuddy"))
+}
+
+fn detect_workbuddy() -> DetectedAgent {
+    let home = get_home_dir().unwrap_or_default();
+    let root = workbuddy_config_dir(&home);
+    let mut apps: Vec<PathBuf> = Vec::new();
+    #[cfg(target_os = "macos")]
+    apps.extend([PathBuf::from("/Applications/WorkBuddy.app"), home.join("Applications/WorkBuddy.app")]);
+    #[cfg(windows)]
+    {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") { apps.push(PathBuf::from(local).join("Programs/WorkBuddy/WorkBuddy.exe")); }
+        if let Some(programs) = std::env::var_os("ProgramFiles") { apps.push(PathBuf::from(programs).join("WorkBuddy/WorkBuddy.exe")); }
+    }
+    if let Some(dir) = std::env::var_os("WORKBUDDY_INSTALL_DIR") {
+        apps.push(PathBuf::from(dir).join(if cfg!(windows) { "WorkBuddy.exe" } else { "WorkBuddy" }));
+    }
+    let app = apps.into_iter().find(|p| p.exists());
+    let detected = app.is_some() || root.is_dir();
+    let ready = detected && root.is_dir();
+    DetectedAgent {
+        id: "workbuddy".into(), label: "WorkBuddy".into(), detected, ready,
+        status: if ready { "ready" } else if detected { "needs_setup" } else { "not_found" }.into(),
+        detail: if ready { "支持形象与任务状态跟随；启用后自动安装状态 Hook，暂不支持语音输入" }
+            else if detected { "已安装 WorkBuddy；请先启动一次，再重新扫描并启用状态跟随" }
+            else { "未检测到 WorkBuddy" }.into(),
+        command_path: app.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+        config_path: root.join("settings.json").to_string_lossy().into_owned(),
+        activity_path: String::new(), can_sync_hook: ready,
+    }
+}
+
 fn detect_local_agents_inner() -> Result<AgentDiscoveryResponse, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -5847,6 +6025,7 @@ fn detect_local_agents_inner() -> Result<AgentDiscoveryResponse, String> {
         detect_codex(),
         detect_openclaw(),
         detect_mimocode(),
+        detect_workbuddy(),
     ];
 
     Ok(AgentDiscoveryResponse {
@@ -6738,7 +6917,8 @@ async fn usb_sync_appearance(
         let sync_result = match sync_runtime {
             UsbAppearanceSyncRuntime::EspP4 => {
                 if serial_connected {
-                    worker_mgr.sync_appearance_p4(
+                    let stage_emitter = emitter.clone();
+                    worker_mgr.sync_appearance_p4_with_stages(
                         &dir,
                         &data_dir,
                         &expected_board_device_id,
@@ -6753,6 +6933,10 @@ async fn usb_sync_appearance(
                                     "bytesTotal": bytes_total,
                                 }),
                             );
+                        },
+                        move |stage| {
+                            let _ = stage_emitter
+                                .emit("usb-sync-progress", serde_json::json!({ "stage": stage }));
                         },
                     )
                 } else {
@@ -6857,6 +7041,10 @@ struct SkillTarget {
 }
 
 const SKILL_TARGETS: &[SkillTarget] = &[
+    SkillTarget {
+        agent: "WorkBuddy",
+        home_dir: ".workbuddy",
+    },
     SkillTarget {
         agent: "ChatGPT（Codex）",
         home_dir: ".codex",
@@ -7029,7 +7217,11 @@ async fn install_widget_skill(
     let mut skipped: Vec<SkillSkipEntry> = Vec::new();
 
     for target in SKILL_TARGETS {
-        let home_subdir = home.join(target.home_dir);
+        let home_subdir = if target.agent == "WorkBuddy" {
+            workbuddy_config_dir(&home)
+        } else {
+            home.join(target.home_dir)
+        };
         if !home_subdir.exists() {
             skipped.push(SkillSkipEntry {
                 agent: target.agent.to_string(),
@@ -8136,6 +8328,7 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
         "屏幕点击" => ("屏幕区域", "screen.region.tap"),
         "屏幕长按" => ("屏幕区域", "screen.region.long_press"),
         "SW1 短按" => ("SW1", "button.sw1.short_press"),
+        "SW1 长按" => ("SW1", "button.sw1.long_press"),
         "SW2 短按" => ("SW2", "button.sw2.short_press"),
         "SW3 短按" => ("SW3", "button.sw3.short_press"),
         "摇杆中按短按" => ("前方摇杆", "button.encoder.short_press"),
@@ -8403,6 +8596,7 @@ fn normalize_agent_id(value: &str) -> Option<String> {
         "claude" | "claude-code" => Some("claude-code".to_string()),
         "openclaw" => Some("openclaw".to_string()),
         "mimo" | "mimo-code" | "mimocode" => Some("mimocode".to_string()),
+        "workbuddy" | "work-buddy" => Some("workbuddy".to_string()),
         "copilot" | "copilot-cli" => Some("copilot-cli".to_string()),
         "gemini" | "gemini-cli" => Some("gemini-cli".to_string()),
         "cursor" => Some("cursor".to_string()),
@@ -8872,6 +9066,7 @@ fn score_usb_source(source: &str) -> i32 {
         "codex" => 30,
         "claude-code" => 20,
         "mimocode" => 15,
+        "workbuddy" => 15,
         "openclaw" => 10,
         _ => 0,
     }
@@ -8923,6 +9118,7 @@ fn usb_source_display_name(source: &str) -> String {
         "claude" | "claude-code" => "Claude".to_string(),
         "openclaw" => "OpenClaw".to_string(),
         "mimo" | "mimo-code" | "mimocode" => "MiMoCode".to_string(),
+        "workbuddy" | "work-buddy" => "WorkBuddy".to_string(),
         other if !other.is_empty() => other.to_string(),
         _ => "桌宠".to_string(),
     }
@@ -9780,10 +9976,19 @@ pub fn run() {
                 eprintln!("[stocks] {error}");
             }
             stock_quotes::start(usb_for_auto.clone());
+            todos::configure(app.path().app_data_dir()?);
+            local_widget_data::start(usb_for_auto.clone());
+            music_player::configure(app.path().app_data_dir()?,usb_for_auto.clone());
             smart_home::configure_storage_dir(app.path().app_data_dir()?)
                 .map_err(std::io::Error::other)?;
             realtime_chat_log::configure(&app.path().app_local_data_dir()?)
                 .map_err(std::io::Error::other)?;
+            // Warm the cached CLI search inputs off the UI thread so the first
+            // Bridge restart (Agent follow switch) does not pay for them.
+            thread::spawn(|| {
+                let _ = get_npm_global_bin();
+                let _ = get_full_shell_path();
+            });
             let handle = app.handle().clone();
             start_usb_auto_connect(usb_for_auto, handle.clone());
             start_p4_ready_migration(handle.clone());
@@ -9817,6 +10022,11 @@ pub fn run() {
         .manage(usb_manager)
         .invoke_handler(tauri::generate_handler![
             stock_quotes::stock_watchlist_status,
+            local_tools::local_tool_execute,
+            local_tools::local_tool_definitions,
+            music_player::music_player_request,
+            music_player::music_player_import,
+            local_widget_data::local_widget_snapshot,
             stock_quotes::stock_watchlist_save,
             stock_quotes::stock_watchlist_refresh,
             stock_quotes::stock_quote_lookup,
@@ -9850,6 +10060,7 @@ pub fn run() {
             audio_bridge_signal,
             button_config_signal,
             check_codex_accessibility_permission,
+            write_workbuddy_voice_test_draft,
             request_codex_accessibility_permission,
             set_p4_session_binding,
             dispatch_remote_cli_binding,
@@ -10170,6 +10381,7 @@ fn selected_agent_to_channel_id(value: &str) -> String {
         "codex" => "codex".to_string(),
         "openclaw" => "openclaw".to_string(),
         "mimocode" => "mimocode".to_string(),
+        "workbuddy" => "workbuddy".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
     }
 }
@@ -10180,6 +10392,7 @@ fn normalize_pet_channel_id(value: String) -> String {
         "claude" => "claude".to_string(),
         "openclaw" => "openclaw".to_string(),
         "mimocode" => "mimocode".to_string(),
+        "workbuddy" => "workbuddy".to_string(),
         "cursor" => "cursor".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
     }
@@ -11321,6 +11534,14 @@ fn stop_managed_process(pid_path: &Path) {
 }
 
 fn stop_process(pid: u32) -> bool {
+    // On Windows `taskkill` without /F only posts WM_CLOSE, which windowless
+    // Node/PowerShell children never handle ("can only be terminated
+    // forcefully"). The soft wait therefore always ran its full ~5 s before
+    // the forced kill, stalling every Agent follow switch.
+    if cfg!(windows) {
+        terminate_process_force(pid);
+        return wait_for_process_exit(pid, 25, 40);
+    }
     terminate_process_soft(pid);
     if wait_for_process_exit(pid, 12, 120) {
         return true;
@@ -11381,27 +11602,28 @@ fn process_exists_platform(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+// Query the process handle directly. Spawning `tasklist` costs ~300 ms per
+// call on Windows, and exit waits poll this repeatedly.
 #[cfg(windows)]
 fn process_exists_platform(pid: u32) -> bool {
-    let pid_text = pid.to_string();
-    command_for_host("tasklist")
-        .args(["/FO", "CSV", "/NH", "/FI", &format!("PID eq {pid}")])
-        .output()
-        .map(|output| {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout.lines().any(|line| {
-                let trimmed = line.trim();
-                if !trimmed.starts_with('\"') {
-                    return false;
-                }
-                let columns: Vec<&str> = trimmed.trim_matches('\"').split("\",\"").collect();
-                columns
-                    .get(1)
-                    .map(|value| value.trim() == pid_text.as_str())
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_ACCESS_DENIED, STILL_ACTIVE,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid == 0 {
+        return false;
+    }
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        // A live process owned by another security context still exists.
+        return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+    }
+    let mut exit_code = 0_u32;
+    let queried = unsafe { GetExitCodeProcess(handle, &mut exit_code) } != 0;
+    unsafe { CloseHandle(handle) };
+    !queried || exit_code == STILL_ACTIVE as u32
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -11770,6 +11992,61 @@ fn current_timestamp_ms() -> u64 {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_bridge_stop_kills_windowless_node_without_the_soft_wait() {
+        assert!(process_exists(std::process::id()));
+        assert!(!process_exists(0));
+        // A windowless console child ignores taskkill without /F, like the Bridge.
+        let mut child = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert!(process_exists(pid));
+        let started = Instant::now();
+        assert!(stop_process(pid));
+        assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
+        assert!(!process_exists(pid));
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn unsupported_mimo_voice_is_rejected_before_asr_without_disabling_other_agents() {
+        assert!(device_voice_platform_block_reason("mimocode", false).is_some());
+        assert!(device_voice_platform_block_reason("mimocode", true).is_none());
+        for id in ["codex", "claude-code", "openclaw", "workbuddy"] {
+            assert!(device_voice_platform_block_reason(id, false).is_none());
+        }
+        let source = include_str!("lib.rs");
+        let startup = source.split("fn start_device_voice_context(").nth(1).unwrap().split("fn ").next().unwrap();
+        assert!(startup.find("device_voice_platform_block_reason").unwrap() < startup.find("pc_audio::StreamingSpeechRecognizer::start").unwrap());
+    }
+
+    #[test]
+    fn workbuddy_channel_has_isolated_current_visible_composer() {
+        assert_eq!(normalize_agent_id("WorkBuddy").as_deref(), Some("workbuddy"));
+        assert_eq!(normalize_agent_id("work-buddy").as_deref(), Some("workbuddy"));
+        assert_eq!(selected_agent_to_channel_id("workbuddy"), "workbuddy");
+        assert_eq!(normalize_pet_channel_id("WorkBuddy".into()), "workbuddy");
+        assert_eq!(usb_source_display_name("workbuddy"), "WorkBuddy");
+        assert!(KNOWN_USB_STATE_SOURCES.contains(&"workbuddy"));
+        assert!(agent_uses_visible_composer("workbuddy"));
+        assert!(should_use_current_visible_session(false, false, "workbuddy"));
+        assert!(!should_locate_desktop_session(true, "workbuddy"));
+        assert!(!device_voice_bound_target_is_addressable(false, &P4SessionBinding {
+            agent_id: "workbuddy".into(), session_id: "id".into(), session_title: "title".into(),
+            session_title_unique: true, ..P4SessionBinding::default()
+        }));
+        let detected = detect_workbuddy();
+        assert_eq!(detected.id, "workbuddy");
+        assert_eq!(detected.label, "WorkBuddy");
+        assert!(detected.config_path.ends_with("settings.json"));
+    }
+
     #[test]
     fn default_audio_cues_refresh_without_overwriting_uploaded_cues() {
         let temp = tempfile::tempdir().unwrap();
@@ -11946,6 +12223,7 @@ mod tests {
 
     #[test]
     fn ssh_component_override_accepts_combined_encoder_rotation() {
+        assert_eq!(canonical_binding_for_control("SW1 长按"), Some(("SW1", "button.sw1.long_press")));
         assert_eq!(
             canonical_binding_for_control("旋钮双向旋转"),
             Some(("前方旋钮", "knob.rotate_cw / knob.rotate_ccw"))
@@ -12445,6 +12723,15 @@ mod tests {
         assert!(source.contains("\"draft_ready\""));
         assert!(source.contains("bridge.confirm(revision, &text)"));
         assert!(!composer.contains("pub fn submit(&self"));
+        assert!(source.contains("bridge.update_confirmed(revision, &text)"));
+    }
+
+    #[test]
+    fn workbuddy_only_receives_final_voice_text() {
+        assert!(!agent_streams_voice_draft("workbuddy"));
+        assert!(agent_streams_voice_draft("codex"));
+        assert!(agent_streams_voice_draft("claude-code"));
+        assert!(!agent_streams_voice_draft("mimocode"));
     }
 
     #[test]
@@ -12898,7 +13185,8 @@ mod tests {
             vec![
                 "codex".to_string(),
                 "mimocode".to_string(),
-                "openclaw".to_string()
+                "openclaw".to_string(),
+                "workbuddy".to_string()
             ]
         );
     }

@@ -20,8 +20,11 @@ pub fn error_kind(error: &str) -> &'static str {
     else if text.contains("401") || text.contains("鉴权") { "authentication" }
     else if text.contains("403") || text.contains("授权") { "resource_permission" }
     else if text.contains("404") { "endpoint_or_model" }
+    else if text.contains("持续繁忙") { "device_transfer_busy" }
     else if text.contains("timeout") || text.contains("超时") { "timeout" }
     else if text.contains("配置") { "configuration" }
+    else if text.contains("sessionfailed") { "tts_session_rejected" }
+    else if text.contains("协议错误") || text.contains("sessionstarted") { "tts_protocol" }
     else { "service_or_transport" }
 }
 
@@ -29,7 +32,7 @@ fn metadata(details: Value) -> Value {
     let mut out = serde_json::Map::new();
     // Call sites supply these diagnostic fields only. Unknown strings (including provider bodies)
     // cannot accidentally become persistent logs.
-    for key in ["bytes", "frames", "turn", "chars", "elapsedMs", "bufferedMs", "uptimeMs", "seq", "ok", "count", "steps", "hintFrames", "rejectedFrames", "peakRms", "replyFrames", "argIndex", "expectedArgs", "actualArgs"] {
+    for key in ["bytes", "frames", "turn", "chars", "elapsedMs", "bufferedMs", "positionMs", "generation", "uptimeMs", "seq", "ok", "count", "steps", "hintFrames", "rejectedFrames", "peakRms", "replyFrames", "argIndex", "expectedArgs", "actualArgs"] {
         if let Some(v) = details.get(key).filter(|v| v.is_number() || v.is_boolean()) { out.insert(key.into(), v.clone()); }
     }
     for key in ["state", "reason", "errorKind", "stage"] {
@@ -40,6 +43,21 @@ fn metadata(details: Value) -> Value {
     for key in ["version", "firmware"] {
         if let Some(v) = details.get(key).and_then(Value::as_str) {
             if v.len() <= 48 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') { out.insert(key.into(), json!(v)); }
+        }
+    }
+    // Exact enums only: neither raw tool arguments nor arbitrary operation names
+    // may leak task titles, dates, identifiers or model-supplied text.
+    for (key, allowed) in [
+        ("tool", &["todo_manage", "computer_status", "media_player"][..]),
+        ("operation", &["list", "add", "update", "complete", "reopen", "delete", "search", "status", "play", "enqueue", "next", "previous", "pause", "resume", "toggle", "stop", "seek", "volume", "mode", "move", "remove"][..]),
+    ] {
+        if let Some(v) = details.get(key).and_then(Value::as_str).filter(|v| allowed.contains(v)) {
+            out.insert(key.into(), json!(v));
+        }
+    }
+    for key in ["trackRef","requestedTrackRef"] {
+        if let Some(v)=details[key].as_str().filter(|v|v.len()==16 && v.bytes().all(|b|b.is_ascii_hexdigit())) {
+            out.insert(key.into(),json!(v));
         }
     }
     Value::Object(out)
@@ -70,6 +88,15 @@ fn append(path: &Path, session: &str, event: &str, details: Value) -> std::io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_tool_diagnostics_include_only_fixed_operation_enums() {
+        assert_eq!(metadata(json!({"tool":"todo_manage","operation":"add","count":1,"ok":true,"title":"PRIVATE","dueAt":"PRIVATE","id":"PRIVATE"})),
+            json!({"tool":"todo_manage","operation":"add","count":1,"ok":true}));
+        assert_eq!(metadata(json!({"tool":"private_title","operation":"private_title"})),json!({}));
+        assert_eq!(metadata(json!({"tool":"media_player","operation":"play","generation":3,
+            "trackRef":"aabbccddeeff0011","requestedTrackRef":"netease:123","key":"netease:123","title":"PRIVATE"})),
+            json!({"tool":"media_player","operation":"play","generation":3,"trackRef":"aabbccddeeff0011"}));
+    }
     #[test]
     fn argument_diagnostics_never_include_values_or_device_ids() {
         assert_eq!(metadata(json!({"argIndex":1,"expectedArgs":2,"actualArgs":1,

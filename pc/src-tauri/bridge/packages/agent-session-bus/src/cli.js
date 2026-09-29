@@ -17,6 +17,7 @@ const {
   CodexAdapter,
   OpenClawAdapter,
   MiMoCodeAdapter,
+  WorkBuddyAdapter,
 } = require("./index");
 const { defaultLog, withScope } = require("./log");
 const { readBool } = require("./env");
@@ -37,6 +38,7 @@ async function main() {
   adapters.push(new CodexAdapter({ log: withScope(defaultLog, "codex") }));
   adapters.push(new OpenClawAdapter({ log: withScope(defaultLog, "openclaw") }));
   adapters.push(new MiMoCodeAdapter({ log: withScope(defaultLog, "mimocode") }));
+  adapters.push(new WorkBuddyAdapter({ log: withScope(defaultLog, "workbuddy") }));
 
   const bus = createAgentSessionBus({ adapters, log: withScope(defaultLog, "bus") });
   const port = await bus.start();

@@ -60,6 +60,7 @@ ALLOWED_SCENE_SHAPES = {
     "circle", "capsule", "triangle", "diamond", "heart", "cloud", "coin", "character",
 }
 ALLOWED_SPRITES = {
+    "music",
     "target",
     "trophy",
     "star",
@@ -123,6 +124,9 @@ STRING_VAR_MAX_BYTES = 63
 WIDGET_INT_MIN = -1_000_000_000
 WIDGET_INT_MAX = 1_000_000_000
 DEFAULT_CAPABILITIES = {
+    "widgetInstrument": "p4-instrument-v1",
+    "widgetMedia": "p4-media-v1",
+    "widgetLyrics": "p4-lrc-v1",
     "widgetData": "p4-data-list-v1",
     "widgetRuntime": RUNTIME_ENGINE,
     "widgetRuntimes": [RUNTIME_ENGINE_V3, RUNTIME_ENGINE],
@@ -499,6 +503,7 @@ def validate_dashboard(
     *,
     runtime_dashboard: bool,
     errors: list[str],
+    native_surface: bool = False,
 ) -> None:
     if not isinstance(dashboard, dict):
         errors.append(f"{location} 必须是对象")
@@ -538,6 +543,8 @@ def validate_dashboard(
     }
     for field, allowed in visual_sets.items():
         values = string_leaves(dashboard.get(field))
+        if native_surface and field in {"visualPalette", "visualSprite"} and not values:
+            continue
         if not values:
             errors.append(f"{location}.{field} 缺失")
             continue
@@ -913,6 +920,29 @@ def validate_runtime(
         errors.append(f"目标能力不支持统一组件运行时: {runtime_engine}")
     variables = runtime.get("vars")
     data = runtime.get("data")
+    if "instrument" in runtime:
+        instrument = runtime["instrument"]
+        if (not isinstance(instrument, dict) or set(instrument) != {"source", "effect_volume", "ambience_volume"}
+            or instrument.get("source") != "percussion.wooden-fish"
+            or any(type(instrument.get(k)) is not int or not 0 <= instrument[k] <= 100 for k in ("effect_volume", "ambience_volume"))
+            or runtime_engine != RUNTIME_ENGINE or kind != "tool"
+            or variables != {} or runtime.get("tick", []) != []
+            or any(k in runtime for k in ("scene", "game", "data", "media", "pages"))
+            or runtime.get("transitions") != [{"on": "instrument.strike", "from": "*"}]):
+            errors.append("instrument 仅支持受控木鱼 tool、0–100 整数音量和单个 instrument.strike 动作")
+        if capabilities.get("widgetInstrument") != "p4-instrument-v1":
+            errors.append("目标固件不支持 p4-instrument-v1，请先升级固件")
+    if "media" in runtime:
+        if variables != {} or runtime.get("tick", []) != [] or "pages" in runtime:
+            errors.append("media 不使用自定义变量、tick 或 pages，状态来自真实媒体服务")
+        if runtime.get("media") != {"source": "audio.player"} or runtime_engine != RUNTIME_ENGINE or kind != "tool" or any(k in runtime for k in ("scene", "game", "data")):
+            errors.append("media 只支持 v4 工具的 audio.player，不能混用 scene/game/data")
+        if capabilities.get("widgetMedia") != "p4-media-v1":
+            errors.append("目标固件不支持 p4-media-v1，请先升级固件")
+        media_actions = {"media.toggle", "media.queue", "media.previous", "media.next", "media.up", "media.down", "media.select", "media.lyrics"}
+        for rule in runtime.get("transitions", []):
+            if not isinstance(rule, dict) or set(rule) != {"on", "from"} or rule.get("from") != "*" or rule.get("on") not in media_actions:
+                errors.append("media transition 仅接受受控 on 动作，不接受额外效果")
     if "data" in runtime:
         if (
             not only_keys(data, {"source", "page_var"})
@@ -1060,6 +1090,7 @@ def validate_runtime(
         kind,
         runtime_dashboard=True,
         errors=errors,
+        native_surface=isinstance(runtime.get("instrument"), dict),
     )
     if compact_json_size(runtime) > 4095:
         errors.append(f"runtime/widget.json 紧凑后超过 4095 字节: {compact_json_size(runtime)}")
@@ -1153,6 +1184,10 @@ def validate_buttons(
                 errors.append(f"buttons.json[{index}].{field} 必须是非空字符串")
         action = binding.get("action")
         event = binding.get("event")
+        media_lyric_key = (isinstance(runtime, dict) and runtime.get("media") == {"source": "audio.player"}
+                           and action == "media.lyrics" and event == "button.sw1.long_press")
+        if action == "media.lyrics" and capabilities.get("widgetLyrics") != "p4-lrc-v1":
+            errors.append("歌词模式需要 widgetLyrics=p4-lrc-v1，请先升级固件")
         label = binding.get("label")
         if isinstance(action, str) and action:
             actions.append(action)
@@ -1163,9 +1198,9 @@ def validate_buttons(
         if isinstance(event, str):
             if event == DEFAULT_GLOBAL_EXIT_EVENT:
                 errors.append("button.sw3.short_press 是默认全局退出键，组件不得占用")
-            if SW_HOLD_PATTERN.fullmatch(event):
+            if SW_HOLD_PATTERN.fullmatch(event) and not media_lyric_key:
                 errors.append(f"SW1/SW2/SW3 不支持长按或 hold: {event}")
-            if event not in ALLOWED_EVENTS:
+            if event not in ALLOWED_EVENTS and not media_lyric_key:
                 errors.append(f"buttons.json[{index}].event 不受支持: {event}")
             if event.startswith("screen.") and not touch_ready:
                 errors.append(f"目标设备未声明触控可用，不能绑定 {event}")
@@ -1228,6 +1263,7 @@ def validate_widget(
             kind,
             runtime_dashboard=False,
             errors=errors,
+            native_surface=isinstance(runtime, dict) and isinstance(runtime.get("instrument"), dict),
         )
     transition_actions = validate_runtime(runtime, kind, widget_dir, capabilities, errors)
     validate_buttons(buttons, transition_actions, capabilities, runtime, errors)

@@ -22,6 +22,7 @@ const GENERIC_SESSION_TITLES = new Set([
   "Claude 会话",
   "Codex 会话",
   "MiMoCode 会话",
+  "WorkBuddy 会话",
   "OpenClaw 会话",
 ]);
 

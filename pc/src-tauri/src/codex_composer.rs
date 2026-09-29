@@ -1,5 +1,5 @@
 /*
- * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
+ * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, a current-visible WorkBuddy composer, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
  * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded composer lookup, per-recording appended draft updates, and explicit-confirm submission without automatic send on ASR finalization.
  * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, stale-focus recovery, and Windows minimized-Claude restoration.
  * [Sync] If this file changes, update pc/.folder.md.
@@ -35,6 +35,60 @@ const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 10;
 
 #[cfg(windows)]
 const WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
+
+#[cfg(any(windows, test))]
+fn composer_startup_timeout_message(agent: &str, stage: &str) -> String {
+    let label = match agent {
+        "workbuddy" => "WorkBuddy",
+        "claude" | "claude-code" => "Claude",
+        "codex" => "ChatGPT（Codex）",
+        _ => "Agent",
+    };
+    format!("{label} 输入框准备超时（阶段：{stage}）；尚未写入或发送文字")
+}
+
+// Progress contains fixed stage identifiers only, never editor text or paths.
+// It is not a command acknowledgement and must not complete the ready wait.
+#[cfg(any(windows, test))]
+fn read_windows_composer_response(
+    reader: &mut impl std::io::BufRead,
+    mut on_progress: impl FnMut(&'static str),
+) -> Result<Value, String> {
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line)
+            .map_err(|error| format!("failed to read visible Agent composer response: {error}"))?;
+        if line.trim().is_empty() {
+            return Err("Visible Agent composer bridge closed without a response".into());
+        }
+        let value = serde_json::from_str::<Value>(&line)
+            .map_err(|_| "Invalid visible Agent composer response".to_string())?;
+        if value.get("phase").and_then(Value::as_str) == Some("progress") {
+            let stage = match value.get("stage").and_then(Value::as_str) {
+                Some("load_ui") => "加载 Windows 辅助功能组件",
+                Some("compile_native") => "初始化 Windows 输入桥",
+                Some("enable_accessibility") => "请求 WorkBuddy 辅助功能界面树",
+                Some("ready_runtime") => "等待输入框定位命令",
+                Some("resolve_window") => "定位目标应用窗口",
+                Some("focused") => "读取当前聚焦输入框",
+                Some("control") => "查找可写输入框",
+                Some("raw") => "读取 Chromium 辅助功能树",
+                Some("probe") => "检查输入区域",
+                Some("validate") => "校验输入框归属和内容",
+                Some("focus") => "聚焦目标输入框",
+                _ => return Err("Unknown visible Agent composer progress stage".into()),
+            };
+            on_progress(stage);
+            continue;
+        }
+        return match value.get("ok").and_then(Value::as_bool) {
+            Some(true) => Ok(value),
+            Some(false) => Err(value.get("error").and_then(Value::as_str)
+                .unwrap_or("Visible Agent composer update failed").to_string()),
+            None => Err("Invalid visible Agent composer acknowledgement".into()),
+        };
+    }
+}
 
 #[cfg(target_os = "macos")]
 const CODEX_COMPOSER_STARTUP_TIMEOUT_SECS: u64 = 8;
@@ -405,13 +459,15 @@ fn receive_latest_composer_command(
         Some(command) => command,
         None => receiver.recv().ok()?,
     };
-    if composer_command_kind(&command) != "update" {
+    if composer_command_kind(&command) != "update" || command.response.is_some() {
         return Some(command);
     }
 
     while let Ok(next) = receiver.try_recv() {
         if composer_command_kind(&next) == "update" {
             command = next;
+            // A readback-acknowledged final update is a barrier, never discard it.
+            if command.response.is_some() { break; }
         } else {
             *pending = Some(next);
             break;
@@ -434,6 +490,24 @@ pub struct CodexComposerBridge {
 
 #[cfg(any(windows, target_os = "macos"))]
 impl CodexComposerBridge {
+    /// Success means the editor acknowledged this exact final revision, not just
+    /// that it entered the worker queue. No automatic submission or retry.
+    pub fn update_confirmed(&self, revision: u64, text: &str) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        if self.failed.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
+            return Err("Visible Agent composer is unavailable".to_string());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.sender.send(ComposerCommand {
+            payload: json!({ "kind": "update", "revision": revision, "text": text }),
+            started: None,
+            response: Some(tx),
+        }).map_err(|_| "Visible Agent composer bridge is closed".to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(8))
+            .map_err(|_| "语音草稿写入结果未确认，请检查输入框；不会自动重试或发送".to_string())??;
+        Ok(())
+    }
+
     /// Drain this recording's queued writes before a new recording reads its base.
     /// Closing without cancellation must never erase the previous voice segment.
     pub fn preserve_draft(&self) -> Result<(), String> {
@@ -463,6 +537,7 @@ impl CodexComposerBridge {
         let expected_names: &[&str] = match agent_id.trim() {
             "codex" => &["chatgpt.exe", "codex.exe"],
             "claude-code" => &["claude.exe"],
+            "workbuddy" => &["workbuddy.exe"],
             _ => return false,
         };
         unsafe {
@@ -505,9 +580,10 @@ impl CodexComposerBridge {
         let agent = match agent_id.trim() {
             "codex" => "codex",
             "claude-code" => "claude",
+            "workbuddy" => "workbuddy",
             _ => {
                 return Err(
-                    "Current visible composer requires ChatGPT（Codex） or Claude".to_string(),
+                    "Current visible composer requires ChatGPT（Codex）, Claude or WorkBuddy".to_string(),
                 )
             }
         };
@@ -610,7 +686,7 @@ impl CodexComposerBridge {
         callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
     ) -> Result<Self, String> {
         use std::fs;
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::{BufReader, Write};
         use std::process::Stdio;
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::{mpsc, Arc, Mutex};
@@ -620,10 +696,13 @@ impl CodexComposerBridge {
         let session_id = session_id.trim();
         let deep_link = deep_link.trim();
         let session_title = session_title.trim();
-        if !matches!(agent, "codex" | "claude") {
+        if !matches!(agent, "codex" | "claude" | "workbuddy") {
             return Err("visible composer agent is invalid".to_string());
         }
         let current_visible = purpose == "current_voice";
+        if agent == "workbuddy" && !current_visible {
+            return Err("WorkBuddy 仅向当前可见对话输入，不回退到其他 Agent".into());
+        }
         if !current_visible
             && agent == "claude"
             && (session_id.is_empty() || !valid_claude_desktop_session_id(deep_link))
@@ -641,8 +720,14 @@ impl CodexComposerBridge {
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+function Write-ComposerProgress([string]$stage) {
+  [Console]::Out.WriteLine((@{ phase = 'progress'; stage = $stage } | ConvertTo-Json -Compress))
+  [Console]::Out.Flush()
+}
+Write-ComposerProgress 'load_ui'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Write-ComposerProgress 'compile_native'
 Add-Type @"
 using System;
 using System.Collections.Generic;
@@ -731,6 +816,59 @@ public static class CodexVoiceNative {
 
   [DllImport("user32.dll")]
   public static extern bool IsWindow(IntPtr window);
+
+  [DllImport("user32.dll")]
+  private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+  public static bool IsOwnedWindow(IntPtr parent, IntPtr child) {
+    return parent != IntPtr.Zero && child != IntPtr.Zero &&
+      (parent == child || IsChild(parent, child));
+  }
+
+  public static bool IsForeground(IntPtr window) {
+    return GetForegroundWindow() == window;
+  }
+
+  [DllImport("oleacc.dll", ExactSpelling = true)]
+  private static extern int AccessibleObjectFromWindow(
+    IntPtr window, uint objectId, ref Guid interfaceId, out IntPtr accessible);
+
+  [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern IntPtr SendMessageTimeout(
+    IntPtr window, uint message, UIntPtr wParam, IntPtr lParam,
+    uint flags, uint timeout, out UIntPtr result);
+
+  public static int RequestClientAccessibility(IntPtr parent, IntPtr window, int expectedProcessId) {
+    uint processId;
+    GetWindowThreadProcessId(parent, out processId);
+    if (processId != (uint)expectedProcessId || !IsForeground(parent) ||
+        !IsWindow(window) || !IsOwnedWindow(parent, window)) { return 0; }
+    int responses = 0;
+    var className = new StringBuilder(256);
+    GetClassName(window, className, className.Capacity);
+    if (className.ToString() == "Chrome_RenderWidgetHostHWND") {
+      // Chromium's documented MSAA client-detection object (id 1). It
+      // returns no object: the request asks Chromium to expose web content.
+      // This is WM_GETOBJECT, not a keyboard/mouse event or global setting.
+      UIntPtr result;
+      if (SendMessageTimeout(window, 0x003D, UIntPtr.Zero, new IntPtr(1),
+          0x0001 | 0x0002 | 0x0020, 250, out result) != IntPtr.Zero) {
+        responses |= 2;
+      }
+    }
+    if (!IsForeground(parent) || !IsOwnedWindow(parent, window)) { return responses; }
+    var iid = new Guid("618736E0-3C3D-11CF-810C-00AA00389B71"); // IID_IAccessible
+    IntPtr accessible = IntPtr.Zero;
+    try {
+      // Standard OBJID_CLIENT request also serves Windows versions using
+      // MSAA-to-UIA bridging. A returned interface is NOT a writable editor.
+      int hr = AccessibleObjectFromWindow(window, 0xFFFFFFFC, ref iid, out accessible);
+      if (hr == 0 && accessible != IntPtr.Zero) { responses |= 1; }
+    } finally {
+      if (accessible != IntPtr.Zero) { Marshal.Release(accessible); }
+    }
+    return responses;
+  }
 
   [DllImport("user32.dll", SetLastError = true)]
   private static extern bool SetCursorPos(int x, int y);
@@ -861,7 +999,357 @@ public static class CodexVoiceNative {
     Send(new List<INPUT> { Mouse(MOUSEEVENTF_LEFTDOWN), Mouse(MOUSEEVENTF_LEFTUP) });
   }
 }
+// WorkBuddy (Electron 37) exposes its web content only through Chromium's
+// native UIA provider on the owned Chrome_RenderWidgetHostHWND. The managed
+// System.Windows.Automation client cannot read that provider, and the first
+// managed AutomationElement created in a process registers client-side
+// proxies that hide it from every later UIA request in the same process.
+// WorkBuddy therefore uses UIAutomationCore's COM client only. The wrappers
+// mirror the small AutomationElement surface used by the composer helpers.
+[StructLayout(LayoutKind.Sequential)]
+public struct WorkBuddyUiaPoint {
+  public int X;
+  public int Y;
+}
+
+[ComImport, Guid("30cbe57d-d9d0-452a-ab13-7ac5ac4825ee"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUia {
+  void CompareElements();
+  void CompareRuntimeIds();
+  void GetRootElement();
+  IWorkBuddyUiaElement ElementFromHandle(IntPtr window);
+  IWorkBuddyUiaElement ElementFromPoint(WorkBuddyUiaPoint point);
+  IWorkBuddyUiaElement GetFocusedElement();
+  void GetRootElementBuildCache();
+  void ElementFromHandleBuildCache();
+  void ElementFromPointBuildCache();
+  void GetFocusedElementBuildCache();
+  void CreateTreeWalker();
+  IWorkBuddyUiaTreeWalker GetControlViewWalker();
+  IWorkBuddyUiaTreeWalker GetContentViewWalker();
+  IWorkBuddyUiaTreeWalker GetRawViewWalker();
+}
+
+[ComImport, Guid("4042c624-389c-4afc-a630-9df854a541fc"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaTreeWalker {
+  IWorkBuddyUiaElement GetParentElement(IWorkBuddyUiaElement element);
+  IWorkBuddyUiaElement GetFirstChildElement(IWorkBuddyUiaElement element);
+  IWorkBuddyUiaElement GetLastChildElement(IWorkBuddyUiaElement element);
+  IWorkBuddyUiaElement GetNextSiblingElement(IWorkBuddyUiaElement element);
+}
+
+[ComImport, Guid("d22108aa-8ac5-49a5-837b-37bbb3d7591e"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaElement {
+  void SetFocus();
+  [return: MarshalAs(UnmanagedType.SafeArray, SafeArraySubType = VarEnum.VT_I4)]
+  int[] GetRuntimeId();
+  void FindFirst();
+  void FindAll();
+  void FindFirstBuildCache();
+  void FindAllBuildCache();
+  void BuildUpdatedCache();
+  [return: MarshalAs(UnmanagedType.Struct)]
+  object GetCurrentPropertyValue(int propertyId);
+  void GetCurrentPropertyValueEx();
+  void GetCachedPropertyValue();
+  void GetCachedPropertyValueEx();
+  void GetCurrentPatternAs();
+  void GetCachedPatternAs();
+  [return: MarshalAs(UnmanagedType.IUnknown)]
+  object GetCurrentPattern(int patternId);
+}
+
+[ComImport, Guid("a94cd8b1-0844-4cd6-9d2d-640537ab39e9"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaValuePattern {
+  void SetValue([MarshalAs(UnmanagedType.BStr)] string value);
+  [return: MarshalAs(UnmanagedType.BStr)]
+  string GetCurrentValue();
+  [return: MarshalAs(UnmanagedType.Bool)]
+  bool GetCurrentIsReadOnly();
+}
+
+[ComImport, Guid("32eba289-3583-42c9-9c59-3b6d9a1e9b6a"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaTextPattern {
+  void RangeFromPoint();
+  void RangeFromChild();
+  void GetSelection();
+  void GetVisibleRanges();
+  IWorkBuddyUiaTextRange GetDocumentRange();
+}
+
+[ComImport, Guid("a543cc6a-f4ae-494b-8239-c814481187a8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaTextRange {
+  void Clone();
+  void Compare();
+  void CompareEndpoints();
+  void ExpandToEnclosingUnit();
+  void FindAttribute();
+  void FindText();
+  [return: MarshalAs(UnmanagedType.Struct)]
+  object GetAttributeValue(int attributeId);
+  void GetBoundingRectangles();
+  void GetEnclosingElement();
+  [return: MarshalAs(UnmanagedType.BStr)]
+  string GetText(int maxLength);
+}
+
+[ComImport, Guid("fb377fbe-8ea6-46d5-9c73-6499642d3059"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaInvokePattern {
+  void Invoke();
+}
+
+public sealed class WorkBuddyUiaControlType {
+  public WorkBuddyUiaControlType(int id) { Id = id; }
+  public int Id { get; private set; }
+  public string ProgrammaticName { get { return "ControlType." + Id; } }
+}
+
+public sealed class WorkBuddyUiaRect {
+  public WorkBuddyUiaRect(double left, double top, double width, double height) {
+    Left = left; Top = top; Width = width; Height = height;
+  }
+  public double Left { get; private set; }
+  public double Top { get; private set; }
+  public double Width { get; private set; }
+  public double Height { get; private set; }
+  public double Right { get { return Left + Width; } }
+  public double Bottom { get { return Top + Height; } }
+  public bool IsEmpty { get { return !(Width > 0 && Height > 0); } }
+}
+
+public sealed class WorkBuddyUiaValueState {
+  private readonly IWorkBuddyUiaValuePattern pattern;
+  internal WorkBuddyUiaValueState(IWorkBuddyUiaValuePattern pattern) { this.pattern = pattern; }
+  public string Value { get { return pattern.GetCurrentValue() ?? string.Empty; } }
+  public bool IsReadOnly { get { return pattern.GetCurrentIsReadOnly(); } }
+}
+
+public sealed class WorkBuddyUiaValuePattern {
+  private readonly IWorkBuddyUiaValuePattern pattern;
+  internal WorkBuddyUiaValuePattern(IWorkBuddyUiaValuePattern pattern) { this.pattern = pattern; }
+  public WorkBuddyUiaValueState Current { get { return new WorkBuddyUiaValueState(pattern); } }
+}
+
+public sealed class WorkBuddyUiaTextRange {
+  private readonly IWorkBuddyUiaTextRange range;
+  internal WorkBuddyUiaTextRange(IWorkBuddyUiaTextRange range) { this.range = range; }
+  public string GetText(int maxLength) { return range.GetText(maxLength) ?? string.Empty; }
+  public object GetAttributeValue(object attribute) { return range.GetAttributeValue(WorkBuddyUia.IdOf(attribute)); }
+}
+
+public sealed class WorkBuddyUiaTextPattern {
+  private readonly IWorkBuddyUiaTextPattern pattern;
+  internal WorkBuddyUiaTextPattern(IWorkBuddyUiaTextPattern pattern) { this.pattern = pattern; }
+  public WorkBuddyUiaTextRange DocumentRange { get { return new WorkBuddyUiaTextRange(pattern.GetDocumentRange()); } }
+}
+
+public sealed class WorkBuddyUiaInvokePattern {
+  private readonly IWorkBuddyUiaInvokePattern pattern;
+  internal WorkBuddyUiaInvokePattern(IWorkBuddyUiaInvokePattern pattern) { this.pattern = pattern; }
+  public void Invoke() { pattern.Invoke(); }
+}
+
+public sealed class WorkBuddyUiaCurrent {
+  private readonly WorkBuddyUiaElement element;
+  internal WorkBuddyUiaCurrent(WorkBuddyUiaElement element) { this.element = element; }
+  public WorkBuddyUiaControlType ControlType { get { return new WorkBuddyUiaControlType(element.Int(30003)); } }
+  public WorkBuddyUiaRect BoundingRectangle {
+    get {
+      double[] rect = element.Property(30001) as double[];
+      if (rect == null || rect.Length != 4) { return new WorkBuddyUiaRect(0, 0, 0, 0); }
+      return new WorkBuddyUiaRect(rect[0], rect[1], rect[2], rect[3]);
+    }
+  }
+  public int ProcessId { get { return element.Int(30002); } }
+  public string Name { get { return element.Text(30005); } }
+  public bool HasKeyboardFocus { get { return element.Flag(30008); } }
+  public bool IsKeyboardFocusable { get { return element.Flag(30009); } }
+  public bool IsEnabled { get { return element.Flag(30010); } }
+  public string ClassName { get { return element.Text(30012); } }
+  public int NativeWindowHandle { get { return element.Int(30020); } }
+  public bool IsOffscreen { get { return element.Flag(30022); } }
+}
+
+public sealed class WorkBuddyUiaElement {
+  private readonly IWorkBuddyUiaElement element;
+  internal WorkBuddyUiaElement(IWorkBuddyUiaElement element) { this.element = element; }
+  internal IWorkBuddyUiaElement Native { get { return element; } }
+  public WorkBuddyUiaCurrent Current { get { return new WorkBuddyUiaCurrent(this); } }
+  public int[] GetRuntimeId() {
+    try { return element.GetRuntimeId() ?? new int[0]; } catch { return new int[0]; }
+  }
+  public void SetFocus() { element.SetFocus(); }
+  public object GetCurrentPropertyValue(object property) { return Property(WorkBuddyUia.IdOf(property)); }
+  public bool TryGetCurrentPattern(object pattern, out object patternObject) {
+    patternObject = null;
+    int patternId = WorkBuddyUia.IdOf(pattern);
+    object raw;
+    try { raw = element.GetCurrentPattern(patternId); } catch { return false; }
+    if (raw == null) { return false; }
+    if (patternId == 10002) {
+      IWorkBuddyUiaValuePattern value = raw as IWorkBuddyUiaValuePattern;
+      if (value != null) { patternObject = new WorkBuddyUiaValuePattern(value); }
+    } else if (patternId == 10014) {
+      IWorkBuddyUiaTextPattern text = raw as IWorkBuddyUiaTextPattern;
+      if (text != null) { patternObject = new WorkBuddyUiaTextPattern(text); }
+    } else if (patternId == 10000) {
+      IWorkBuddyUiaInvokePattern invoke = raw as IWorkBuddyUiaInvokePattern;
+      if (invoke != null) { patternObject = new WorkBuddyUiaInvokePattern(invoke); }
+    }
+    return patternObject != null;
+  }
+  internal object Property(int propertyId) {
+    try { return element.GetCurrentPropertyValue(propertyId); } catch { return null; }
+  }
+  internal int Int(int propertyId) {
+    object value = Property(propertyId);
+    return value is int ? (int)value : 0;
+  }
+  internal bool Flag(int propertyId) {
+    object value = Property(propertyId);
+    return value is bool && (bool)value;
+  }
+  internal string Text(int propertyId) {
+    return Property(propertyId) as string ?? string.Empty;
+  }
+}
+
+public static class WorkBuddyUia {
+  private static IWorkBuddyUia automation;
+
+  [DllImport("user32.dll")]
+  private static extern bool IsChild(IntPtr parent, IntPtr child);
+
+  private static IWorkBuddyUia Automation {
+    get {
+      if (automation != null) { return automation; }
+      // CUIAutomation8 first, then the Windows 7 CUIAutomation class.
+      foreach (string clsid in new[] { "e22ad333-b25f-460c-83d0-0581107395c9", "ff48dba4-60ef-4201-aa87-54103eef594e" }) {
+        try {
+          automation = (IWorkBuddyUia)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid(clsid), true));
+          return automation;
+        } catch {}
+      }
+      throw new InvalidOperationException("Windows UI Automation COM client is unavailable");
+    }
+  }
+
+  // Accepts managed AutomationPattern/AutomationProperty/AutomationTextAttribute
+  // identifiers (only their numeric Id is read) or a raw UIA identifier.
+  public static int IdOf(object identifier) {
+    if (identifier == null) { return 0; }
+    if (identifier is int) { return (int)identifier; }
+    System.Reflection.PropertyInfo id = identifier.GetType().GetProperty("Id");
+    if (id == null) { return 0; }
+    object value = id.GetValue(identifier, null);
+    return value is int ? (int)value : 0;
+  }
+
+  private static WorkBuddyUiaElement Wrap(IWorkBuddyUiaElement element) {
+    return element == null ? null : new WorkBuddyUiaElement(element);
+  }
+
+  private static int HandleOf(IWorkBuddyUiaElement element) {
+    object value = element.GetCurrentPropertyValue(30020);
+    return value is int ? (int)value : 0;
+  }
+
+  public static WorkBuddyUiaElement FromHandle(IntPtr window) {
+    try { return Wrap(Automation.ElementFromHandle(window)); } catch { return null; }
+  }
+
+  public static WorkBuddyUiaElement FocusedElement() {
+    try { return Wrap(Automation.GetFocusedElement()); } catch { return null; }
+  }
+
+  public static bool IsOwnedBy(IntPtr window, WorkBuddyUiaElement element) {
+    if (window == IntPtr.Zero || element == null) { return false; }
+    try {
+      IWorkBuddyUiaTreeWalker walker = Automation.GetRawViewWalker();
+      IWorkBuddyUiaElement current = element.Native;
+      for (int depth = 0; depth < 64 && current != null; depth += 1) {
+        IntPtr handle = new IntPtr(HandleOf(current));
+        if (handle != IntPtr.Zero && (handle == window || IsChild(window, handle))) { return true; }
+        current = walker.GetParentElement(current);
+      }
+    } catch {}
+    return false;
+  }
+
+  // Same bounded breadth-first contract as Find-BoundedComposerElements.
+  public static WorkBuddyUiaElement[] FindBounded(IntPtr window, bool rawView, int budgetMs, int maxNodes) {
+    List<WorkBuddyUiaElement> matches = new List<WorkBuddyUiaElement>();
+    System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    Queue<KeyValuePair<IWorkBuddyUiaElement, int>> pending = new Queue<KeyValuePair<IWorkBuddyUiaElement, int>>();
+    IWorkBuddyUiaTreeWalker walker;
+    try {
+      walker = rawView ? Automation.GetRawViewWalker() : Automation.GetControlViewWalker();
+      IWorkBuddyUiaElement root = Automation.ElementFromHandle(window);
+      if (root == null) { return matches.ToArray(); }
+      pending.Enqueue(new KeyValuePair<IWorkBuddyUiaElement, int>(root, 0));
+    } catch { return matches.ToArray(); }
+    int discovered = 1;
+    while (pending.Count > 0 && clock.ElapsedMilliseconds < budgetMs) {
+      KeyValuePair<IWorkBuddyUiaElement, int> node = pending.Dequeue();
+      if (node.Value > 0) {
+        int typeId = 0;
+        try {
+          object type = node.Key.GetCurrentPropertyValue(30003);
+          if (type is int) { typeId = (int)type; }
+        } catch {}
+        // Edit, Button, Group, Custom, Document, Pane.
+        if (typeId == 50004 || typeId == 50000 || typeId == 50026 ||
+            typeId == 50025 || typeId == 50030 || typeId == 50033) {
+          matches.Add(new WorkBuddyUiaElement(node.Key));
+        }
+      }
+      if (node.Value >= 48 || discovered >= maxNodes) { continue; }
+      try {
+        IWorkBuddyUiaElement child = walker.GetFirstChildElement(node.Key);
+        while (child != null && discovered < maxNodes && clock.ElapsedMilliseconds < budgetMs) {
+          pending.Enqueue(new KeyValuePair<IWorkBuddyUiaElement, int>(child, node.Value + 1));
+          discovered += 1;
+          child = walker.GetNextSiblingElement(child);
+        }
+      } catch {}
+    }
+    return matches.ToArray();
+  }
+
+  // Same lower-surface point probe as Find-PointComposerElements: each hit and
+  // its ancestors up to the target window.
+  public static WorkBuddyUiaElement[] FindAtPoints(IntPtr window, double[] xRatios, double[] yRatios, int budgetMs) {
+    List<WorkBuddyUiaElement> matches = new List<WorkBuddyUiaElement>();
+    System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+    try {
+      IWorkBuddyUiaElement root = Automation.ElementFromHandle(window);
+      if (root == null) { return matches.ToArray(); }
+      object value = root.GetCurrentPropertyValue(30001);
+      double[] rect = value as double[];
+      if (rect == null || rect.Length != 4 || !(rect[2] > 0 && rect[3] > 0)) { return matches.ToArray(); }
+      IWorkBuddyUiaTreeWalker walker = Automation.GetControlViewWalker();
+      foreach (double yRatio in yRatios) {
+        foreach (double xRatio in xRatios) {
+          if (clock.ElapsedMilliseconds >= budgetMs) { return matches.ToArray(); }
+          WorkBuddyUiaPoint point = new WorkBuddyUiaPoint();
+          point.X = (int)Math.Round(rect[0] + rect[2] * xRatio);
+          point.Y = (int)Math.Round(rect[1] + rect[3] * yRatio);
+          try {
+            IWorkBuddyUiaElement element = Automation.ElementFromPoint(point);
+            for (int depth = 0; depth < 16 && element != null && clock.ElapsedMilliseconds < budgetMs; depth += 1) {
+              if ((long)HandleOf(element) == window.ToInt64()) { break; }
+              matches.Add(new WorkBuddyUiaElement(element));
+              element = walker.GetParentElement(element);
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    return matches.ToArray();
+  }
+}
 "@
+Write-ComposerProgress 'ready_runtime'
 
 function Write-ComposerReply([hashtable]$reply) {
   [Console]::Out.WriteLine(($reply | ConvertTo-Json -Compress))
@@ -1775,6 +2263,8 @@ function Get-ComposerText($element) {
   } else {
     throw 'Visible composer exposes neither ValuePattern nor TextPattern'
   }
+  $value = $value.TrimStart([char]0xFEFF)
+  if ($value.Trim() -eq '今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令') { $value = '' }
   if ($value -match '^(?i:随心输入|输入消息|message codex|ask anything|write your prompt to claude|type / for commands|write a message\W*|send a message\W*)$') { $value = '' }
   return @($pattern, $value)
 }
@@ -1809,7 +2299,8 @@ function Add-UniqueComposerElement($element, $elements, $seen) {
   } catch {}
 }
 
-function Find-PointComposerElements($root) {
+function Find-PointComposerElements($root, [int]$budgetMs = 1800) {
+  $deadline = (Get-MonotonicMilliseconds) + $budgetMs
   $rootRect = $root.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $rootRect)) { return @() }
   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
@@ -1820,6 +2311,7 @@ function Find-PointComposerElements($root) {
   # an unbounded descendant materialization before voice can stage its draft.
   foreach ($yRatio in @(0.76, 0.83, 0.89, 0.94)) {
     foreach ($xRatio in @(0.42, 0.60, 0.76, 0.89)) {
+      if ((Get-MonotonicMilliseconds) -ge $deadline) { return @($elements.ToArray()) }
       try {
         $x = [double]($rootRect.Left + ($rootRect.Width * $xRatio))
         $y = [double]($rootRect.Top + ($rootRect.Height * $yRatio))
@@ -1827,6 +2319,7 @@ function Find-PointComposerElements($root) {
           [System.Windows.Point]::new($x, $y)
         )
         for ($depth = 0; $depth -lt 16 -and $null -ne $element; $depth += 1) {
+          if ((Get-MonotonicMilliseconds) -ge $deadline) { break }
           if ($element.Current.NativeWindowHandle -eq $root.Current.NativeWindowHandle) { break }
           Add-UniqueComposerElement $element $elements $seen
           $element = $walker.GetParent($element)
@@ -1837,17 +2330,19 @@ function Find-PointComposerElements($root) {
   return @($elements.ToArray())
 }
 
-function Find-BoundedComposerElements($root) {
+function Find-BoundedComposerElements($root, [bool]$rawView = $false, [int]$budgetMs = 1800) {
   $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  if ($rawView) { $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker }
   $pending = [System.Collections.Generic.Queue[object]]::new()
   $elements = [System.Collections.Generic.List[object]]::new()
   $seen = @{}
-  $deadline = (Get-MonotonicMilliseconds) + 1800
+  $deadline = (Get-MonotonicMilliseconds) + $budgetMs
   $visited = 0
   $discovered = 0
   try {
     $child = $walker.GetFirstChild($root)
-    while ($null -ne $child -and $discovered -lt 3500) {
+    while ($null -ne $child -and $discovered -lt 3500 -and
+           (Get-MonotonicMilliseconds) -lt $deadline) {
       $pending.Enqueue([pscustomobject]@{ Element = $child; Depth = 1 })
       $discovered += 1
       $child = $walker.GetNextSibling($child)
@@ -1888,13 +2383,39 @@ function Find-BoundedComposerElements($root) {
   return @($elements.ToArray())
 }
 
-function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues) {
+function Test-WorkBuddyWritablePattern($pattern) {
+  try {
+    if ($pattern -is [System.Windows.Automation.ValuePattern] -or
+        $pattern -is [WorkBuddyUiaValuePattern]) {
+      return -not $pattern.Current.IsReadOnly
+    }
+    if ($pattern -is [System.Windows.Automation.TextPattern] -or
+        $pattern -is [WorkBuddyUiaTextPattern]) {
+      $readOnly = $pattern.DocumentRange.GetAttributeValue(
+        [System.Windows.Automation.TextPattern]::IsReadOnlyAttribute
+      )
+      # Mixed/NotSupported is not evidence of an editable document.
+      return ($readOnly -is [bool] -and -not $readOnly)
+    }
+  } catch {}
+  return $false
+}
+
+function Test-WorkBuddyElementOwner($root, $element) {
+  # Native raw-view parents only; a managed TreeWalker would hide Chromium's
+  # provider for the rest of this helper process (see WorkBuddyUia).
+  return [WorkBuddyUia]::IsOwnedBy([IntPtr]$root.Current.NativeWindowHandle, $element)
+}
+
+function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [bool]$workbuddy = $false) {
   $rootRect = $root.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $rootRect)) {
     throw 'Visible Agent window geometry is unavailable'
   }
   $candidates = @()
   $unexpectedCandidates = @()
+  $readableCount = 0
+  $writableCount = 0
   foreach ($element in @($elements)) {
     try { $current = $element.Current } catch { continue }
     if (-not $current.IsEnabled -or $current.IsOffscreen -or
@@ -1909,17 +2430,36 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues) {
     $typeId = $current.ControlType.Id
     $classHint = $className -match '(?i)(^|\s)(ProseMirror|tiptap)(\s|$)'
     $nameHint = $name -match '(?i)prompt|message|ask|write|输入|消息|提问'
+    $documentHint = $false
+    if ($workbuddy) {
+      if ($name -match '(?i)search|搜索') { continue }
+      if (-not (Test-WorkBuddyElementOwner $root $element)) { continue }
+      # Rich contenteditables may appear as Document rather than Edit. Require
+      # explicit textbox/editor semantics, not merely a readable chat document.
+      $ariaRole = ''
+      try {
+        $ariaRoleProperty = [System.Windows.Automation.AutomationProperty]::LookupById(30101)
+        if ($null -ne $ariaRoleProperty) { $ariaRole = [string]$element.GetCurrentPropertyValue($ariaRoleProperty) }
+      } catch {}
+      if ($ariaRole -match '^(?i:searchbox)$') { continue }
+      $documentHint = $typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and
+        ($classHint -or $ariaRole -match '^(?i:textbox)$')
+      if ($typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and -not $documentHint) { continue }
+    }
     $typeHint = $typeId -eq [System.Windows.Automation.ControlType]::Edit.Id -or
       $typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
       $typeId -eq [System.Windows.Automation.ControlType]::Custom.Id
-    if (-not $classHint -and -not $nameHint -and -not $typeHint) { continue }
+    if (-not $classHint -and -not $nameHint -and -not $typeHint -and -not $documentHint) { continue }
 
     $valueInfo = $null
     try { $valueInfo = Get-ComposerText $element } catch { continue }
+    $readableCount += 1
+    if ($workbuddy -and -not (Test-WorkBuddyWritablePattern $valueInfo[0])) { continue }
+    $writableCount += 1
     $score = 0
     if ($classHint) { $score += 8 }
     if ($nameHint) { $score += 6 }
-    if ($typeId -eq [System.Windows.Automation.ControlType]::Edit.Id) { $score += 5 }
+    if ($typeId -eq [System.Windows.Automation.ControlType]::Edit.Id -or $documentHint) { $score += 5 }
     elseif ($typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
             $typeId -eq [System.Windows.Automation.ControlType]::Custom.Id) { $score += 2 }
     if ($current.HasKeyboardFocus) { $score += 3 }
@@ -1945,6 +2485,8 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues) {
   return [pscustomobject]@{
     Candidates = @($candidates)
     UnexpectedCandidates = @($unexpectedCandidates)
+    ReadableCount = $readableCount
+    WritableCount = $writableCount
   }
 }
 
@@ -2039,7 +2581,152 @@ function Get-ElementRuntimeId($element) {
   try { return @($element.GetRuntimeId()) -join '.' } catch { return '' }
 }
 
+function Select-WorkBuddyComposer($candidateSet) {
+  if (@($candidateSet.UnexpectedCandidates).Count -gt 0) {
+    throw 'WorkBuddy 草稿已被其他操作修改，已停止语音写入'
+  }
+  $distinct = @{}
+  foreach ($candidate in @($candidateSet.Candidates)) {
+    $identity = Get-ElementRuntimeId $candidate.Element
+    if (-not $identity) { throw 'WorkBuddy 输入框没有稳定标识，已停止语音写入' }
+    $distinct[$identity] = $candidate
+  }
+  if ($distinct.Count -gt 1) { throw 'WorkBuddy 存在多个可写输入框，请关闭搜索或弹窗后重试' }
+  if ($distinct.Count -eq 1) { return @($distinct.Values)[0] }
+  return $null
+}
+
+function Find-WorkBuddyFocusedComposer($root, [string[]]$allowedValues) {
+  # Explicit keyboard focus is a stronger target than a guessed screen region.
+  # Still apply every ownership, semantics, writability and draft guard.
+  try {
+    $focused = [WorkBuddyUia]::FocusedElement()
+    if ($null -eq $focused -or -not $focused.Current.HasKeyboardFocus) { return $null }
+  } catch { return $null }
+  $set = Get-ComposerCandidates $root @($focused) $allowedValues $true
+  return Select-WorkBuddyComposer $set
+}
+
+function Initialize-WorkBuddyAccessibility([IntPtr]$handle, [int]$ownerProcessId, [long]$deadline) {
+  $key = "${ownerProcessId}:$handle"
+  if ($script:WorkBuddyAccessibilityRequests.ContainsKey($key)) {
+    return $script:WorkBuddyAccessibilityRequests[$key]
+  }
+  $info = [pscustomobject]@{ Requested = 0; Msaa = 0; Renderers = 0; Detected = 0 }
+  # At most once per window per recording, even if activation fails. The next
+  # recording uses a fresh helper and can retry; no permanent success cache.
+  $script:WorkBuddyAccessibilityRequests[$key] = $info
+  Write-ComposerProgress 'enable_accessibility'
+  $targets = [System.Collections.Generic.List[IntPtr]]::new()
+  $targets.Add($handle)
+  foreach ($renderer in @([CodexVoiceNative]::FindChildWindowsByClass($handle, 'Chrome_RenderWidgetHostHWND'))) {
+    if ($info.Renderers -ge 4) { break }
+    if (-not [CodexVoiceNative]::IsOwnedWindow($handle, $renderer)) { continue }
+    if ($targets.Contains($renderer)) { continue }
+    $targets.Add($renderer)
+    $info.Renderers += 1
+  }
+  foreach ($target in $targets) {
+    if ((Get-MonotonicMilliseconds) -ge $deadline -or
+        -not [CodexVoiceNative]::IsForeground($handle)) { break }
+    $info.Requested += 1
+    try {
+      $responses = [CodexVoiceNative]::RequestClientAccessibility($handle, $target, $ownerProcessId)
+      if (($responses -band 1) -ne 0) { $info.Msaa += 1 }
+      if (($responses -band 2) -ne 0) { $info.Detected += 1 }
+    } catch {
+      # Re-read UIA after a rejected MSAA request as well. Never treat a
+      # handshake response or exception as proof that editing is safe.
+    }
+  }
+  return $info
+}
+
+function Get-WorkBuddyTarget([string[]]$allowedValues) {
+  Write-ComposerProgress 'resolve_window'
+  $windows = @(Get-Process -Name WorkBuddy -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+  if ($windows.Count -ne 1) { throw '请保留一个 WorkBuddy 主窗口并打开目标对话，再重新开始语音输入' }
+  $process = $windows[0]
+  $handle = [IntPtr]$process.MainWindowHandle
+  if (-not [CodexVoiceNative]::ActivateWindow($handle)) { throw '无法激活 WorkBuddy 目标窗口' }
+  # Same activation settling as Codex/Claude. Refresh roots on each attempt;
+  # a valid main HWND does not mean Chromium has populated its editable tree.
+  Start-Sleep -Milliseconds 120
+  $deadline = (Get-MonotonicMilliseconds) + 4500
+  $lastCount = 0
+  $readableCount = 0
+  $writableCount = 0
+  $accessibilityInfo = $null
+  do {
+    if (-not [CodexVoiceNative]::IsForeground($handle)) { throw 'WorkBuddy 已失去前台焦点，未写入文字' }
+    $process.Refresh()
+    if ([IntPtr]$process.MainWindowHandle -ne $handle) { throw 'WorkBuddy 主窗口已变化，请重新开始录音' }
+    # Native UIA only. Chromium serves this tree from the owned
+    # Chrome_RenderWidgetHostHWND, which the native walkers cross from the
+    # main window; managed AutomationElement would permanently hide it.
+    $root = [WorkBuddyUia]::FromHandle($handle)
+    if ($null -ne $root -and (Test-FiniteWindowRectangle $root.Current.BoundingRectangle)) {
+      $elements = [System.Collections.Generic.List[object]]::new()
+      $seen = @{}
+      Write-ComposerProgress 'focused'
+      $composer = Find-WorkBuddyFocusedComposer $root $allowedValues
+      if ($null -eq $composer) {
+        Write-ComposerProgress 'control'
+        foreach ($element in @([WorkBuddyUia]::FindBounded($handle, $false, 1500, 3500))) { Add-UniqueComposerElement $element $elements $seen }
+        $candidateSet = Get-ComposerCandidates $root @($elements.ToArray()) $allowedValues $true
+        $composer = Select-WorkBuddyComposer $candidateSet
+      }
+      if ($null -eq $composer) {
+        if ($null -eq $accessibilityInfo -and (Get-MonotonicMilliseconds) -lt $deadline) {
+          $accessibilityInfo = Initialize-WorkBuddyAccessibility $handle ([int]$process.Id) $deadline
+          Start-Sleep -Milliseconds 150
+          # Enabling Chromium accessibility replaces proxy/stub elements.
+          # Discard every pre-activation root, candidate and runtime identity.
+          continue
+        }
+        Write-ComposerProgress 'raw'
+        # Raw view also includes non-control containers and the owned
+        # Chrome_RenderWidgetHostHWND subtree.
+        foreach ($element in @([WorkBuddyUia]::FindBounded($handle, $true, 1500, 3500))) { Add-UniqueComposerElement $element $elements $seen }
+        $candidateSet = Get-ComposerCandidates $root @($elements.ToArray()) $allowedValues $true
+        $composer = Select-WorkBuddyComposer $candidateSet
+      }
+      if ($null -eq $composer -and (Get-MonotonicMilliseconds) -lt $deadline) {
+        Write-ComposerProgress 'probe'
+        $points = [WorkBuddyUia]::FindAtPoints($handle, [double[]]@(0.42, 0.60, 0.76, 0.89), [double[]]@(0.76, 0.83, 0.89, 0.94), 250)
+        foreach ($element in @($points)) { Add-UniqueComposerElement $element $elements $seen }
+        $candidateSet = Get-ComposerCandidates $root @($elements.ToArray()) $allowedValues $true
+        $composer = Select-WorkBuddyComposer $candidateSet
+      }
+      if ($null -ne $composer) {
+        Write-ComposerProgress 'validate'
+        Start-Sleep -Milliseconds 120
+        $current = Get-ComposerText $composer.Element
+        if ([CodexVoiceNative]::IsForeground($handle) -and
+            (Test-WorkBuddyElementOwner $root $composer.Element) -and
+            $composer.Element.Current.IsEnabled -and -not $composer.Element.Current.IsOffscreen -and
+            [string]$current[1] -ceq $composer.Value) {
+          return [pscustomobject]@{ Root = $root; RootHandle = [int64]$handle; WindowHandle = [int64]$handle; ProcessId = [int]$process.Id; Composer = $composer }
+        }
+      } else {
+        $lastCount = $elements.Count
+        $readableCount = $candidateSet.ReadableCount
+        $writableCount = $candidateSet.WritableCount
+      }
+    }
+    Start-Sleep -Milliseconds 80
+  } while ((Get-MonotonicMilliseconds) -lt $deadline)
+  # No window names, composer contents, local paths, or account data in errors.
+  $activation = if ($null -ne $accessibilityInfo) {
+    "，辅助功能请求=$($accessibilityInfo.Requested)，MSAA应答=$($accessibilityInfo.Msaa)，渲染窗口=$($accessibilityInfo.Renderers)，激活应答=$($accessibilityInfo.Detected)"
+  } else { '' }
+  throw "WorkBuddy 输入框未就绪（节点=$lastCount，可读=$readableCount，可写=$writableCount$activation）；未取得可写编辑器，已停止写入。请保持目标对话可见。尚未写入或发送文字"
+}
+
 function Get-CurrentVisibleTarget([string]$agent, [string[]]$allowedValues) {
+  if ($agent -eq 'workbuddy') {
+    return Get-WorkBuddyTarget $allowedValues
+  }
   if ($agent -eq 'codex') {
     $windows = @(Get-OrLaunchCodexWindows)
     $errors = @()
@@ -2088,13 +2775,36 @@ function Get-CurrentVisibleTarget([string]$agent, [string[]]$allowedValues) {
   throw "Unsupported current visible composer agent: $agent"
 }
 
+function Assert-WorkBuddyComposerCurrent($state) {
+  # Re-verify the composer bound at begin instead of re-running the whole
+  # window lookup (two settle sleeps plus tree scans) before and after every
+  # write. The same element must still exist with the recorded runtime ID,
+  # stay owned, enabled, visible and writable; the caller then requires the
+  # exact last voice-controlled text.
+  $handle = [IntPtr]$state.WindowHandle
+  if (-not [CodexVoiceNative]::IsForeground($handle) -and
+      -not [CodexVoiceNative]::ActivateWindow($handle)) {
+    throw 'WorkBuddy 已失去前台焦点，未写入文字'
+  }
+  $element = $state.Composer
+  $runtimeId = Get-ElementRuntimeId $element
+  if (-not $runtimeId -or $runtimeId -ne $state.ComposerRuntimeId -or
+      -not (Test-WorkBuddyElementOwner $state.Root $element) -or
+      -not $element.Current.IsEnabled -or $element.Current.IsOffscreen -or
+      -not (Test-WorkBuddyWritablePattern (Get-ComposerText $element)[0])) {
+    throw 'The visible Agent session or composer changed during voice input'
+  }
+}
+
 function Assert-TargetCurrent($state, [bool]$checkSession) {
   [void](Get-Process -Id $state.ProcessId -ErrorAction Stop)
   if (-not [CodexVoiceNative]::IsWindow([IntPtr]$state.WindowHandle) -or
       $state.Root.Current.NativeWindowHandle -ne $state.RootHandle) {
     throw 'Visible Agent window changed during voice input'
   }
-  if ($state.CurrentVisible) {
+  if ($state.CurrentVisible -and $state.Agent -eq 'workbuddy') {
+    Assert-WorkBuddyComposerCurrent $state
+  } elseif ($state.CurrentVisible) {
     if ($checkSession) {
       $current = Get-CurrentVisibleTarget $state.Agent @($state.LastValue)
       $runtimeId = Get-ElementRuntimeId $current.Composer.Element
@@ -2125,6 +2835,7 @@ function Assert-TargetCurrent($state, [bool]$checkSession) {
 }
 
 function Focus-Composer($state) {
+  Write-ComposerProgress 'focus'
   $activated = [CodexVoiceNative]::ActivateWindow([IntPtr]$state.WindowHandle)
   if (-not $activated) {
     try {
@@ -2191,7 +2902,9 @@ function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck) {
     return
   }
   $lastError = ''
-  for ($attempt = 0; $attempt -lt 2; $attempt += 1) {
+  # Never replay an uncertain WorkBuddy rich-editor insertion.
+  $attempts = if ($state.Agent -eq 'workbuddy') { 1 } else { 2 }
+  for ($attempt = 0; $attempt -lt $attempts; $attempt += 1) {
     try {
       if ($attempt -gt 0) {
         Rebind-CodexTarget $state @($state.LastValue, $normalizedText)
@@ -2207,17 +2920,22 @@ function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck) {
       # Chromium can block a synchronous TextPattern read while committing the
       # just-injected ProseMirror update. Let the accessibility tree settle.
       Start-Sleep -Milliseconds 120
-      if (-not (Wait-ComposerText $state $normalizedText 350)) {
+      # WorkBuddy receives the whole final transcript as one burst of typed
+      # characters; allow for its length. Readback returns on first match.
+      $confirmMs = if ($state.Agent -eq 'workbuddy') {
+        [Math]::Min(3000, 350 + (10 * $normalizedText.Length))
+      } else { 350 }
+      if (-not (Wait-ComposerText $state $normalizedText $confirmMs)) {
         throw 'Visible composer did not confirm the voice transcript in time'
       }
       $state.LastValue = $normalizedText
       return
     } catch {
       $lastError = $_.Exception.Message
-      if ($attempt -lt 1) { Start-Sleep -Milliseconds 40 }
+      if ($attempt + 1 -lt $attempts) { Start-Sleep -Milliseconds 40 }
     }
   }
-  throw "Visible composer update failed after retry: $lastError"
+  throw "Visible composer update failed: $lastError"
 }
 
 function Clear-ComposerVoiceText($state) {
@@ -2264,7 +2982,11 @@ function Invoke-SendButton($state) {
   # Reuse the bounded breadth-first surface walk. A live task transcript can
   # make an unbounded descendant Button query stall just like the old Edit
   # query did during startup; Enter remains the verified fallback.
-  $all = @(Find-BoundedComposerElements $state.Root)
+  $all = if ($state.Agent -eq 'workbuddy') {
+    @([WorkBuddyUia]::FindBounded([IntPtr]$state.WindowHandle, $false, 1800, 3500))
+  } else {
+    @(Find-BoundedComposerElements $state.Root)
+  }
   $buttons = @()
   for ($index = 0; $index -lt $all.Count; $index += 1) {
     $element = $all[$index]
@@ -2308,6 +3030,7 @@ function Invoke-SendButton($state) {
   }
 }
 $state = $null
+$script:WorkBuddyAccessibilityRequests = @{}
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   if ([string]::IsNullOrWhiteSpace($line)) { continue }
   $command = $null
@@ -2315,6 +3038,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
     $command = $line | ConvertFrom-Json
     switch ([string]$command.kind) {
       'begin' {
+        Write-ComposerProgress 'resolve_window'
         $agent = Normalize-Label ([string]$command.agent)
         if (-not $agent) { $agent = 'codex' }
         $sessionId = Normalize-Label ([string]$command.sessionId)
@@ -2472,6 +3196,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         let worker_failed = failed.clone();
         let worker_closed = closed.clone();
         let worker_child = child.clone();
+        let startup_stage = Arc::new(Mutex::new("启动 Windows 输入桥"));
+        let worker_startup_stage = startup_stage.clone();
         let worker_job = composer_job;
         thread::Builder::new()
             .name("pet-codex-visible-composer".to_string())
@@ -2510,25 +3236,11 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                             .map_err(|error| {
                                 format!("failed to write visible Agent composer command: {error}")
                             })?;
-                        let mut line = String::new();
-                        stdout.read_line(&mut line).map_err(|error| {
-                            format!("failed to read visible Agent composer response: {error}")
-                        })?;
-                        if line.trim().is_empty() {
-                            return Err("Visible Agent composer bridge closed without a response"
-                                .to_string());
-                        }
-                        let value = serde_json::from_str::<Value>(&line).map_err(|error| {
-                            format!("invalid visible Agent composer response: {error}")
-                        })?;
-                        if value.get("ok").and_then(Value::as_bool) == Some(false) {
-                            return Err(value
-                                .get("error")
-                                .and_then(Value::as_str)
-                                .unwrap_or("Visible Agent composer update failed")
-                                .to_string());
-                        }
-                        Ok(value)
+                        read_windows_composer_response(&mut stdout, |stage| {
+                            if let Ok(mut current) = worker_startup_stage.lock() {
+                                *current = stage;
+                            }
+                        })
                     })();
 
                     let phase = command
@@ -2613,14 +3325,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     let _ = child.kill();
                     let _ = child.wait();
                 }
-                Err(format!(
-                    "{} visible composer startup timed out",
-                    if agent == "claude" {
-                        "Claude"
-                    } else {
-                        "ChatGPT（Codex）"
-                    }
-                ))
+                let stage = startup_stage.lock().map(|stage| *stage)
+                    .unwrap_or("读取输入框状态");
+                Err(composer_startup_timeout_message(agent, stage))
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 Err("Visible Agent composer closed during startup".to_string())
@@ -2699,6 +3406,7 @@ impl CodexComposerBridge {
         let agent = match agent_id.trim() {
             "codex" => macos::MacosAgent::Codex,
             "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
             _ => return false,
         };
         macos::agent_is_frontmost(agent)
@@ -2719,9 +3427,10 @@ impl CodexComposerBridge {
         let agent = match agent_id.trim() {
             "codex" => macos::MacosAgent::Codex,
             "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
             _ => {
                 return Err(
-                    "Current visible composer requires ChatGPT（Codex） or Claude".to_string(),
+                    "Current visible composer requires ChatGPT（Codex）, Claude or WorkBuddy".to_string(),
                 )
             }
         };
@@ -3092,6 +3801,10 @@ impl CodexComposerBridge {
 
     pub fn preserve_draft(&self) -> Result<(), String> { Ok(()) }
 
+    pub fn update_confirmed(&self, _revision: u64, _text: &str) -> Result<(), String> {
+        Err("当前系统不支持前台语音输入".into())
+    }
+
     pub fn start_current(
         _agent_id: &str,
         _callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
@@ -3174,6 +3887,50 @@ fn workspace_label_from_cwd(cwd: &str) -> String {
 #[cfg(all(test, any(windows, target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_startup_timeout_names_the_selected_agent_and_stage() {
+        let message = composer_startup_timeout_message("workbuddy", "读取当前聚焦输入框");
+        assert!(message.starts_with("WorkBuddy "));
+        assert!(!message.contains("Codex"));
+        assert!(message.contains("读取当前聚焦输入框"));
+        assert!(composer_startup_timeout_message("claude", "test").starts_with("Claude "));
+        assert!(composer_startup_timeout_message("codex", "test").starts_with("ChatGPT（Codex）"));
+        assert!(composer_startup_timeout_message("unknown", "test").starts_with("Agent "));
+    }
+
+    #[test]
+    fn windows_progress_does_not_acknowledge_startup_or_consume_next_reply() {
+        let mut reader = std::io::Cursor::new(concat!(
+            "{\"phase\":\"progress\",\"stage\":\"compile_native\"}\n",
+            "{\"phase\":\"progress\",\"stage\":\"enable_accessibility\"}\n",
+            "{\"phase\":\"progress\",\"stage\":\"focused\"}\n",
+            "{\"ok\":true,\"phase\":\"ready\"}\n",
+            "{\"ok\":true,\"phase\":\"updated\",\"revision\":1}\n",
+        ));
+        let mut stages = Vec::new();
+        let ready = read_windows_composer_response(&mut reader, |stage| stages.push(stage)).unwrap();
+        assert_eq!(ready["phase"], "ready");
+        assert_eq!(stages, ["初始化 Windows 输入桥", "请求 WorkBuddy 辅助功能界面树", "读取当前聚焦输入框"]);
+        let updated = read_windows_composer_response(&mut reader, |_| {}).unwrap();
+        assert_eq!(updated["revision"], 1);
+    }
+
+    #[test]
+    fn windows_progress_retains_errors_and_rejects_incomplete_or_unknown_replies() {
+        let mut reader = std::io::Cursor::new(concat!(
+            "{\"phase\":\"progress\",\"stage\":\"control\"}\n",
+            "{\"ok\":false,\"error\":\"输入框不可写\"}\n",
+        ));
+        assert_eq!(read_windows_composer_response(&mut reader, |_| {}).unwrap_err(), "输入框不可写");
+        for input in [
+            "{\"phase\":\"progress\",\"stage\":\"focus\"}\n",
+            "{\"phase\":\"progress\",\"stage\":\"untrusted details\"}\n",
+            "{}\n", "invalid\n", "",
+        ] {
+            assert!(read_windows_composer_response(&mut std::io::Cursor::new(input), |_| {}).is_err());
+        }
+    }
     use std::time::Duration;
 
     #[test]
@@ -3414,7 +4171,8 @@ mod tests {
         assert!(source.contains("AutomationElement]::FromPoint"));
         assert!(source.contains("function Find-BoundedComposerElements"));
         assert!(source.contains("$visited -lt 3500"));
-        assert!(source.contains("(Get-MonotonicMilliseconds) + 1800"));
+        assert!(source.contains("[int]$budgetMs = 1800"));
+        assert!(source.contains("(Get-MonotonicMilliseconds) + $budgetMs"));
         assert!(source.contains("$depth -ge 48"));
         assert!(source.contains("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE"));
         assert!(source.contains("JOB_OBJECT_LIMIT_PROCESS_MEMORY"));
@@ -3629,6 +4387,54 @@ mod tests {
         let confirm = receive_latest_composer_command(&receiver, &mut pending).unwrap();
         assert_eq!(composer_command_kind(&confirm), "confirm");
         assert_eq!(confirm.payload["revision"], 4);
+    }
+
+    #[test]
+    fn final_readback_is_a_queue_barrier_even_with_later_updates() {
+        for has_partial in [false, true] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            if has_partial { sender.send(command("update", 1)).unwrap(); }
+            let (response, ack) = std::sync::mpsc::channel();
+            let mut final_update = command("update", 2);
+            final_update.response = Some(response);
+            sender.send(final_update).unwrap();
+            sender.send(command("update", 3)).unwrap();
+            sender.send(command("confirm", 4)).unwrap();
+            let mut pending = None;
+            let final_update = receive_latest_composer_command(&receiver, &mut pending).unwrap();
+            assert_eq!(final_update.payload["revision"], 2);
+            final_update.response.unwrap().send(Ok(json!({"ok":true}))).unwrap();
+            assert!(ack.recv().unwrap().is_ok());
+            assert_eq!(receive_latest_composer_command(&receiver, &mut pending).unwrap().payload["revision"], 3);
+            assert_eq!(receive_latest_composer_command(&receiver, &mut pending).unwrap().payload["revision"], 4);
+        }
+    }
+
+    #[test]
+    fn final_draft_waits_for_readback_and_propagates_editor_rejection() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        for rejected in [false, true] {
+            let (sender, receiver) = std::sync::mpsc::channel::<ComposerCommand>();
+            let bridge = CodexComposerBridge {
+                sender,
+                failed: Arc::new(AtomicBool::new(false)),
+                closed: Arc::new(AtomicBool::new(false)),
+            };
+            let worker = std::thread::spawn(move || {
+                let command = receiver.recv().unwrap();
+                assert_eq!(command.payload["text"], "查一下北京今天的天气怎么样？");
+                assert_eq!(command.payload["revision"], 9);
+                command.response.unwrap().send(if rejected {
+                    Err("selection not confirmed".to_string())
+                } else {
+                    Ok(json!({"ok":true,"phase":"updated"}))
+                }).unwrap();
+            });
+            let result = bridge.update_confirmed(9, "查一下北京今天的天气怎么样？");
+            assert_eq!(result.is_err(), rejected);
+            if rejected { assert_eq!(result.unwrap_err(), "selection not confirmed"); }
+            worker.join().unwrap();
+        }
     }
 
     #[test]

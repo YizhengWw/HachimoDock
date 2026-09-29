@@ -170,7 +170,7 @@ test("firmware implements conversation capture, streamed playback, the key actio
   assert.match(audio, /esp_err_t pet_p4_audio_stream_push\(const uint8_t \*pcm, size_t length\)/);
   assert.match(audio, /PET_P4_AUDIO_STREAM_START_BYTES 6400/);
   assert.match(audio, /if \(playback_gates_capture\(now_ms\)\) \{/);
-  assert.match(audio, /if \(pet_p4_audio_conversation_active\(\)\s*\|\| atomic_load_explicit\(&g_stream_active, memory_order_acquire\)\) return;/);
+  assert.match(audio, /if \(atomic_load\(&g_instrument_enabled\) \|\| pet_p4_audio_conversation_active\(\)\s*\|\| atomic_load_explicit\(&g_stream_active, memory_order_acquire\)\) return;/);
   assert.match(audio, /!conversation && now_ms - started_ms >= PET_P4_AUDIO_MAX_CAPTURE_MS/);
   const protocol = read("firmware/main/pet_p4_protocol.c");
   for (const topic of ["audio/conversation", "audio/play_begin", "audio/play_chunk", "audio/play_end", "audio/play_flush", "ui/conversation"]) {

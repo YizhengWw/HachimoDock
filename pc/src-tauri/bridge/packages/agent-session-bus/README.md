@@ -17,6 +17,7 @@ path:
 | `codex`        | resume Desktop threads via `codex app-server --listen stdio://`; new sessions use `codex exec --json` |
 | `openclaw`     | spawn helper → `import('openclaw/dist/plugin-sdk/agent-runtime').agentCommand({...})` |
 | `mimocode`     | official `mimo session list --format json`; status comes from the managed MiMoCode plugin |
+| `workbuddy`    | status-only WorkBuddy lifecycle hooks; sessions received during the current Bridge run; text injection and session creation explicitly unsupported |
 
 Centralising the "find the user's latest session, pipe text in, stream tokens
 out" logic here keeps voice-service-node a pure audio frontend, and keeps each

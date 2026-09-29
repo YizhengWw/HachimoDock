@@ -1,4 +1,5 @@
 #include "pet_p4_audio.h"
+#include "pet_p4_instrument_core.h"
 #include "pet_p4_audio_frontend.h"
 #include "pet_p4_system_cues.h"
 
@@ -83,6 +84,11 @@ static atomic_bool g_stream_active;
 static atomic_bool g_stream_ended;
 static atomic_bool g_stream_playing;
 static atomic_uint g_stream_played_bytes;
+static atomic_bool g_music;
+static atomic_bool g_music_paused;
+static atomic_bool g_music_pause_requested;
+static atomic_uint g_music_volume = 65;
+static int32_t g_music_gain = 0;
 
 unsigned int pet_p4_audio_stream_played_bytes(void) { return atomic_load(&g_stream_played_bytes); }
 bool pet_p4_audio_stream_playing(void) { return atomic_load(&g_stream_playing); }
@@ -361,6 +367,7 @@ static void stream_silence_step(uint8_t *pcm, size_t capacity) {
 }
 
 static void stream_drain_step_locked(uint8_t *pcm, size_t capacity) {
+  if (atomic_load(&g_music_paused) && atomic_load(&g_music)) return;
   if (!atomic_load_explicit(&g_stream_active, memory_order_acquire) || !g_stream_ring) {
     stream_silence_step(pcm, capacity);
     return;
@@ -369,7 +376,8 @@ static void stream_drain_step_locked(uint8_t *pcm, size_t capacity) {
   bool ended = atomic_load_explicit(&g_stream_ended, memory_order_acquire);
   bool playing = atomic_load_explicit(&g_stream_playing, memory_order_acquire);
   if (!playing) {
-    if (buffered < PET_P4_AUDIO_STREAM_START_BYTES && !(ended && buffered > 0)) {
+    size_t start_bytes = atomic_load(&g_music) ? 38400 : PET_P4_AUDIO_STREAM_START_BYTES;
+    if (buffered < start_bytes && !(ended && buffered > 0)) {
       if (ended && buffered == 0) {
         atomic_store_explicit(&g_stream_active, false, memory_order_release);
         pet_p4_audio_send_status();
@@ -394,18 +402,34 @@ static void stream_drain_step_locked(uint8_t *pcm, size_t capacity) {
     } else {
       unsigned int n = atomic_fetch_add(&g_stream_underruns, 1);
       if (n == 0 || n % 100 == 0) pet_p4_audio_diagnostic("playback_underrun", g_stream_session, 0, false);
+      if (atomic_load(&g_music)) {
+        atomic_store(&g_stream_playing, false);
+        atomic_store(&g_playback_active, false);
+      }
     }
     /* Keep the codec/reference clock continuous, including network gaps. */
     stream_silence_step(pcm, capacity);
     return;
   }
   size_t want = buffered < capacity ? buffered : capacity;
-  if (want > PET_P4_AUDIO_STREAM_WRITE_BYTES) want = PET_P4_AUDIO_STREAM_WRITE_BYTES;
+  size_t write_bytes = atomic_load(&g_music) ? 1920 : PET_P4_AUDIO_STREAM_WRITE_BYTES;
+  if (want > write_bytes) want = write_bytes;
   size_t tail = atomic_load_explicit(&g_stream_tail, memory_order_acquire);
   for (size_t i = 0; i < want; i += 1) {
     pcm[i] = g_stream_ring[(tail + i) % PET_P4_AUDIO_STREAM_RING_BYTES];
   }
   atomic_store_explicit(&g_stream_tail, (tail + want) % PET_P4_AUDIO_STREAM_RING_BYTES, memory_order_release);
+  if (atomic_load(&g_music)) {
+    int target = atomic_load(&g_music_pause_requested)?0:(int)atomic_load(&g_music_volume)*256;
+    for (size_t i=0;i+1<want;i+=2) {
+      int delta=target-g_music_gain;
+      g_music_gain+=delta>32?32:delta<-32?-32:delta;
+      int16_t value=(int16_t)((uint16_t)pcm[i] | ((uint16_t)pcm[i+1]<<8));
+      value=(int16_t)((int32_t)value*g_music_gain/(100*256));
+      pcm[i]=(uint8_t)value;pcm[i+1]=(uint8_t)((uint16_t)value>>8);
+    }
+    if(target==0 && g_music_gain==0 && atomic_load(&g_music_pause_requested))atomic_store(&g_music_paused,true);
+  }
   if (pet_p4_audio_conversation_active() && !atomic_load(&g_conversation_half_duplex))
     pet_p4_afe_reference((const int16_t *)pcm, want / sizeof(int16_t));
   if (esp_codec_dev_write(g_speaker, pcm, (int) want) != ESP_OK) {
@@ -427,11 +451,67 @@ static void stream_drain_step(uint8_t *pcm, size_t capacity) {
   xSemaphoreGiveRecursive(g_stream_lock);
 }
 
+static atomic_bool g_instrument_enabled;
+static atomic_uint g_instrument_pending, g_instrument_effect, g_instrument_ambience;
+static atomic_uint g_instrument_hit_ms;
+static atomic_bool g_instrument_hit;
+static atomic_int g_instrument_start_y, g_instrument_start_scale;
+static pet_instrument_core_t g_instrument_core;
+
+void pet_p4_audio_instrument_set(bool active,unsigned effect,unsigned ambience) {
+  atomic_store(&g_instrument_effect,effect>100?100:effect);
+  atomic_store(&g_instrument_ambience,ambience>100?100:ambience);
+  bool old=atomic_exchange(&g_instrument_enabled,active);
+  if(old!=active) {
+    atomic_store(&g_instrument_pending,0);atomic_store(&g_instrument_hit,false);
+    atomic_fetch_add(&g_playback_generation,1);
+    if(g_playback_queue)xQueueReset(g_playback_queue);
+  }
+}
+bool pet_p4_audio_instrument_strike(uint64_t now_ms) {
+  if(!atomic_load(&g_instrument_enabled) || atomic_load(&g_capture_requested)
+     || atomic_load(&g_conversation) || !pet_p4_audio_playback_ready())return false;
+  unsigned n=atomic_load(&g_instrument_pending);
+  do {if(n>=4)return false;} while(!atomic_compare_exchange_weak(&g_instrument_pending,&n,n+1));
+  pet_instrument_motion_t current=pet_p4_audio_instrument_motion(now_ms);
+  atomic_store(&g_instrument_start_y,(int)(current.mallet_y*1024));
+  atomic_store(&g_instrument_start_scale,(int)(current.fish_scale*1024));
+  atomic_store(&g_instrument_hit_ms,(uint32_t)now_ms);atomic_store(&g_instrument_hit,true);
+  return true;
+}
+uint32_t pet_p4_audio_instrument_age(uint64_t now_ms) {
+  return atomic_load(&g_instrument_hit)?(uint32_t)now_ms-atomic_load(&g_instrument_hit_ms):1000;
+}
+pet_instrument_motion_t pet_p4_audio_instrument_motion(uint64_t now_ms) {
+  return pet_instrument_motion_from(pet_p4_audio_instrument_age(now_ms),
+    atomic_load(&g_instrument_start_y)/1024.0f,
+    atomic_load(&g_instrument_start_scale)/1024.0f);
+}
+static bool instrument_drain_step(uint8_t *pcm) {
+  if(!g_stream_lock)return false;
+  xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
+  bool blocked=atomic_load(&g_capture_requested)||atomic_load(&g_capture_active)
+    ||atomic_load(&g_conversation)||atomic_load(&g_stream_active)||atomic_load(&g_music);
+  bool enabled=atomic_load(&g_instrument_enabled);
+  bool render=!blocked && (enabled||g_instrument_core.gain>0);
+  unsigned hits=atomic_exchange(&g_instrument_pending,0);
+  if(blocked)pet_instrument_reset(&g_instrument_core);
+  if(render) {
+    if(enabled)for(unsigned i=0;i<hits;i++)pet_instrument_strike(&g_instrument_core);
+    pet_instrument_render(&g_instrument_core,(int16_t*)pcm,320,enabled,
+      atomic_load(&g_instrument_effect),atomic_load(&g_instrument_ambience));
+    if(esp_codec_dev_write(g_speaker,pcm,640)!=ESP_OK)pet_instrument_reset(&g_instrument_core);
+  }
+  xSemaphoreGiveRecursive(g_stream_lock);
+  return render;
+}
 static void playback_task(void *arg) {
   (void) arg;
   uint8_t pcm[PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES];
   pet_p4_audio_playback_request_t request;
+  pet_instrument_reset(&g_instrument_core);
   while (true) {
+    if(instrument_drain_step(pcm)) {vTaskDelay(1);continue;}
     if (xQueueReceive(g_playback_queue, &request,
           atomic_load(&g_stream_active) ? 0 : pdMS_TO_TICKS(10)) != pdTRUE) {
       stream_drain_step(pcm, sizeof(pcm));
@@ -440,7 +520,7 @@ static void playback_task(void *arg) {
       vTaskDelay(1);
       continue;
     }
-    if (atomic_load_explicit(&g_stream_active, memory_order_acquire)
+    if (atomic_load(&g_instrument_enabled) || atomic_load(&g_music) || atomic_load_explicit(&g_stream_active, memory_order_acquire)
         || pet_p4_audio_conversation_active()) {
       /* 实时对话播放中：状态音效让路，不打断形象说话 */
       continue;
@@ -714,7 +794,7 @@ void pet_p4_audio_process(
   if (!state || !pet_p4_audio_playback_ready() || !g_playback_queue) return;
   /* Listening/working animation changes must not play status WAVs into the microphone.
    * Those cues also gate half-duplex capture and can suppress an entire user utterance. */
-  if (pet_p4_audio_conversation_active()
+  if (atomic_load(&g_instrument_enabled) || pet_p4_audio_conversation_active()
       || atomic_load_explicit(&g_stream_active, memory_order_acquire)) return;
   const char *lifecycle = pet_p4_canonical_lifecycle(pet_p4_state_effective_lifecycle(state, now_ms));
   int index = pet_p4_behavior_select(
@@ -762,14 +842,23 @@ esp_err_t pet_p4_audio_set_enabled(bool enabled) {
 
 esp_err_t pet_p4_audio_capture_start(bool session_queue_empty) {
   if (!pet_p4_audio_ready() || !pet_p4_audio_enabled()) return ESP_ERR_INVALID_STATE;
+  if(g_stream_lock)xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
+  /* Restore the voice clock before waking the microphone task. */
+  if (atomic_load(&g_music)) pet_p4_audio_stream_flush();
+  if (!pet_p4_audio_ready()) {
+    if(g_stream_lock)xSemaphoreGiveRecursive(g_stream_lock);
+    return ESP_ERR_INVALID_STATE;
+  }
   bool expected = false;
   if (!atomic_compare_exchange_strong_explicit(
         &g_capture_requested, &expected, true, memory_order_acq_rel, memory_order_acquire)) {
+    if(g_stream_lock)xSemaphoreGiveRecursive(g_stream_lock);
     return ESP_ERR_INVALID_STATE;
   }
   atomic_store_explicit(
     &g_capture_session_queue_empty, session_queue_empty, memory_order_release
   );
+  if(g_stream_lock)xSemaphoreGiveRecursive(g_stream_lock);
   xTaskNotifyGive(g_audio_task);
   return ESP_OK;
 }
@@ -795,6 +884,7 @@ esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex) {
     return ESP_OK;
   }
   if (!pet_p4_audio_ready()) return ESP_ERR_INVALID_STATE;
+  if (atomic_load(&g_music)) pet_p4_audio_stream_flush();
   half_duplex = half_duplex || !pet_p4_afe_ready();
   if (!conversation_mic_gain(!half_duplex)) return ESP_FAIL;
   pet_p4_afe_reset_stream();
@@ -816,6 +906,7 @@ esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex) {
 
 esp_err_t pet_p4_audio_stream_begin(const char *session_id) {
   if (!pet_p4_audio_playback_ready()) return ESP_ERR_INVALID_STATE;
+  if (atomic_load(&g_music) && (!session_id || strncmp(session_id,"music-",6))) pet_p4_audio_stream_flush();
   if (!stream_ring_ensure()) return ESP_ERR_NO_MEM;
   xSemaphoreTakeRecursive(g_stream_lock, portMAX_DELAY);
   atomic_store_explicit(&g_stream_playing, false, memory_order_release);
@@ -877,5 +968,51 @@ void pet_p4_audio_stream_flush(void) {
     atomic_store_explicit(&g_stream_last_play_ms, (uint64_t) (esp_timer_get_time() / 1000ULL), memory_order_release);
   }
   g_stream_session[0] = '\0';
+  if (atomic_exchange(&g_music, false)) {
+    /* Both handles share one I2S bus. Never change only one half's clock. */
+    esp_codec_dev_close(g_speaker);
+    if (g_microphone && g_microphone != g_speaker) esp_codec_dev_close(g_microphone);
+    esp_codec_dev_sample_info_t format = {.sample_rate=16000,.channel=1,.bits_per_sample=16};
+    int restored = g_microphone ? esp_codec_dev_open(g_microphone,&format) : ESP_OK;
+    if (g_speaker != g_microphone) {
+      int r=esp_codec_dev_open(g_speaker,&format); if (r!=ESP_OK) restored=r;
+    }
+    if (restored != ESP_OK) {
+      atomic_store(&g_ready,false);atomic_store(&g_playback_ready,false);
+      ESP_LOGE(TAG,"music to voice codec restore failed: %d",restored);
+    }
+    atomic_store(&g_music_paused,false);
+  }
   if (g_stream_lock) xSemaphoreGiveRecursive(g_stream_lock);
 }
+
+esp_err_t pet_p4_audio_music_begin(const char *session_id) {
+  if (!g_stream_lock || !pet_p4_audio_playback_ready()) return ESP_ERR_INVALID_STATE;
+  xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
+  if (atomic_load(&g_capture_requested) || atomic_load(&g_capture_active) || atomic_load(&g_conversation)) {
+    xSemaphoreGiveRecursive(g_stream_lock);return ESP_ERR_INVALID_STATE;
+  }
+  pet_p4_audio_stream_flush();
+  atomic_fetch_add(&g_playback_generation,1);
+  xQueueReset(g_playback_queue);
+  for (int i=0; i<100 && atomic_load(&g_playback_active); i++) vTaskDelay(pdMS_TO_TICKS(5));
+  if (atomic_load(&g_playback_active)) {xSemaphoreGiveRecursive(g_stream_lock);return ESP_ERR_INVALID_STATE;}
+  esp_codec_dev_close(g_speaker);
+  if (g_microphone && g_microphone!=g_speaker) esp_codec_dev_close(g_microphone);
+  esp_codec_dev_sample_info_t format={.sample_rate=48000,.channel=1,.bits_per_sample=16};
+  int result=g_microphone ? esp_codec_dev_open(g_microphone,&format) : ESP_OK;
+  if (result==ESP_OK && g_speaker!=g_microphone) result=esp_codec_dev_open(g_speaker,&format);
+  atomic_store(&g_music,true);atomic_store(&g_music_paused,false);atomic_store(&g_music_pause_requested,false);g_music_gain=0;
+  if (result==ESP_OK) result=pet_p4_audio_stream_begin(session_id);
+  if (result!=ESP_OK) pet_p4_audio_stream_flush();
+  xSemaphoreGiveRecursive(g_stream_lock);return result;
+}
+bool pet_p4_audio_music_active(void) {return atomic_load(&g_music);}
+bool pet_p4_audio_music_paused(void) {return atomic_load(&g_music_paused);}
+bool pet_p4_audio_music_ended(void) {return atomic_load(&g_music) && !atomic_load(&g_stream_active) && atomic_load(&g_stream_ended);}
+void pet_p4_audio_music_pause(bool paused) {
+  atomic_store(&g_music_pause_requested,paused);
+  if(!paused || !atomic_load(&g_stream_playing))atomic_store(&g_music_paused,paused);
+}
+void pet_p4_audio_music_volume(unsigned int v) {atomic_store(&g_music_volume,v>100?100:v);}
+unsigned int pet_p4_audio_music_buffered_ms(void) {return (unsigned int)(stream_buffered()*1000ULL/96000ULL);}

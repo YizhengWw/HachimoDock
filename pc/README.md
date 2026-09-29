@@ -2,6 +2,8 @@
 
 Pet Manager 用于连接设备、管理形象和组件，以及将 Agent 状态与语音输入同步到桌面小屏。支持 macOS arm64 与 Windows x64。
 
+当前源码支持 [WorkBuddy](docs/workbuddy.md)：独立形象绑定、状态与气泡同步、当前可见对话的按键语音草稿及组件生成 Skill 安装。历史会话需在 WorkBuddy 手动打开。已发布安装包的能力以对应版本为准。
+
 直接使用请前往 [下载页面](https://github.com/YizhengWw/HachimoDock/releases/latest)。以下内容面向需要自行编译或修改客户端的开发者，技术栈为 Tauri 2 + React。
 
 ## 环境与测试 / Requirements and tests

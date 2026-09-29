@@ -1,0 +1,11 @@
+{
+  "dashboard": {
+    "title": "近期待办",
+    "headline": "等待数据",
+    "footer": "摇杆左右翻页 · 主操作回首页",
+    "visualStyle": "clean",
+    "visualPalette": "mint",
+    "visualLayout": "tool",
+    "visualSprite": "target"
+  }
+}

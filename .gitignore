@@ -1,8 +1,11 @@
 node_modules/
+node_modules
 dist/
 !pc/src-tauri/bridge/packages/agent-session-bus/test/fixtures/fake-openclaw/dist/
 target/
+target
 generated-runtime/
+generated-runtime
 .runtime-cache/
 .pio/
 build/

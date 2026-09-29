@@ -18,6 +18,9 @@ import { buildComponentPlayGuide } from "./binding-labels";
 import { componentKindLabel, resolveComponentKind } from "./CandidateCard";
 import DeviceScreenPreview from "./DeviceScreenPreview";
 import StockWatchlist from "./StockWatchlist.jsx";
+import LocalDataPanel from "./LocalDataPanel.jsx";
+import MusicPlayer from "./MusicPlayer.jsx";
+import { LOCAL_SOURCES } from "./local-widget-model.js";
 
 export default function ComponentPreviewModal({
   component,
@@ -136,14 +139,16 @@ export default function ComponentPreviewModal({
           </Button>
         </div>
         <div className="modal-body">
+          {(component.mediaSource === "audio.player" || component.id === "music-player") && <MusicPlayer />}
+          {LOCAL_SOURCES.has(component.dataSource) && <LocalDataPanel key={component.id} source={component.dataSource} />}
           {(component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist") && (
             <StockWatchlist key={component.id} usb={usb} />
           )}
           <div className="component-preview-modal__layout">
             <aside className="component-preview-modal__overview" aria-label="组件预览与说明">
-              <div className="component-preview-modal__screen">
+              {component.mediaSource !== "audio.player" && component.id !== "music-player" && <div className="component-preview-modal__screen">
                 <DeviceScreenPreview component={component} className="component-preview-modal__device" />
-              </div>
+              </div>}
               <div className="component-preview-modal__summary">
                 <div className="component-preview-modal__summary-tags">
                   <span className={`candidate-card__badge candidate-card__badge--${isLocal ? "custom" : "builtin"}`}>

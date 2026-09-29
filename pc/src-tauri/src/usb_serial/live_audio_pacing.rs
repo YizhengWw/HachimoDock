@@ -24,6 +24,34 @@ pub(super) fn write_serial_live_frame(writer: &mut dyn Write, bytes: &[u8], slic
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Explicit native performance regression: run separately from parallel CI
+    // tests. Exercises the actual writer on a thread inherited as background,
+    // without opening a serial port or playing audio on the user's device.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "native macOS scheduling benchmark; run explicitly with --nocapture"]
+    fn macos_background_player_keeps_up_with_100ms_pcm() {
+        std::thread::spawn(|| {
+            assert_eq!(unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_BACKGROUND, 0) }, 0);
+            let measure = |frames: usize| {
+                let started = std::time::Instant::now();
+                for _ in 0..frames {
+                    let mut writer = capture(usize::MAX);
+                    write_serial_live_frame(&mut writer, &[1; 4400], 64, Duration::from_micros(250)).unwrap();
+                    assert_eq!(writer.bytes.len(), 4400);
+                    assert_eq!(writer.calls.len(), 69);
+                }
+                started.elapsed().as_secs_f64() * 1000.0 / frames as f64
+            };
+            let before = measure(5);
+            let activity = crate::realtime_audio_macos::AudioActivity::begin_on_player_thread();
+            assert_eq!(activity.qos_error, 0);
+            let after = measure(100);
+            eprintln!("macOS 100ms PCM frame pacing: background={before:.2}ms protected={after:.2}ms");
+            assert!(after >= 17.0, "CH343 minimum inter-slice gaps must remain");
+            assert!(after < 80.0, "audio must be delivered faster than playback, with headroom");
+        }).join().unwrap();
+    }
     struct Capture { bytes: Vec<u8>, calls: Vec<usize>, max_write: usize, fail_after: usize }
     impl Write for Capture {
         fn write(&mut self, data: &[u8]) -> io::Result<usize> {

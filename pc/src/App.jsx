@@ -22,6 +22,7 @@ import AppearanceGallery from "./AppearanceGallery";
 import CustomAvatarWizard from "./CustomAvatarWizard";
 import AppearanceDetail from "./AppearanceDetail";
 import ComponentCenter from "./ComponentCenter";
+import ComponentCenterBoundary from "./component-center/ComponentCenterBoundary.jsx";
 import ApiSettings from "./ApiSettings";
 import SmartHome from "./SmartHome.jsx";
 import { DeviceContextProvider, useDeviceContext } from "./shell/DeviceContext.jsx";
@@ -404,7 +405,7 @@ function AppInner({
                 </div>
             )}
             {view === "components" && (
-              <ComponentCenter />
+              <ComponentCenterBoundary><ComponentCenter /></ComponentCenterBoundary>
             )}
             {view === "api" && (
               <ApiSettings onBack={handleApiSettingsBack} />

@@ -39,6 +39,7 @@ export const COMPONENT_VISUAL_PRESETS = {
   visualPalette: ["candy", "sunset", "mint", "arcade", "ocean", "forest", "ember", "mono"],
   visualLayout: ["arcade", "scoreboard", "tool"],
   visualSprite: [
+    "music",
     "target", "trophy", "star", "bolt", "coffee", "timer", "droplet", "gauge",
     "blocks", "snake", "flappy",
     "mole-ready", "mole-left", "mole-center", "mole-right",

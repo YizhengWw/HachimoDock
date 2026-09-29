@@ -23,6 +23,9 @@
   "widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"],
   "widgetSprites": true,
   "widgetData": "p4-data-list-v1",
+  "widgetMedia": "p4-media-v1",
+  "widgetInstrument": "p4-instrument-v1",
+  "widgetLyrics": "p4-lrc-v1",
   "widgetGamePresets": ["blocks", "snake", "flappy"],
   "touchInput": { "ready": false }
 }
@@ -31,6 +34,13 @@
 没有提供能力文件时，校验器使用上面的当前 P4 产品能力。
 
 ## 2. 包结构
+
+### 原生本地音效工具
+
+已实现的 `instrument.source=percussion.wooden-fish` 需要独立能力
+`widgetInstrument=p4-instrument-v1`，详见 [instrument.md](instrument.md)。
+这是受控原生工具表面：图层、音效合成和调度在产品内实现，并非扩大 scene 精灵配额。
+生成包不得携带任意脚本、音频 URL、WAV 或高分辨率未引用图片。
 
 组件目录必须包含：
 
@@ -80,7 +90,7 @@
 安全图标：
 
 ```text
-target trophy star bolt coffee timer droplet gauge
+target trophy star bolt coffee timer droplet gauge music
 blocks snake flappy mole-ready mole-left mole-center mole-right
 ```
 
@@ -122,7 +132,7 @@ screen.region.tap
 screen.region.long_press
 ```
 
-- SW1/SW2/SW3 只允许短按，禁止任何 `long_press` 或 `hold`。
+- SW1/SW2/SW3 默认只允许短按，禁止 `hold`。唯一受控例外：audio.player 媒体组件的 media.lyrics 可绑定 button.sw1.long_press，需要 widgetLyrics=p4-lrc-v1；全局实时对话与退出绑定优先于组件动作。
 - 触屏事件仅在 `touchInput.ready=true` 时允许。
 - `buttons.json` 最多 8 条；每条必须有非空 `action`、`control`、`event`、`label`。
 - `action` 唯一；物理事件槽位唯一；label 不超过 30 UTF-8 字节。
@@ -202,6 +212,13 @@ Dashboard 使用 clean/tool，提供 title/footer；初始预览使用“等待�
 行情时间来自数据源，不以请求时间冒充行情时间。
 PC 数据源、刷新与验收边界见 [live-data.md](live-data.md)。实时列表也必须通过现有自测脚本的分页测试；
 模拟通过不等于完成网络、断连恢复或真机显示验收。
+
+### 5.2 可选 PC 音频播放器
+
+仅支持 `widgetMedia=p4-media-v1` 的设备接受 v4 tool 的
+`"media":{"source":"audio.player"}`。media 只含 source，不能混用 data/scene/game。
+旧固件必须拒绝安装，不能仅凭 v4 判断支持。
+使用产品原生播放器界面及真实音频状态，详见 [media.md](media.md)。
 
 ## 6. 通用 Scene
 

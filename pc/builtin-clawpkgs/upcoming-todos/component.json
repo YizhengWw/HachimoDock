@@ -1,0 +1,7 @@
+{
+  "id": "upcoming-todos",
+  "name": "近期待办",
+  "version": "1.0.1",
+  "description": "查看事项和截止时间，蓝色未完成、绿色已完成；通过 PC 或实时对话管理待办。",
+  "kind": "tool"
+}

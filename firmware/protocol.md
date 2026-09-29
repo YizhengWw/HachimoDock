@@ -1,5 +1,27 @@
 # ESP-P4 USB Protocol
 
+组件中心：应用 bundle 与出厂 SPIFFS 同步内置 13 项（新增敲木鱼），默认前五项是 `stock-watchlist`、`wooden-fish`、`music-player`、`upcoming-todos`、`computer-status`。保持现有 ID、全局按键与 16 项容量上限，升级不清空用户数据。目录页使用 2×2 卡片和分页，左右依次选择，确认/返回跟随全局配置；图标为原生几何绘制，不依赖字体符号。
+
+## PC 音频播放器（0.7.66-p4）
+
+0.7.69-p4：离开随身听组件允许后台播放。在宠物主页触发配置的全局 `page_back` 时，设备立即停止音乐并清空音乐缓冲，上报 `media/event {operation:"stop"}`，同时 input/event 标记 action=media_stop、handledLocally=true。即使 PC 尚在准备歌曲也上报，以取消对应任务；PC 不在接收线程阻塞等待 USB，补发的清理只针对当时的音乐会话。保留曲库，不自动下一首；实时对话中的退出优先于停止音乐。
+
+能力 `widgetMedia=p4-media-v1` 表示支持 v4 工具的 `media.source=audio.player` 原生播放器。
+`media/begin/chunk/end/query/control/stop/metadata/cover/library` 的每个请求使用唯一 requestId，
+回复 `media/status` 包含同一 requestId、ok、sessionId、state、positionMs、bufferedMs、volume。
+begin 声明 music- 前缀会话、sampleRate=48000、format=ima-block-v1、durationMs/offsetMs/volume。
+begin/library 的 queue 与 keys 是同长度、最多 20 项的标题与稳定曲目 ID 数组，全部校验后才替换。
+设备 `media/event` 携带 operation，选择歌曲携带 key，不依赖易变化的列表序号。
+
+chunk 携带匹配 sessionId、从 0 单调递增的 seq 和独立 IMA ADPCM base64 块：
+LE16 初始采样值、步长索引、零保留字节、LE16 样本数、低 nibble 优先数据；
+最多 3840 个样本/1926 字节，48 kHz 单声道约 80 ms。旧会话或重复序号不写入音频。
+cover 为 192×192 RGB565 LE，offset 连续且每片不超过 2048 字节；封面失败不阻断音乐。
+进度来自实际播放字节，400 ms 缓冲起播（短曲收到 end 可提前播放），PC 有界补充。
+语音优先：开始采集前暂停音乐并恢复双向 16 kHz codec；不将音乐混入会话 AEC。
+媒体控制/数据请求维护 5 秒失联停止租期，library 刷新不续期。音乐不写 flash。
+详细 PC 服务、技能和测试边界见 [播放器说明](../pc/docs/music-player.md)。
+
 ## PC 推送的组件实时数据（0.7.60-p4）
 
 能力 `widgetData: "p4-data-list-v1"` 表示支持 `widget/data` 完整快照。
@@ -1085,3 +1107,6 @@ with only animated working markers redrawn per frame.
 设备能力 `appearance.systemCues: true` 表示默认完成、错误、等待用户音效由固件公共资源提供，不依赖形象内是否存在对应视频。完成音保持四组、每组三声。新形象 manifest 可声明 `systemCues: true`，默认不含 WAV；`families[].audioPath` 配合 `audioSource: "custom"` 表示专属音效，缺失/无效时公共音效兜底。旧 manifest 保持兼容，已知旧默认 WAV 按内容指纹迁移，不按文件名猜测用户音效。
 
 内置形象切换使用现有 `asset/slot-query` 与 `asset/activate`：仅对设备声明 `builtinProtected` 的内置形象请求，选择有效 slot 0，并使用设备返回的 packId 激活；不要求与 PC 内置 packId 相等。槽位无效时停止并报错，不能回退成写入自定义槽位。普通自定义包仍严格校验 packId。
+# 原生敲击组件能力（0.7.70-p4）
+
+设备通过 `widgetInstrument: p4-instrument-v1` 声明本地敲击音源支持。受控组件使用 `instrument.source = percussion.wooden-fish`，`instrument.strike` 只由绑定按键触发；`effect_volume` 和 `ambience_volume` 为 0–100 的整数。缺少能力声明时 PC 阻止安装并提示升级，不模拟成功。组件退出淡出，录音、实时对话和媒体流优先；音频不需要新增 USB 流协议。

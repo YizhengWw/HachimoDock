@@ -19,6 +19,13 @@ export const APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE =
 export const CHANNEL_SWITCH_DEVICE_REQUIRED_MESSAGE =
   "切换跟随需要 USB 连接，请连接设备后重试。";
 export const APPEARANCE_SYNC_CANCELLED_MESSAGE = "形象素材传输已中断";
+export const APPEARANCE_SYNC_STAGE_TEXT = {
+  checking_cache: "正在检查设备是否已缓存该形象…",
+  comparing_assets: "正在对比设备已有素材…",
+  preparing_slot: "正在准备设备形象存储槽…",
+  preparing_storage: "设备正在擦除旧素材、准备存储空间…",
+  transferring: "开始通过 USB 传输素材…",
+};
 
 export function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -89,6 +96,13 @@ export async function applyDesktopPetAssignment({
     const unlisten = listen
       ? await listen("usb-sync-progress", (event) => {
         const progress = event.payload || {};
+        if (progress.stage) {
+          // Pre-transfer steps have no byte progress; name the step instead
+          // of showing a frozen 0%.
+          const text = APPEARANCE_SYNC_STAGE_TEXT[progress.stage];
+          if (text) onProgress?.({ type: "info", stage: progress.stage, text, percent: 0, indeterminate: true });
+          return;
+        }
         const currentFile = Number(progress.currentFile || 0);
         const totalFiles = Number(progress.totalFiles || 0);
         const bytesSent = Number(progress.bytesSent || 0);

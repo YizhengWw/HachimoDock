@@ -63,6 +63,12 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 
 ## 核心亮点
 
+### 0.1.101：桌面组件与交互优化
+
+- 可见内置工具依次为自选股行情、敲木鱼、近期待办、电脑状态，之后为其他组件。
+- 配套 v1/v3 固件 0.7.72-p4；保留实时对话和按键语音、实时组件及全局按键设置。
+- 对外安装包不内置 API Key、企业 CA 证书或固定代理。第三方组件及服务仍适用各自许可证和使用条件。
+
 ### 0.1.82：语音配置与联网问答
 
 - 对话大模型支持编辑模型名，并按服务商分别保存 Key；默认豆包，MiMo 默认 `mimo-v2.6-flash`。
@@ -201,8 +207,8 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.79_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.79_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.101_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.101_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。

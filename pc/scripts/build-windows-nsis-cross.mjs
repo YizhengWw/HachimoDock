@@ -196,6 +196,7 @@ mkdirSync(join(stageRoot, "licenses"), { recursive: true });
 copyFileSync(join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), join(stageRoot, "THIRD_PARTY_NOTICES.md"));
 copyFileSync(join(repositoryRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"), join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"));
 copyFileSync(join(repositoryRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"), join(stageRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"));
+copyFileSync(join(repositoryRoot, "licenses", "sysinfo-LICENSE.txt"), join(stageRoot, "licenses", "sysinfo-LICENSE.txt"));
 copyFileSync(windowsFfmpeg, join(stageRoot, "tools", "ffmpeg.exe"));
 for (const notice of ["ffmpeg.LICENSE", "ffmpeg.README", "ffmpeg.SOURCE.txt", "zlib.LICENSE"]) {
   copyFileSync(
@@ -217,6 +218,7 @@ const requiredResources = [
   bundledFirmwareDestination,
   join(stageRoot, "THIRD_PARTY_NOTICES.md"),
   join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"),
+  join(stageRoot, "licenses", "sysinfo-LICENSE.txt"),
   join(stageRoot, "bridge", "runtime", "node.exe"),
   join(stageRoot, "tools", "ffmpeg.exe"),
   join(stageRoot, "tools", "ffmpeg.LICENSE"),
@@ -234,6 +236,8 @@ const requiredResources = [
   join(stageRoot, "builtin-clawpkgs", "token-usage"),
   join(stageRoot, "builtin-clawpkgs", "stock-watchlist", "component.json"),
   join(stageRoot, "builtin-clawpkgs", "stock-watchlist", "runtime", "widget.json"),
+  join(stageRoot, "builtin-clawpkgs", "computer-status", "runtime", "widget.json"),
+  join(stageRoot, "builtin-clawpkgs", "upcoming-todos", "runtime", "widget.json"),
   join(stageRoot, "skills", "petui", "SKILL.md"),
 ];
 for (const path of requiredResources) {

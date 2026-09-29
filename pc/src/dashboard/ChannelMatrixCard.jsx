@@ -38,6 +38,7 @@ const AGENT_ICONS = {
   codex: Terminal,
   openclaw: Zap,
   mimocode: Braces,
+  workbuddy: Code,
 };
 
 function appearanceKindLabel(appearance) {
@@ -57,6 +58,10 @@ function normalizeSyncProgress(progress = {}) {
       : 0;
   return {
     text: progress.text || "正在通过 USB 下发形象素材...",
+    // Follow-only switches reuse the device's current appearance: nothing is
+    // transferred, so there is no byte progress and nothing to abort.
+    followOnly: progress.followOnly === true,
+    indeterminate: progress.followOnly === true || progress.indeterminate === true,
     currentFile: Number(progress.currentFile || 0),
     totalFiles: Number(progress.totalFiles || 0),
     bytesSent,
@@ -126,6 +131,7 @@ export default function ChannelMatrixCard() {
         initialProgress: {
           text: `准备下发「${appearance.name}」到设备端...`,
           percent: 0,
+          indeterminate: true,
         },
       });
       push({ tone: "success", title: notice || `已同步「${appearance.name}」到设备端` });
@@ -152,12 +158,19 @@ export default function ChannelMatrixCard() {
     if (!pendingFollow) return;
     const { agentId, appearance } = pendingFollow;
     setPendingFollow(null);
+    const followOnly = appearance.id === currentDisplay.appearance?.id;
     try {
       const { notice } = await applyDesktopPet(agentId, appearance, {
-        initialProgress: {
-          text: `准备下发「${appearance.name}」并切换跟随...`,
-          percent: 0,
-        },
+        initialProgress: followOnly
+          ? {
+            text: `沿用「${appearance.name}」，正在把设备跟随切换到 ${channelLabelForId(agentOptions, agentId)}…`,
+            followOnly: true,
+          }
+          : {
+            text: `准备下发「${appearance.name}」并切换跟随...`,
+            percent: 0,
+            indeterminate: true,
+          },
       });
       push({ tone: "success", title: notice || `已跟随 ${channelLabelForId(agentOptions, agentId)}` });
     } catch (err) {
@@ -175,7 +188,7 @@ export default function ChannelMatrixCard() {
         message: cancelled ? "设备继续保留原形象和跟随主体。" : msg,
       });
     }
-  }, [agentOptions, applyDesktopPet, pendingFollow, push]);
+  }, [agentOptions, applyDesktopPet, currentDisplay.appearance?.id, pendingFollow, push]);
 
   const handleCancelAppearanceSync = useCallback(async () => {
     try {
@@ -196,24 +209,24 @@ export default function ChannelMatrixCard() {
           <div className="channel-matrix-sync__copy">
             <UploadCloud size={15} />
             <div>
-              <strong>正在切换形象</strong>
+              <strong>{syncProgress.followOnly ? "正在切换跟随" : "正在切换形象"}</strong>
               <span>{syncProgress.text}</span>
             </div>
           </div>
           <div className="channel-matrix-sync__meter">
-            <span>{syncProgress.percent}%</span>
+            <span>{syncProgress.indeterminate ? "准备中" : `${syncProgress.percent}%`}</span>
             <div
-              className="channel-matrix-sync__bar"
+              className={`channel-matrix-sync__bar${syncProgress.indeterminate ? " is-indeterminate" : ""}`}
               role="progressbar"
-              aria-label="形象素材下发进度"
+              aria-label={syncProgress.followOnly ? "设备跟随切换进度" : "形象素材下发进度"}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={syncProgress.percent}
+              aria-valuenow={syncProgress.indeterminate ? undefined : syncProgress.percent}
             >
               <span style={{ "--sync-progress": `${syncProgress.percent}%` }} />
             </div>
           </div>
-          <Button
+          {!syncProgress.followOnly && <Button
             className="channel-matrix-sync__cancel"
             variant="danger"
             size="small"
@@ -224,7 +237,7 @@ export default function ChannelMatrixCard() {
           >
             <X size={14} />
             中断传输
-          </Button>
+          </Button>}
         </div>
       )}
 
@@ -324,6 +337,7 @@ export default function ChannelMatrixCard() {
           currentLabel={channelLabelForId(agentOptions, activeAgentId)}
           nextLabel={channelLabelForId(agentOptions, pendingFollow.agentId)}
           appearanceName={pendingFollow.appearance?.name || "西高地小狗"}
+          reusesCurrentAppearance={pendingFollow.appearance?.id === currentDisplay.appearance?.id}
           syncing={syncing}
           onCancel={() => setPendingFollow(null)}
           onConfirm={confirmFollow}
@@ -412,6 +426,7 @@ function FollowAgentConfirmModal({
   currentLabel,
   nextLabel,
   appearanceName,
+  reusesCurrentAppearance,
   syncing,
   onCancel,
   onConfirm,
@@ -430,7 +445,9 @@ function FollowAgentConfirmModal({
         </div>
         <div className="modal-body channel-switch-confirm-modal__body">
           <div className="message-banner message-banner--muted channel-switch-confirm-modal__message">
-            将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，并同步「{appearanceName}」到设备端展示。
+            {reusesCurrentAppearance
+              ? <>将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，沿用设备当前的「{appearanceName}」，无需重新传输素材。</>
+              : <>将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，并同步「{appearanceName}」到设备端展示。</>}
           </div>
         </div>
         <div className="channel-switch-confirm-modal__actions">

@@ -3,8 +3,8 @@
  *         semantic shapes, and persisted RGB565-alpha sprite frames.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus a two-dot main/components indicator that is hidden while a component runs,
- *          current SW3-back/SW1-enter hints in the component catalog, modern clean cards/HUDs, and
+ *          plus a main-page indicator and a paginated component card catalog with native icons,
+ *          global-binding-neutral navigation hints, modern clean cards/HUDs, and
  *          Session-independent recording feedback on the idle main page,
  *          a lightweight transfer screen that never reads changing assets,
  *          and reusable bounded H.264 decode storage isolated from immutable asset caches.
@@ -36,6 +36,9 @@
 
 #include "pet_p4_lcd.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_media.h"
+#include "pet_p4_audio.h"
+#include "pet_p4_instrument_core.h"
 #include "pet_p4_behavior.h"
 
 #define PET_P4_ASSET_WIDTH 640
@@ -2467,83 +2470,113 @@ static void draw_text_center(
   int scale
 );
 
+// Geometric icons do not depend on emoji or private-use font glyphs.
+static void draw_component_icon(const char *id, int x, int y, uint16_t ink, uint16_t tile) {
+  fill_round_rect(x, y, 44, 44, 12, tile);
+  if (strcmp(id, "stock-watchlist") == 0) {
+    fill_round_rect(x+10, y+25, 5, 10, 2, ink);
+    fill_round_rect(x+20, y+19, 5, 16, 2, ink);
+    fill_round_rect(x+30, y+9, 5, 26, 2, ink);
+  } else if (strcmp(id, "music-player") == 0) {
+    fill_rect(x+18, y+11, 3, 22, ink);
+    fill_rect(x+31, y+8, 3, 22, ink);
+    for (int t=0; t<4; ++t) draw_line(x+18, y+11+t, x+33, y+8+t, ink);
+    fill_ellipse(x+14, y+32, 6, 4, ink);
+    fill_ellipse(x+27, y+29, 6, 4, ink);
+  } else if (strcmp(id, "upcoming-todos") == 0) {
+    for (int row=0; row<3; ++row) {
+      const int top=y+11+row*10;
+      fill_round_rect(x+20, top+2, 15, 3, 1, ink);
+      for (int t=0; t<2; ++t) {
+        draw_line(x+9, top+2+t, x+12, top+5+t, ink);
+        draw_line(x+12, top+5+t, x+17, top+t, ink);
+      }
+    }
+  } else if (strcmp(id, "computer-status") == 0) {
+    fill_round_rect(x+8, y+10, 28, 20, 3, ink);
+    fill_round_rect(x+11, y+13, 22, 14, 1, tile);
+    fill_rect(x+20, y+30, 4, 5, ink);
+    fill_round_rect(x+14, y+35, 16, 3, 1, ink);
+  } else {
+    for (int row=0; row<2; ++row) for (int col=0; col<2; ++col)
+      fill_round_rect(x+9+col*15, y+9+row*15, 11, 11, 3, ink);
+  }
+}
+
+static const char *component_card_caption(const char *id) {
+  if (strcmp(id, "stock-watchlist") == 0) return "实时行情";
+  if (strcmp(id, "music-player") == 0) return "音乐与歌词";
+  if (strcmp(id, "upcoming-todos") == 0) return "记录与管理";
+  if (strcmp(id, "computer-status") == 0) return "电脑实时状态";
+  return "打开体验";
+}
+
 static void render_component_center_page(void) {
-  const uint16_t background = rgb565(5, 7, 6);
-  const uint16_t panel = rgb565(14, 18, 16);
-  const uint16_t panel_outline = rgb565(52, 58, 53);
-  const uint16_t selected_panel = rgb565(74, 44, 16);
-  const uint16_t selected_outline = rgb565(255, 163, 31);
-  const uint16_t ivory = rgb565(250, 241, 204);
-  const uint16_t muted = rgb565(126, 133, 126);
-  const uint16_t orange = rgb565(255, 163, 31);
+  const uint16_t background = rgb565(246, 247, 249);
+  const uint16_t panel = rgb565(255, 255, 255);
+  const uint16_t outline = rgb565(226, 229, 234);
+  const uint16_t selected_panel = rgb565(255, 246, 237);
+  const uint16_t ink = rgb565(32, 36, 43);
+  const uint16_t muted = rgb565(113, 120, 133);
+  const uint16_t orange = rgb565(255, 110, 0);
   const size_t count = pet_p4_miniapp_catalog_count();
-  const size_t selected = pet_p4_miniapp_catalog_selected();
-  const size_t visible_rows = 5;
-  size_t start = 0;
+  const size_t requested = pet_p4_miniapp_catalog_selected();
+  const size_t selected = count && requested < count ? requested : 0;
+  const size_t per_page = 4;
+  const size_t start = selected / per_page * per_page;
+  const size_t pages = (count + per_page - 1) / per_page;
 
   fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, background);
-  draw_text_line("组件中心", 28, 16, 248, orange, 2, true);
+  draw_text_line("组件中心", 26, 22, 300, ink, 2, true);
   char count_text[24];
   snprintf(count_text, sizeof(count_text), "已安装 %u 个", (unsigned int) count);
-  draw_text_right(count_text, 612, 22, 160, muted, 1);
-  fill_rect(28, 58, 584, 1, panel_outline);
+  draw_text_right(count_text, 614, 32, 160, muted, 1);
 
   if (count == 0) {
-    draw_text_center("暂无已安装组件", 320, 170, 560, ivory, 2);
-    draw_text_center("请在客户端安装组件", 320, 218, 560, muted, 1);
+    fill_round_rect(24, 86, 592, 306, 20, panel);
+    draw_component_icon("", 298, 142, orange, selected_panel);
+    draw_text_center("还没有组件", 320, 210, 536, ink, 2);
+    draw_text_center("在 PC 组件中心添加后，即可在这里打开", 320, 265, 536, muted, 1);
   } else {
-    if (selected >= visible_rows) start = selected - visible_rows + 1;
-    if (start + visible_rows > count && count > visible_rows) start = count - visible_rows;
-    size_t end = count < start + visible_rows ? count : start + visible_rows;
+    size_t end = count < start + per_page ? count : start + per_page;
     for (size_t index = start; index < end; index += 1) {
       pet_p4_miniapp_catalog_entry_t item = {0};
       if (!pet_p4_miniapp_catalog_get(index, &item)) continue;
       const bool focused = index == selected;
-      const int row = (int) (index - start);
-      const int y = 76 + row * 62;
-      fill_round_rect_outline(
-        28,
-        y,
-        584,
-        52,
-        9,
-        focused ? selected_panel : panel,
-        focused ? selected_outline : panel_outline
-      );
-      if (focused) fill_ellipse(48, y + 26, 5, 5, orange);
-      draw_text_line(
-        item.title[0] ? item.title : item.widget_id,
-        66,
-        y + 8,
-        390,
-        focused ? ivory : orange,
-        2,
-        true
-      );
+      const int slot = (int) (index - start);
+      const int x = 24 + (slot % 2) * 304;
+      const int y = 86 + (slot / 2) * 160;
+      const uint16_t surface = focused ? selected_panel : panel;
+      fill_round_rect(x, y+3, 288, 146, 18, rgb565(234, 237, 241));
+      fill_round_rect_outline(x, y, 288, 146, 18, surface, focused ? orange : outline);
+      if (focused) fill_round_rect_outline(x+1, y+1, 286, 144, 17, surface, orange);
+      draw_component_icon(item.widget_id, x+18, y+16, focused ? orange : muted,
+        focused ? rgb565(255, 229, 206) : background);
       if (item.active) {
-        fill_round_rect(500, y + 8, 86, 22, 11, orange);
-        draw_text_center(
-          "已打开",
-          543,
-          text_y_in_box("已打开", 1, y + 8, 22),
-          72,
-          background,
-          1
-        );
+        fill_round_rect(x+194, y+23, 76, 24, 12, rgb565(226, 246, 237));
+        draw_text_center("已打开", x+232, text_y_in_box("已打开", 1, y+23, 24), 64,
+          rgb565(33, 138, 92), 1);
+      } else {
+        char number[12];
+        snprintf(number, sizeof(number), "%02u", (unsigned int)index+1);
+        draw_text_right(number, x+268, y+28, 48, focused ? orange : muted, 1);
+      }
+      draw_text_line(
+        item.title[0] ? item.title : item.widget_id, x+18, y+72, 252, ink, 2, true
+      );
+      draw_text_line(component_card_caption(item.widget_id), x+18, y+116, 226, muted, 1, true);
+      if (focused) {
+        draw_line(x+260, y+117, x+265, y+122, orange);
+        draw_line(x+265, y+122, x+260, y+127, orange);
       }
     }
+    for (size_t page=0; page<pages; ++page) {
+      const int dot_x = 320 - (int)(pages*18)/2 + (int)page*18;
+      fill_round_rect(dot_x, 412, page == selected/per_page ? 12 : 6, 6, 3,
+        page == selected/per_page ? orange : rgb565(206, 211, 220));
+    }
   }
-
-  fill_round_rect_outline(28, 408, 584, 44, 9, panel, panel_outline);
-  const char *hint = "SW3返回，SW1进入";
-  draw_text_center(
-    hint,
-    320,
-    text_y_in_box(hint, 1, 408, 44),
-    548,
-    muted,
-    1
-  );
+  draw_text_center("左右切换    确认键打开    全局键返回", 320, 446, 580, muted, 1);
 }
 
 static void draw_connection_banner(
@@ -3817,9 +3850,13 @@ static void render_data_miniapp_page(const pet_p4_miniapp_view_t *app) {
   const pet_p4_data_view_t *data = &app->data;
   const uint16_t bg = rgb565(7, 12, 18), ink = rgb565(236, 243, 251), muted = rgb565(147, 165, 182);
   const uint16_t accent = rgb565(76, 167, 250);
+  const bool todos = strcmp(app->data_source, "todos.upcoming") == 0;
   fill_rect(0, 0, 640, 480, bg);
   draw_text_line(app->title, 24, 18, data->date[0] ? 346 : 490, ink, 2, true);
-  if (data->date[0]) draw_text_line(data->date, 384, 22, 156, muted, 1, true);
+  if (data->date[0]) {
+    if (todos && strlen(data->date) == 10) draw_text_line(data->date + 5, 450, 22, 90, muted, 1, true);
+    else draw_text_line(data->date, 384, 22, 156, muted, 1, true);
+  }
   char page[16]; snprintf(page, sizeof(page), "%u/%u", data->page + 1, data->pages);
   draw_text_line(page, 554, 22, 70, accent, 1, true);
   fill_rect(24, 57, 592, 1, rgb565(43, 59, 76));
@@ -3827,10 +3864,19 @@ static void render_data_miniapp_page(const pet_p4_miniapp_view_t *app) {
     const pet_p4_data_row_t *r = &data->rows[i];
     int y = 74 + i * 61;
     uint16_t tone = data->stale ? muted : r->tone > 0 ? rgb565(255, 100, 102) : r->tone < 0 ? rgb565(79, 212, 149) : ink;
+    if (todos) {
+      tone = data->stale ? muted : r->tone < 0 ? rgb565(79, 212, 149) : accent;
+      char title[sizeof(r->label) + sizeof(r->meta)];
+      snprintf(title, sizeof(title), "%s%s", r->label, r->meta);
+      draw_text_line(title, 24, y, 592, tone, 2, true);
+      draw_text_line(r->value, 24, y + 33, 420, muted, 1, true);
+      draw_text_line(r->detail, 500, y + 33, 116, tone, 1, true);
+    } else {
     draw_text_line(r->label, 24, y, 235, ink, 1, true);
     draw_text_line(r->value, 270, y, 176, tone, 2, true);
     draw_text_line(r->detail, 465, y + 2, 153, tone, 1, true);
     draw_text_line(r->meta, 24, y + 29, 592, muted, 1, true);
+    }
     fill_rect(24, y + 53, 592, 1, rgb565(28, 40, 51));
   }
   if (!data->count) draw_text_line("等待数据", 24, 135, 590, ink, 2, true);
@@ -3839,6 +3885,141 @@ static void render_data_miniapp_page(const pet_p4_miniapp_view_t *app) {
   draw_text_line(app->footer, 24, 437, 592, accent, 1, true);
 }
 
+// Semantic icons are geometric primitives, not font/Unicode glyphs. The board's
+// compact Chinese font does not contain the browser preview's icon font.
+static void draw_media_note(int x,int y,uint16_t color) {
+  fill_rect(x+14,y,3,22,color);fill_rect(x+16,y+1,9,3,color);
+  fill_ellipse(x+10,y+22,7,5,color);
+}
+static void draw_media_volume(int x,int y,uint16_t color) {
+  fill_rect(x,y+8,5,10,color);
+  for(int i=0;i<7;i++)fill_rect(x+5+i,y+8-i,1,10+i*2,color);
+  for(int d=0;d<2;d++) {
+    draw_line(x+16+d,y+6,x+20+d,y+12,color);draw_line(x+20+d,y+12,x+16+d,y+19,color);
+    draw_line(x+21+d,y+2,x+27+d,y+12,color);draw_line(x+27+d,y+12,x+21+d,y+23,color);
+  }
+}
+static void draw_media_queue(int x,int y,uint16_t color) {
+  for(int row=0;row<3;row++)fill_rect(x,y+row*7,16,2,color);
+  fill_rect(x+23,y+3,2,17,color);fill_rect(x+24,y+3,5,2,color);
+  fill_ellipse(x+20,y+20,5,3,color);
+}
+
+static void render_media_page(unsigned long long now_ms) {
+  pet_p4_media_view_t m;pet_p4_media_view(&m);
+  const uint16_t bg=rgb565(22,21,24),surface=rgb565(45,36,35),ink=rgb565(255,246,237),muted=rgb565(177,160,149),accent=rgb565(255,136,62);
+  fill_rect(0,0,640,480,bg);
+  if(m.page==2) {
+    if(!strcmp(m.status,"error")) {draw_text_center(m.message,320,222,580,muted,1);return;}
+    bool has_lines=false;for(int i=0;i<5;i++)if(m.lyric_lines[i][0])has_lines=true;
+    if(!has_lines) {
+      const char *empty=!m.lyrics_ready?"正在获取歌词":m.lyric_index<0?"暂无同步歌词":"音乐间奏";
+      draw_text_center(empty,320,222,580,muted,2);
+    } else {
+      unsigned long long age=now_ms>=m.lyric_changed_ms?now_ms-m.lyric_changed_ms:280;
+      float t=age>=280?1.0f:(float)age/280.0f;
+      int shift=(int)(82*(1-t)*(1-t)*(1-t));
+      for(int row=0;row<5;row++) {
+        int y=55+row*82+shift;
+        uint16_t color=row==2?accent:(row==1||row==3)?muted:rgb565(85,76,74);
+        if(row==2) {
+          // Two bounded lines keep long Chinese lyrics readable, rather than
+          // shrinking everything or drawing over the adjacent lyric rows.
+          if(utf8_text_width(m.lyric_lines[row],-1,2)<=568)draw_text_center(m.lyric_lines[row],320,y,568,color,2);
+          else {
+            const char *rest=draw_text_line(m.lyric_lines[row],36,y,568,color,2,false);
+            if(rest&&*rest)draw_text_line(rest,36,y+35,568,color,2,true);
+          }
+        } else draw_text_center(m.lyric_lines[row],320,y+6,568,color,1);
+      }
+    }
+    return; // Immersive lyrics: no cover, transport bar, header or footer.
+  }
+  draw_media_note(25,27,accent);
+  draw_text_line("随身听",65,23,210,ink,2,true);
+  const char *state=!strcmp(m.status,"playing")?"正在播放":!strcmp(m.status,"paused")?"已暂停":!strcmp(m.status,"buffering")?"正在缓冲":!strcmp(m.status,"ended")?"播放结束":!strcmp(m.status,"error")?"播放失败":!strcmp(m.status,"interrupted")?"语音优先":"准备播放";
+  fill_ellipse(471,37,4,4,!strcmp(m.status,"playing")?accent:muted);
+  draw_text_line(state,486,29,130,muted,1,true);
+  if(m.page==1) {
+    draw_text_line("播放列表",28,81,350,muted,1,true);
+    int first=m.selected/5*5;
+    for(int row=0;row<5 && first+row<m.count;row++) {
+      int index=first+row,y=114+row*58;
+      if(index==m.selected)fill_round_rect_outline(24,y-6,592,53,12,surface,rgb565(85,58,43));
+      char number[8];snprintf(number,sizeof(number),"%02d",index+1);
+      draw_text_line(number,40,y+8,45,index==m.selected?accent:muted,1,true);
+      draw_text_line(m.queue[index],94,y+5,500,index==m.selected?ink:muted,1,true);
+    }
+    if(!m.count)draw_text_line("在 PC 搜索歌曲并添加到播放列表",30,179,580,ink,1,true);
+    draw_text_line("摇杆上下选择 · 中键播放 · 副操作返回",28,444,590,muted,1,true);return;
+  }
+  fill_round_rect_outline(30,104,212,212,22,rgb565(68,48,43),rgb565(88,61,49));
+  if(m.cover_ready)pet_p4_media_blit(g_framebuffer,PET_P4_UI_WIDTH,40,114);
+  else {
+    fill_ellipse(136,210,86,86,rgb565(18,18,22));
+    for(int r=80;r>34;r--)fill_ellipse(136,210,r,r,r%7==0?rgb565(46,40,42):rgb565(18,18,22));
+    fill_ellipse(136,210,30,30,accent);fill_ellipse(136,210,5,5,bg);
+  }
+  draw_text_line("HACHIMO / MUSIC",276,105,330,rgb565(191,139,110),1,true);
+  const char *title=m.title[0]?m.title:"音乐，陪你一会儿";
+  const char *rest=draw_text_line(title,276,145,332,ink,2,false);
+  if(rest&&*rest)draw_text_line(rest,276,186,332,ink,2,true);
+  draw_text_line(m.artist[0]?m.artist:"搜索歌曲或语音点歌",276,242,332,muted,1,true);
+  fill_round_rect_outline(276,278,174,30,15,surface,rgb565(88,61,49));
+  draw_text_center("哈基米扬声器",363,285,158,rgb565(226,165,121),1);
+  fill_round_rect_outline(30,341,580,6,3,rgb565(67,52,47),rgb565(67,52,47));
+  int progress=m.duration_ms? (int)((uint64_t)m.position_ms*580/m.duration_ms):0;if(progress>580)progress=580;
+  if(progress>0)fill_round_rect_outline(30,341,progress,6,3,accent,accent);
+  char elapsed[16],duration[16],volume[20];
+  snprintf(elapsed,sizeof(elapsed),"%02lu:%02lu",(unsigned long)m.position_ms/60000,(unsigned long)m.position_ms/1000%60);
+  if(m.duration_ms)snprintf(duration,sizeof(duration),"%02lu:%02lu",(unsigned long)m.duration_ms/60000,(unsigned long)m.duration_ms/1000%60);else strcpy(duration,"--:--");
+  draw_text_line(elapsed,30,357,90,muted,1,true);draw_text_line(duration,537,357,80,muted,1,true);
+  if(m.seeking)draw_text_center("左右调整进度 · 中键确认",320,357,370,accent,1);
+  fill_ellipse(320,405,29,29,accent);
+  if(!strcmp(m.status,"playing")) {fill_rect(310,392,7,26,bg);fill_rect(324,392,7,26,bg);}
+  else for(int x=0;x<22;x++)fill_rect(312+x,392+x/2,1,26-x,bg);
+  for(int i=0;i<18;i++) {fill_rect(230-i,395+i/2,1,21-i,ink);fill_rect(410+i,395+i/2,1,21-i,ink);}
+  fill_rect(210,396,3,20,ink);fill_rect(430,396,3,20,ink);
+  draw_media_volume(30,392,muted);
+  snprintf(volume,sizeof(volume),"%u%%",m.volume);draw_text_line(volume,69,398,105,muted,1,true);
+  draw_media_queue(535,395,muted);
+  char count[20];snprintf(count,sizeof(count),"%u",m.count);draw_text_line(count,575,398,45,muted,1,true);
+  draw_text_center(m.message[0]?m.message:"摇杆切歌与音量 · 全局键退出",320,449,590,muted,1);
+}
+
+extern const uint8_t wooden_body[] asm("_binary_wooden_fish_body_bin_start");
+extern const uint8_t wooden_mallet[] asm("_binary_wooden_fish_mallet_bin_start");
+static void instrument_layer(const uint8_t *data,int x,int y,int height) {
+  int w=data[0]|data[1]<<8,h=data[2]|data[3]<<8;
+  int width=w*height/h;
+  for(int dy=0;dy<height;dy++)for(int dx=0;dx<width;dx++) {
+    int px=x+dx,py=y+dy;if(px<0||px>=640||py<0||py>=480)continue;
+    const uint8_t *p=data+4+((dy*h/height)*w+dx*w/width)*3;
+    unsigned a=p[2];if(!a)continue;
+    uint16_t fg=p[0]|p[1]<<8,bg=g_framebuffer[py*640+px];
+    unsigned r=(((fg>>11)&31)*a+((bg>>11)&31)*(255-a))/255;
+    unsigned g=(((fg>>5)&63)*a+((bg>>5)&63)*(255-a))/255;
+    unsigned b=((fg&31)*a+(bg&31)*(255-a))/255;
+    g_framebuffer[py*640+px]=(r<<11)|(g<<5)|b;
+  }
+}
+static void render_instrument_page(unsigned long long now_ms) {
+  uint16_t bg=rgb565(241,227,207),ink=rgb565(84,66,47),muted=rgb565(139,115,84);
+  fill_rect(0,0,640,480,bg);
+  draw_text_line("敲木鱼",30,27,250,ink,2,true);
+  draw_text_line("一声木响，一刻安静",31,68,520,muted,1,true);
+  pet_instrument_motion_t m=pet_p4_audio_instrument_motion(now_ms);
+  if(m.wave<1) {
+    int rx=160+(int)(m.wave*110),ry=49+(int)(m.wave*37);
+    uint16_t wave=rgb565(205+(int)(36*m.wave),173+(int)(54*m.wave),127+(int)(80*m.wave));
+    fill_ellipse(316,356,rx,ry,wave);fill_ellipse(316,356,rx-2,ry-2,bg);
+  }
+  fill_ellipse(308,410,175,15,rgb565(218,195,161));
+  int height=(int)(297*m.fish_scale);
+  instrument_layer(wooden_body,110,425-height,height);
+  instrument_layer(wooden_mallet,340,85+(int)m.mallet_y,214);
+  draw_text_center("按主操作敲一下 · 全局键退出",320,449,595,muted,1);
+}
 static void render_miniapp_page(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
@@ -3846,6 +4027,8 @@ static void render_miniapp_page(
   pet_p4_miniapp_view_t snapshot = {0};
   bool available = pet_p4_miniapp_get_view(&snapshot);
   const pet_p4_miniapp_view_t *app = available ? &snapshot : NULL;
+  if(app && app->active && app->instrument) {render_instrument_page(now_ms);return;}
+  if(app && app->active && app->media) {render_media_page(now_ms);return;}
   if (app && app->active && app->data.enabled) { render_data_miniapp_page(app); return; }
   uint16_t background = rgb565(5, 7, 6);
   uint16_t panel = rgb565(11, 14, 13);
@@ -4289,11 +4472,17 @@ esp_err_t pet_p4_renderer_render(
     if (!realtime) draw_session_queue(state, now_ms);
     else g_session_overlay_cache_valid = false;
   }
-  draw_touch_feedback(state, now_ms);
-  if (strcmp(page, "app") != 0) draw_page_indicator(page);
-  draw_connection_banner(state, now_ms);
+  const bool media_page = strcmp(page, "app") == 0 && pet_p4_miniapp_media_active();
+  const bool instrument_page = strcmp(page, "app") == 0
+    && pet_p4_miniapp_instrument_config(NULL, NULL);
+  const bool dedicated_page = media_page || instrument_page || strcmp(page, "components") == 0;
+  if (!dedicated_page) draw_touch_feedback(state, now_ms);
+  if (strcmp(page, "main") == 0) draw_page_indicator(page);
+  // Native media owns its status and error UI. Generic Agent/connection banners
+  // must not cover playback status or break the immersive lyrics-only page.
+  if (!dedicated_page) draw_connection_banner(state, now_ms);
   snprintf(g_last_render_page, sizeof(g_last_render_page), "%s", page);
-  draw_boot_diagnostic(now_ms);
+  if (!dedicated_page) draw_boot_diagnostic(now_ms);
   int64_t rotate_started_us = esp_timer_get_time();
   uint32_t overlay_us = elapsed_us_clamped(overlay_started_us, rotate_started_us);
   ESP_RETURN_ON_ERROR(rotate_landscape_to_panel(), TAG, "rotate logical framebuffer");

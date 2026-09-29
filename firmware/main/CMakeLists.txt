@@ -9,6 +9,7 @@ idf_component_register(
     "pet_p4_lcd.c"
     "pet_p4_assets.c"
     "pet_p4_audio.c"
+    "pet_p4_instrument_core.c"
     "pet_p4_system_cues.c"
     "pet_p4_audio_frontend.c"
     "pet_p4_behavior.c"
@@ -20,6 +21,8 @@ idf_component_register(
     "pet_p4_input_core.c"
     "pet_p4_miniapp.c"
     "pet_p4_widget_data.c"
+    "pet_p4_media.c"
+    "pet_p4_media_codec.c"
     "pet_p4_builtin_components_data.c"
     "pet_p4_ota.c"
     "pet_p4_protocol.c"
@@ -58,6 +61,9 @@ idf_component_register(
 )
 
 # Shared, OTA-updatable status cues live in the application, not appearance slots.
+foreach(layer body mallet)
+  target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../assets/instruments/wooden_fish_${layer}.bin" BINARY)
+endforeach()
 foreach(cue done error waiting_user)
   set(cue_input "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/${cue}.wav")
   target_add_binary_data(${COMPONENT_LIB} "${cue_input}" BINARY)

@@ -34,6 +34,13 @@ export const COMPONENT_CONTROL_OPTIONS = [
     };
   }),
   {
+    label: "SW1 长按",
+    shortLabel: "SW1 长按",
+    control: "SW1",
+    event: "button.sw1.long_press",
+    help: "长按设备 SW1 进入或退出歌词模式；全局实时对话或退出绑定优先。",
+  },
+  {
     label: "摇杆中按短按",
     shortLabel: "中按",
     control: "前方摇杆",
@@ -207,6 +214,12 @@ export function defaultControlLabelForBinding(binding = {}) {
 
 export function optionForControlLabel(label) {
   return COMPONENT_CONTROL_OPTIONS.find((option) => option.label === label) || null;
+}
+
+export function componentControlOptionAllowed(option, binding, component) {
+  if (option.event !== "button.sw1.long_press") return true;
+  return binding.action === "media.lyrics"
+    && (component?.mediaSource === "audio.player" || component?.id === "music-player");
 }
 
 export function componentInputEventSlots(event) {

@@ -11,7 +11,32 @@ import {
   componentCreatedAtMs,
   sortComponentsByCreatedAt,
   mergeComponentCatalog,
+  isComponentVisible,
 } from "./library-order.js";
+import { readFileSync } from "node:fs";
+
+test("release hides builtin and already-installed music without deleting records", () => {
+  const source = [{id:"stock-watchlist"}, {id:"music-player"}, {id:"wooden-fish"}];
+  assert.deepEqual(mergeComponentCatalog([], source).map(x => x.id), ["stock-watchlist", "wooden-fish"]);
+  assert.deepEqual(mergeComponentCatalog([{id:"music-player"}], source).map(x => x.id), ["stock-watchlist", "wooden-fish"]);
+  assert.equal(source.length, 3);
+  assert.equal(isComponentVisible({id:"custom-player", mediaSource:"audio.player"}), false);
+  assert.equal(isComponentVisible({id:"upcoming-todos"}), true);
+  const center=readFileSync(new URL("../ComponentCenter.jsx", import.meta.url),"utf8");
+  assert.ok(center.includes("isComponentVisible(activeComponentRecord)"));
+  assert.ok(center.includes("isComponentVisible(item) && !catalogIds.has(item.id)"));
+});
+
+test("default builtin tools put wooden fish second on PC and firmware", () => {
+  const factory = JSON.parse(readFileSync(new URL("../../../firmware/factory-config.json", import.meta.url)));
+  assert.deepEqual(factory.components.ids.slice(0, 5), ["stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status"]);
+  const fixtures = readFileSync(new URL("../fixtures.js", import.meta.url), "utf8");
+  const catalog = fixtures.slice(fixtures.indexOf("export const BUILTIN_COMPONENT_CENTER"));
+  assert.ok(catalog.indexOf('id: "stock-watchlist"') < catalog.indexOf("id: woodenFishManifest.id"));
+  assert.ok(catalog.indexOf("id: woodenFishManifest.id") < catalog.indexOf("id: musicManifest.id"));
+  assert.ok(catalog.indexOf("id: musicManifest.id") < catalog.indexOf("...localDataComponents[1]"));
+  assert.ok(catalog.indexOf("...localDataComponents[1]") < catalog.indexOf("...localDataComponents[0]"));
+});
 
 test("component library sorts mixed records by creation time newest first", () => {
   const sorted = sortComponentsByCreatedAt([

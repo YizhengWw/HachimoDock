@@ -39,6 +39,7 @@
 #include "pet_p4_audio.h"
 #include "pet_p4_input_core.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_media.h"
 
 #define PET_P4_INPUT_SW1_GPIO GPIO_NUM_50
 #define PET_P4_INPUT_SW2_GPIO GPIO_NUM_49
@@ -1198,13 +1199,17 @@ static bool component_system_action(const char *action) {
     );
 }
 
-static const pet_p4_input_binding_t *active_global_exit_binding(
+static const pet_p4_input_binding_t *active_global_priority_binding(
   const pet_p4_runtime_state_t *state,
   const char *event_name
 ) {
-  if (!state || strcmp(state->screen_page, "app") != 0) return NULL;
+  if (!state) return NULL;
   const pet_p4_input_binding_t *binding = active_binding(event_name);
-  return binding && strcmp(binding->action, "page_back") == 0 ? binding : NULL;
+  // Realtime is global, including component lists. It must win over a package
+  // action even when the user remaps it away from the factory SW2 long press.
+  if (binding && strcmp(binding->action, "realtime_chat") == 0) return binding;
+  return binding && strcmp(state->screen_page, "app") == 0
+    && strcmp(binding->action, "page_back") == 0 ? binding : NULL;
 }
 
 static bool dispatch_component_binding_event(
@@ -1290,20 +1295,29 @@ static void dispatch_binding_event(
   const pet_p4_input_binding_t *binding = active_binding(event_name);
   if (pet_p4_conversation_active(state)) {
     // The realtime mode owns input: never move/confirm/send into an Agent session.
-    if (!strcmp(event_name, "joystick.up") || !strcmp(event_name, "knob.rotate_ccw"))
-      pet_p4_conversation_move(state, -1, event->ts_ms);
-    else if (!strcmp(event_name, "joystick.down") || !strcmp(event_name, "knob.rotate_cw"))
-      pet_p4_conversation_move(state, 1, event->ts_ms);
-    else if (binding && (!strcmp(binding->action, "realtime_chat") || !strcmp(binding->action, "page_back"))) {
+    if (binding && (!strcmp(binding->action, "realtime_chat") || !strcmp(binding->action, "page_back"))) {
       pet_p4_input_binding_t exit = *binding;
       copy_text(exit.action, sizeof(exit.action), "realtime_chat");
       send_input_event(state, send_line, ctx, event, event_name, gesture, &exit, "", false);
       return;
     }
+    if (!strcmp(event_name, "joystick.up") || !strcmp(event_name, "knob.rotate_ccw"))
+      pet_p4_conversation_move(state, -1, event->ts_ms);
+    else if (!strcmp(event_name, "joystick.down") || !strcmp(event_name, "knob.rotate_cw"))
+      pet_p4_conversation_move(state, 1, event->ts_ms);
     send_ignored_component_event(state, send_line, ctx, event, event_name, gesture);
     return;
   }
-  const pet_p4_input_binding_t *global_exit = active_global_exit_binding(state, event_name);
+  // Leaving a component keeps music playing. A further configured Back on
+  // the pet home page stops it; realtime mode above retains input priority.
+  if (state && binding && strcmp(state->screen_page, "main") == 0
+      && strcmp(binding->action, "page_back") == 0) {
+    pet_p4_media_stop_background(send_line, ctx);
+    state->last_update_ms = event->ts_ms;
+    send_input_event(state, send_line, ctx, event, event_name, gesture, binding, "media_stop", true);
+    return;
+  }
+  const pet_p4_input_binding_t *global_exit = active_global_priority_binding(state, event_name);
   if (global_exit) {
     char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
     const bool handled_locally = apply_local_action(
@@ -1337,8 +1351,7 @@ static void dispatch_binding_event(
   // While a component is open, its package owns optional gameplay buttons.
   // An unmapped system-navigation gesture must not fall through to the global
   // action (for example SW2 -> component_center) and look like a second exit.
-  // The configured page_back gesture was already handled above and remains
-  // the only system-navigation escape from a running component.
+  // The configured page_back and realtime_chat gestures were handled above.
   if (state
       && strcmp(state->screen_page, "app") == 0
       && binding
@@ -1465,7 +1478,7 @@ void pet_p4_input_process(
       if (state && !pet_p4_conversation_active(state)
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
-          && !active_global_exit_binding(state, event_name)) {
+          && !active_global_priority_binding(state, event_name)) {
         send_ignored_component_event(
           state,
           send_line,
@@ -1480,7 +1493,8 @@ void pet_p4_input_process(
     } else if (event.control == PET_P4_INPUT_CONTROL_ENCODER
         && event.gesture == PET_P4_INPUT_GESTURE_ROTATE) {
       const char *event_name = event.delta > 0 ? "knob.rotate_cw" : "knob.rotate_ccw";
-      if (state && !pet_p4_conversation_active(state) && strcmp(state->screen_page, "components") == 0) {
+      if (state && !pet_p4_conversation_active(state) && strcmp(state->screen_page, "components") == 0
+          && !active_global_priority_binding(state, event_name)) {
         static const pet_p4_input_binding_t select_binding = {
           .event = "knob.rotate_cw",
           .action = "component_select",
@@ -1504,7 +1518,7 @@ void pet_p4_input_process(
       if (state && !pet_p4_conversation_active(state)
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)
-          && !active_global_exit_binding(state, event_name)) {
+          && !active_global_priority_binding(state, event_name)) {
         send_ignored_component_event(
           state,
           send_line,

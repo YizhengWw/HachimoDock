@@ -21,7 +21,9 @@ v4 组件可声明：
 {"data":{"source":"stocks.watchlist","page_var":"list_page"}}
 ```
 
-`list_page` 必须是组件的整数变量，通过标准 transition 加减实现分页。数据列表不混用 scene/game 渲染；原有未声明 data 的组件不受影响。当前内置数据源仅有 `stocks.watchlist`，后续数据源需要在 PC 实现受控提供器，不接受组件内 URL、脚本或任意网络请求。
+`list_page` 必须是组件的整数变量，通过标准 transition 加减实现分页。数据列表不混用 scene/game 渲染；原有未声明 data 的组件不受影响。当前内置数据源为 `stocks.watchlist`、`computer.status`、`todos.upcoming`。后续数据源仍需要在 PC 实现受控提供器，不接受组件内 URL、脚本或任意网络请求。
+
+电脑状态与近期待办均每 2 秒更新本机快照，30 秒失效；采集不依赖设备联网。近期待办在 PC 详情与实时对话中共用本机数据，设备仅显示前 20 项未完成事项，按截止时间优先排列。详见 [本地实时工具](local-live-widgets.md)。语音采集期间 `widget/data` 暂停串口发送以保护音频，退出语音后下一轮重新推送；组件数据不落设备 Flash。
 
 USB topic `widget/data` 的 payload：
 

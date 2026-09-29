@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "list_page": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "view"
+  ],
+  "initial_state": "view",
+  "data": {
+    "source": "computer.status",
+    "page_var": "list_page"
+  },
+  "transitions": [
+    {
+      "on": "first_page",
+      "from": "*",
+      "set": {
+        "list_page": 0
+      }
+    },
+    {
+      "on": "previous_page",
+      "from": "*",
+      "inc": {
+        "list_page": -1
+      }
+    },
+    {
+      "on": "next_page",
+      "from": "*",
+      "inc": {
+        "list_page": 1
+      }
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "电脑状态",
+    "headline": "等待数据",
+    "footer": "摇杆左右翻页 · 主操作回首页",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+  }
+}

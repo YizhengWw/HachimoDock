@@ -10,7 +10,41 @@ import assert from "node:assert/strict";
 import {
   DEVICE_VOICE_ROUTER_INITIAL_STATE,
   deviceVoiceRouterReducer,
+  transcriptMessage,
+  voiceFlowMessage,
 } from "./useDeviceVoiceRouter.js";
+
+test("Failed visible composer delivery keeps the actual cause beside its summary", () => {
+  for (const composerMode of ["visible", "focused-input", ""]) {
+    const state = deviceVoiceRouterReducer(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+      type: "delivery", ok: false, composerMode,
+      message: "WorkBuddy 前台会话未定位，语音草稿未写入",
+      composerError: "WorkBuddy 输入框未就绪（节点=12，可读=0，可写=0）",
+    });
+    assert.match(state.flow.composerError, /节点=12/);
+    assert.match(voiceFlowMessage(state.flow), /前台会话未定位.*\n具体原因：.*节点=12/s);
+  }
+});
+
+test("Voice failure details are not duplicated or displayed after success", () => {
+  assert.equal(voiceFlowMessage({ phase: "error", message: "失败：原因", composerError: "原因" }), "失败：原因");
+  assert.equal(voiceFlowMessage({ phase: "done", ok: true, message: "已发送", composerError: "旧错误" }), "已发送");
+  assert.equal(voiceFlowMessage({ phase: "error", composerError: "原因" }), "具体原因：原因");
+  assert.equal(voiceFlowMessage({ phase: "error", message: "发送失败" }), "发送失败");
+  assert.equal(voiceFlowMessage(null), "");
+  const state = deviceVoiceRouterReducer({
+    ...DEVICE_VOICE_ROUTER_INITIAL_STATE,
+    flow: { ...DEVICE_VOICE_ROUTER_INITIAL_STATE.flow, composerError: "旧错误" },
+  }, { type: "delivery", ok: true, composerMode: "visible" });
+  assert.equal(state.flow.composerError, "");
+});
+
+test("WorkBuddy describes final-only append without promising streaming editor writes", () => {
+  assert.match(transcriptMessage({ agentId: "workbuddy" }, "listening", "visible"), /松开后.*一次追加/);
+  assert.match(transcriptMessage({ agentId: "workbuddy" }, "partial", "visible"), /松开后一次写入/);
+  assert.match(transcriptMessage({ agentId: "workbuddy" }, "draft_ready", "visible"), /已追加到 WorkBuddy/);
+  assert.match(transcriptMessage({ agentId: "codex" }, "partial", "visible"), /实时识别并同步/);
+});
 
 function transcript(state, value) {
   return deviceVoiceRouterReducer(state, {
@@ -52,6 +86,8 @@ test("device voice route freezes on listening while revisions and phases stay mo
     phase: "draft_ready",
     revision: 3,
     isFinal: true,
+    text: "final text",
+    message: "已追加到输入框",
   });
   assert.equal(draftReady.flow.phase, "draft_ready");
 
@@ -59,11 +95,14 @@ test("device voice route freezes on listening while revisions and phases stay mo
     utteranceId: "utterance-a",
     phase: "partial",
     revision: 4,
-    text: "final text",
+    text: "stale partial",
+    message: "正在识别",
   });
+  assert.strictEqual(delayedPartial, draftReady);
   assert.equal(delayedPartial.flow.phase, "draft_ready");
   assert.equal(delayedPartial.flow.text, "final text");
   assert.equal(delayedPartial.flow.isFinal, true);
+  assert.equal(delayedPartial.flow.message, "已追加到输入框");
 
   const submitting = transcript(delayedPartial, {
     utteranceId: "utterance-a",

@@ -22,9 +22,34 @@
  */
 
 import bloomfrogSpriteUrl from "../builtin-clawpkgs/bloomfrog_companion/assets/bloomfrog.png";
+import woodenFishManifest from "../builtin-clawpkgs/wooden-fish/component.json";
+import woodenFishWidget from "../builtin-clawpkgs/wooden-fish/runtime/widget.json";
+import woodenFishBindings from "../builtin-clawpkgs/wooden-fish/buttons.json";
 import stockManifest from "../builtin-clawpkgs/stock-watchlist/component.json";
 import stockWidget from "../builtin-clawpkgs/stock-watchlist/runtime/widget.json";
 import stockBindings from "../builtin-clawpkgs/stock-watchlist/buttons.json";
+import computerManifest from "../builtin-clawpkgs/computer-status/component.json";
+import computerWidget from "../builtin-clawpkgs/computer-status/runtime/widget.json";
+import computerBindings from "../builtin-clawpkgs/computer-status/buttons.json";
+import todoManifest from "../builtin-clawpkgs/upcoming-todos/component.json";
+import todoWidget from "../builtin-clawpkgs/upcoming-todos/runtime/widget.json";
+import todoBindings from "../builtin-clawpkgs/upcoming-todos/buttons.json";
+import musicManifest from "../builtin-clawpkgs/music-player/component.json";
+import musicWidget from "../builtin-clawpkgs/music-player/runtime/widget.json";
+import musicBindings from "../builtin-clawpkgs/music-player/buttons.json";
+
+const localDataComponents = [
+  [computerManifest, computerWidget, computerBindings],
+  [todoManifest, todoWidget, todoBindings],
+].map(([manifest, widget, bindings]) => ({
+  id: manifest.id, name: manifest.name, version: manifest.version, kind: "tool",
+  category: "内置工具", source: "PC 本地实时数据", status: "available", accent: "blue",
+  runtimeEngine: widget.engine, dataSource: widget.data.source, goal: manifest.description,
+  capabilities: ["widget.data", "input.device_global_exit"],
+  packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "分享信息"],
+  dashboard: widget.dashboard, defaultBindings: bindings,
+  screens: [{ name: manifest.name, purpose: manifest.description, regions: [] }],
+}));
 
 export const AGENT_DISCOVERY_FIXTURES = {
   ready_available: {
@@ -131,6 +156,26 @@ export const BUILTIN_COMPONENT_CENTER = {
       defaultBindings: stockBindings,
       screens: [{ name: stockManifest.name, purpose: "每页显示 5 只自选股的最新价格与涨跌幅。", regions: [] }],
     },
+    {
+      id: woodenFishManifest.id, name: woodenFishManifest.name, version: woodenFishManifest.version,
+      kind: "tool", category: "内置工具", source: "设备本地音效", status: "available", accent: "orange",
+      runtimeEngine: woodenFishWidget.engine, instrumentSource: woodenFishWidget.instrument.source,
+      goal: woodenFishManifest.description, dashboard: woodenFishWidget.dashboard, defaultBindings: woodenFishBindings,
+      capabilities: ["widget.instrument", "input.device_global_exit"],
+      packageIncludes: ["组件说明", "本地音效界面", "按钮绑定", "运行文件"],
+      screens: [{ name: "敲木鱼", purpose: "单键敲击，清脆木响与轻柔伴奏。", regions: [] }],
+    },
+    {
+      id: musicManifest.id, name: musicManifest.name, version: musicManifest.version,
+      kind: "tool", category: "内置工具", source: "GD音乐台 / 本地音频", status: "available", accent: "orange",
+      runtimeEngine: musicWidget.engine, mediaSource: musicWidget.media.source,
+      goal: musicManifest.description, dashboard: musicWidget.dashboard, defaultBindings: musicBindings,
+      capabilities: ["widget.media", "input.device_global_exit"],
+      packageIncludes: ["组件说明", "播放器界面", "按钮绑定", "运行文件"],
+      screens: [{ name: "随身听", purpose: "播放本机音乐，查看真实播放进度与曲目。", regions: [] }],
+    },
+    { ...localDataComponents[1] },
+    { ...localDataComponents[0] },
     {
       id: "two-key-pong",
       name: "双键接球",

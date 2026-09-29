@@ -29,6 +29,8 @@ The board support code in `firmware/components/esp32_p4_wifi6_touch_lcd_4_3/` an
 
 Desktop npm and Rust dependency versions are recorded in package lockfiles and `pc/src-tauri/Cargo.lock`. Their licenses accompany the upstream packages and remain independent of HachimoDock's first-party license.
 
+The local computer-status provider uses [sysinfo](https://github.com/GuillaumeGomez/sysinfo), Copyright (c) 2015 Guillaume Gomez, under the MIT License. The license is retained in [sysinfo MIT License](licenses/sysinfo-LICENSE.txt). Only system and network metrics are enabled; this integration does not enumerate processes or collect host names.
+
 This file records third-party notices for source code incorporated into
 HachimoDock. It does not replace the license selected for HachimoDock's own
 code, firmware, documentation, or media assets.
@@ -85,3 +87,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## GD 音乐台在线服务
+
+随身听的在线搜索及音源解析使用 [GD 音乐台 API](https://music-api.gdstudio.xyz/api.php)，来源标识为 [GD音乐台](https://music.gdstudio.xyz/)。服务文档标注 CC BY-NC 4.0，并说明仅供学习参考，禁止下载、传播或商用；具体服务限制以提供方说明为准。
+
+本项目不打包歌曲、不提供歌曲下载/导出，也不绕过登录、付费或 DRM。用户选择播放时仅进行受限流式解码与设备播放；本地音频由用户自行提供。服务可访问不代表已取得相关音乐作品的使用或再分发许可。

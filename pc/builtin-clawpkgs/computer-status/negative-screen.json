@@ -1,0 +1,11 @@
+{
+  "dashboard": {
+    "title": "电脑状态",
+    "headline": "等待数据",
+    "footer": "摇杆左右翻页 · 主操作回首页",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+  }
+}

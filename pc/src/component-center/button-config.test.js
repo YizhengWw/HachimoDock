@@ -89,7 +89,8 @@ test("component controls expose screen, switches, and joystick events without du
   assert.ok(events.includes("screen.region.tap"));
   assert.ok(events.includes("button.sw1.short_press"));
   assert.ok(events.includes("button.encoder.long_press"));
-  assert.equal(events.some((event) => /button\.sw[123]\.long_press/.test(event)), false);
+  assert.ok(events.includes("button.sw1.long_press"));
+  assert.equal(events.some((event) => /button\.sw[23]\.long_press/.test(event)), false);
   assert.ok(events.includes("knob.rotate_cw"));
   assert.ok(events.includes("knob.rotate_ccw"));
   assert.ok(events.includes("knob.rotate_cw / knob.rotate_ccw"));

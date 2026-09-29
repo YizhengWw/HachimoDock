@@ -125,7 +125,7 @@ class MiMoCodeAdapter extends BaseAdapter {
     yield {
       kind: "error",
       code: "AGENT_INPUT_UNSUPPORTED",
-      message: "MiMoCode 第一阶段仅同步状态与会话，设备语音输入将在下一阶段接入。",
+      message: "MiMoCode 不支持后台会话注入；macOS 请使用客户端的当前终端光标语音输入，Windows 暂仅支持状态与会话跟随。",
     };
   }
 }

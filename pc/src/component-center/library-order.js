@@ -28,5 +28,10 @@ export function mergeComponentCatalog(publishedItems, builtins) {
   return [
     ...publishedItems,
     ...builtins.filter((item) => !publishedIds.has(item.id)),
-  ];
+  ].filter(isComponentVisible);
+}
+
+// Release availability, not deletion: keep packages and user data for future restoration.
+export function isComponentVisible(component) {
+  return component?.id !== "music-player" && component?.mediaSource !== "audio.player";
 }

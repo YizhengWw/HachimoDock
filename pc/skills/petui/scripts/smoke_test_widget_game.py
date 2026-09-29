@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import sys
 from collections import deque
 from dataclasses import dataclass
@@ -567,10 +568,76 @@ def smoke_test_data_list(runtime: dict[str, Any], buttons: list[dict[str, Any]])
             "networkVerified": False, "deviceVerified": False}
 
 
+def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> dict[str, Any]:
+    """Exercise media navigation semantics; transport/audio tested by product tests."""
+    supported = {"media.toggle", "media.queue", "media.previous", "media.next", "media.up", "media.down", "media.select", "media.lyrics"}
+    declared = {b["action"] for b in buttons}
+    transitions = {t["on"] for t in runtime["transitions"]}
+    errors = []
+    if declared != transitions or not declared <= supported:
+        errors.append("媒体按键与受控动作不一致")
+    if not {"media.toggle", "media.queue", "media.select"} <= declared:
+        errors.append("播放器需要播放/暂停、列表/返回和选择动作")
+    checks = []
+    # Model the bounded native input contract using the actions actually bound.
+    # Audio acknowledgements are deliberately simulated, never claimed as hardware.
+    for count in (0, 1, 5, 6, 20):
+        state = {"page": 0, "selected": 0, "seeking": False, "volume": 65, "position": 15000, "playing": False, "track": 0}
+        visible = set()
+        def press(action):
+            if action not in declared:
+                return
+            before = dict(state)
+            if action == "media.lyrics": state.update(page=0 if state["page"] == 2 else 2, seeking=False)
+            elif action == "media.queue": state.update(page=0 if state["page"] == 1 else 1, seeking=False)
+            elif action == "media.select":
+                if state["page"] == 1 and count: state.update(track=state["selected"], playing=True)
+                elif not state["page"]: state["seeking"] = not state["seeking"]
+            elif action in {"media.up", "media.down"}:
+                direction = -1 if action == "media.up" else 1
+                if state["page"] == 1 and count: state["selected"] = (state["selected"] + direction) % count
+                else: state["volume"] = max(0, min(100, state["volume"] - direction*5))
+            elif action == "media.toggle" and count: state["playing"] = not state["playing"]
+            elif action in {"media.next", "media.previous"} and count:
+                direction = 1 if action == "media.next" else -1
+                if state["seeking"]: state["position"] = max(0, state["position"] + direction*10000)
+                else: state["track"] = (state["track"] + direction) % count
+            if state != before: visible.add(action)
+        for action in sorted(declared): press(action)
+        if state["page"] == 2: press("media.lyrics")
+        if state["page"] == 1: press("media.queue")
+        press("media.select"); press("media.next"); press("media.previous")
+        press("media.queue")
+        reached = {state["selected"]}
+        for _ in range(count): press("media.down"); reached.add(state["selected"])
+        if count > 1 and len(reached) != count: errors.append(f"{count} 首歌曲不能逐一选择")
+        press("media.select")
+        if not count and state["playing"]: errors.append("空队列错误地显示播放")
+        checks.append({"queueCount": count, "reachableSelections": len(reached) if count else 0,
+                       "visibleActions": sorted(visible), "emptyIsNotPlaying": bool(count) or not state["playing"]})
+    demonstrated = set().union(*(set(c["visibleActions"]) for c in checks))
+    if declared - demonstrated: errors.append("部分动作在模拟可达状态中没有反馈：" + ",".join(sorted(declared-demonstrated)))
+    return {"ok": not errors, "mode": "media", "source": "audio.player", "errors": errors,
+            "visibleActions": sorted(declared), "scenarios": checks, "networkVerified": False, "deviceVerified": False}
+
+
 def smoke_test_game(widget_dir: Path) -> dict[str, Any]:
     runtime = load_json(widget_dir / "runtime" / "widget.json")
     manifest = load_json(widget_dir / "component.json")
     buttons = load_json(widget_dir / "buttons.json")
+    if isinstance(runtime.get("instrument"), dict):
+        actions = [b.get("action") for b in buttons]
+        # Contract-level reachable feedback model; native DSP/codec tests live in firmware/tests.
+        poses = [68*(ms/55)**2 if ms < 55 else
+                 68*math.exp(-8*(ms-55)/1000)*math.cos(16*(ms-55)/1000) if ms < 900 else 0
+                 for ms in (0, 27, 55, 155, 305, 600, 900)]
+        ok = actions == ["instrument.strike"] and poses[2] == 68 and poses[0] == poses[-1] == 0
+        return {"ok": ok, "mode": "instrument", "source": "percussion.wooden-fish",
+                "visibleActions": actions, "reboundPositions": poses, "boundedVoices": 4,
+                "errors": [] if ok else ["木鱼需要唯一敲击动作与衰减回弹反馈"],
+                "nativeDspVerified": False, "deviceVerified": False}
+    if isinstance(runtime.get("media"), dict):
+        return smoke_test_media(runtime, buttons)
     if isinstance(runtime.get("data"), dict):
         return smoke_test_data_list(runtime, buttons)
     if manifest.get("kind") != "game":

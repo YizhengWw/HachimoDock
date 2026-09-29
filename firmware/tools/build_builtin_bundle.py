@@ -25,6 +25,10 @@ BUNDLE_PATH = RUNTIME_ROOT / "main" / "pet_p4_builtin_components.json"
 DATA_SOURCE_PATH = RUNTIME_ROOT / "main" / "pet_p4_builtin_components_data.c"
 BUILTIN_IDS = (
     "stock-watchlist",
+    "wooden-fish",
+    "music-player",
+    "upcoming-todos",
+    "computer-status",
     "two-key-pong",
     "bloomfrog_companion",
     "flappy-bird",
@@ -82,7 +86,7 @@ def render_data_source(bundle: str) -> str:
         [
             "/*",
             " * [Input] Generated deterministic JSON from pc/builtin-clawpkgs.",
-            " * [Output] Null-terminated firmware-resident nine-component bundle with P4 sprites.",
+            " * [Output] Null-terminated firmware-resident component bundle with P4 sprites.",
             " * [Pos] Generated data source linked into the ESP32-P4 application image.",
             " * [Sync] Regenerate with tools/build_builtin_bundle.py; do not edit manually.",
             " */",

@@ -53,6 +53,14 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function voiceFlowMessage(flow) {
+  const message = normalizeText(flow?.message);
+  const error = normalizeText(flow?.composerError);
+  const failed = flow?.phase === "error" || flow?.ok === false;
+  if (!failed || !error || message.includes(error)) return message;
+  return [message, `具体原因：${error}`].filter(Boolean).join("\n");
+}
+
 function phaseRank(phase) {
   return PHASE_RANK[phase] ?? PHASE_RANK.idle;
 }
@@ -124,6 +132,8 @@ export function deviceVoiceRouterReducer(state, action) {
       if (!selected.accepted) return state;
       const baseState = selected.state;
       const flow = baseState.flow;
+      if ((flow.isFinal || TERMINAL_PHASES.has(flow.phase))
+          && phaseRank(action.phase || "listening") < phaseRank(flow.phase)) return state;
       const revision = Number(action.revision || 0);
       if (revision < Number(flow.revision || 0)) return state;
       const route = routeForFlow(flow, action);
@@ -199,7 +209,8 @@ export function deviceVoiceRouterReducer(state, action) {
           agentId: route.agentId,
           sessionId: route.sessionId,
           composerMode: action.composerMode || baseState.flow.composerMode || "",
-          composerError: ["visible", "focused-input"].includes(action.composerMode)
+          composerError: terminal && action.ok === true
+            && ["visible", "focused-input"].includes(action.composerMode)
             ? ""
             : action.composerError || baseState.flow.composerError || "",
           updatedAt: Number(action.nowMs || Date.now()),
@@ -211,11 +222,14 @@ export function deviceVoiceRouterReducer(state, action) {
   }
 }
 
-function transcriptMessage(payload, phase, composerMode) {
-  const visibleAgentLabel = normalizeText(payload?.agentId).toLowerCase() === "claude-code"
+export function transcriptMessage(payload, phase, composerMode) {
+  const visibleAgentLabel = normalizeText(payload?.agentId).toLowerCase() === "workbuddy" ? "WorkBuddy" : normalizeText(payload?.agentId).toLowerCase() === "claude-code"
     ? "Claude"
     : "ChatGPT（Codex）";
   if (phase === "listening") {
+    if (visibleAgentLabel === "WorkBuddy") {
+      return "正在聆听；松开后将完整识别结果一次追加到 WorkBuddy 输入框，不自动发送。";
+    }
     if (composerMode === "visible") {
       return `正在聆听，识别文字会实时同步到 ${visibleAgentLabel} 输入框。`;
     }
@@ -225,6 +239,9 @@ function transcriptMessage(payload, phase, composerMode) {
     return "正在聆听并实时识别。";
   }
   if (phase === "partial") {
+    if (visibleAgentLabel === "WorkBuddy") {
+      return "正在实时识别；松开后一次写入 WorkBuddy，写入确认前请保持目标对话在前台。";
+    }
     if (composerMode === "visible") {
       return `正在实时识别并同步到 ${visibleAgentLabel}；松开后保留为草稿，不自动发送。`;
     }
@@ -356,7 +373,8 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
           agentId,
           sessionId,
           composerMode,
-          composerError: normalizeText(payload.composerError),
+          composerError: normalizeText(payload.composerError)
+            || (!ok ? normalizeText(payload.error) : ""),
         });
       });
 

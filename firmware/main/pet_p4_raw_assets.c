@@ -25,7 +25,10 @@
 #define PET_P4_RAW_MAX_FILES 32U
 #define PET_P4_RAW_PACK_ID_BYTES 64U
 #define PET_P4_RAW_ERASE_BYTES 4096U
-#define PET_P4_RAW_ERASE_SLICE_BYTES (16U * 1024U)
+// esp_flash uses a 64 KiB block erase only for block-aligned ranges of at
+// least 64 KiB; smaller slices fall back to 4 KiB sector erases (~16x the
+// commands, ~14 s before a 1.9 MB appearance transfer could start).
+#define PET_P4_RAW_ERASE_BLOCK_BYTES (64U * 1024U)
 
 static const unsigned char PET_P4_RAW_MAGIC[8] = {
   'P', '4', 'R', 'A', 'W', '0', '1', '\0'
@@ -164,9 +167,12 @@ static bool erase_range_yielding(
   uint32_t erased = 0;
   while (erased < size) {
     uint32_t remaining = size - erased;
-    uint32_t slice = remaining < PET_P4_RAW_ERASE_SLICE_BYTES
-      ? remaining
-      : PET_P4_RAW_ERASE_SLICE_BYTES;
+    // Slice on absolute flash block boundaries so every full slice is one
+    // aligned 64 KiB block erase; only unaligned head/tail use sectors.
+    uint32_t absolute = partition->address + offset + erased;
+    uint32_t to_boundary = PET_P4_RAW_ERASE_BLOCK_BYTES
+      - (absolute % PET_P4_RAW_ERASE_BLOCK_BYTES);
+    uint32_t slice = remaining < to_boundary ? remaining : to_boundary;
     if (esp_partition_erase_range(partition, offset + erased, slice) != ESP_OK) {
       return false;
     }

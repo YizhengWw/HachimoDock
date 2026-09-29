@@ -695,6 +695,10 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
 
     builtin_ids = [
         "stock-watchlist",
+        "wooden-fish",
+        "music-player",
+        "upcoming-todos",
+        "computer-status",
         "two-key-pong",
         "bloomfrog_companion",
         "flappy-bird",
@@ -728,7 +732,9 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     assert "esp_err_t pet_p4_miniapp_sync_builtins(void)" in miniapp
     assert "pet_p4_miniapp_sync_builtins()" in main
     assert "MINIAPP_BUILTIN_MARKER_PATH" in miniapp
-    assert "strcmp(marker, PET_P4_BUILD_ID) == 0" in miniapp
+    assert "strcmp(marker, expected_marker) == 0" in miniapp
+    assert "miniapp_checksum((const char *) pet_p4_builtin_components_json" in miniapp
+    assert "strlen(expected_marker)" in miniapp
     assert "cJSON_Parse((const char *) pet_p4_builtin_components_json)" in miniapp
     assert "commit_builtin_package" in miniapp
     assert "new_component && !g_builtin_sync_in_progress" in miniapp
@@ -736,8 +742,8 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     assert "later installs still prepend normally" in miniapp
     assert "next_catalog[0] = installed;" in miniapp
     assert "catalog_index = 0;" in miniapp
-    assert 'catalog_find(g_catalog, g_catalog_count, "stock-watchlist")' in miniapp
-    assert "cJSON_GetArraySize(components) != 9" in miniapp
+    assert '"stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status"' in miniapp
+    assert "cJSON_GetArraySize(components) > PET_P4_MINIAPP_CATALOG_MAX" in miniapp
     assert '"falling-catch"' in miniapp
     assert "restore_active_after_builtin_sync" in miniapp
     assert "reorder_catalog_for_builtin_bundle(components)" in miniapp
@@ -1622,10 +1628,10 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert ".rgb_swap = false" in renderer
     assert ".byte_swap = false" in renderer
     assert "panel-order=RGB" in renderer
-    assert "rgb565(255, 163, 31)" in component_center
+    assert "rgb565(255, 110, 0)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.64-p4")' in project
+    assert 'set(PROJECT_VER "0.7.72-p4")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1707,7 +1713,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.64-p4")' in project
+    assert 'set(PROJECT_VER "0.7.72-p4")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1941,7 +1947,10 @@ def test_p4_asset_transfer_prepares_spiffs_and_raw_slot_without_rereads():
     assert "pet_p4_raw_assets_prepare(raw_bytes" in source
     assert "esp_partition_erase_range" in raw
     assert "erase_range_yielding" in raw
-    assert "PET_P4_RAW_ERASE_SLICE_BYTES (16U * 1024U)" in raw
+    # Erase on absolute 64 KiB boundaries so full slices use block erase.
+    assert "PET_P4_RAW_ERASE_BLOCK_BYTES (64U * 1024U)" in raw
+    assert "partition->address + offset + erased" in raw
+    assert "PET_P4_RAW_ERASE_SLICE_BYTES" not in raw
     assert "vTaskDelay(pdMS_TO_TICKS(2))" in raw
     assert "esp_partition_write(partition, g_transfer.cursor" in raw
     assert "g_transfer.next_chunk_index" in raw
@@ -2210,11 +2219,11 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"SW3返回，SW1进入"' in renderer
+    assert '"左右切换    确认键打开    全局键返回"' in renderer
     assert "int count = 2;" in renderer
     assert 'strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0' in renderer
     assert "dispatch_component_binding_event" in input_source
-    assert "active_global_exit_binding" in input_source
+    assert "active_global_priority_binding" in input_source
     assert 'strcmp(binding->action, "page_back") == 0' in input_source
     assert "if (component_system_action(component_action)) return false" in input_source
     assert "send_ignored_component_event" in input_source
@@ -2349,7 +2358,7 @@ def test_p4_gt911_touch_and_local_lifecycle_are_product_integrated():
     assert "behavior->welcome_until_ms = 0" in read_required("main/pet_p4_behavior.c")
     assert "draw_touch_feedback" in renderer
     assert "draw_page_indicator" in renderer
-    assert 'if (strcmp(page, "app") != 0) draw_page_indicator(page);' in renderer
+    assert 'if (strcmp(page, "main") == 0) draw_page_indicator(page);' in renderer
     assert "#define PET_P4_PAGE_INDICATOR_Y 16" in renderer
     assert "int y = PET_P4_PAGE_INDICATOR_Y;" in renderer
     assert "PET_P4_PAGE_INDICATOR_TITLE_GAP" in renderer

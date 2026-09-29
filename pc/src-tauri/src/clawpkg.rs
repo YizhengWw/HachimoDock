@@ -138,6 +138,7 @@ fn component_visual_slot_values(slot: &str) -> Option<&'static [&'static str]> {
         ]),
         "visualLayout" => Some(&["arcade", "scoreboard", "tool"]),
         "visualSprite" => Some(&[
+            "music",
             "target",
             "trophy",
             "star",
@@ -181,6 +182,9 @@ fn validate_component_buttons(files: &HashMap<String, Vec<u8>>, errors: &mut Vec
     }
     let mut events = HashSet::new();
     let mut actions = HashSet::new();
+    let is_media = files.get("runtime/widget.json")
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+        .is_some_and(|runtime| runtime["media"]["source"] == "audio.player");
     for (index, binding) in bindings.iter().enumerate() {
         let Some(object) = binding.as_object() else {
             errors.push(format!("buttons.json 第 {} 项必须是对象", index + 1));
@@ -215,7 +219,8 @@ fn validate_component_buttons(files: &HashMap<String, Vec<u8>>, errors: &mut Vec
             errors.push(format!("buttons.json 动作 {} 重复，无法独立换键", action));
         }
         if !event.is_empty() {
-            if !COMPONENT_BUTTON_EVENTS.contains(&event) {
+            if !COMPONENT_BUTTON_EVENTS.contains(&event)
+                && !(is_media && event == "button.sw1.long_press" && action == "media.lyrics") {
                 errors.push(format!(
                     "buttons.json 第 {} 项含未知事件 {}",
                     index + 1,
@@ -383,6 +388,36 @@ fn validate_widget_data(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<Strin
         || widget.get("vars").and_then(|v| v.get(page)).and_then(|v| v.get("type")).and_then(|v| v.as_str()) != Some("int") {
         errors.push("runtime/widget.json.data 需要受控 source 和整数 page_var；仅用于 v4 列表工具，不能混用 scene/game".into());
     }
+}
+
+fn validate_widget_instrument(files:&HashMap<String,Vec<u8>>,errors:&mut Vec<String>) {
+    let Some(widget)=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()) else {return};
+    let Some(instrument)=widget.get("instrument") else {return};
+    let tool=files.get("component.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()).is_some_and(|v|v["kind"]=="tool");
+    let valid=tool && widget["engine"]=="p4-bounded-runtime-v4"
+        && instrument.as_object().is_some_and(|v|v.len()==3)
+        && instrument["source"]=="percussion.wooden-fish"
+        && ["effect_volume","ambience_volume"].iter().all(|k|instrument[*k].as_u64().is_some_and(|v|v<=100))
+        && widget["vars"].as_object().is_some_and(|v|v.is_empty())
+        && widget.get("tick").is_none_or(|v|v.as_array().is_some_and(|a|a.is_empty()))
+        && ["scene","game","data","media","pages"].iter().all(|k|widget.get(*k).is_none())
+        && widget["transitions"]==serde_json::json!([{"on":"instrument.strike","from":"*"}]);
+    if !valid {errors.push("instrument 仅支持 v4 tool 的 percussion.wooden-fish，音量为 0–100 整数且只接受 instrument.strike".into());}
+}
+fn validate_widget_media(files:&HashMap<String,Vec<u8>>,errors:&mut Vec<String>) {
+    let Some(widget)=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()) else {return};
+    let Some(media)=widget.get("media") else {return};
+    if widget["vars"].as_object().is_none_or(|v|!v.is_empty()) || widget["tick"].as_array().is_some_and(|v|!v.is_empty()) || widget.get("pages").is_some() {errors.push("media 不使用自定义变量、tick 或 pages；状态由真实音频服务提供".into());}
+    let kind=files.get("component.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok());
+    if kind.as_ref().and_then(|v|v["kind"].as_str())!=Some("tool") {errors.push("media 仅用于 tool 组件".into());}
+    if media.as_object().is_none_or(|m|m.len()!=1) || media["source"]!="audio.player" || widget["engine"]!="p4-bounded-runtime-v4"
+       || ["data","scene","game"].iter().any(|k|widget.get(k).is_some()) {
+        errors.push("media 仅支持 v4 的受控 audio.player，不得混用 data/scene/game".into());
+    }
+    let allowed=["media.toggle","media.queue","media.previous","media.next","media.up","media.down","media.select","media.lyrics"];
+    if let Some(rules)=widget["transitions"].as_array() {for rule in rules {
+        if !allowed.contains(&rule["on"].as_str().unwrap_or("")) || rule["from"]!="*" || rule.as_object().is_none_or(|r|r.len()!=2) {errors.push("media transition 只能声明受控 on 动作和 from=*，不接受变量或附加效果".into());}
+    }}
 }
 
 fn p4_widget_effect_count(rule: &serde_json::Value) -> usize {
@@ -1293,6 +1328,8 @@ fn build_manifest_preview(
     validate_p4_compact_json_sizes(files, errors);
     validate_p4_widget_vars_shape(files, errors);
     validate_widget_data(files, errors);
+    validate_widget_media(files, errors);
+    validate_widget_instrument(files, errors);
     validate_p4_widget_effect_bounds(files, errors);
     validate_component_game(files, errors);
     /* Read dashboard. Most slots are flat strings; `progress` may be an object

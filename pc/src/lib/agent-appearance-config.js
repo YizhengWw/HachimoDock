@@ -32,6 +32,11 @@ export const FIXED_AGENT_OPTIONS = [
     label: "MiMoCode",
     detail: "MiMoCode 本地会话与实时状态渠道",
   },
+  {
+    id: "workbuddy",
+    label: "WorkBuddy",
+    detail: "WorkBuddy 状态与气泡跟随；向当前可见对话追加语音草稿",
+  },
 ];
 
 export function loadEnabledAgents() {

@@ -6,8 +6,8 @@ HachimoDock turns Agent activity into a desktop companion: pet animations, conve
 
 ## Source and builds
 
-- [`pc/`](pc/README.md): desktop client 0.1.79, local Agent bridge, component-generation Skill and built-in resources.
-- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.63-p4, board drivers, tests and complete factory-image tools.
+- [`pc/`](pc/README.md): desktop client 0.1.101, local Agent bridge, component-generation Skill and built-in resources.
+- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.72-p4, board drivers, tests and complete factory-image tools.
 - Install Git LFS and run `git lfs pull` after cloning. Build dependencies are described in each directory.
 - For a ready-to-use app or a complete device flashing kit, visit [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest).
 - To use speech recognition or appearance generation, enter your service keys in Pet Manager’s API settings.
@@ -15,6 +15,8 @@ HachimoDock turns Agent activity into a desktop companion: pet animations, conve
 Choose the complete v1 or v3 flashing kit for your actual chip revision; they are not interchangeable. Contact customer support if unsure. Windows and macOS use the same firmware for each chip family. The scripts require Python 3.10+ and install esptool **5.4.0**. They check the chip before erasing; a complete flash clears settings, appearances and components. Connect the display to **DSI**, not CSI, with power disconnected. The v3 24 MHz display fix restored pet animation on a physical board; input, audio and large-file transfers still require release-level hardware validation. See the [flashing guide](firmware/BUILD.md) for tool versions and instructions.
 
 ## Device and voice use
+
+Release 0.1.101 improves the component center and device interaction. Default visible tools are Stocks, Wooden Fish, Upcoming Todos, and Computer Status. Third-party components and services retain their respective licenses and conditions.
 
 Configure speech and chat-model credentials, then long-press SW2 in the pet view to start or end real-time conversation. Compatible firmware supports listening during playback and interruption. Pair your home account on the Smart Home page for natural-language control of authorized devices. The built-in stock watchlist defaults to Xiaomi and Alibaba; manage it in component details. Quotes are refreshed by the PC every two seconds and forwarded over USB, may be delayed, and do not enable trading.
 

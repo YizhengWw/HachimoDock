@@ -14,6 +14,8 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
    - 有目标、玩家输入、即时反馈、局面变化和回合结算时，使用 `game`。
    - 以计时、提醒、追踪、展示、查询或控制为主要价值时，使用 `tool`。
    - 展示行情等实时数据时，另读 [references/live-data.md](references/live-data.md)，确认 PC 数据源与设备能力；组件只订阅数据，不自行联网。
+   - 音频播放器使用已实现的受控媒体界面，另读 [references/media.md](references/media.md)。先确认 PC 音源服务和 widgetMedia 能力；不得用计时器、静态进度条假装播放。
+   - 本地木鱼音效工具另读 [references/instrument.md](references/instrument.md)，需要 widgetInstrument=p4-instrument-v1；不是任意音频或高分辨率素材的通用执行入口。
 3. 先判断这是新建组件还是优化/修复现有组件：
    - 新建组件才创建新的 `component.json.id`。
    - 优化、修复或继续迭代现有组件时，先读取用户指定的那个组件，并原样保留它的 `component.json.id`；除非用户明确要求另存为新组件，否则禁止生成新 ID。显示名称相同不能代替 ID 相同。
@@ -44,7 +46,7 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
    python <skill-dir>/scripts/validate_generated_widget.py <component-dir>
    ```
 
-10. 游戏、带 `scene` 的互动工具、声明 `data` 的实时列表均执行自测：
+10. 游戏、带 `scene` 的互动工具、声明 `data` 的实时列表、声明 `instrument` 的木鱼及声明 `media` 的播放器均执行自测：
 
    ```bash
    python <skill-dir>/scripts/smoke_test_widget_game.py <component-dir>

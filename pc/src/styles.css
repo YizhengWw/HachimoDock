@@ -13628,6 +13628,25 @@ select:focus-visible {
   transition: width 180ms ease;
 }
 
+/* Pre-transfer device steps have no byte count: sweep instead of a frozen 0%. */
+.channel-matrix-sync__bar.is-indeterminate > span {
+  width: 35%;
+  animation: channel-matrix-sync-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes channel-matrix-sync-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(290%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-matrix-sync__bar.is-indeterminate > span {
+    width: 100%;
+    opacity: 0.45;
+    animation: none;
+  }
+}
+
 .channel-matrix-sync__cancel {
   justify-self: end;
 }

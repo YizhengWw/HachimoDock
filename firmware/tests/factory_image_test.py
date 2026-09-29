@@ -162,6 +162,10 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     config = json.loads((RUNTIME / "factory-config.json").read_text(encoding="utf-8"))
     expected_ids = [
         "stock-watchlist",
+        "wooden-fish",
+        "music-player",
+        "upcoming-todos",
+        "computer-status",
         "two-key-pong",
         "bloomfrog_companion",
         "flappy-bird",
@@ -220,10 +224,10 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     assert stock_widget["dashboard"]["headline"] == "等待数据"
     assert "hk01810" not in json.dumps(stock_widget)
     two_key_widget = json.loads(
-        (spiffs_tree / "p4w01.json").read_text(encoding="utf-8")
+        (spiffs_tree / f"p4w{expected_ids.index('two-key-pong'):02d}.json").read_text(encoding="utf-8")
     )
     two_key_buttons = json.loads(
-        (spiffs_tree / "p4b01.json").read_text(encoding="utf-8")
+        (spiffs_tree / f"p4b{expected_ids.index('two-key-pong'):02d}.json").read_text(encoding="utf-8")
     )
     assert two_key_widget["engine"] == "p4-bounded-runtime-v3"
     assert two_key_widget["scene"]["grid"] == {"width": 16, "height": 16}
@@ -239,15 +243,15 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     ]
 
     frog_widget = json.loads(
-        (spiffs_tree / "p4w02.json").read_text(encoding="utf-8")
+        (spiffs_tree / f"p4w{expected_ids.index('bloomfrog_companion'):02d}.json").read_text(encoding="utf-8")
     )
-    frog_sprite = (spiffs_tree / "p4s02-0-0.bin").read_bytes()
+    frog_sprite = (spiffs_tree / f"p4s{expected_ids.index('bloomfrog_companion'):02d}-0-0.bin").read_bytes()
     assert frog_widget["dashboard"]["title"] == "蛙蛙养成"
     assert frog_sprite.startswith(b"P4S1")
-    assert catalog["items"][2]["spritesChecksum"] != "00000000"
+    assert catalog["items"][expected_ids.index('bloomfrog_companion')]["spritesChecksum"] != "00000000"
 
     token_widget = json.loads(
-        (spiffs_tree / "p4w08.json").read_text(encoding="utf-8")
+        (spiffs_tree / f"p4w{expected_ids.index('token-usage'):02d}.json").read_text(encoding="utf-8")
     )
     assert "readers" not in token_widget
     assert "fetchers" not in token_widget

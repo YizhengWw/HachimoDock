@@ -18,6 +18,10 @@
     "packagesDir": "../pc/builtin-clawpkgs",
     "ids": [
       "stock-watchlist",
+      "wooden-fish",
+      "music-player",
+      "upcoming-todos",
+      "computer-status",
       "two-key-pong",
       "bloomfrog_companion",
       "flappy-bird",

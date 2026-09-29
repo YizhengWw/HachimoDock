@@ -427,3 +427,37 @@ test("applyDesktopPetAssignment refuses appearance changes without USB before sa
   assert.equal(calls.some((call) => call.command === "save_bridge_profile"), false);
   assert.equal(storage.get(AGENT_APPEARANCE_MAP_STORAGE_KEY), undefined);
 });
+
+test("applyDesktopPetAssignment names pre-transfer device steps instead of a frozen 0%", async () => {
+  installStorage();
+  const progressEvents = [];
+  const invoke = async (command) => {
+    if (command === "load_bridge_profile") return { desktopDeviceId: "desk-1", enabledAgents: ["codex"], selectedAgentId: "codex" };
+    if (command === "usb_get_status") return { connected: true };
+    if (command === "usb_sync_appearance") return { ok: true, fileCount: 1, byteCount: 10 };
+    return {};
+  };
+  const listen = async (_eventName, callback) => {
+    callback({ payload: { stage: "preparing_storage" } });
+    callback({ payload: { stage: "unknown_future_stage" } });
+    return () => {};
+  };
+  await applyDesktopPetAssignment({
+    invoke,
+    listen,
+    agentAppearanceMap: { codex: "old-avatar" },
+    agentId: "codex",
+    appearance: { id: "new-avatar", name: "新形象" },
+    agentOptions: [{ id: "codex", label: "Codex" }],
+    boardDeviceId: "board-1",
+    currentAppearanceId: "old-avatar",
+    onProgress: (progress) => progressEvents.push(progress),
+  });
+  assert.deepEqual(progressEvents, [{
+    type: "info",
+    stage: "preparing_storage",
+    text: "设备正在擦除旧素材、准备存储空间…",
+    percent: 0,
+    indeterminate: true,
+  }]);
+});

@@ -1356,11 +1356,14 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     const text = (voiceState.mockInjectInput || "").trim();
     if (!text || !selectedAgentId) return;
     voiceDispatch({ type: "set_mock_inject_pending", value: true });
-    postMockButtonInject({
+    const request = selectedAgentId === "workbuddy"
+      ? invoke("write_workbuddy_voice_test_draft", { text })
+      : postMockButtonInject({
       agentId: selectedAgentId,
       sessionId: p4SessionSync.sessionId || "auto",
       text,
-    })
+    });
+    request
       .then((response) => {
         const sessionId =
           response?.sessionId
@@ -1371,7 +1374,9 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         voiceDispatch({
           type: "set_mock_inject_result",
           ok: true,
-          message: `已发送到当前会话 · ${sessionId}`,
+          message: selectedAgentId === "workbuddy"
+            ? "已追加到 WorkBuddy 草稿，未发送；请核对文字是否一致、有无截图蒙层。"
+            : `已发送到当前会话 · ${sessionId}`,
           reply: response?.tokenPreview || "",
         });
       })

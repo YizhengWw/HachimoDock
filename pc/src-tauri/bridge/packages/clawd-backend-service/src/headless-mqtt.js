@@ -34,7 +34,7 @@ const SPEECH_EXPIRES_MS = 30000;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const STATUS_VALUES = new Set(["idle", "working", "speaking", "done", "error", "waiting_user"]);
 const LEGACY_WORKING_STATUS_VALUES = new Set(["thinking", "tool_running"]);
-const KNOWN_AGENT_SOURCES = ["codex", "claude-code", "openclaw", "mimocode"];
+const KNOWN_AGENT_SOURCES = ["codex", "claude-code", "openclaw", "mimocode", "workbuddy"];
 
 function requireOptional(name) {
   try {
@@ -669,6 +669,7 @@ class OpenClawStatusController {
     this.gatewayConnected = false;
     this.lastFingerprint = "";
     this.lastActivityAt = 0;
+    this.displayUpdatedAtMs = 0;
 
     this.idleTimer = null;
     this.heartbeatTimer = null;
@@ -719,6 +720,7 @@ class OpenClawStatusController {
       this.tokenUsage = update.tokenUsage;
     }
     this.raw = update.raw;
+    this.displayUpdatedAtMs = this.lastActivityAt;
 
     this.publishCurrent(false);
   }
@@ -774,6 +776,16 @@ class OpenClawStatusController {
       tokenUsage: this.tokenUsage,
       ts: nowIso(),
       tsMs: Date.now(),
+      display: this.sessionKey && ["working", "speaking", "waiting_user", "done", "error"].includes(this.state)
+        ? {
+            title: "OpenClaw",
+            content: { working: "正在处理", speaking: "正在回复", waiting_user: "等待确认", done: "已完成", error: "执行失败" }[this.state],
+            status: this.state,
+            event: this.reason,
+            // Heartbeats must not extend a completed bubble's lifetime.
+            updatedAtMs: this.displayUpdatedAtMs,
+          }
+        : undefined,
       ...(this.includeRaw && this.raw ? { raw: this.raw } : {}),
     };
 
@@ -1235,12 +1247,7 @@ class HookHttpServer {
         }
 
         const decision = this.config.onPermission(payload);
-        const responseBody = {
-          hookSpecificOutput: {
-            hookEventName: "PermissionRequest",
-            decision,
-          },
-        };
+        const responseBody = permissionHookResponse(decision);
         this.sendJson(res, 200, responseBody);
       });
       return;
@@ -1543,6 +1550,12 @@ function injectViaAgentBusOnce(agentBus, injectBody, options = {}) {
   });
 }
 
+function permissionHookResponse(decision) {
+  return decision && ["allow", "deny"].includes(decision.behavior)
+    ? { hookSpecificOutput: { hookEventName: "PermissionRequest", decision } }
+    : {};
+}
+
 function resolvePermissionDecision(config, payload) {
   const behavior = config.permissionBehavior;
   if (behavior === "deny") {
@@ -1558,14 +1571,9 @@ function resolvePermissionDecision(config, payload) {
     };
   }
 
-  log("warn", "invalid permission behavior, fallback to allow", {
-    behavior,
-    payloadSummary: {
-      sessionId: payload?.session_id,
-      toolName: payload?.tool_name,
-    },
-  });
-  return { behavior: "allow" };
+  // Observing state must not silently approve tool execution. An absent or
+  // unknown policy leaves the existing Claude permission dialog in control.
+  return null;
 }
 
 function compactHookText(value, maxLength) {
@@ -1595,8 +1603,12 @@ function buildClaudeHookDisplay(payload, status, event) {
     content = toolName ? `正在执行 ${toolName}` : "正在执行任务";
   } else if (event === "Stop") content = finalMessage || "已完成";
   else if (event === "StopFailure" || event === "PostToolUseFailure") content = notification || "执行失败";
-  else if (event === "Notification" || event === "Elicitation") content = notification || "等待确认";
+  else if (event === "Notification" || event === "Elicitation" || event === "PermissionRequest") content = notification || "等待确认";
   else if (status === "working") content = "正在处理";
+  else if (status === "speaking") content = finalMessage || "正在回复";
+  else if (status === "waiting_user") content = "等待确认";
+  else if (status === "done") content = finalMessage || "已完成";
+  else if (status === "error") content = "执行失败";
 
   if (!title && !content) return undefined;
   return {
@@ -1636,7 +1648,9 @@ function publishClawdState(config, payload) {
     ? buildClaudeHookDisplay(payload, status, event)
     : source === "mimocode"
       ? buildMiMoCodeHookDisplay(payload, status, event)
-      : undefined;
+      : source === "workbuddy"
+        ? buildWorkBuddyHookDisplay(payload, status, event)
+        : undefined;
   const explicitSessionTitle = compactHookText(payload.session_title, 160);
   const sessionTitle = explicitSessionTitle
     || (display && display.title)
@@ -1682,6 +1696,17 @@ function publishClawdState(config, payload) {
   config.publisher.publishSource(enriched);
 }
 
+function buildWorkBuddyHookDisplay(payload, status, event) {
+  const { displayText } = require("../../../hooks/workbuddy-display");
+  const content = displayText(payload?.display_content) || {
+    working: event === "PreToolUse" ? "正在执行任务" : "正在思考",
+    speaking: "正在回复", waiting_user: "等待确认", done: "已完成",
+    error: "执行失败", idle: "等待任务", sleeping: "会话已结束",
+  }[status] || "正在处理";
+  // Sanitized current-turn prose only; status is a fallback when unavailable.
+  return { title: "WorkBuddy", content, status, event, updatedAtMs: Date.now() };
+}
+
 function publishPermissionRequest(config, payload) {
   const out = {
     source: "claude-code",
@@ -1692,6 +1717,7 @@ function publishPermissionRequest(config, payload) {
     rawState: "permission_request",
     reason: "clawd.PermissionRequest",
     event: "PermissionRequest",
+    display: buildClaudeHookDisplay({}, "waiting_user", "PermissionRequest"),
     sessionId: typeof payload.session_id === "string" ? payload.session_id : undefined,
     detail: {
       toolName: typeof payload.tool_name === "string" ? payload.tool_name : undefined,
@@ -1715,6 +1741,7 @@ function syncHooks(port, autoStart, options = {}) {
       autoStart: Boolean(autoStart),
       syncLegacyHooks: options.syncLegacyHooks !== false,
       syncMiMoCode: options.syncMiMoCode === true,
+      syncWorkBuddy: options.syncWorkBuddy === true,
     },
   });
   worker.once("message", logHookSyncOutcomes);
@@ -2058,7 +2085,7 @@ function resolveConfig() {
       strictPort: getEnvBool("CLAWD_BRIDGE_STRICT_PORT", false),
       syncHooks: getEnvBool("CLAWD_SYNC_HOOKS", true),
       autoStartHook: getEnvBool("CLAWD_AUTO_START_HOOK", false),
-      permissionBehavior: getEnv("CLAWD_PERMISSION_BEHAVIOR", "allow").toLowerCase(),
+      permissionBehavior: getEnv("CLAWD_PERMISSION_BEHAVIOR", "passthrough").toLowerCase(),
       permissionDenyMessage: getEnv("CLAWD_PERMISSION_DENY_MESSAGE", "Denied by bridge policy"),
       mockButtonDefaultText: getEnv(
         "CLAWD_MOCK_BUTTON_TEXT",
@@ -2102,6 +2129,11 @@ function resolveConfig() {
     },
     mimocode: {
       enabled: getEnvBool("CLAWD_ENABLE_MIMOCODE", true),
+    },
+    workbuddy: {
+      // Selected/enabled channel is authoritative in both direct and autostart launches.
+      enabled: parseCsvEnv("CLAWD_ENABLED_AGENTS", []).includes("workbuddy")
+        || getEnv("CLAWD_SELECTED_AGENT_ID", "") === "workbuddy",
     },
     openclawState: {
       idleTimeoutMs: Math.max(1000, getEnvInt("STATUS_IDLE_TIMEOUT_MS", 15000)),
@@ -2232,7 +2264,7 @@ async function main() {
     port: config.http.port,
     strictPort: config.http.strictPort,
     publisher,
-    onState: config.http.syncHooks || config.mimocode.enabled
+    onState: config.http.syncHooks || config.mimocode.enabled || config.workbuddy.enabled
       ? (payload) => publishClawdState({
           publisher,
           metricsTracker,
@@ -2248,7 +2280,7 @@ async function main() {
           }, payload);
           return resolvePermissionDecision(config.http, payload);
         }
-      : () => ({ allow: false, reason: "hook sync disabled" }),
+      : () => null,
     onMockButtonInject: async (payload) => {
       if (!agentBus) {
         const error = new Error("agent-session-bus unavailable");
@@ -2311,14 +2343,15 @@ async function main() {
     mockButtonInjectPath: "http://127.0.0.1:" + port + "/mock-button-inject",
   });
 
-  if (config.http.syncHooks || config.mimocode.enabled) {
+  if (config.http.syncHooks || config.mimocode.enabled || config.workbuddy.enabled) {
     syncHooks(port, config.http.autoStartHook, {
       syncLegacyHooks: config.http.syncHooks,
       syncMiMoCode: config.mimocode.enabled,
+      syncWorkBuddy: config.workbuddy.enabled,
     });
   } else {
     log("info", "hook sync skipped", {
-      reason: "CLAWD_SYNC_HOOKS=false and CLAWD_ENABLE_MIMOCODE=false",
+      reason: "No enabled hook-based Agent",
     });
   }
 
@@ -2367,6 +2400,7 @@ async function main() {
       CodexAdapter,
       OpenClawAdapter,
       MiMoCodeAdapter,
+      WorkBuddyAdapter,
     } = busModule;
     const busLog = (level, message, details) => log(level, `bus :: ${message}`, details);
     const adapters = [
@@ -2374,6 +2408,7 @@ async function main() {
       new CodexAdapter({ log: busLog }),
       new OpenClawAdapter({ log: busLog }),
       new MiMoCodeAdapter({ log: busLog }),
+      new WorkBuddyAdapter({ log: busLog }),
     ];
     agentBus = createAgentSessionBus({
       adapters,
@@ -2431,6 +2466,7 @@ async function main() {
     claudeLogMonitor: config.claude.enabledLogMonitor,
     openclawEnabled: config.openclaw.enabled,
     mimocodeEnabled: config.mimocode.enabled,
+    workbuddyEnabled: config.workbuddy.enabled,
     agentBusEnabled: Boolean(agentBus),
   });
 }
@@ -2457,4 +2493,10 @@ module.exports = {
   createLatestHardwareInputQueue,
   buildClaudeHookDisplay,
   buildMiMoCodeHookDisplay,
+  buildWorkBuddyHookDisplay,
+  publishClawdState,
+  publishPermissionRequest,
+  OpenClawStatusController,
+  resolvePermissionDecision,
+  permissionHookResponse,
 };

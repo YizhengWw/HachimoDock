@@ -10,6 +10,7 @@
 export function formatBindingControl(binding = {}) {
   const event = String(binding.event || "").trim();
   if (event === "button.sw1.short_press") return "SW1 · 短按";
+  if (event === "button.sw1.long_press") return "SW1 · 长按";
   if (event === "button.sw2.short_press") return "SW2 · 短按";
   if (event === "button.sw3.short_press") return "SW3 · 短按";
   if (event === "button.encoder.short_press") return "前方摇杆 · 中按";
@@ -34,6 +35,7 @@ const JOYSTICK_DIRECTION_EVENTS = new Set([
 
 const COMPACT_CONTROL_LABELS = {
   "button.sw1.short_press": "SW1",
+  "button.sw1.long_press": "SW1 长按",
   "button.sw2.short_press": "SW2",
   "button.sw3.short_press": "SW3",
   "button.encoder.short_press": "摇杆中按",
@@ -96,7 +98,8 @@ const COMPONENT_SYSTEM_ACTIONS = new Set([
 
 export function isRoutedWidgetBinding(binding = {}) {
   return (
-    ROUTED_WIDGET_EVENTS.has(String(binding.event || "").trim())
+    (ROUTED_WIDGET_EVENTS.has(String(binding.event || "").trim())
+      || (binding.event === "button.sw1.long_press" && binding.action === "media.lyrics"))
     && !COMPONENT_SYSTEM_ACTIONS.has(String(binding.action || "").trim())
   );
 }

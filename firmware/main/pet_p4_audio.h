@@ -5,6 +5,7 @@
 
 #include "esp_err.h"
 #include "pet_p4_protocol.h"
+#include "pet_p4_instrument_core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,6 +15,10 @@ extern "C" {
 #define PET_P4_AUDIO_CHANNELS 1
 #define PET_P4_AUDIO_BITS_PER_SAMPLE 16
 #define PET_P4_AUDIO_FRAME_MS 20
+void pet_p4_audio_instrument_set(bool active, unsigned effect, unsigned ambience);
+bool pet_p4_audio_instrument_strike(uint64_t now_ms);
+uint32_t pet_p4_audio_instrument_age(uint64_t now_ms);
+pet_instrument_motion_t pet_p4_audio_instrument_motion(uint64_t now_ms);
 
 esp_err_t pet_p4_audio_init(
   const char *board_device_id,
@@ -46,6 +51,13 @@ esp_err_t pet_p4_audio_stream_push(const uint8_t *pcm, size_t length);
 esp_err_t pet_p4_audio_stream_end(void);
 void pet_p4_audio_stream_flush(void);
 unsigned int pet_p4_audio_stream_played_bytes(void);
+esp_err_t pet_p4_audio_music_begin(const char *session_id);
+bool pet_p4_audio_music_active(void);
+bool pet_p4_audio_music_paused(void);
+bool pet_p4_audio_music_ended(void);
+void pet_p4_audio_music_pause(bool paused);
+void pet_p4_audio_music_volume(unsigned int volume);
+unsigned int pet_p4_audio_music_buffered_ms(void);
 bool pet_p4_audio_stream_playing(void);
 /* Metadata-only device diagnostic events: no PCM or spoken text. */
 void pet_p4_audio_diagnostic(const char *event, const char *session_id, size_t bytes, bool ok);

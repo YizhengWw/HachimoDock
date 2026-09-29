@@ -64,10 +64,11 @@ import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
 import CandidateCard, { resolveComponentKind } from "./component-center/CandidateCard.jsx";
 import ComponentPreviewModal from "./component-center/ComponentPreviewModal.jsx";
 import { isRoutedWidgetBinding } from "./component-center/binding-labels.js";
-import { mergeComponentCatalog, sortComponentsByCreatedAt } from "./component-center/library-order.js";
+import { isComponentVisible, mergeComponentCatalog, sortComponentsByCreatedAt } from "./component-center/library-order.js";
 import {
   COMPONENT_CONTROL_OPTIONS,
   componentInputEventSlots,
+  componentControlOptionAllowed,
   defaultControlLabelForBinding,
   globalExitControlLabel,
   optionForControlLabel,
@@ -80,6 +81,7 @@ const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-ove
 // their normal newest-first position ahead of builtins.
 const PROMOTED_BUILTIN_SOURCE_HASHES = new Set([
   "75b1737728db27be",
+  "b7cd756fc47c42b3",
 ]);
 const EMPTY_DEVICE_INVENTORY = Object.freeze({
   freshness: "idle",
@@ -98,6 +100,19 @@ const CONTROL_HELP = Object.fromEntries(
 );
 
 function gameInstallBlockedReason(component, usb) {
+  if (component?.instrumentSource && usb?.capabilities?.widgetInstrument !== "p4-instrument-v1") {
+    return "这个组件需要本地木鱼音效能力，请先升级设备固件。";
+  }
+  // Capability requirements depend on declared actions, not per-user key remapping.
+  // This module-level function must not call ComponentCenter's render-local helpers.
+  const bindings = Array.isArray(component?.defaultBindings) ? component.defaultBindings : [];
+  if (bindings.some((binding) => binding?.action === "media.lyrics")
+      && usb?.capabilities?.widgetLyrics !== "p4-lrc-v1") {
+    return "这个组件的歌词模式需要更新固件，请先升级设备固件。";
+  }
+  if ((component?.mediaSource || component?.id === "music-player") && usb?.capabilities?.widgetMedia !== "p4-media-v1") {
+    return "这个组件需要音乐播放能力，请先升级设备固件。";
+  }
   if (component?.dataSource && usb?.capabilities?.widgetData !== "p4-data-list-v1") {
     return "这个组件需要实时数据列表能力，请先升级设备固件。";
   }
@@ -627,6 +642,8 @@ export default function ComponentCenter() {
       gameType: entry.gameType || "",
       runtimeEngine: entry.runtimeEngine || "",
       dataSource: entry.dataSource || "",
+      mediaSource: entry.mediaSource || "",
+      instrumentSource: entry.instrumentSource || "",
       sceneEngine: entry.sceneEngine || "",
       gamePreset: entry.gamePreset || "",
       scene: entry.scene || null,
@@ -650,7 +667,7 @@ export default function ComponentCenter() {
   /** Resolve the exact installed source. A generated local component may intentionally
    *  share its manifest id with a builtin, so id alone is not enough. */
   const currentFullComponent = useMemo(() => {
-    const record = activeComponentRecord;
+    const record = isComponentVisible(activeComponentRecord) ? activeComponentRecord : null;
     const id = record?.id;
     if (!id) return null;
     if (record?.source?.type === "library" && record.source.path) {
@@ -709,7 +726,7 @@ export default function ComponentCenter() {
     if (deviceInventory.freshness !== "live") return catalogItems;
     const catalogIds = new Set(catalogItems.map((item) => item.id));
     const deviceOnlyItems = deviceInventory.items
-      .filter((item) => !catalogIds.has(item.id))
+      .filter((item) => isComponentVisible(item) && !catalogIds.has(item.id))
       .map((item) => buildUnknownInventoryComponent(item));
     return [...catalogItems, ...deviceOnlyItems];
   }, [catalogItems, deviceInventory.freshness, deviceInventory.items]);
@@ -1137,6 +1154,7 @@ export default function ComponentCenter() {
         .flatMap((candidate) => componentInputEventSlots(candidate.event)),
     );
     return COMPONENT_CONTROL_OPTIONS
+      .filter((option) => componentControlOptionAllowed(option, binding, component))
       .filter((option) => (
         !option.event.startsWith("screen.")
         || deviceTouchReady(usb)
@@ -1163,6 +1181,7 @@ export default function ComponentCenter() {
       const next = { ...current };
       (component?.defaultBindings || []).forEach((binding) => {
         delete next[bindingKey(component, binding.action)];
+        delete next[`${component.id}:${binding.action}`];
       });
       return next;
     });

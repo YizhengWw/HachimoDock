@@ -536,6 +536,7 @@ test("component library keeps user components newest-first ahead of default-orde
   assert.match(order, /const publishedIds = new Set/);
   assert.match(component, /PROMOTED_BUILTIN_SOURCE_HASHES\.has\(entry\.versionHash\)/);
   assert.match(component, /"75b1737728db27be"/);
+  assert.match(component, /"b7cd756fc47c42b3"/);
   assert.match(component, /createdAtMs:\s*entry\.createdAtMs \|\| entry\.mtimeMs \|\| 0/);
   assert.match(order, /componentCreatedAtMs\(right\.component\) - componentCreatedAtMs\(left\.component\)/);
 });
@@ -852,6 +853,7 @@ test("fixtures expose stocks first then the existing games and tools", () => {
   assert.doesNotMatch(data, /falling-catch|接住星星|catch\.left|catch\.right|catch\.start/);
   assert.doesNotMatch(data, /ten-second-tap|5秒连点|10秒连点/);
   assert.equal((data.match(/createdAt:/g) || []).length, 8);
+  assert.match(data, /mediaSource: musicWidget.media.source/);
   assert.match(data, /gameType: "blocks"/);
   assert.match(data, /gameType: "snake"/);
   assert.match(data, /gameType: "flappy"/);
@@ -861,7 +863,13 @@ test("fixtures expose stocks first then the existing games and tools", () => {
   assert.doesNotMatch(data, /slack-off-countdown/);
   assert.doesNotMatch(data, /摸鱼倒计时/);
   assert.equal((data.match(/kind: "game"/g) || []).length, 4);
-  assert.equal((data.match(/kind: "tool"/g) || []).length, 5);
+  // Two local-data tools share one catalog factory; wooden-fish is a native instrument.
+  assert.equal((data.match(/kind: "tool"/g) || []).length, 8);
+  assert.match(data, /instrumentSource: woodenFishWidget.instrument.source/);
+  assert.match(data, /computerManifest, computerWidget, computerBindings/);
+  assert.match(data, /todoManifest, todoWidget, todoBindings/);
+  assert.ok(data.indexOf("...localDataComponents[0]") > data.indexOf('id: "stock-watchlist"'));
+  assert.ok(data.indexOf("...localDataComponents[1]") < data.indexOf('id: "two-key-pong"'));
   assert.equal((data.match(/visualStyle: "pixel"/g) || []).length, 7);
   assert.equal((data.match(/visualLayout: "tool"/g) || []).length, 4);
   assert.match(data, /event: "button\.sw1\.short_press"/);
@@ -948,7 +956,7 @@ test("component install keeps its button map package-owned without replacing dev
   assert.match(component, /globalExitBinding\.status === "error"/);
   assert.match(component, /bindingOverrides: buildBindingOverridesForInstall\(component\)/);
   assert.match(firmware, /dispatch_component_binding_event/);
-  assert.match(firmware, /active_global_exit_binding/);
+  assert.match(firmware, /active_global_priority_binding/);
   assert.match(firmware, /if \(component_system_action\(component_action\)\) return false/);
   assert.match(bindingLabels, /COMPONENT_SYSTEM_ACTIONS/);
   assert.match(widgetTransaction, /bindings\.retain/);
