@@ -2,7 +2,9 @@
 
 [简体中文 · Product gallery](README.md) · [Downloads](https://github.com/YizhengWw/HachimoDock/releases)
 
-HachimoDock turns Agent activity into a desktop companion: pet animations, conversation bubbles, voice dictation and interactive components on an ESP32-P4 display. Pet Manager supports macOS and Windows and integrates with agents including ChatGPT (Codex), Claude, OpenClaw and MiMoCode.
+HachimoDock turns Agent activity into a desktop companion: pet animations, conversation bubbles, voice dictation and interactive components on an ESP32-P4 display. Pet Manager supports macOS and Windows and integrates with agents including ChatGPT (Codex), Claude, OpenClaw, MiMoCode and WorkBuddy.
+
+Home-control capabilities are provided by [**Xiaomi MiLoCo**](https://github.com/XiaoMi/xiaomi-miloco). The relevant MiLoCo licensed works are copyrighted by Xiaomi and subject to the [Xiaomi Miloco License](licenses/Xiaomi-Miloco-LICENSE.md); copyright notices, disclaimers and the license are retained with the relevant implementation. Non-commercial use must still comply with the license's permitted scope. This project grants no additional commercial, sublicensing or trademark rights. See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for details.
 
 ## Source and builds
 
@@ -22,11 +24,7 @@ Configure speech and chat-model credentials, then long-press SW2 in the pet view
 
 Public installers contain no API keys, enterprise CA certificates or fixed proxy addresses. For image moderation failures, the client explains the rejected stage and offers manual MP4 import using material you are authorized to use.
 
-## Special thanks: Xiaomi MiLoCo
-
-Thank you to [Xiaomi MiLoCo](https://github.com/XiaoMi/xiaomi-miloco). The home-control cloud protocol is adapted in Rust from `miloco-miot`, not bundled as the complete Python SDK. The relevant licensed work belongs to Xiaomi and remains subject to the [Xiaomi Miloco License](licenses/Xiaomi-Miloco-LICENSE.md); copyright notices, disclaimers and the license are retained. Its non-commercial and purpose restrictions still apply; this project grants no additional commercial, sublicensing or trademark rights. See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
-
-Default short presses: SW1 confirms, SW2 switches the pet/component-center view, SW3 returns. Long-press SW1 records speech; releasing writes a draft, and Confirm sends it. Permissions are required to control the chosen Agent's input field. If the Agent is already open, dictation uses its current conversation; otherwise Pet Manager opens the selected Agent and uses the device-selected conversation when available.
+Default short presses: SW1 confirms, SW2 switches the pet/component-center view, SW3 returns. Long-press SW1 records speech; releasing writes a draft, and Confirm sends it. Permissions are required to control the chosen Agent's input field. Dictation targets and desktop session switching depend on each Agent's integration. For WorkBuddy, manually open the target conversation and keep its input visible; changing the device bubble does not switch the desktop conversation. See [WorkBuddy](pc/docs/workbuddy.md) and [Agent integration](pc/docs/agent-integration-audit.md) for platform limits.
 
 Component behavior and physical bindings can be adjusted in Pet Manager. Use the bundled `petui` Skill inside an Agent to create and iterate on non-commercial components, then synchronize them to the device.
 
