@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "product": "HachimoDock Pet Manager",
-  "desktopVersion": "0.1.82",
-  "firmwareVersion": "0.7.64-p4",
-  "sourceCommit": "20da6c4dbee2d264f07c51249e22e7d4ed8ab538",
-  "firmwareBuildId": "0.7.64-p4+8ae44468877d",
-  "firmwareSourceCommit": "8ae44468877d8238313506b9b66030fa55356538",
-  "firmwareBuildProvenance": "Firmware build ID identifies an isolated local source snapshot. Firmware inputs match firmwareSourceCommit; Release metadata and test-only differences do not affect the firmware binary.",
+  "desktopVersion": "0.1.101",
+  "firmwareVersion": "0.7.72-p4",
+  "sourceCommit": "21f9fac608e6d8a66cd8fe0d8e824161d30aec95",
+  "firmwareBuildId": "0.7.72-p4+542b33d5a6a4",
+  "firmwareSourceCommit": "542b33d5a6a49355c63f4571e74fd301b36b5b6c",
+  "firmwareBuildProvenance": "Firmware build IDs identify the committed source snapshots. Between the v1 and v3 snapshots only a desktop Rust regression test changed. Later commits package binaries and release metadata.",
   "publicSourceIncluded": true,
   "embeddedInternalCredentials": false,
   "embeddedEnterpriseCa": false,
@@ -20,26 +20,30 @@
       "chipFamily": "v1",
       "chipRevisionMin": 1,
       "chipRevisionMax": 199,
-      "hardwareValidation": "build-and-host-regressions-passed; full-release-hardware-validation-pending",
-      "sha256": "4096d58986fd7f050ea0b0242bc9300d0082cb7a7702732b52122d5cf367b336"
+      "buildId": "0.7.72-p4+542b33d5a6a4",
+      "sourceCommit": "542b33d5a6a49355c63f4571e74fd301b36b5b6c",
+      "hardwareValidation": "preserving-data-ota-and-valid-boot-passed; complete-runtime-acceptance-pending",
+      "sha256": "18da63994fa48c20b49063ca9d9340b601df6147ba816a6aa73b24184caf70c6"
     },
     {
       "chipFamily": "v3",
       "chipRevisionMin": 300,
       "chipRevisionMax": 399,
-      "hardwareValidation": "build-and-host-regressions-passed; full-release-hardware-validation-pending",
-      "sha256": "0d0a7faa125f023548216b368e457e5f45f7cf9020b5f25803d62ba237dae58b"
+      "buildId": "0.7.72-p4+f40980406b3b",
+      "sourceCommit": "f40980406b3b41e9584a0f770a1c6884117f194d",
+      "hardwareValidation": "build-and-host-regressions-passed; physical-v3-runtime-not-tested-this-release",
+      "sha256": "2d788b729e0be9707e45180c058fcf8c884ac1ac48ab1f50c29e3595ae3ae2d2"
     }
   ],
   "validation": {
-    "frontendPassed": 621,
+    "frontendPassed": 660,
     "frontendSkipped": 1,
-    "bridgePassed": 188,
-    "firmwareHostPassed": 134,
+    "bridgePassed": 202,
+    "firmwareHostPassed": 159,
     "firmwareSubtestsPassed": 5,
-    "smartHomeBrowserRegression": false,
-    "rustPassed": 394,
-    "rustIgnored": 24,
+    "rustPassed": 451,
+    "rustIgnored": 27,
+    "preservingDataOtaPassed": 1,
     "publicSourceSecretScan": true,
     "installerPayloadScan": true,
     "macOSSigning": "local-ad-hoc-not-notarized",
@@ -48,29 +52,29 @@
   "artifacts": [
     {
       "role": "mac",
-      "file": "HachimoDock-Pet-Manager_0.1.82_macOS-arm64.dmg",
-      "bytes": 102840895,
-      "sha256": "583c0b8971f26d3b64e13541c56e57ddf492139cb11a861ca1415fb9f6f306a1"
+      "file": "HachimoDock-Pet-Manager_0.1.101_macOS-arm64.dmg",
+      "bytes": 105313725,
+      "sha256": "9d28fbf3fc09985ce92082be2324fda79a0012500267e04cbb6d1e5fe6fd0df4"
     },
     {
       "role": "windows",
-      "file": "HachimoDock-Pet-Manager_0.1.82_Windows-x64-setup.exe",
-      "bytes": 89331230,
-      "sha256": "3e64895d69eb7fa29b7986f30cc911695da43caec99d9cb11c9a5ed316eedb92"
+      "file": "HachimoDock-Pet-Manager_0.1.101_Windows-x64-setup.exe",
+      "bytes": 91685698,
+      "sha256": "36dcabaa3e7a107be4c4d0ed59564aafa4a8c62ca320b4023412fb603142a1f0"
     },
     {
       "role": "factoryPackage",
-      "file": "HachimoDock-P4-v1_0.7.64-p4_Factory-Flasher.zip",
-      "chipFamily": "v1",
-      "bytes": 19854563,
-      "sha256": "a34ae8055161291b83bd010865e16b26f228cf208c63fdaefa7559bf943981cf"
+      "file": "HachimoDock-P4-v1_0.7.72-p4_Factory-Flasher.zip",
+      "bytes": 20024916,
+      "sha256": "9fc01f363e62f3945cb31f4c6b8c5490fc0347227bd6097e27c35ea7440e8ae3",
+      "chipFamily": "v1"
     },
     {
       "role": "factoryPackage",
-      "file": "HachimoDock-P4-v3_0.7.64-p4_Factory-Flasher.zip",
-      "chipFamily": "v3",
-      "bytes": 19872030,
-      "sha256": "f5b16b5b915b2a8d4ad52483f821b2300c4380bc61e10644ef9c470846c1c8a5"
+      "file": "HachimoDock-P4-v3_0.7.72-p4_Factory-Flasher.zip",
+      "bytes": 20044506,
+      "sha256": "11765a9d05ec68fc4be12c4af9119c710fc08d22223e665ad21d4f25a6105859",
+      "chipFamily": "v3"
     },
     {
       "role": "ffmpegSource",
@@ -87,8 +91,8 @@
     {
       "role": "third-party-notices",
       "file": "THIRD_PARTY_NOTICES.md",
-      "bytes": 5887,
-      "sha256": "5a5b1a38767c79b30e9c901335c4501ade86ab8e8ecf01953d93e17e96d32631"
+      "bytes": 6856,
+      "sha256": "4e9187d896428808184a3b54fe71b4a25f5563ad995022efdb76a26b0be252a4"
     },
     {
       "role": "license",
@@ -101,6 +105,12 @@
       "file": "Espressif-ESP-SR-LICENSE.txt",
       "bytes": 1188,
       "sha256": "923e6274ea64b226c4f0cb9fc29bda915ae343fd6a8fc290ff5e0daaa85f8813"
+    },
+    {
+      "role": "license",
+      "file": "sysinfo-LICENSE.txt",
+      "bytes": 1082,
+      "sha256": "666ccdb468b5fe0f408f90ebb563c95e4d453e89bd1660e93aa7463f2807ae36"
     }
   ]
 }
