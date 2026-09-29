@@ -219,7 +219,8 @@ mod tests {
     }
     #[test]
     fn registry_is_shared_and_writes_fail_closed_after_search() {
-        assert_eq!(definitions().len(), 3);
+        assert_eq!(definitions().len(), 2 + usize::from(crate::music_player::AVAILABLE));
+        assert_eq!(definitions().iter().any(|tool| tool["function"]["name"] == "media_player"), crate::music_player::AVAILABLE);
         let mut turn = Turn::default();
         assert!(turn
             .execute("todo_manage", json!({"operation":"add","title":"x"}), true)
