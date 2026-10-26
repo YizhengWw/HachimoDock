@@ -295,7 +295,18 @@ HachimoDock 的实现参考、借鉴并集成了以下开源项目，特此致�
 - 📧 邮箱：avalon.ty@gmail.com
 - 💬 微信交流群：扫描下方二维码加入
 
-<img src="assets/group-qrcode.jpg" width="180" alt="HachimoDock 微信交流群二维码" />
+<table>
+  <tr>
+    <th>微信群二维码</th>
+    <th>微信好友二维码（群满备用）</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/group-qrcode.jpg" width="180" alt="HachimoDock 微信交流群二维码" /></td>
+    <td align="center"><img src="assets/wechat-contact-qrcode.png" width="180" alt="ai-maker 微信好友二维码，备注 HachimiDock 后邀请入群" /></td>
+  </tr>
+</table>
+
+微信群已经满了或无法直接加入时，可以先扫描右侧二维码添加微信好友，备注 **“HachimiDock”**，再由管理员邀请你入群。
 
 如果 HachimoDock 对你有帮助，欢迎给仓库点一个 ⭐ **Star**、点击 **Follow** 关注后续更新，也欢迎通过 Issue 提交可复现的问题与建议。
 
