@@ -47,5 +47,5 @@ int main(void){
 }
 ''')
     exe=tmp_path/'save'
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-DPET_APP_SAVE_ROOT="."','-I',str(tmp_path),'-I',str(ROOT/'main'),str(harness),'-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-DPET_APP_SAVE_ROOT="."','-I',str(tmp_path),'-I',str(ROOT/'main'),str(harness),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],cwd=tmp_path,check=True)

@@ -1272,7 +1272,10 @@ bool pet_p4_game_pointer(pet_p4_game_engine_t *game,unsigned index,int x,int y,u
   pet_p4_game_entity_t *e=&game->bounded_entities[index];
   if(!e->active||e->bounds!=PET_P4_GAME_BOUNDS_CLAMP)return false;
   int nx=x-e->width/2,ny=y-e->height/2;
-  if(nx<0)nx=0;if(ny<0)ny=0;if(nx>game->width-e->width)nx=game->width-e->width;if(ny>game->height-e->height)ny=game->height-e->height;
+  if (nx < 0) nx = 0;
+  if (ny < 0) ny = 0;
+  if (nx > game->width - e->width) nx = game->width - e->width;
+  if (ny > game->height - e->height) ny = game->height - e->height;
   bool changed=false;
   if((axes&1)&&e->x!=nx){e->x=nx;changed=true;}
   if((axes&2)&&e->y!=ny){e->y=ny;changed=true;}

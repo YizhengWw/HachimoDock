@@ -86,7 +86,10 @@ bool pet_app_host_apply(const cJSON *p,uint64_t now){
     mode=m->valueint;count=cJSON_GetArraySize(a);
     for(int i=0;i<count;i++){const cJSON *s=cJSON_GetArrayItem(a,i);if(!cJSON_IsString(s)||strncmp(s->valuestring,"host.",5)||strlen(s->valuestring)>47)return false;
       for(const char *c=s->valuestring;*c;c++)if(!((*c>='a'&&*c<='z')||(*c>='A'&&*c<='Z')||(*c>='0'&&*c<='9')||*c=='.'||*c=='_'||*c=='-'))return false;
-      for(int j=0;j<i;j++)if(!strcmp(actions[j],s->valuestring))return false;snprintf(actions[i],48,"%s",s->valuestring);}
+      for (int j = 0; j < i; j++) {
+        if (!strcmp(actions[j], s->valuestring)) return false;
+      }
+      snprintf(actions[i],48,"%s",s->valuestring);}
     const cJSON *token=cJSON_GetObjectItemCaseSensitive(ui,"context");
     if(token){if(!cJSON_IsString(token)||strlen(token->valuestring)>64)return false;for(const char *c=token->valuestring;*c;c++)if(!((*c>='0'&&*c<='9')||(*c>='a'&&*c<='f')))return false;snprintf(context,65,"%s",token->valuestring);}
   }

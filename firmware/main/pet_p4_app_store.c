@@ -73,11 +73,14 @@ static void save_worker(void *arg){
   (void)arg;for(;;){vTaskDelay(pdMS_TO_TICKS(1000));flush_one();}
 }
 bool pet_app_store_init(void){
-  if(worker)return true;if(!lock)lock=xSemaphoreCreateMutex();if(!lock)return false;
+  if (worker) return true;
+  if (!lock) lock = xSemaphoreCreateMutex();
+  if (!lock) return false;
   return xTaskCreate(save_worker,"pet_app_save",4096,NULL,1,&worker)==pdPASS;
 }
 bool pet_app_store_read(const char *id,char out[PET_APP_SAVE_BYTES]){
-  if(!lock||!valid_id(id))return false;out[0]=0;
+  if (!lock || !valid_id(id)) return false;
+  out[0] = 0;
   xSemaphoreTake(lock,portMAX_DELAY);int i=find_slot(id);
   if(i<0){xSemaphoreGive(lock);return false;}
   if(saves[i].loaded){bool ok=!saves[i].deleted&&saves[i].json[0];if(ok)memcpy(out,saves[i].json,PET_APP_SAVE_BYTES);xSemaphoreGive(lock);return ok;}
@@ -85,18 +88,22 @@ bool pet_app_store_read(const char *id,char out[PET_APP_SAVE_BYTES]){
   save_t a={0},b={0};bool av=read_slot(id,0,&a),bv=read_slot(id,1,&b);
   if(av||bv)saves[i]=bv&&(!av||(int32_t)(b.seq-a.seq)>0)?b:a;
   else{snprintf(saves[i].id,48,"%s",id);saves[i].loaded=true;}
-  if(av||bv)memcpy(out,saves[i].json,PET_APP_SAVE_BYTES);xSemaphoreGive(lock);return av||bv;
+  if (av || bv) memcpy(out, saves[i].json, PET_APP_SAVE_BYTES);
+  xSemaphoreGive(lock);
+  return av || bv;
 }
 bool pet_app_store_update(const char *id,const char *json){
   if(!lock||!valid_id(id)||!json||!json[0]||strlen(json)>=PET_APP_SAVE_BYTES)return false;
   xSemaphoreTake(lock,portMAX_DELAY);int i=find_slot(id);bool ok=i>=0;
   if(ok&&strcmp(saves[i].json,json)){
     save_t *s=&saves[i];snprintf(s->id,48,"%s",id);snprintf(s->json,sizeof(s->json),"%s",json);s->seq++;if(!s->seq)s->seq=1;
-    if(!s->dirty)s->dirty_since=now_ms();s->loaded=true;s->dirty=true;s->deleted=false;
+    if (!s->dirty) s->dirty_since = now_ms();
+    s->loaded=true;s->dirty=true;s->deleted=false;
   }xSemaphoreGive(lock);return ok;
 }
 void pet_app_store_forget(const char *id){
-  if(!lock||!valid_id(id))return;xSemaphoreTake(lock,portMAX_DELAY);int i=find_slot(id);
+  if (!lock || !valid_id(id)) return;
+  xSemaphoreTake(lock,portMAX_DELAY);int i=find_slot(id);
   if(i>=0){save_t *s=&saves[i];snprintf(s->id,48,"%s",id);s->json[0]=0;s->seq++;s->loaded=true;s->dirty=true;s->deleted=true;s->dirty_since=0;}
   xSemaphoreGive(lock);
 }
