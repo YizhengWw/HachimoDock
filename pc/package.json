@@ -1,7 +1,7 @@
 {
   "name": "pet-manager-client",
   "private": true,
-  "version": "0.1.101",
+  "version": "0.1.167",
   "author": "Yizheng Wang",
   "license": "SEE LICENSE IN ../LICENSE",
   "type": "module",
@@ -42,6 +42,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "2.11.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "lunar-javascript": "1.7.7",
     "vite": "^6.4.3"
   },
   "overrides": {

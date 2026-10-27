@@ -17,6 +17,10 @@
 extern "C" {
 #endif
 
+typedef struct {bool held,blocked;uint64_t context;} pet_p4_input_gate_t;
+/* Any page/state/ownership change disarms a held direction until neutral. */
+bool pet_p4_input_gate_accept(pet_p4_input_gate_t *gate,bool neutral,uint64_t context);
+
 enum {
   PET_P4_BUTTON_EVENT_NONE = 0,
   PET_P4_BUTTON_EVENT_DOWN = 1 << 0,

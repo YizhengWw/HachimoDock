@@ -1,0 +1,812 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "left": {
+      "type": "int",
+      "init": 30
+    },
+    "rounds": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "idle",
+    "run",
+    "paused",
+    "done",
+    "later"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "idle",
+      "on": "primary",
+      "to": "run",
+      "set": {
+        "left": 30
+      }
+    },
+    {
+      "from": "run",
+      "on": "primary",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "primary",
+      "to": "run"
+    },
+    {
+      "from": "done",
+      "on": "primary",
+      "to": "run",
+      "set": {
+        "left": 30
+      }
+    },
+    {
+      "from": "later",
+      "on": "primary",
+      "to": "run",
+      "set": {
+        "left": 30
+      }
+    },
+    {
+      "from": "*",
+      "on": "secondary",
+      "to": "later",
+      "set": {
+        "left": 300
+      }
+    },
+    {
+      "from": "*",
+      "on": "previous",
+      "page": "prev"
+    },
+    {
+      "from": "*",
+      "on": "next",
+      "page": "next"
+    }
+  ],
+  "tick": [
+    {
+      "every_ms": 1000,
+      "while_state": "run",
+      "inc": {
+        "left": -1
+      },
+      "when": {
+        "var": "left",
+        "lte": 0
+      },
+      "then": {
+        "to": "done",
+        "inc": {
+          "rounds": 1
+        }
+      }
+    },
+    {
+      "every_ms": 1000,
+      "while_state": "later",
+      "inc": {
+        "left": -1
+      },
+      "when": {
+        "var": "left",
+        "lte": 0
+      },
+      "then": {
+        "to": "idle",
+        "set": {
+          "left": 30
+        }
+      }
+    }
+  ],
+  "dashboard": {
+    "title": "活力间歇",
+    "visualStyle": "clean",
+    "visualPalette": "candy",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": {
+      "switch_state": {
+        "idle": "给自己半分钟",
+        "run": "按舒服的节奏",
+        "paused": "已暂停",
+        "done": "轻休息完成",
+        "later": "五分钟后再提醒"
+      }
+    },
+    "headline": {
+      "switch_page": {
+        "shoulders": "放松肩膀",
+        "eyes": "看看远处",
+        "hands": "轻松握放"
+      }
+    },
+    "metricValue": {
+      "fmt_mmss": "left"
+    },
+    "note": {
+      "switch_page": {
+        "shoulders": "轻轻抬肩，再慢慢放下；不适就停止。",
+        "eyes": "目光离开屏幕，看看远处；自然眨眼。",
+        "hands": "双手轻轻张开、握拢；不适就停止。"
+      }
+    },
+    "footer": "SW1 开始/暂停  SW2 稍后  左右换动作  全局键退出",
+    "metricLabel": {
+      "switch_state": {
+        "idle": "开始休息",
+        "run": "暂停",
+        "paused": "继续",
+        "done": "再来一次",
+        "later": "现在开始"
+      }
+    },
+    "metricUnit": "稍后五分钟"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 63359,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 128,
+        "frame_height": 144,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 63359,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 290,
+        "h": 436,
+        "color": 63359,
+        "opacity": 245,
+        "opacity_end": 200
+      },
+      {
+        "type": "panel",
+        "x": 290,
+        "y": 0,
+        "w": 350,
+        "h": 436,
+        "color": 63359,
+        "opacity": 200,
+        "opacity_end": 0
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 18924,
+        "icon": "stretch"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 18924,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 372,
+        "y": 20,
+        "w": 242,
+        "h": 24,
+        "color": 18924,
+        "font_size": 14,
+        "text": "轻休息 · 舒适最重要",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 90,
+        "w": 410,
+        "h": 25,
+        "color": 40021,
+        "font_size": 14,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 134,
+        "w": 410,
+        "h": 60,
+        "color": 18924,
+        "font_size": 37,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 210,
+        "w": 338,
+        "h": 89,
+        "color": 18924,
+        "font_size": 69,
+        "bind": "metricValue"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 318,
+        "w": 510,
+        "h": 30,
+        "color": 35762,
+        "font_size": 14,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 366,
+        "w": 148,
+        "h": 48,
+        "color": 31507,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "stretch",
+        "action": "primary"
+      },
+      {
+        "type": "button",
+        "x": 184,
+        "y": 366,
+        "w": 174,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 18924,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "clock",
+        "action": "secondary",
+        "opacity": 230,
+        "stroke": 65535,
+        "stroke_width": 1
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 63359,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 35762,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 63359,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 35762,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 35762,
+        "font_size": 15,
+        "text": "开始/暂停"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 63359,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 35762,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 35762,
+        "font_size": 15,
+        "text": "稍后"
+      },
+      {
+        "type": "text",
+        "x": 257,
+        "y": 446,
+        "w": 253,
+        "h": 24,
+        "color": 35762,
+        "font_size": 14,
+        "text": "左右换动作"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 35762,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 390,
+        "y": 366,
+        "w": 106,
+        "h": 48,
+        "color": 65502,
+        "foreground": 18924,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "上个动作",
+        "action": "previous"
+      },
+      {
+        "type": "button",
+        "x": 506,
+        "y": 366,
+        "w": 106,
+        "h": 48,
+        "color": 65502,
+        "foreground": 18924,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "下个动作",
+        "action": "next"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:",
+        "metrics": [
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            9,
+            11,
+            29
+          ]
+        ],
+        "cell": [
+          32,
+          48
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "活力间歇cleandytosr给自己半分钟按舒服的节奏已暂停轻休息完成五后再提醒放松肩膀看远处握抬",
+        "metrics": [
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            16,
+            11,
+            28
+          ],
+          [
+            9,
+            2,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            20,
+            3,
+            28
+          ],
+          [
+            16,
+            11,
+            32
+          ],
+          [
+            12,
+            6,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            15,
+            11,
+            28
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            4,
+            30
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "shoulders"
+    },
+    {
+      "id": "eyes"
+    },
+    {
+      "id": "hands"
+    }
+  ],
+  "initial_page": "shoulders",
+  "limits": {
+    "left": [
+      0,
+      300
+    ],
+    "rounds": [
+      0,
+      1000000000
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "rounds",
+      "left"
+    ],
+    "states": {
+      "idle": "idle",
+      "run": "paused",
+      "paused": "paused",
+      "done": "done",
+      "later": "later"
+    },
+    "page": true
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "next",
+      "right": "previous"
+    }
+  }
+}

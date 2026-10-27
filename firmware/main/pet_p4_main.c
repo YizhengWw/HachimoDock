@@ -43,6 +43,7 @@
 #include "pet_p4_transport_config.h"
 #include "pet_p4_renderer.h"
 #include "pet_p4_touch.h"
+#include "pet_p4_conversation.h"
 #include "pet_p4_usb_native.h"
 #include "pet_p4_view.h"
 
@@ -67,6 +68,9 @@ static char *g_uart_line_buffer;
 static size_t g_uart_line_used;
 static SemaphoreHandle_t g_render_mutex;
 static SemaphoreHandle_t g_transport_mutex;
+static bool g_transport_ready;
+// Shared under g_transport_mutex, not on the audio/render task stacks.
+static char g_transport_log_buffer[1024];
 static SemaphoreHandle_t g_state_mutex;
 static QueueHandle_t g_protocol_queue;
 static pet_p4_runtime_state_t *g_render_state;
@@ -177,21 +181,30 @@ static void uart_write_all(const char *data, size_t len) {
 
 static int transport_log_vprintf(const char *format, va_list args) {
   if (g_transport_mutex) xSemaphoreTake(g_transport_mutex, portMAX_DELAY);
-  // Only streaming audio leaves queued data behind. Do not let the console's
-  // direct FIFO writes splice a log into its JSON frame; drop a debug log if a
-  // disconnected host cannot drain, rather than corrupting or stalling audio.
-  if (pet_p4_audio_active()) {
-    bool pending = uart_is_driver_installed(PET_P4_UART_NUM)
-      && uart_wait_tx_done(PET_P4_UART_NUM, pdMS_TO_TICKS(20)) != ESP_OK;
-    if (usb_serial_jtag_is_driver_installed() && usb_protocol_seen())
-      pending |= usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(20)) != ESP_OK;
-    if (pending) {
-      if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
-      return 0;
+  int written;
+  if (!g_transport_ready) {
+    // Before driver initialization there are no queued protocol frames.
+    written = vprintf(format, args);
+    fflush(stdout);
+  } else {
+    // A task mutex alone cannot serialize the console's direct FIFO writes
+    // against bytes still in an interrupt-driven TX queue. Use that SAME queue
+    // for logs, in every audio state (capture-active excludes radio playback).
+    // No drain waits: a short USB packet can otherwise add 100 ms to an ACK.
+    written = vsnprintf(g_transport_log_buffer, sizeof(g_transport_log_buffer), format, args);
+    if (written > 0) {
+      size_t len = (size_t) written;
+      if (len >= sizeof(g_transport_log_buffer)) len = sizeof(g_transport_log_buffer) - 1;
+      // Bound long diagnostics and always terminate the record. Even a clipped
+      // log must not absorb the next protocol frame into its physical line.
+      if (g_transport_log_buffer[len - 1] != '\n') {
+        if (len == sizeof(g_transport_log_buffer) - 1) --len;
+        g_transport_log_buffer[len++] = '\n';
+      }
+      uart_queue_all(g_transport_log_buffer, len);
+      if (usb_protocol_seen()) usb_queue_all(g_transport_log_buffer, len);
     }
   }
-  int written = vprintf(format, args);
-  fflush(stdout);
   if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
   return written;
 }
@@ -229,7 +242,13 @@ static void transport_send_line_impl(const char *line, void *ctx, bool drain) {
 
 static void transport_send_line(const char *line, void *ctx) {
   const char audio_prefix[] = "{\"topic\":\"audio/";
-  bool audio = line && strncmp(line, audio_prefix, sizeof(audio_prefix) - 1) == 0;
+  const char media_prefix[] = "{\"topic\":\"media/";
+  // A media chunk contains only 80 ms of audio. Waiting for USB TX completion
+  // before queuing the newline delays its ACK by ~100 ms on native USB and
+  // guarantees underruns. Queue the complete frame under the same mutex, as
+  // for realtime audio; firmware/widget transfers keep their drained path.
+  bool audio = line && (strncmp(line, audio_prefix, sizeof(audio_prefix) - 1) == 0
+    || strncmp(line, media_prefix, sizeof(media_prefix) - 1) == 0);
   transport_send_line_impl(line, ctx, !audio);
 }
 
@@ -281,8 +300,12 @@ static void send_screenshot_chunk(
 
 static bool maybe_handle_debug_line(const char *line, void *reply_ctx) {
   if (!line || !strstr(line, "\"debug/screenshot\"")) return false;
-
-  uint8_t *raw = (uint8_t *) malloc(PET_P4_SCREENSHOT_W * PET_P4_SCREENSHOT_H * 2);
+  cJSON *request=cJSON_Parse(line);
+  const cJSON *payload=cJSON_GetObjectItemCaseSensitive(request,"payload");
+  bool full=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload,"fullResolution"));
+  cJSON_Delete(request);
+  const int capture_w=full?640:PET_P4_SCREENSHOT_W,capture_h=full?480:PET_P4_SCREENSHOT_H;
+  uint8_t *raw = (uint8_t *) heap_caps_malloc(capture_w*capture_h*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
   char *b64 = (char *) malloc(((PET_P4_SCREENSHOT_RAW_CHUNK + 2) / 3) * 4 + 8);
   if (!raw || !b64) {
     free(raw);
@@ -310,15 +333,15 @@ static bool maybe_handle_debug_line(const char *line, void *reply_ctx) {
 
   unsigned int non_black = 0;
   unsigned int checksum = 2166136261u;
-  for (int y = 0; y < PET_P4_SCREENSHOT_H; y += 1) {
-    int sy = y * src_h / PET_P4_SCREENSHOT_H;
-    for (int x = 0; x < PET_P4_SCREENSHOT_W; x += 1) {
-      int sx = x * src_w / PET_P4_SCREENSHOT_W;
+  for (int y = 0; y < capture_h; y += 1) {
+    int sy = y * src_h / capture_h;
+    for (int x = 0; x < capture_w; x += 1) {
+      int sx = x * src_w / capture_w;
       uint16_t px = src[sy * src_w + sx];
       if (px != 0) non_black += 1;
       checksum ^= (unsigned int) px;
       checksum *= 16777619u;
-      size_t off = (size_t) (y * PET_P4_SCREENSHOT_W + x) * 2;
+      size_t off = (size_t) (y * capture_w + x) * 2;
       raw[off] = (uint8_t) (px & 0xff);
       raw[off + 1] = (uint8_t) (px >> 8);
     }
@@ -333,12 +356,12 @@ static bool maybe_handle_debug_line(const char *line, void *reply_ctx) {
     sizeof(begin),
     "{\"topic\":\"debug/screenshot_begin\",\"payload\":{\"id\":\"%s\",\"width\":%d,\"height\":%d,\"format\":\"rgb565le\"}}",
     id,
-    PET_P4_SCREENSHOT_W,
-    PET_P4_SCREENSHOT_H
+    capture_w,
+    capture_h
   );
   transport_send_line(begin, reply_ctx);
 
-  size_t total = PET_P4_SCREENSHOT_W * PET_P4_SCREENSHOT_H * 2;
+  size_t total = capture_w*capture_h*2;
   int index = 0;
   for (size_t offset = 0; offset < total; offset += PET_P4_SCREENSHOT_RAW_CHUNK) {
     size_t n = total - offset;
@@ -664,6 +687,9 @@ void app_main(void) {
   pet_p4_load_asset_manifest(&g_state);
   ESP_ERROR_CHECK(init_usb());
   ESP_ERROR_CHECK(init_uart());
+  xSemaphoreTake(g_transport_mutex, portMAX_DELAY);
+  g_transport_ready = true;
+  xSemaphoreGive(g_transport_mutex);
   ESP_ERROR_CHECK(pet_p4_input_init());
   esp_err_t lcd_err = pet_p4_lcd_init();
   esp_err_t touch_err = lcd_err == ESP_OK ? pet_p4_touch_init() : ESP_ERR_INVALID_STATE;
@@ -757,14 +783,24 @@ void app_main(void) {
     pet_p4_ota_process(now_ms);
     pet_p4_asset_transfer_process(&g_state, now_ms);
     pet_p4_native_usb_process(now_ms);
-    pet_p4_miniapp_process(now_ms);
+    pet_p4_miniapp_process(now_ms,!strcmp(g_state.screen_page,"app")&&!pet_p4_conversation_active(&g_state));
+    pet_p4_miniapp_host_process(now_ms,!strcmp(g_state.screen_page,"app")&&!pet_p4_conversation_active(&g_state));
     pet_p4_state_process(&g_state, now_ms);
     pet_p4_touch_process(&g_state, transport_send_line, NULL);
     pet_p4_input_process(&g_state, transport_send_line, NULL);
+    pet_p4_miniapp_fruit_process(now_ms,!strcmp(g_state.screen_page,"app")
+      && !pet_p4_conversation_active(&g_state) && !g_state.asset_transfer_active && !pet_p4_ota_transfer_active());
+    if (!strcmp(g_state.screen_page, "touch_test")) {
+      if (now_ms >= g_state.touch_test_until_ms || pet_p4_conversation_active(&g_state)) {
+        snprintf(g_state.screen_page, sizeof(g_state.screen_page), "main");
+        g_state.touch_test.pointer_down = false;
+      } else pet_p4_slice_tick(&g_state.touch_test, now_ms);
+    }
     uint8_t instrument_effect=0, instrument_ambience=0;
     bool instrument_open=!strcmp(g_state.screen_page,"app")
       &&pet_p4_miniapp_instrument_config(&instrument_effect,&instrument_ambience);
-    if(instrument_open && pet_p4_audio_music_active())
+    bool slicing_open=!strcmp(g_state.screen_page,"app")&&pet_p4_miniapp_slicing_active();
+    if((instrument_open||slicing_open) && pet_p4_audio_music_active())
       pet_p4_media_stop_background(transport_send_line,NULL);
     pet_p4_audio_instrument_set(instrument_open&&!g_state.asset_transfer_active
       &&!pet_p4_ota_transfer_active()&&!pet_p4_audio_conversation_active(),
@@ -805,7 +841,8 @@ void app_main(void) {
       render_transfer_frame = true;
       last_transfer_render_ms = now_ms;
     } else if (lcd_err == ESP_OK && !transfer_active
-        && now_ms - last_render_ms >= PET_P4_MAIN_RENDER_INTERVAL_MS) {
+        && now_ms - last_render_ms >= ((!strcmp(g_state.screen_page,"app") && (pet_p4_miniapp_slicing_active() || pet_p4_miniapp_media_surface_animated())) || !strcmp(g_state.screen_page, "touch_test")
+          ? 33ULL : PET_P4_MAIN_RENDER_INTERVAL_MS)) {
       memcpy(g_render_state, &g_state, sizeof(*g_render_state));
       pet_p4_build_view_model(g_render_state, &render_view);
       render_frame = true;

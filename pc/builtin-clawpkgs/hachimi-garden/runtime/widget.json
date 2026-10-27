@@ -1,0 +1,742 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "duration": {
+      "type": "int",
+      "init": 1500
+    },
+    "left": {
+      "type": "int",
+      "init": 1500
+    },
+    "flowers": {
+      "type": "int",
+      "init": 0
+    },
+    "elapsed": {
+      "type": "int",
+      "init": 0
+    },
+    "bloom": {
+      "type": "int",
+      "init": 2
+    }
+  },
+  "states": [
+    "ready",
+    "run",
+    "paused",
+    "done"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "from": "ready",
+      "on": "primary",
+      "to": "run",
+      "set": {
+        "left": {
+          "var": "duration"
+        },
+        "elapsed": 0
+      },
+      "page": "focus"
+    },
+    {
+      "from": "run",
+      "on": "primary",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "primary",
+      "to": "run"
+    },
+    {
+      "from": "done",
+      "on": "primary",
+      "to": "run",
+      "set": {
+        "left": {
+          "var": "duration"
+        },
+        "elapsed": 0
+      },
+      "page": "focus"
+    },
+    {
+      "from": "*",
+      "on": "secondary",
+      "page": "next"
+    },
+    {
+      "from": "ready",
+      "on": "less",
+      "inc": {
+        "duration": -300
+      }
+    },
+    {
+      "from": "ready",
+      "on": "more",
+      "inc": {
+        "duration": 300
+      }
+    },
+    {
+      "from": "done",
+      "on": "less",
+      "to": "ready",
+      "inc": {
+        "duration": -300
+      },
+      "set": {
+        "elapsed": 0
+      }
+    },
+    {
+      "from": "done",
+      "on": "more",
+      "to": "ready",
+      "inc": {
+        "duration": 300
+      },
+      "set": {
+        "elapsed": 0
+      }
+    }
+  ],
+  "tick": [
+    {
+      "every_ms": 1000,
+      "while_state": "run",
+      "inc": {
+        "left": -1,
+        "elapsed": 1
+      },
+      "when": {
+        "var": "left",
+        "lte": 0
+      },
+      "then": {
+        "to": "done",
+        "inc": {
+          "flowers": 1
+        }
+      }
+    }
+  ],
+  "dashboard": {
+    "title": "专注花园",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": {
+      "switch_page": {
+        "focus": "只做眼前这一件事",
+        "garden": "花园 · 完成一次长一株"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "ready": "准备专注",
+        "run": "慢慢生长",
+        "paused": "休息一下",
+        "done": "又长出一株"
+      }
+    },
+    "metricValue": {
+      "switch_state": {
+        "ready": {
+          "fmt_mmss": "duration"
+        },
+        "run": {
+          "fmt_mmss": "left"
+        },
+        "paused": {
+          "fmt_mmss": "left"
+        },
+        "done": "完成"
+      }
+    },
+    "badge": {
+      "var": "flowers"
+    },
+    "note": "左右调节 5–60 分钟；完成才计入花园。",
+    "footer": "SW1 开始/暂停  SW2 花园  左右调时  全局键退出",
+    "metricLabel": {
+      "switch_state": {
+        "ready": "开始专注",
+        "run": "暂停",
+        "paused": "继续",
+        "done": "再种一株"
+      }
+    },
+    "metricUnit": {
+      "switch_page": {
+        "focus": "我的花园",
+        "garden": "返回专注"
+      }
+    },
+    "progress": {
+      "pct_of": "left",
+      "of_max": "duration",
+      "label": "剩余时间"
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "interaction": "p4-app-interaction-v1",
+    "background": 61373,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "decor",
+        "asset": "assets/decor.png",
+        "frame_width": 480,
+        "frame_height": 160,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 128,
+        "frame_height": 144,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 61373,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 290,
+        "h": 436,
+        "color": 61340,
+        "opacity": 245,
+        "opacity_end": 200
+      },
+      {
+        "type": "panel",
+        "x": 290,
+        "y": 0,
+        "w": 350,
+        "h": 436,
+        "color": 61340,
+        "opacity": 200,
+        "opacity_end": 0
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 8677,
+        "icon": "leaf"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 8677,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 356,
+        "y": 20,
+        "w": 258,
+        "h": 24,
+        "color": 8677,
+        "font_size": 13,
+        "text": "专注与花园，都按自己的节奏。",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 88,
+        "w": 390,
+        "h": 25,
+        "color": 8677,
+        "font_size": 16,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 24,
+        "y": 120,
+        "w": 340,
+        "h": 96,
+        "color": 8677,
+        "font_size": 48,
+        "bind": "metricValue",
+        "page": 0,
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 120,
+        "w": 300,
+        "h": 96,
+        "color": 8677,
+        "font_size": 48,
+        "bind": "badge",
+        "page": 1,
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 220,
+        "w": 350,
+        "h": 28,
+        "color": 8677,
+        "font_size": 17,
+        "bind": "headline"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 273,
+        "w": 18,
+        "h": 18,
+        "color": 8677,
+        "icon": "leaf"
+      },
+      {
+        "type": "text",
+        "x": 54,
+        "y": 268,
+        "w": 354,
+        "h": 28,
+        "color": 8677,
+        "font_size": 16,
+        "text": "完成收获；花园展示最近三株。"
+      },
+      {
+        "type": "panel",
+        "x": 28,
+        "y": 337,
+        "w": 135,
+        "h": 5,
+        "color": 46677,
+        "radius": 2
+      },
+      {
+        "type": "meter",
+        "x": 28,
+        "y": 337,
+        "w": 135,
+        "h": 5,
+        "color": 21418,
+        "bind": "progress"
+      },
+      {
+        "type": "text",
+        "x": 176,
+        "y": 327,
+        "w": 350,
+        "h": 26,
+        "color": 8677,
+        "font_size": 14,
+        "text": "不急，一次只做一件事。"
+      },
+      {
+        "type": "panel",
+        "x": 400,
+        "y": 102,
+        "w": 204,
+        "h": 216,
+        "color": 63453,
+        "radius": 22,
+        "opacity": 235
+      },
+      {
+        "type": "image",
+        "x": 412,
+        "y": 114,
+        "w": 178,
+        "h": 178,
+        "color": 8677,
+        "image": "decor",
+        "page": 0,
+        "tile": {
+          "columns": 3,
+          "rows": 1,
+          "row": 0,
+          "var": "elapsed",
+          "max_var": "duration"
+        }
+      },
+      {
+        "type": "image",
+        "x": 404,
+        "y": 106,
+        "w": 94,
+        "h": 94,
+        "color": 8677,
+        "image": "decor",
+        "page": 1,
+        "tile": {
+          "columns": 3,
+          "rows": 1,
+          "row": 0,
+          "var": "bloom"
+        },
+        "show": {
+          "var": "flowers",
+          "min": 1,
+          "max": 1000000000
+        }
+      },
+      {
+        "type": "image",
+        "x": 508,
+        "y": 178,
+        "w": 94,
+        "h": 94,
+        "color": 8677,
+        "image": "decor",
+        "page": 1,
+        "tile": {
+          "columns": 3,
+          "rows": 1,
+          "row": 0,
+          "var": "bloom"
+        },
+        "show": {
+          "var": "flowers",
+          "min": 2,
+          "max": 1000000000
+        }
+      },
+      {
+        "type": "image",
+        "x": 406,
+        "y": 248,
+        "w": 94,
+        "h": 94,
+        "color": 8677,
+        "image": "decor",
+        "page": 1,
+        "tile": {
+          "columns": 3,
+          "rows": 1,
+          "row": 0,
+          "var": "bloom"
+        },
+        "show": {
+          "var": "flowers",
+          "min": 3,
+          "max": 1000000000
+        }
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 366,
+        "w": 142,
+        "h": 48,
+        "color": 13032,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "clock",
+        "action": "primary"
+      },
+      {
+        "type": "button",
+        "x": 178,
+        "y": 366,
+        "w": 148,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8677,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "leaf",
+        "action": "secondary",
+        "opacity": 230,
+        "stroke": 65535,
+        "stroke_width": 1
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 61373,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 8677,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 61373,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 8677,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 8677,
+        "font_size": 15,
+        "text": "开始/暂停"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 61373,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 8677,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 8677,
+        "font_size": 15,
+        "text": "花园"
+      },
+      {
+        "type": "text",
+        "x": 257,
+        "y": 446,
+        "w": 253,
+        "h": 24,
+        "color": 8677,
+        "font_size": 14,
+        "text": "左右调时"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 8677,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 366,
+        "y": 366,
+        "w": 116,
+        "h": 48,
+        "color": 65502,
+        "foreground": 8677,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "−5 分钟",
+        "action": "less",
+        "state_mask": 9
+      },
+      {
+        "type": "button",
+        "x": 492,
+        "y": 366,
+        "w": 122,
+        "h": 48,
+        "color": 65502,
+        "foreground": 8677,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "+5 分钟",
+        "action": "more",
+        "state_mask": 9
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:",
+        "metrics": [
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            9,
+            11,
+            29
+          ]
+        ],
+        "cell": [
+          32,
+          48
+        ]
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "focus"
+    },
+    {
+      "id": "garden"
+    }
+  ],
+  "initial_page": "focus",
+  "limits": {
+    "duration": [
+      300,
+      3600
+    ],
+    "left": [
+      0,
+      3600
+    ],
+    "flowers": [
+      0,
+      1000000000
+    ],
+    "elapsed": [
+      0,
+      3600
+    ],
+    "bloom": [
+      2,
+      2
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "duration",
+      "left",
+      "flowers",
+      "elapsed"
+    ],
+    "states": {
+      "ready": "ready",
+      "run": "paused",
+      "paused": "paused",
+      "done": "done"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1"
+  }
+}

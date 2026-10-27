@@ -1,13 +1,14 @@
 /**
  * [Input] none or a provider config object.
- * [Output] exported Ark-safe 400x300 image defaults plus 5-second Volcano fast-generation resolver consumed by run.js.
+ * [Output] 768/1024px video references, separate 400px vision-analysis input, and 5-second fast video defaults; these are not retried/changed to address image moderation.
  * [Pos] lib node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update run.js, image-processing.js headers.
  */
 
-/** Max longest edge (px) after matting + black composite; 400 keeps 4:3 height at Ark's 300px minimum. */
-export const PIPELINE_MAX_IMAGE_DIMENSION = 400;
-export const STANDARD_PIPELINE_MAX_IMAGE_DIMENSION = 512;
+/** Preserve video-reference detail; vision analysis uses a separate smaller copy. */
+export const PIPELINE_MAX_IMAGE_DIMENSION = 768;
+export const STANDARD_PIPELINE_MAX_IMAGE_DIMENSION = 1024;
+export const THINKING_IMAGE_DIMENSION = 400;
 export const PIPELINE_OUTPUT_ASPECT_RATIO = Object.freeze({
   width: 4,
   height: 3,

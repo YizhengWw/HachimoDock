@@ -1,0 +1,3 @@
+// Shared human styling contract for image editing and its acceptance check.
+export const HUMAN_CHIBI_STYLE_ZH = '人物主体统一转成可爱、精致的 Q 版卡通：白皙、明亮自然的白皮肤，柔和腮红；圆润大头、明亮大眼、小鼻子小嘴、短小圆润的身体和四肢，约 2.5 到 3 头身。保留可辨认的发型、发色、脸部标志、服装配色和已有随身物件。肤色提亮、眼睛放大和头身比例重塑是预期风格变化，不要求保留原照片的肤色或写实人体比例。不要写实成年人体型、长脸、小眼睛、硬朗写实肌肉或恐怖玩偶质感。';
+export const KEEP_CHIBI_STYLE_EN = 'Preserve the processed reference image\'s chosen art style, skin tone, head/body proportions and materials. If it is a cute chibi character, retain its oversized head, large eyes and compact body; if it uses another custom style, retain that style instead. Keep the same hairstyle, outfit and existing accessories throughout, without switching to realistic anatomy or another art style.';

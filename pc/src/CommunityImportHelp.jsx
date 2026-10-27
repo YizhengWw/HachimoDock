@@ -12,9 +12,7 @@ const HELP_IMAGES = {
   codexPlay01: "/community-help/codex-play-01.png",
   codexPlay02: "/community-help/codex-play-02.png",
   codexPlay03: "/community-help/codex-play-03.png",
-  codexPlay04: "/community-help/codex-play-04.png",
   importEntry: "/community-help/import-entry.png",
-  petsFolder: "/community-help/pets-folder-in-settings.png",
 };
 
 function Figure({ src, alt, caption }) {
@@ -91,11 +89,7 @@ export default function CommunityImportHelp({ onBack }) {
           alt="通过 hatch-pet 生成宠物"
           caption="通过 hatch-pet 生成宠物"
         />
-        <Figure
-          src={HELP_IMAGES.codexPlay04}
-          alt="选择新生成的宠物"
-          caption="在外观列表中选择新生成的宠物"
-        />
+        <p>在外观列表中选择新生成的宠物。</p>
       </section>
 
       <section className="help-section">
@@ -119,11 +113,7 @@ export default function CommunityImportHelp({ onBack }) {
         <p>
           如果导入不到，先确认宠物资源是否真的在这个目录下，再回到 Pet Manager 重新扫描。
         </p>
-        <Figure
-          src={HELP_IMAGES.petsFolder}
-          alt="查看 pets 文件夹位置"
-          caption="先确认本机 pets 文件夹位置，再进行导入"
-        />
+        <p>先确认本机 pets 文件夹位置，再进行导入。</p>
       </section>
 
       <section className="help-section">

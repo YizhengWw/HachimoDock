@@ -1,8 +1,9 @@
 {
   "dashboard": {
     "title": "近期待办",
-    "headline": "等待数据",
-    "footer": "摇杆左右翻页 · 主操作回首页",
+    "headline": "等待电脑连接",
+    "note": "请保持 Pet Manager 运行",
+    "metricValue": "真实待办 · 本机保存",
     "visualStyle": "clean",
     "visualPalette": "mint",
     "visualLayout": "tool",

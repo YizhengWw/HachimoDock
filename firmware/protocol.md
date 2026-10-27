@@ -1,6 +1,14 @@
 # ESP-P4 USB Protocol
 
-组件中心：应用 bundle 与出厂 SPIFFS 同步内置 13 项（新增敲木鱼），默认前五项是 `stock-watchlist`、`wooden-fish`、`music-player`、`upcoming-todos`、`computer-status`。保持现有 ID、全局按键与 16 项容量上限，升级不清空用户数据。目录页使用 2×2 卡片和分页，左右依次选择，确认/返回跟随全局配置；图标为原生几何绘制，不依赖字体符号。
+0.7.103-p4：内置清单、启动器图片及完整出厂资源统一为 29 项。末尾追加 `decision-capsule`、`answer-book`、`hope-train`；通用 `widgetLocalTools=p4-local-tools-v1` 契约保持不变。OTA 仍保留轻量资源引导与现有用户存档，完整出厂镜像才携带全部图片。
+
+0.7.100-p4：新增 `widgetMediaQueueMax=128` 与 `widgetMediaLifecycle=p4-media-lifecycle-v1`。媒体队列超过 20 项时，key 至多 80 UTF-8 字节、标题至多 90 字节；上限 128，刷新按 key 保留选中项，不修改音频会话。`media/event` 新增 `operation=visibility`，包含 `source/boot/epoch/visible`；进入或离开递增 epoch，可见时每 2 秒发送心跳。宿主只有资源包声明自动播放、当前可见且新的进入事件时才准备播放，停止/离开取消未开始的播放；目录刷新不重新触发播放。能力与配置为通用媒体机制，不绑定特定组件 ID。
+
+0.7.83-p4 媒体重入：从组件中心重新进入当前已验证的媒体组件只恢复界面，不重写目录或失效图片缓存，避免后台音频因同步 Flash 操作欠载。切到其他组件、安装更新及游戏重开仍走原有加载/校验路径；媒体会话与全局退出语义不变。
+
+0.7.82-p4 发送约束：运行时日志与 JSON 协议必须在同一传输锁内进入同一 UART/USB 驱动队列；不得混用直接 console FIFO 写入与驱动排队。媒体/实时音频回执包含完整换行后立即返回，不等待队列排空；日志限长且保留换行。不以麦克风采集状态决定协议完整性保护，电台播放及启停过渡同样受保护。
+
+组件中心（0.7.98）：出厂 SPIFFS 完整预置 25 项，顺序由 `factory-config.json` 决定，前四项为 `stock-watchlist`、`wooden-fish`、`upcoming-todos`、`computer-status`；停用、下架组件不重新启用。容量上限 32 项，目录 JSON 上限 16383 字节，单 widget 上限 8191 字节。OTA 内只保留轻量启动目录，不覆盖设备已有完整包；新机完整镜像包含全部贴图，已有设备通过 PC 同步完整资源。目录页使用 2×2 卡片、缓存材质背景与小缩略图，轻点打开、左右滑动翻页；摇杆选择与确认/全局返回保留。PC 宿主服务、公开知识库不搬入设备固件，仍需要 PC 在线。
 
 ## PC 音频播放器（0.7.66-p4）
 
@@ -58,6 +66,32 @@ Processed `audio/chunk` carries `aec:true` and boolean `vadSpeech` alongside
 the unchanged 640-byte PCM/checksum fields. Raw capture is never marked AEC.
 Runtime AEC failure emits `aec_fallback` and gates playback capture; the PC
 stops a duplex session rather than recognizing raw loudspeaker echo.
+`features.audioAecRecovery:true` additionally advertises capture-owner recovery:
+the client may request duplex even when a previous fault made live availability
+false. Each new `audio/conversation` entry attempts DSP preparation once, not on
+every frame. `audio/status.audioAecPreparing:true` is a transitional state, not
+an AEC failure; the client waits up to 3 seconds before playing its greeting.
+`audio/status.aecReason` and `audio/diagnostic.aecReason` use fixed codes:
+`none`, `init_failed`, `stream_reset_failed`, `reference_overflow`,
+`processed_queue_overflow`, `dsp_too_slow`. A runtime fault stops capture without
+uploading raw echo; a new conversation can rebuild the DSP without rebooting.
+
+Firmware 0.7.74 adds numeric DSP diagnostics to status/diagnostic responses:
+`dspFrames`, `dspLastUs`, `dspMaxUs`, `dspAecUs`, `dspNsUs`, `dspVadUs` and
+`aecReferenceSamples`. Durations are microseconds; frame counts and maxima
+reset on a new DSP generation. Stage durations describe the last processing
+call, not a session average. These fields contain no audio or transcript and
+are not repeated on every PCM chunk. v3 uses FD_HIGH_PERF + VERYAGGR, while
+v1 retains VOIP_LOW_COST. USB frames remain 20 ms in both cases.
+
+Audio messages carry `boardDeviceId`. Conversation status, begin, diagnostics,
+errors and chunks also carry `conversationSessionId`, echoing the control
+request's `sessionId` (maximum 63 bytes). This is separate from the existing
+capture `sessionId`. Chunks bind to the conversation snapshot before the codec
+read, so a PTT/conversation switch cannot relabel old PCM. Clients discard
+another board's audio and stale conversation timelines. Older firmware without
+these fields remains supported; raw PCM is never accepted in duplex mode,
+and startup readiness has a bounded timeout.
 Late `audio/play_chunk` and `audio/play_end` for an inactive playback session
 are ignored after cancellation; they cannot append to a new reply. See
 `pc/docs/realtime-duplex.md` for acoustic acceptance criteria.
@@ -506,7 +540,13 @@ PC to board:
   combined `set`/`inc` entries; a tick's `then` group has its own four-effect
   limit. State/page changes do not consume an effect slot. This lets timers stop
   or advance phases without arbitrary code.
-- `widget/delete`: removes the exact installed catalog component idempotently and replies
+- `widget/delete`: optional `preserveSave:true` requires advertised
+  `widgetDeletePreserveSave=true` (0.7.99+). It retains private device saves under
+  their original component ID for same-ID reinstall; packages must be backed up
+  separately. It does not export saves or touch PC private records. Omitted/false
+  keeps the existing erase-save semantics. Unsupported clients must not assume
+  this policy on an older board.
+  Removes the exact installed catalog component idempotently and replies
   on `widget-install-ack` with the same `transferId` and `phase: "delete"` only
   after its package and catalog entry are cleared and the screen returns to
   `main`. Deleting the active entry selects the nearest remaining component
@@ -516,10 +556,21 @@ PC to board:
 - `widget/list`: requires a bounded `requestId` and replies on
   `widget/inventory` with that same identity. P4 advertises
   `capabilities.widgetInventory=true`, `supportsMultiple=true`, and
-  `maxInstalled=16`; the response enumerates the persisted catalog, marks the
+  `maxInstalled=32` on 0.7.85+ (16 on earlier builds); the response enumerates the persisted catalog, marks the
   active component, and uses each bounded runtime title as its optional name.
   Kind and version remain `null` because `component.json` is not persisted.
 - `miniapp/event`: dispatches a declarative action directly to the active app.
+  Eligibility, host freshness and confirmation deadlines use the device's
+  monotonic clock; an optional legacy desktop `tsMs` is not used for timing.
+- `app/event`: bounded application-host request containing `boardDeviceId`,
+  `componentId`, ephemeral `instance`, increasing `sequence`, `action`, `page`,
+  and `visible`. The desktop requires the connected board identity, deduplicates
+  actions, and invalidates queued actions on exit/switch/reentry. Status polls
+  are not permission to record, play, or dispatch desktop work.
+  `app/snapshot` replies echo component/instance/sequence and bounded dashboard
+  values; an earlier status cannot overwrite a newer action. No automatic action
+  retransmission occurs on timeout. Component-host heartbeats bypass the work
+  queue so a slow action cannot keep playback alive after exit.
 - `miniapp/query`: returns the active bounded view model on `miniapp/state` for
   PC status display and hardware diagnostics. A configured hardware action can
   explicitly proxy `screen.region.tap` or `screen.region.long_press` to the active
@@ -643,17 +694,19 @@ normal rendering. The board keeps the committed runtime alive for 5 seconds
 before restart, leaving enough time for the desktop's 3-second commit timeout
 and one idempotent retry to receive the cached commit result.
 
-The A/B application image contains the canonical runtime/button JSON and bounded
-sprite files for all nine built-in components. On first boot of each firmware build,
-`pet_p4_miniapp_sync_builtins` compares compacted package checksums with the
-existing A/B component catalog, replaces changed same-id built-ins, adds missing
-ones if slots are available, removes retired `falling-catch`, and restores the
-previous active component (or defaults to `stock-watchlist`). The stock component
-is initially first after migration, not pinned: later installs prepend normally.
-User-created packages remain ahead of the other firmware defaults;
-`two-key-pong` and `bloomfrog_companion` lead the remaining builtins. A build-id marker is
-written only after the migration completes, so an interrupted migration retries
-on the next boot. Component ids outside the firmware-owned list are preserved.
+The A/B application image contains a bounded, compressed bootstrap catalog.
+Complete artwork belongs to factory/PC resource packages, not duplicated OTA slots.
+`pet_p4_miniapp_sync_builtins` adds missing entries, never downgrades an existing
+complete artwork package to a bootstrap, removes retired entries, and restores
+the active id (otherwise the first visible entry). The unreleased canonical list
+in `factory-config.json` has 26 entries, with `daily-news` fifth and `city-radio`
+first. User-created packages remain ahead of firmware defaults; later installs
+prepend normally. `two-key-pong` and `bloomfrog_companion` remain available.
+Migration reorders catalog records without moving slots or saved data. A build-id
+and bundle-checksum marker is written only after successful completion; an
+interrupted migration retries on the next boot. Component ids outside the firmware-owned list are preserved.
+Use `tools/read_component_inventory.py` only with an idle serial port to compare
+the actual installed inventory; a bundled count does not prove installation.
 
 Firmware OTA, asset OTA, and delayed reboot are mutually exclusive. Once an
 OTA commit or diagnostic reboot is pending, new asset/native transfers are
@@ -819,17 +872,74 @@ Board to PC:
 
 ## Touchscreen Gestures
 
-GT911 is sampled every 15ms without toggling the reset GPIO shared with the
-LCD. Physical portrait coordinates are converted into the 640x480 logical UI.
+GT911 is sampled every 15ms without driving reset or interrupt GPIOs. The local
+board profile declares separate LCD/touch reset pins; that is not proof that
+the installed panel routes both pins. Startup probes both legal addresses up
+to four times, with bounded delays, without resetting the shared audio I2C bus.
+Physical portrait coordinates are converted into the 640x480 logical UI.
+For the installed CST826 panel, physical testing showed the sensor axes are
+180 degrees from the LCD native axes: its board-specific mapping is
+`uiX=639-rawY, uiY=rawX`. GT911 / FT6336U keep the existing mapping. This is
+panel orientation, not a universal CST826 property. The diagnostic page shows
+a persistent marker while pressed; health reports raw/mapped coordinates,
+queued-pointer age and stale-event counts to separate mapping from latency.
+If both GT911 addresses are absent, the product probes `0x15` and `0x38`.
+CST826 requires chip type `0x11` at register `0xAA`; FT6336U requires chip ID
+`0x64` at register `0xA3`. These enable the bounded six-byte-point report reader;
+an unknown responding device is rejected. This path reads touch reports only,
+without changing controller tuning registers. The register format and ID follow
+[Espressif's FT6336U driver](https://github.com/espressif/esp-iot-solution/blob/master/components/display/lcd_touch/esp_lcd_touch_ft6336u/esp_lcd_touch_ft6336u.c).
+The CST826 identity and report layout are documented in
+[Adafruit's CST8XX driver](https://github.com/adafruit/Adafruit_CST8XX_Library).
+Register `0xA3` returning zero alone does not rule out CST826.
+`touchInput.controller` reports the selected controller, not a hardcoded GT911.
 Tap and long press route to `screen.region.tap` and
-`screen.region.long_press`; any four-direction swipe changes between main and
-the installed app page, or remains on main when no app is installed. Main-page tap feedback selects a bounded `touch.*` family but cannot
+`screen.region.long_press`; four-direction swipes move from main to the component
+center, from the component center to main, or from an app to the component center.
+Realtime conversation owns its history scrolling. Main-page tap feedback selects a bounded `touch.*` family but cannot
 interrupt `waiting_user` or `error`.
 
 Each recognized gesture is emitted on `input/event` with control
 `screen.touch`, logical `x`/`y`, `dx`/`dy`, duration, local handling status,
 and the cumulative dropped-event count. Diagnostics separately reports
-`touchReady` and `touchDroppedEvents`.
+`touchReady` and `touchDroppedEvents`. `runtime.touchHealth` includes initialization
+stage/error, selected address, both probe results, sample/contact counts and poll
+error counters. Three consecutive read failures report touch unavailable until
+a successful poll. Read errors, ambiguous/multiple contacts and queue overflow
+cancel a stroke rather than synthesizing a swipe or connecting stale points.
+
+### Native touch diagnostic (not a PetUI package capability)
+
+`diagnostics/touch-test` with `{"action":"start"}` enters a temporary single-fruit
+slicing test only when touch is ready and no conversation/transfer is active.
+`{"action":"stop"}` returns home. Replies use `diagnostics/action`; the test
+expires after 120 seconds. SW1 restarts, with configured global Back/realtime
+bindings taking priority. A captured stroke never becomes global swipe navigation.
+Points stay local (no per-sample USB traffic); score appears in touch diagnostics.
+The native prototype uses swept hit testing, bounded trails and three-miss
+settlement. This diagnostic is independent of installed components.
+
+### PetUI touch slicing
+
+`capabilities.widgetScenes` now includes `p4-touch-slice-v1`, with
+`widgetPointer: "p4-pointer-v1"`. Installation requires `touchInput.ready=true`;
+an old firmware or disconnected touch controller must not be treated as ready.
+`widgetSliceRevision: 2` adds three selectable modes, radius-based collision,
+golden fruit and bounded double-score energy. A package declaring
+`scene.revision: 2` must not install onto revision-1 devices.
+Top-level `p4-bounded-runtime-v4` packages can select this bounded scene and
+provide four PNG fruit sprites, a 30–120 second duration, 1–5 lives and a
+0–100 effect volume. Package scripts and executable assets remain forbidden.
+The strict schema and original component generation workflow are documented in
+`../pc/skills/petui/references/touch-slice.md`.
+
+The native core owns fixed-size fruit, particle and trail pools, continuous
+segment collision, combo scoring, bomb priority and settlement. Touch remains
+local rather than streaming through USB. Global exit, conversation and transfer
+screens suspend play; resuming requires the pause action. Sounds share the
+existing audio task and stop on pause/exit. The PC preview and skill smoke test
+run the same C core compiled into a bundled, import-free, 128 KiB WASM module;
+no code is loaded from component packages.
 
 For hold bindings, `hold_start` is emitted only after the 700ms threshold;
 `hold_end` is emitted on release. Page actions set `handledLocally: true`.
@@ -1110,3 +1220,75 @@ with only animated working markers redrawn per frame.
 # 原生敲击组件能力（0.7.70-p4）
 
 设备通过 `widgetInstrument: p4-instrument-v1` 声明本地敲击音源支持。受控组件使用 `instrument.source = percussion.wooden-fish`，`instrument.strike` 只由绑定按键触发；`effect_volume` 和 `ambience_volume` 为 0–100 的整数。缺少能力声明时 PC 阻止安装并提示升级，不模拟成功。组件退出淡出，录音、实时对话和媒体流优先；音频不需要新增 USB 流协议。
+# PC 扩展媒体布局（p4-media-surface-v1）
+
+设备声明 `widgetMediaNotice:true` 时，支持 `media/notice`：`{source,state,message,requestId}`。
+state 只接受 idle/buffering/error，message 最多 240 UTF-8 字节；source 必须匹配当前媒体视图。
+仅在媒体未播放时更新提示，不改变音频所有权、播放列表或音量，也不续期媒体看门狗。
+回复沿用 media/status；不匹配 source 或非法字段拒绝，正在播放时忽略通知。
+
+`media.source=pc.<component-id>`、`mode=live` 随 media/library、media/begin 和 media/event 标识所有者。设备通用 surface 由包声明 panel/text/meter/ticks/list/transport，最多 20 个节点、640×480、RGB565、无脚本。`media.sync` 通过列表操作请求 PC 同步；歌词与 seek 不适用于 live。全局停止事件带 `global:true`，PC 取消所有扩展的播放/准备，不取消实时语音。PC 配置不下发；契约详见 `pc/skills/petui/references/pc-extensions.md`。
+# 媒体绘制性能说明（0.7.81）
+
+`p4-surface-images-v1` 的压缩格式、配额和事务协议不变。渲染器以 PSRAM 缓存首个静态全屏背景，在图片修订改变时失效；颜色预计算与 Q16 增量旋转避免逐像素浮点除法。带旋转节点的声明式媒体界面请求 33 ms 刷新，但实际帧率由设备日志验收，不作为网络音频无缓冲的承诺。
+# PetUI 既有游戏精细画面（0.7.88）
+
+能力 `widgetGameSurface=p4-game-surface-v1` 允许维护已有 snake/blocks/flappy
+包时设置有界 `surface.game_view`。布局、图片、字体仍走 App Surface，
+玩法仍走原有 C 核心。无此能力的设备拒绝安装，不静默丢掉画面。
+详细契约见 `pc/docs/classic-game-surface.md`。
+
+高清内置资源随 PC/出厂资源事务安装，不占两份 OTA 应用空间。
+固件 zlib 启动包解压上限 128 KiB，原生图片启动布局仅补缺失项，
+不能覆盖已安装的完整资源包。压缩数据摘要参与升级标记。
+
+# 0.7.91 可选组件能力
+
+- `widgetLifecycle=p4-lifecycle-v1`：原生/场景游戏声明暂停动作与独立最高分变量。
+  隐藏时冻结逻辑时钟，恢复不补帧；最高分通过组件自己的存档保存。
+- `widgetMediaTouch=p4-media-touch-v1`：媒体 surface 显式声明 input 后，
+  可用现有七个受控 media 动作作为节点触屏目标，不接受任意指令。
+- `widgetSurfaceAtlas=p4-wide-atlas-v1`：普通图集最大 512×240，宽图使用 P4I2
+  的 16 位宽高；仍最多四张图、98,304 个调色板像素和 128 KiB 编译资源。
+  字形图集保留 240×240 上限，P4I1/P4J1 与旧组件继续兼容。
+
+安装端必须单独检查这些 capability。声明支持与实机已验收是两回事；
+离线测试的能力 JSON 不可替代实际设备握手。
+## 0.7.92 开发中的受控输入与字格能力
+
+握手新增 `widgetInput=p4-input-v1` 与 `widgetGlyphCells=p4-glyph-cells-v1`，
+安装前由 PC 校验实际握手；离线测试 fixture 不能替代握手。
+输入策略详见仓库 `pc/skills/petui/references/input-policy.md`。
+宿主应用快照可带 `ui:{mode,actions,context}`，最多 16 个已声明动作、64 个十六进制
+上下文字节。`app/event` 的 confirmed/context 只说明设备确认了当时内容；
+PC 仍须核对记录版本、设备/实例/轮次和操作状态，不自动批准其他动作。
+禁用、等待和超时不产生重试；10 秒没有有效快照禁用宿主动作。
+字体可声明 cell，度量仍为 32/em；旧字格解释与 palette/JPEG 总预算不变。
+本版本的场景拖动仍是受控网格坐标，不声明连续物理或完整场景存档能力。
+
+## 0.7.101 附加性能诊断（向后兼容）
+
+`audio/status`、`audio/diagnostic` 等会话元数据增加数值字段 `internalFreeBytes`、`internalLargestBytes`、`captureTxLastUs`、`captureTxMaxUs`、`captureStackMinBytes`。发送耗时是同步串口发送耗时，不是 DSP 耗时；最大值在本轮采集开始时清零。不得将这些指标误认为端到端语音延迟或回声消除质量。
+
+diagnostics 的 `runtime` 增加 `renderLastUs`、`renderP95Us`、`renderMaxUs`、`renderDecodeUs`、`renderWindowSamples`、`renderSubmittedFrames`、`renderUnchangedFrames`。P95/max 取最近完成的 100 帧渲染窗口；窗口尚未完成时 samples 为 0，不能解释为零耗时。相同帧省略 LCD 提交不省略游戏逻辑、输入或动画步进。
+
+## 0.7.103-p4-r1 资源完整性修复
+
+本修复基于 PC 内置 0.7.103，不包含 0.7.108 实验分支。握手增加
+`widgetResourceIntegrity: p4-resource-integrity-v1`。`widget/inventory.items`
+增加 `resourceState`（ready/bootstrap/damaged/unchecked）和 `imageCount`。
+只有 ready 报 `manifestState: valid`；已知无图启动包不再冒充完整资源。
+目录文件存在但均无法解析时返回 `recoveryBlocked: true, complete: false`，
+禁止自动补装、事务提交和清空旧资源；必须保留现有文件用于显式恢复。
+
+启动保留最新结构有效目录中的全部组件身份、顺序及正常资源；只为损坏项寻找
+上一份已提交目录中同 ID、同槽位、校验有效的完整包。不能把未提交的残留图片
+或其他组件的备用代次用于恢复。普通切换仅保存当前组件 ID，不覆盖备用目录。
+
+`widget/begin` 可带 `repairResources: true`，仅修复已安装且被识别为 bootstrap
+的同 ID 组件；damaged 完整包只接受与已提交目录的界面及图片校验值完全一致的恢复源，
+不自动降级或升级。须提供完整图片包，固件读取并校验原有按键配置而不覆盖，保留存档。
+begin/commit 遇到录音、对话或播放则拒绝；客户端每次连接仅尝试一次，不循环重试。
+修复其他组件不切换当前页面。已存在完整图片资源时拒绝已知无图启动包覆盖。
+无有效备用包时设备明确提示需要恢复，完整美术仍来自 PC/出厂资源区，不占应用 OTA 两份空间。
+

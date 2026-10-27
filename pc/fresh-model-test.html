@@ -1,0 +1,27 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Fresh bundled model regression</title></head><body><div id="proof">Local fixture only; no generation</div><button id="fixture">Select synthetic image</button><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import {mockIPC} from '@tauri-apps/api/mocks';
+import {initializeProviderConfigs} from '/src/lib/avatar-pipeline/provider-config.js';
+import Wizard from '/src/CustomAvatarWizard.jsx';
+import '/src/styles.css';
+let count=0;
+const fail=new URLSearchParams(location.search).has('fail');
+mockIPC(async(cmd,args)=>{
+ if(cmd==='load_generation_provider_configs')return {__bundledArkAvailable:true};
+ if(cmd==='reference_image_mount')return false;
+ if(cmd==='http_request_text'){
+  if(args.method!=='GET'||!args.url.endsWith('/models'))throw Error('Paid request blocked');
+  count++; document.getElementById('proof').textContent=`Local mock catalog GET: ${count}; paid calls: 0`;
+  await new Promise(resolve=>setTimeout(resolve,500));
+  return count===1&&fail?{status:503,body:'{}'}:{status:200,body:JSON.stringify({data:[{id:'doubao-seedance-2-0-fast-260128'}]})};
+ }
+ throw Error('Unexpected native command blocked: '+cmd);
+},{shouldMockEvents:true});
+await initializeProviderConfigs({getItem:()=>null});
+createRoot(document.getElementById('root')).render(React.createElement(Wizard,{onExit:()=>{},onOpenApiSettings:()=>{}}));
+document.getElementById('fixture').onclick=()=>{
+ const canvas=document.createElement('canvas');canvas.width=128;canvas.height=128;canvas.getContext('2d').fillRect(0,0,128,128);
+ canvas.toBlob(blob=>{const dt=new DataTransfer();dt.items.add(new File([blob],'fixture.png',{type:'image/png'}));const input=document.querySelector('input[type=file]');input.files=dt.files;input.dispatchEvent(new Event('change',{bubbles:true}));});
+};
+</script></body></html>

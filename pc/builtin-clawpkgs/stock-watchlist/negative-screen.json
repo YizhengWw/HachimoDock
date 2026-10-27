@@ -1,1 +1,12 @@
-{"dashboard":{"title":"自选股行情","headline":"等待数据","note":"在 PC 组件中心管理自选股","footer":"摇杆左右翻页 · 主操作回首页","visualStyle":"clean","visualPalette":"ocean","visualLayout":"tool","visualSprite":"gauge"}}
+{
+  "dashboard": {
+    "title": "自选股行情",
+    "headline": "等待数据",
+    "note": "PC 管理自选股；行情仅供参考，过期数据会标记。",
+    "footer": "摇杆左右翻页 · 主操作回首页",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+  }
+}

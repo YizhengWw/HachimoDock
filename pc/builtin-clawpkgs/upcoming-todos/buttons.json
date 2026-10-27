@@ -1,18 +1,42 @@
 [
   {
-    "action": "first_page",
+    "action": "host.open",
     "control": "SW1",
     "event": "button.sw1.short_press",
-    "label": "回到首页"
+    "label": "查看或返回"
   },
   {
-    "action": "previous_page",
+    "action": "host.toggle",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "完成或撤销"
+  },
+  {
+    "action": "host.filter",
+    "control": "前方摇杆",
+    "event": "button.encoder.short_press",
+    "label": "切换筛选"
+  },
+  {
+    "action": "host.up",
+    "control": "前方摇杆",
+    "event": "joystick.up",
+    "label": "上一项"
+  },
+  {
+    "action": "host.down",
+    "control": "前方摇杆",
+    "event": "joystick.down",
+    "label": "下一项"
+  },
+  {
+    "action": "host.previous",
     "control": "前方摇杆",
     "event": "knob.rotate_ccw",
     "label": "上一页"
   },
   {
-    "action": "next_page",
+    "action": "host.next",
     "control": "前方摇杆",
     "event": "knob.rotate_cw",
     "label": "下一页"

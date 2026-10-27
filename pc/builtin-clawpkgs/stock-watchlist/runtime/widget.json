@@ -1,1 +1,162 @@
-{"schema_version":1,"engine":"p4-bounded-runtime-v4","vars":{"list_page":{"type":"int","init":0}},"states":["viewing"],"initial_state":"viewing","transitions":[{"on":"list.previous","from":"*","inc":{"list_page":-1}},{"on":"list.next","from":"*","inc":{"list_page":1}},{"on":"list.home","from":"*","set":{"list_page":0}}],"tick":[],"data":{"source":"stocks.watchlist","page_var":"list_page"},"dashboard":{"title":"自选股行情","headline":"等待数据","note":"在 PC 组件中心管理自选股","footer":"摇杆左右翻页 · 主操作回首页","visualStyle":"clean","visualPalette":"ocean","visualLayout":"tool","visualSprite":"gauge"}}
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "list_page": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "viewing"
+  ],
+  "initial_state": "viewing",
+  "transitions": [
+    {
+      "on": "list.previous",
+      "from": "*",
+      "inc": {
+        "list_page": -1
+      }
+    },
+    {
+      "on": "list.next",
+      "from": "*",
+      "inc": {
+        "list_page": 1
+      }
+    },
+    {
+      "on": "list.home",
+      "from": "*",
+      "set": {
+        "list_page": 0
+      }
+    }
+  ],
+  "tick": [],
+  "data": {
+    "source": "stocks.watchlist",
+    "page_var": "list_page"
+  },
+  "dashboard": {
+    "title": "自选股行情",
+    "headline": "等待数据",
+    "note": "PC 管理自选股；行情仅供参考，过期数据会标记。",
+    "footer": "摇杆左右翻页 · 主操作回首页",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 4325,
+    "data_view": {
+      "engine": "p4-data-surface-v1",
+      "layout": "metrics",
+      "x": 28,
+      "y": 66,
+      "w": 584,
+      "h": 324,
+      "colors": [
+        61343,
+        40313,
+        40478,
+        17484,
+        6537
+      ]
+    },
+    "elements": [
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 23,
+        "w": 21,
+        "h": 21,
+        "color": 40478,
+        "icon": "desk"
+      },
+      {
+        "type": "text",
+        "x": 60,
+        "y": 18,
+        "w": 320,
+        "h": 30,
+        "color": 61343,
+        "font_size": 22,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 396,
+        "w": 176,
+        "h": 48,
+        "color": 8683,
+        "foreground": 61343,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "上一页",
+        "action": "list.previous"
+      },
+      {
+        "type": "button",
+        "x": 218,
+        "y": 396,
+        "w": 184,
+        "h": 48,
+        "color": 40478,
+        "foreground": 4391,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "回首页",
+        "action": "list.home"
+      },
+      {
+        "type": "button",
+        "x": 416,
+        "y": 396,
+        "w": 196,
+        "h": 48,
+        "color": 8683,
+        "foreground": 61343,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "下一页",
+        "action": "list.next"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 450,
+        "w": 584,
+        "h": 24,
+        "color": 40313,
+        "font_size": 14,
+        "text": "行情仅供参考 · PC 管理自选股 · 全局键退出"
+      }
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "list_page"
+    ],
+    "states": {
+      "viewing": "viewing"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "list.next",
+      "right": "list.previous"
+    }
+  }
+}

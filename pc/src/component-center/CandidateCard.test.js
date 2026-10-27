@@ -106,9 +106,9 @@ test("CandidateCard keeps board presence in the bottom action without a preview 
 });
 
 // 5. Uses DeviceScreenPreview shared helper (which renders component-device-screen internally)
-test("CandidateCard imports and uses DeviceScreenPreview for the mini preview", () => {
-  assert.match(source, /import DeviceScreenPreview from ['"]\.\/DeviceScreenPreview['"]/);
-  assert.match(source, /DeviceScreenPreview/);
+test("CandidateCard uses the full-canvas shared component cover", () => {
+  assert.match(source, /import ComponentCover from ['"]\.\/ComponentCover.jsx['"]/);
+  assert.match(source, /<ComponentCover component=\{component\}/);
   assert.match(source, /candidate-card__screen/);
 });
 
@@ -117,7 +117,7 @@ test("CandidateCard explains how to play games from their actual default binding
   assert.match(source, /resolvedKind === "game"/);
   assert.match(source, /buildComponentPlayGuide\(component\.defaultBindings\)/);
   assert.match(source, /candidate-card__play-guide/);
-  assert.match(source, /怎么玩：/);
+  assert.match(source, /title=\{playGuide\}>点击查看玩法与按键/);
   const guideRule = extractCssRule(".candidate-card__play-guide");
   assert.match(guideRule, /border-top:/);
   assert.match(guideRule, /overflow-wrap:\s*anywhere/);
@@ -137,13 +137,14 @@ test("CandidateCard CSS keeps builtin, local, and create cards on one adaptive p
   assert.doesNotMatch(createRule, /height:\s*80px/);
 });
 
-test("CandidateCard CSS leaves enough room for complete preview and copy", () => {
+test("CandidateCard keeps complete preview and a compact readable summary", () => {
   const previewRule = extractCssRule(".candidate-card__preview");
   const goalRule = extractCssRule(".candidate-card__goal");
   assert.match(previewRule, /box-sizing:\s*border-box/);
   assert.doesNotMatch(previewRule, /min-height:\s*248px/);
-  assert.doesNotMatch(goalRule, /-webkit-line-clamp/);
-  assert.doesNotMatch(goalRule, /overflow:\s*hidden/);
+  assert.match(goalRule, /-webkit-line-clamp:\s*2/);
+  assert.match(goalRule, /font-size:\s*13px/);
+  assert.match(source, /title=\{component.goal\}/);
 });
 
 test("CandidateCard preview frame is the sizing source and clips oversized screen content", () => {

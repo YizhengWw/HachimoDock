@@ -11,14 +11,27 @@
  */
 
 #include "pet_p4_miniapp.h"
+#include "pet_p4_local_tools.h"
+#include "esp_random.h"
 #include "pet_p4_media.h"
+#include "pet_p4_image.h"
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define EXT_RAM_BSS_ATTR
+#endif
+#include "pet_p4_touch.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_app_store.h"
+#include "pet_p4_app_host.h"
 
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -29,14 +42,14 @@
 #define MINIAPP_MAX_VARS 8
 #define MINIAPP_MAX_STATES 6
 #define MINIAPP_MAX_PAGES 4
-#define MINIAPP_MAX_TRANSITIONS 12
+#define MINIAPP_MAX_TRANSITIONS 24
 #define MINIAPP_MAX_TICKS 8
 #define MINIAPP_MAX_EFFECTS 4
 #define MINIAPP_MAX_BUTTONS 8
 #define MINIAPP_MAX_CHOICES 6
 #define MINIAPP_VAR_NAME_MAX 32
 #define MINIAPP_VALUE_MAX 160
-#define MINIAPP_WIDGET_JSON_MAX 4096
+#define MINIAPP_WIDGET_JSON_MAX 8192
 #define MINIAPP_BUTTONS_JSON_MAX 2048
 #define MINIAPP_SPRITE_FILE_HEADER_SIZE 8
 #define MINIAPP_SPRITE_FILE_MAX (MINIAPP_SPRITE_FILE_HEADER_SIZE + PET_P4_MINIAPP_SPRITE_PIXEL_BYTES_MAX)
@@ -54,19 +67,25 @@
 #define MINIAPP_BUTTONS_TMP_PATH "/spiffs/p4-miniapp-buttons.tmp"
 #define MINIAPP_ID_PATH "/spiffs/p4-miniapp-id.txt"
 #define MINIAPP_ID_TMP_PATH "/spiffs/p4-miniapp-id.tmp"
+#define MINIAPP_LAST_ID_PATH "/spiffs/p4-miniapp-last.txt"
+#define MINIAPP_LAST_ID_TMP_PATH "/spiffs/p4-miniapp-last.tmp"
 #define MINIAPP_CATALOG_PATH "/spiffs/p4-miniapps.json"
 #define MINIAPP_BUILTIN_MARKER_PATH "/spiffs/p4-builtins.txt"
 #define MINIAPP_BUILTIN_MARKER_TMP_PATH "/spiffs/p4-builtins.tmp"
 #define MINIAPP_CATALOG_GENERATION_COUNT 2
 #define MINIAPP_PACKAGE_GENERATION_COUNT 2
 #define MINIAPP_CATALOG_VERSION 3
-#define MINIAPP_CATALOG_JSON_MAX 4096
+#define MINIAPP_CATALOG_JSON_MAX 16384
 
 #ifndef PET_P4_BUILD_ID
 #define PET_P4_BUILD_ID "unknown-build"
 #endif
 
-extern const unsigned char pet_p4_builtin_components_json[];
+#include "miniz.h"
+extern const unsigned char pet_p4_builtin_components_zlib[];
+extern const size_t pet_p4_builtin_components_zlib_size;
+extern const size_t pet_p4_builtin_components_json_size;
+extern bool pet_p4_builtin_is_bootstrap(const char *id, uint32_t checksum);
 
 typedef enum {
   MINIAPP_VAR_INT,
@@ -77,6 +96,7 @@ typedef struct {
   char name[MINIAPP_VAR_NAME_MAX];
   miniapp_var_type_t type;
   int32_t int_value;
+  int32_t int_min,int_max;
   char string_value[64];
 } miniapp_var_t;
 
@@ -89,6 +109,7 @@ typedef struct {
   uint8_t var_index;
   miniapp_effect_op_t op;
   int32_t int_value;
+  int8_t source_var;
   char string_value[64];
 } miniapp_effect_t;
 
@@ -122,6 +143,7 @@ typedef struct {
 typedef struct {
   bool active;
   int8_t score_var;
+  int8_t charge_var;
   int8_t playing_state;
   int8_t result_state;
   char start_action[PET_P4_MINIAPP_ACTION_MAX];
@@ -130,6 +152,9 @@ typedef struct {
   char rotate_action[PET_P4_MINIAPP_ACTION_MAX];
   char drop_action[PET_P4_MINIAPP_ACTION_MAX];
   char flap_action[PET_P4_MINIAPP_ACTION_MAX];
+  char soft_drop_action[PET_P4_MINIAPP_ACTION_MAX];
+  char up_action[PET_P4_MINIAPP_ACTION_MAX],down_action[PET_P4_MINIAPP_ACTION_MAX];
+  bool absolute_directions;
   pet_p4_game_engine_t engine;
 } miniapp_game_t;
 
@@ -190,6 +215,7 @@ typedef enum {
 typedef struct {
   bool active;
   char widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX];
+  bool resource_incomplete;
   uint8_t var_count;
   miniapp_var_t vars[MINIAPP_MAX_VARS];
   uint8_t state_count;
@@ -204,20 +230,45 @@ typedef struct {
   miniapp_tick_t ticks[MINIAPP_MAX_TICKS];
   uint8_t button_count;
   miniapp_button_t buttons[MINIAPP_MAX_BUTTONS];
+  bool input_v1;
+  uint8_t repeat_mask,press_mask;
+  char hold_action[48];
+  char drag_entity[16];
+  uint8_t drag_axis;
+  char swipe_actions[4][PET_P4_MINIAPP_ACTION_MAX];
+  char confirm_actions[3][PET_P4_MINIAPP_ACTION_MAX],confirm_prompts[3][121];
+  char cooldown_actions[3][PET_P4_MINIAPP_ACTION_MAX];
+  uint16_t cooldown_ms[3];
+  uint64_t cooldown_at[3];
+  uint8_t cooldown_used;
   miniapp_game_t game;
+  char pause_action[PET_P4_MINIAPP_ACTION_MAX];
+  int8_t record_var;
   pet_p4_miniapp_sprite_pack_t sprites;
   miniapp_rule_t rules[MINIAPP_SLOT_COUNT];
   pet_p4_miniapp_view_t view;
   char data_source[48];
   int8_t data_page_var;
   bool media;
+  char media_source[48];
+  pet_surface_t surface;
+  uint16_t save_version;
+  uint8_t save_vars;
+  bool save_page,app_expressions,app_host;
+  int8_t save_states[MINIAPP_MAX_STATES];
   bool instrument;
+  pet_local_config_t local;
+  pet_local_state_t local_state;
+  int8_t local_vars[7];
+  bool slicing;
+  pet_fruit_t fruit;
   uint8_t effect_volume, ambience_volume;
 } miniapp_runtime_t;
 
 typedef struct {
   bool active;
   char transfer_id[64];
+  bool repair_resources;
   char widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX];
   char widget_json[MINIAPP_WIDGET_JSON_MAX];
   size_t widget_len;
@@ -236,7 +287,14 @@ typedef struct {
   uint32_t widget_checksum;
   uint32_t buttons_checksum;
   uint32_t sprites_checksum;
+  /* Recomputed from committed files, never trusted from catalog JSON. */
+  uint8_t resource_state; /* 0 unchecked, 1 ready, 2 bootstrap, 3 damaged */
+  uint8_t image_count;
 } miniapp_catalog_item_t;
+
+// Catalog transactions must not grow the USB task stack with the slot limit.
+// GCC/Clang cleanup releases scratch storage on every error and success return.
+static void catalog_scratch_free(miniapp_catalog_item_t **p) { free(*p); }
 
 typedef struct {
   bool parsed;
@@ -250,8 +308,36 @@ typedef struct {
 } miniapp_catalog_snapshot_t;
 
 static const char *TAG = "pet-p4-miniapp";
-static miniapp_runtime_t g_runtime;
-static miniapp_staging_t g_staging;
+static bool g_catalog_recovery_blocked;
+static char g_storage_failure[128];
+static EXT_RAM_BSS_ATTR miniapp_runtime_t g_runtime;
+static uint32_t g_image_revision=1;
+static int g_pressed_node=-1;
+static uint64_t g_pressed_context;
+static char g_confirm_action[48],g_confirm_prompt[121];
+static char g_confirm_host_token[65];
+static uint64_t g_confirm_until,g_confirm_context;
+static uint8_t g_input_epoch;
+static bool g_wall_valid;
+static int64_t g_wall_seconds;
+static uint64_t g_wall_at;
+static portMUX_TYPE g_clock_lock = portMUX_INITIALIZER_UNLOCKED;
+static int64_t local_wall_seconds(uint64_t ms){
+  portENTER_CRITICAL(&g_clock_lock);
+  int64_t value=g_wall_valid?g_wall_seconds+(int64_t)((ms>=g_wall_at?ms-g_wall_at:0)/1000):-1;
+  portEXIT_CRITICAL(&g_clock_lock);return value;
+}
+bool pet_p4_miniapp_clock_sync(const cJSON *payload,uint64_t ms){
+  const cJSON *time=cJSON_GetObjectItemCaseSensitive(payload,"unixSeconds"),*offset=cJSON_GetObjectItemCaseSensitive(payload,"utcOffsetMinutes");
+  if(!cJSON_IsNumber(time)||time->valuedouble<1577836800.0||time->valuedouble>4102444799.0||floor(time->valuedouble)!=time->valuedouble||!cJSON_IsNumber(offset)||offset->valuedouble!=offset->valueint||offset->valueint< -840||offset->valueint>840)return false;
+  portENTER_CRITICAL(&g_clock_lock);g_wall_seconds=(int64_t)time->valuedouble+offset->valueint*60;g_wall_at=ms;g_wall_valid=true;portEXIT_CRITICAL(&g_clock_lock);return true;
+}
+static bool g_input_visible;
+static EXT_RAM_BSS_ATTR miniapp_staging_t g_staging;
+static EXT_RAM_BSS_ATTR uint8_t g_image_staging[PET_IMAGE_MAX_BYTES+1];
+static size_t g_image_used;
+static uint32_t g_image_next;
+static char g_image_id[16];
 static bool g_builtin_sync_in_progress;
 static miniapp_catalog_item_t g_catalog[PET_P4_MINIAPP_CATALOG_MAX];
 static size_t g_catalog_count;
@@ -448,6 +534,7 @@ static bool parse_vars(miniapp_runtime_t *runtime, const cJSON *vars, char *erro
         return false;
       }
       var->type = MINIAPP_VAR_INT;
+      var->int_min=MINIAPP_INT_MIN;var->int_max=MINIAPP_INT_MAX;
       var->int_value = init ? clamp_i64((long long) init->valuedouble) : 0;
     } else if (strcmp(type, "string") == 0) {
       if (init && (!cJSON_IsString(init) || strlen(init->valuestring) >= sizeof(var->string_value))) {
@@ -547,19 +634,28 @@ static bool parse_effect_object(
       return false;
     }
     var = &runtime->vars[var_index];
+    int source_var=-1;
+    if(runtime->app_expressions&&op==MINIAPP_EFFECT_SET&&cJSON_IsObject(item)&&cJSON_GetArraySize(item)==1){
+      const char *source=json_string(item,"var");source_var=find_var(runtime,source);
+      if(source_var<0||var->type!=MINIAPP_VAR_INT||runtime->vars[source_var].type!=MINIAPP_VAR_INT){set_error(error,error_size,"set var reference must use integers");return false;}
+    }
     if (op == MINIAPP_EFFECT_INC && (var->type != MINIAPP_VAR_INT || !cJSON_IsNumber(item))) {
       set_error(error, error_size, "inc requires an int var and numeric value");
       return false;
     }
     if (op == MINIAPP_EFFECT_SET
-        && !((var->type == MINIAPP_VAR_INT && cJSON_IsNumber(item))
+        && !((var->type == MINIAPP_VAR_INT && (cJSON_IsNumber(item)||source_var>=0))
              || (var->type == MINIAPP_VAR_STRING && cJSON_IsString(item)))) {
       set_error(error, error_size, "set value does not match var type");
       return false;
     }
+    if(runtime->app_expressions&&cJSON_IsNumber(item)&&(!isfinite(item->valuedouble)||floor(item->valuedouble)!=item->valuedouble||item->valuedouble < -1000000000.0||item->valuedouble>1000000000.0)){
+      set_error(error,error_size,"app effects require bounded integers");return false;
+    }
     effect = &effects[(*effect_count)++];
     effect->var_index = (uint8_t) var_index;
     effect->op = op;
+    effect->source_var=source_var;
     if (var->type == MINIAPP_VAR_INT) {
       effect->int_value = clamp_i64((long long) item->valuedouble);
     } else {
@@ -1006,6 +1102,116 @@ static bool runtime_has_button_action(
   return false;
 }
 
+static bool runtime_action_enabled(const miniapp_runtime_t *r,const char *action) {
+  if(!r->input_v1)return true; /* Legacy packages keep their original contract. */
+  if(r->local.enabled&&!pet_local_enabled(&r->local,&r->local_state,action))return false;
+  uint64_t now=esp_timer_get_time()/1000ULL;
+  for(int i=0;i<3;i++)if(r->cooldown_ms[i]&&(r->cooldown_used&(1u<<i))&&!strcmp(r->cooldown_actions[i],action)
+      &&(now<r->cooldown_at[i]||now-r->cooldown_at[i]<r->cooldown_ms[i]))return false;
+  for(int i=0;i<r->transition_count;i++){
+    const miniapp_transition_t *t=&r->transitions[i];
+    if(!strcmp(t->action,action)&&(t->from_state<0||t->from_state==r->current_state)){
+      if(r->data_source[0]&&t->to_state<0&&t->page_op<0&&t->effect_count==1&&t->effects[0].var_index==r->data_page_var){
+        pet_p4_data_view_t data;pet_p4_widget_data_view(r->data_source,r->vars[r->data_page_var].int_value,esp_timer_get_time()/1000ULL,&data);
+        const miniapp_effect_t *e=&t->effects[0];int64_t value=e->source_var>=0?r->vars[e->source_var].int_value:e->int_value;
+        if(e->op==MINIAPP_EFFECT_INC)value+=r->vars[r->data_page_var].int_value;
+        int pages=data.pages?data.pages:1;
+        return ((value%pages)+pages)%pages!=data.page;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool parse_input_policy(miniapp_runtime_t *r,const cJSON *root) {
+  const cJSON *p=cJSON_GetObjectItemCaseSensitive(root,"input");
+  if(!p)return true;
+static const char *const keys[]={"engine","repeat","press","swipe","confirm","drag","cooldown","hold"};
+  static const char *const dirs[]={"left","right","up","down"};
+  if(!cJSON_IsObject(p)||!object_keys_allowed(p,keys,8)||strcmp(json_string(p,"engine"),"p4-input-v1"))return false;
+  r->input_v1=true;
+  const cJSON *hold=cJSON_GetObjectItemCaseSensitive(p,"hold");
+  if(hold){
+    const cJSON *scene=cJSON_GetObjectItemCaseSensitive(root,"scene");
+    if(!cJSON_IsString(hold)||!runtime_has_transition_action(r,hold->valuestring)||!cJSON_GetObjectItemCaseSensitive(scene,"motion"))return false;
+    bool bound=false;for(int b=0;b<r->button_count;b++)if(!strcmp(r->buttons[b].action,hold->valuestring)&&!strcmp(r->buttons[b].event,"button.sw1.short_press"))bound=true;
+    if(!bound||cJSON_HasObjectItem(p,"drag"))return false;
+    const char *conflicts[]={"repeat","press","confirm","cooldown"};
+    for(int k=0;k<4;k++){const cJSON *v=cJSON_GetObjectItemCaseSensitive(p,conflicts[k]),*item;
+      if(k<2){cJSON_ArrayForEach(item,v)if(cJSON_IsString(item)&&!strcmp(item->valuestring,hold->valuestring))return false;}
+      else if(cJSON_HasObjectItem(v,hold->valuestring))return false;
+    }
+    copy_utf8(r->hold_action,48,hold->valuestring);
+  }
+  for(int mode=0;mode<2;mode++){
+    const cJSON *a=cJSON_GetObjectItemCaseSensitive(p,mode?"press":"repeat");
+    if(!a)continue;
+    if(!cJSON_IsArray(a)||cJSON_GetArraySize(a)>8)return false;
+    uint8_t mask=0;const cJSON *v;
+    cJSON_ArrayForEach(v,a){
+      if(!cJSON_IsString(v)||!runtime_has_transition_action(r,v->valuestring))return false;
+      int b=-1;
+      for(int i=0;i<r->button_count;i++)if(!strcmp(r->buttons[i].action,v->valuestring)){b=i;break;}
+      if(b<0||(mask&(1u<<b)))return false;
+      const char *event=r->buttons[b].event;
+      if(mode){
+        const cJSON *game=cJSON_GetObjectItemCaseSensitive(root,"game");
+        const char *flap=json_string(cJSON_GetObjectItemCaseSensitive(game,"actions"),"flap");
+        if(strcmp(event,"button.sw1.short_press")||
+           (strcmp(v->valuestring,flap)&&!(cJSON_GetObjectItemCaseSensitive(root,"instrument")&&!strcmp(v->valuestring,"instrument.strike"))))return false;
+      }else if(strcmp(event,"knob.rotate_ccw")&&strcmp(event,"knob.rotate_cw")&&strcmp(event,"joystick.up")&&strcmp(event,"joystick.down"))return false;
+      mask|=1u<<b;
+    }
+    if(mode)r->press_mask=mask;else r->repeat_mask=mask;
+  }
+  const cJSON *swipe=cJSON_GetObjectItemCaseSensitive(p,"swipe");
+  if(swipe){
+    if(!cJSON_IsObject(swipe)||!object_keys_allowed(swipe,dirs,4))return false;
+    for(int i=0;i<4;i++){
+      const cJSON *v=cJSON_GetObjectItemCaseSensitive(swipe,dirs[i]);
+      if(!v)continue;
+      if(!cJSON_IsString(v)||!runtime_has_transition_action(r,v->valuestring))return false;
+      copy_utf8(r->swipe_actions[i],sizeof(r->swipe_actions[i]),v->valuestring);
+    }
+  }
+  const cJSON *confirm=cJSON_GetObjectItemCaseSensitive(p,"confirm");
+  if(confirm){
+    if(!cJSON_IsObject(confirm)||cJSON_GetArraySize(confirm)>3)return false;
+    int i=0;const cJSON *v;
+    cJSON_ArrayForEach(v,confirm){
+      if(!cJSON_IsString(v)||!v->string||!runtime_has_transition_action(r,v->string)||!v->valuestring[0]||strlen(v->valuestring)>120)return false;
+      copy_utf8(r->confirm_actions[i],48,v->string);copy_utf8(r->confirm_prompts[i],121,v->valuestring);i++;
+    }
+  }
+  const cJSON *drag=cJSON_GetObjectItemCaseSensitive(p,"drag");
+  if(drag){
+    static const char *const dk[]={"entity","axis"};
+    const char *id=json_string(drag,"entity"),*axis=json_string(drag,"axis");
+    const cJSON *scene=cJSON_GetObjectItemCaseSensitive(root,"scene"),*surface=cJSON_GetObjectItemCaseSensitive(root,"surface");
+    if(!object_keys_allowed(drag,dk,2)||!id[0]||strlen(id)>15||strcmp(json_string(cJSON_GetObjectItemCaseSensitive(surface,"scene_view"),"engine"),"p4-scene-surface-v1"))return false;
+    r->drag_axis=!strcmp(axis,"x")?1:!strcmp(axis,"y")?2:!strcmp(axis,"xy")?3:0;
+    if(!r->drag_axis)return false;
+    bool found=false;const cJSON *e;cJSON_ArrayForEach(e,cJSON_GetObjectItemCaseSensitive(scene,"entities")){
+      const char *bounds=json_string(e,"bounds");
+      if(!strcmp(json_string(e,"id"),id)&&(!bounds[0]||!strcmp(bounds,"clamp")))found=true;
+    }
+    if(!found)return false;copy_utf8(r->drag_entity,16,id);
+  }
+  const cJSON *cooldown=cJSON_GetObjectItemCaseSensitive(p,"cooldown");
+  if(cooldown){
+    if(!cJSON_IsObject(cooldown)||cJSON_GetArraySize(cooldown)>3)return false;
+    if(cJSON_GetArraySize(cooldown)&&(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root,"host"))||cJSON_GetObjectItemCaseSensitive(root,"media")||cJSON_GetObjectItemCaseSensitive(root,"instrument")))return false;
+    int i=0;const cJSON *v;cJSON_ArrayForEach(v,cooldown){
+      if(!v->string||!runtime_has_transition_action(r,v->string)||!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||v->valueint<250||v->valueint>60000)return false;
+      for(int j=0;j<i;j++)if(!strcmp(r->cooldown_actions[j],v->string))return false;
+      copy_utf8(r->cooldown_actions[i],48,v->string);r->cooldown_ms[i++]=v->valueint;
+    }
+  }
+  return true;
+}
+
+static bool json_int_range(const cJSON *value, int minimum, int maximum, int *out);
 static bool parse_game(
   miniapp_runtime_t *runtime,
   const cJSON *game,
@@ -1013,13 +1219,13 @@ static bool parse_game(
   size_t error_size
 ) {
   static const char *const allowed[] = {
-    "type", "tick_ms", "playing_state", "result_state", "score_var", "actions",
+    "type", "tick_ms", "playing_state", "result_state", "score_var", "actions", "vertical_speed_percent", "direction_mode",
   };
   static const char *const blocks_action_allowed[] = {
-    "start", "left", "right", "rotate", "drop",
+    "start", "left", "right", "rotate", "drop", "soft_drop",
   };
   static const char *const snake_action_allowed[] = {
-    "start", "left", "right",
+    "start", "left", "right", "up", "down",
   };
   static const char *const flappy_action_allowed[] = {
     "flap",
@@ -1083,6 +1289,19 @@ static bool parse_game(
             json_string(actions, "drop"));
   copy_utf8(runtime->game.flap_action, sizeof(runtime->game.flap_action),
             json_string(actions, "flap"));
+  copy_utf8(runtime->game.soft_drop_action,sizeof(runtime->game.soft_drop_action),json_string(actions,"soft_drop"));
+  copy_utf8(runtime->game.up_action,sizeof(runtime->game.up_action),json_string(actions,"up"));
+  copy_utf8(runtime->game.down_action,sizeof(runtime->game.down_action),json_string(actions,"down"));
+  const cJSON *mode=cJSON_GetObjectItemCaseSensitive(game,"direction_mode");
+  if(mode){
+    if(!runtime->input_v1||kind!=PET_P4_GAME_SNAKE||!cJSON_IsString(mode)||strcmp(mode->valuestring,"absolute"))return false;
+    runtime->game.absolute_directions=true;
+  }
+  if((runtime->game.up_action[0]||runtime->game.down_action[0])&&!runtime->game.absolute_directions)return false;
+  if(runtime->game.absolute_directions&&(!runtime->game.up_action[0]||!runtime->game.down_action[0]))return false;
+  if(cJSON_GetObjectItemCaseSensitive(actions,"soft_drop")&&(!runtime->input_v1||!runtime->game.soft_drop_action[0]))return false;
+  const char *extras[]={runtime->game.soft_drop_action,runtime->game.up_action,runtime->game.down_action};
+  for(int i=0;i<3;i++)if(extras[i][0]&&(!safe_id(extras[i],PET_P4_MINIAPP_ACTION_MAX)||!runtime_has_transition_action(runtime,extras[i])||!runtime_has_button_action(runtime,extras[i])))return false;
   if (kind == PET_P4_GAME_FLAPPY) {
     required_actions[0] = runtime->game.flap_action;
     required_count = 1;
@@ -1109,6 +1328,13 @@ static bool parse_game(
         stable_widget_seed(runtime->widget_id)
       )) {
     set_error(error, error_size, "game engine configuration is invalid");
+    return false;
+  }
+  const cJSON *speed=cJSON_GetObjectItemCaseSensitive(game,"vertical_speed_percent");
+  int percent=100;
+  if(speed&&(!json_int_range(speed,25,100,&percent)
+      ||!pet_p4_game_set_vertical_speed(&runtime->game.engine,(unsigned)percent))){
+    set_error(error,error_size,"vertical_speed_percent requires flappy and an integer in 25-100");
     return false;
   }
   runtime->game.active = true;
@@ -1165,7 +1391,11 @@ static void resolve_rule(
   }
 }
 
+static void local_values(miniapp_runtime_t *r,int32_t v[7],bool write){
+  for(int i=0;i<7;i++){if(write)r->vars[r->local_vars[i]].int_value=v[i];else v[i]=r->vars[r->local_vars[i]].int_value;}
+}
 static void refresh_view(miniapp_runtime_t *runtime) {
+  if (runtime->resource_incomplete) return;
   pet_p4_miniapp_view_t *view = &runtime->view;
   uint32_t next_revision = view->revision + 1;
   memset(view, 0, sizeof(*view));
@@ -1174,7 +1404,11 @@ static void refresh_view(miniapp_runtime_t *runtime) {
   view->revision = next_revision;
   copy_utf8(view->data_source, sizeof(view->data_source), runtime->data_source);
   view->media=runtime->media;
+  view->app_surface=runtime->surface.app;
+  view->app_host=runtime->app_host;
+  view->surface_page=runtime->current_page<0?0:runtime->current_page;
   view->instrument=runtime->instrument;
+  view->slicing=runtime->slicing;
   view->effect_volume=runtime->effect_volume;
   view->ambience_volume=runtime->ambience_volume;
   if (runtime->data_source[0]) view->data_page = runtime->vars[runtime->data_page_var].int_value;
@@ -1222,6 +1456,116 @@ static void refresh_view(miniapp_runtime_t *runtime) {
   }
 }
 
+static void refresh_local_view(miniapp_runtime_t *r,uint64_t now){
+  int32_t v[7];local_values(r,v,false);pet_local_view_t o;
+  pet_local_view(&r->local,&r->local_state,v,now,local_wall_seconds(now),&o);
+  r->current_state=o.phase;refresh_view(r);
+  copy_utf8(r->view.eyebrow,sizeof(r->view.eyebrow),o.eyebrow);
+  copy_utf8(r->view.headline,sizeof(r->view.headline),o.headline);
+  copy_utf8(r->view.note,sizeof(r->view.note),o.note);
+  copy_utf8(r->view.metric_value,sizeof(r->view.metric_value),o.metric);
+  copy_utf8(r->view.metric_label,sizeof(r->view.metric_label),o.label);
+  copy_utf8(r->view.metric_unit,sizeof(r->view.metric_unit),o.unit);
+  copy_utf8(r->view.badge,sizeof(r->view.badge),o.badge);
+  r->view.progress_percent=o.progress;
+}
+static bool parse_local(miniapp_runtime_t *r,const cJSON *root){
+  const cJSON *local=cJSON_GetObjectItemCaseSensitive(root,"local");if(!local)return true;
+  if(!r->surface.app||!r->input_v1||r->var_count!=7||r->tick_count||r->page_count||r->save_vars!=127||r->save_version!=1||r->state_count!=6||r->transition_count<2||r->game.active||cJSON_HasObjectItem(root,"host")||cJSON_HasObjectItem(root,"scene")||cJSON_HasObjectItem(root,"media")||cJSON_HasObjectItem(root,"data")||cJSON_HasObjectItem(root,"instrument"))return false;
+  const char *states[]={"ready","busy","result","editing","empty","offline"};
+  for(int i=0;i<6;i++)if(strcmp(r->states[i],states[i])||r->save_states[i]!=0)return false;
+  for(int i=0;i<7;i++){char name[8];snprintf(name,sizeof(name),"local%d",i);int index=find_var(r,name);if(index<0||r->vars[index].type!=MINIAPP_VAR_INT)return false;r->local_vars[i]=index;}
+  if(!pet_local_parse(local,&r->local)||r->local.action_count!=r->transition_count)return false;
+  for(int i=0;i<r->transition_count;i++){
+    miniapp_transition_t *t=&r->transitions[i];bool found=false;
+    for(int j=0;j<r->local.action_count;j++)if(!strcmp(t->action,r->local.actions[j]))found=true;
+    if(!found||t->from_state!=-1||t->to_state!=-1||t->page_op!=-1||t->effect_count)return false;
+  }
+  if(cJSON_HasObjectItem(root,"game"))return false;
+  pet_local_init(&r->local_state);return true;
+}
+static bool parse_save(miniapp_runtime_t *r,const cJSON *save){
+  if(!save)return true;
+  static const char *const keys[]={"version","vars","states","page"};
+  const cJSON *v=cJSON_GetObjectItemCaseSensitive(save,"version"),*vars=cJSON_GetObjectItemCaseSensitive(save,"vars"),*states=cJSON_GetObjectItemCaseSensitive(save,"states"),*item;
+  if(!r->surface.app||!object_keys_allowed(save,keys,4)||!cJSON_IsNumber(v)||v->valuedouble!=v->valueint||v->valueint<1||v->valueint>65535||!cJSON_IsArray(vars)||cJSON_GetArraySize(vars)<1||cJSON_GetArraySize(vars)>8||!cJSON_IsObject(states)||cJSON_GetArraySize(states)!=r->state_count)return false;
+  const cJSON *page=cJSON_GetObjectItemCaseSensitive(save,"page");if(page&&!cJSON_IsBool(page))return false;r->save_page=cJSON_IsTrue(page);if(r->save_page&&!r->page_count)return false;
+  r->save_version=v->valueint;
+  cJSON_ArrayForEach(item,vars){
+    if(!cJSON_IsString(item))return false;int i=find_var(r,item->valuestring);
+    if(i<0||r->vars[i].type!=MINIAPP_VAR_INT||(r->save_vars&(1u<<i)))return false;r->save_vars|=1u<<i;
+  }
+  for(int i=0;i<r->state_count;i++){
+    const cJSON *s=cJSON_GetObjectItemCaseSensitive(states,r->states[i]);
+    if(!cJSON_IsString(s))return false;r->save_states[i]=find_name(r->states,r->state_count,s->valuestring);
+    if(r->save_states[i]<0)return false;
+  }
+  return true;
+}
+
+static void save_app_runtime(void){
+  miniapp_var_t vars[MINIAPP_MAX_VARS];char id[48],state[24],page[24]={0};uint16_t version;uint8_t mask,count;
+  bool fruit;unsigned records[3],mode;
+  portENTER_CRITICAL(&g_runtime_lock);
+  fruit=g_runtime.active&&g_runtime.slicing;
+  if(fruit){memcpy(records,g_runtime.fruit.records,sizeof(records));mode=g_runtime.fruit.mode;copy_utf8(id,sizeof(id),g_runtime.widget_id);}
+  version=g_runtime.save_version;mask=g_runtime.save_vars;count=g_runtime.var_count;
+  if(version){memcpy(vars,g_runtime.vars,sizeof(vars));copy_utf8(id,sizeof(id),g_runtime.widget_id);copy_utf8(state,sizeof(state),g_runtime.states[g_runtime.current_state]);}
+  if(version&&g_runtime.save_page)copy_utf8(page,sizeof(page),g_runtime.pages[g_runtime.current_page]);
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(fruit){
+    cJSON *root=cJSON_CreateObject(),*list=root?cJSON_AddArrayToObject(root,"fruitRecords"):NULL;
+    if(list){cJSON_AddNumberToObject(root,"fruitVersion",1);cJSON_AddNumberToObject(root,"mode",mode);
+      for(int i=0;i<3;i++)cJSON_AddItemToArray(list,cJSON_CreateNumber(records[i]));
+      char *json=cJSON_PrintUnformatted(root);if(json){pet_app_store_update(id,json);cJSON_free(json);}
+    }cJSON_Delete(root);return;
+  }
+  if(!version)return;
+  cJSON *root=cJSON_CreateObject();if(!root)return;
+  cJSON_AddNumberToObject(root,"version",version);cJSON_AddStringToObject(root,"state",state);
+  if(page[0])cJSON_AddStringToObject(root,"page",page);
+  cJSON *values=cJSON_AddObjectToObject(root,"vars");
+  if(values)for(int i=0;i<count;i++)if(mask&(1u<<i)){
+    if(vars[i].type==MINIAPP_VAR_INT)cJSON_AddNumberToObject(values,vars[i].name,vars[i].int_value);
+    else cJSON_AddStringToObject(values,vars[i].name,vars[i].string_value);
+  }
+  char *json=values?cJSON_PrintUnformatted(root):NULL;
+  if(json){pet_app_store_update(id,json);cJSON_free(json);}cJSON_Delete(root);
+}
+
+static void restore_app_runtime(miniapp_runtime_t *r){
+  if(!r||(!r->save_version&&!r->slicing))return;
+  char json[PET_APP_SAVE_BYTES];if(!pet_app_store_read(r->widget_id,json))return;
+  cJSON *root=cJSON_Parse(json);if(!root)return;
+  if(r->slicing){
+    const cJSON *list=cJSON_GetObjectItemCaseSensitive(root,"fruitRecords"),*mode=cJSON_GetObjectItemCaseSensitive(root,"mode"),*version=cJSON_GetObjectItemCaseSensitive(root,"fruitVersion");
+    bool valid=cJSON_IsNumber(version)&&version->valuedouble==1&&cJSON_IsArray(list)&&cJSON_GetArraySize(list)==3&&cJSON_IsNumber(mode)&&mode->valuedouble>=0&&mode->valuedouble<=2&&mode->valuedouble==mode->valueint;
+    for(int i=0;valid&&i<3;i++){const cJSON *v=cJSON_GetArrayItem(list,i);valid=cJSON_IsNumber(v)&&v->valuedouble>=0&&v->valuedouble<=1000000000&&v->valuedouble==v->valueint;}
+    if(valid){for(int i=0;i<3;i++)r->fruit.records[i]=cJSON_GetArrayItem(list,i)->valueint;pet_fruit_select_mode(&r->fruit,mode->valueint);}
+    cJSON_Delete(root);return;
+  }
+  const cJSON *version=cJSON_GetObjectItemCaseSensitive(root,"version"),*values=cJSON_GetObjectItemCaseSensitive(root,"vars");
+  int state=find_name(r->states,r->state_count,json_string(root,"state"));
+  bool valid=cJSON_IsNumber(version)&&version->valuedouble==r->save_version&&state>=0&&cJSON_IsObject(values);
+  for(int i=0;valid&&i<r->var_count;i++)if(r->save_vars&(1u<<i)){
+    const cJSON *v=cJSON_GetObjectItemCaseSensitive(values,r->vars[i].name);
+    /* Additive fields in the same save version keep their declared defaults.
+     * Reject malformed existing values atomically, but preserve earlier progress. */
+    if(!v)continue;
+    valid=r->vars[i].type==MINIAPP_VAR_INT?(cJSON_IsNumber(v)&&v->valuedouble>=r->vars[i].int_min&&v->valuedouble<=r->vars[i].int_max&&v->valuedouble==v->valueint):(cJSON_IsString(v)&&strlen(v->valuestring)<64);
+  }
+  if(valid){
+    for(int i=0;i<r->var_count;i++)if(r->save_vars&(1u<<i)){
+      const cJSON *v=cJSON_GetObjectItemCaseSensitive(values,r->vars[i].name);
+      if(!v)continue;
+      if(r->vars[i].type==MINIAPP_VAR_INT)r->vars[i].int_value=v->valueint;else copy_utf8(r->vars[i].string_value,64,v->valuestring);
+    }
+    r->current_state=r->save_states[state];refresh_view(r);
+    if(r->save_page){int page=find_name(r->pages,r->page_count,json_string(root,"page"));if(page>=0)r->current_page=page;refresh_view(r);}
+  }
+  cJSON_Delete(root);
+}
+
 static bool parse_runtime(
   miniapp_runtime_t *runtime,
   const char *widget_id,
@@ -1234,7 +1578,7 @@ static bool parse_runtime(
   static const char *const allowed[] = {
     "schema_version", "vars", "states", "initial_state", "pages", "initial_page",
     "transitions", "tick", "dashboard", "fetchers", "readers", "engine", "scene",
-    "game", "data", "media", "instrument",
+    "game", "data", "media", "instrument", "surface", "persist", "limits", "host", "lifecycle", "input", "local",
   };
   cJSON *root;
   const cJSON *schema;
@@ -1278,12 +1622,22 @@ static bool parse_runtime(
     goto fail;
   }
   const bool runtime_v4 = strcmp(engine, "p4-bounded-runtime-v4") == 0;
+  parsed->app_expressions=runtime_v4&&!strcmp(json_string(cJSON_GetObjectItemCaseSensitive(root,"surface"),"engine"),"p4-app-surface-v1");
   if ((engine[0] && strcmp(engine, "p4-bounded-runtime-v3") != 0 && !runtime_v4)
       || (scene && !engine[0]) || (scene && legacy_game)) {
     set_error(error, error_size, "engine/scene declaration is unsupported or conflicts with legacy game");
     goto fail;
   }
   if (!parse_vars(parsed, cJSON_GetObjectItemCaseSensitive(root, "vars"), error, error_size)) goto fail;
+  const cJSON *limits=cJSON_GetObjectItemCaseSensitive(root,"limits"),*limit;
+  if(limits){
+    if(!parsed->app_expressions||!cJSON_IsObject(limits)){set_error(error,error_size,"limits require application surface");goto fail;}
+    cJSON_ArrayForEach(limit,limits){
+      int i=find_var(parsed,limit->string);const cJSON *lo=cJSON_GetArrayItem(limit,0),*hi=cJSON_GetArrayItem(limit,1);
+      if(i<0||parsed->vars[i].type!=MINIAPP_VAR_INT||!cJSON_IsArray(limit)||cJSON_GetArraySize(limit)!=2||!cJSON_IsNumber(lo)||!cJSON_IsNumber(hi)||lo->valuedouble<MINIAPP_INT_MIN||hi->valuedouble>MINIAPP_INT_MAX||lo->valuedouble>hi->valuedouble||lo->valuedouble!=lo->valueint||hi->valuedouble!=hi->valueint||parsed->vars[i].int_value<lo->valueint||parsed->vars[i].int_value>hi->valueint){set_error(error,error_size,"invalid application variable limits");goto fail;}
+      parsed->vars[i].int_min=lo->valueint;parsed->vars[i].int_max=hi->valueint;
+    }
+  }
   const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
   const cJSON *media=cJSON_GetObjectItemCaseSensitive(root,"media");
   const cJSON *instrument=cJSON_GetObjectItemCaseSensitive(root,"instrument");
@@ -1309,14 +1663,20 @@ static bool parse_runtime(
     parsed->instrument=true;parsed->effect_volume=effect->valueint;parsed->ambience_volume=ambience->valueint;
   }
   if(media) {
-    static const char *const media_keys[]={"source"};
+    static const char *const media_keys[]={"source","mode"};
+    const char *source=json_string(media,"source");
+    char expected[48];snprintf(expected,sizeof(expected),"pc.%s",widget_id);
+    bool generic=!strcmp(source,expected)&&strlen(widget_id)<=44&&!strcmp(json_string(media,"mode"),"live");
     if(!runtime_v4 || data || scene || legacy_game || parsed->var_count || !cJSON_IsObject(media)
        || cJSON_GetObjectItemCaseSensitive(root,"pages")
        || cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(root,"tick"))
-       || !object_keys_allowed(media,media_keys,1)||strcmp(json_string(media,"source"),"audio.player")) {
+       || !object_keys_allowed(media,media_keys,generic?2:1)
+       || (!generic && strcmp(source,"audio.player"))) {
       set_error(error,error_size,"invalid media surface");goto fail;
     }
     parsed->media=true;
+    snprintf(parsed->media_source,sizeof(parsed->media_source),"%s",source);
+    if(generic&&!pet_surface_parse(cJSON_GetObjectItemCaseSensitive(root,"surface"),&parsed->surface)){set_error(error,error_size,"invalid bounded media layout");goto fail;}
     const cJSON *rules=cJSON_GetObjectItemCaseSensitive(root,"transitions");
     static const char *const rule_keys[]={"on","from"};
     static const char *const actions[]={"media.toggle","media.queue","media.previous","media.next","media.up","media.down","media.select","media.lyrics"};
@@ -1324,7 +1684,7 @@ static bool parse_runtime(
     cJSON_ArrayForEach(rule,rules) {
       bool known=false;
       for(size_t i=0;i<sizeof(actions)/sizeof(actions[0]);i++)if(!strcmp(json_string(rule,"on"),actions[i]))known=true;
-      if(!known||!object_keys_allowed(rule,rule_keys,2)||strcmp(json_string(rule,"from"),"*")) {
+      if(!known||(generic&&!strcmp(json_string(rule,"on"),"media.lyrics"))||!object_keys_allowed(rule,rule_keys,2)||strcmp(json_string(rule,"from"),"*")) {
         set_error(error,error_size,"invalid media action");goto fail;
       }
     }
@@ -1367,9 +1727,91 @@ static bool parse_runtime(
   if (!parse_ticks(parsed, cJSON_GetObjectItemCaseSensitive(root, "tick"), error, error_size)) goto fail;
   if (!parse_dashboard(parsed, cJSON_GetObjectItemCaseSensitive(root, "dashboard"), error, error_size)) goto fail;
   if (!parse_buttons(parsed, buttons_json, error, error_size)) goto fail;
+  if(!parse_input_policy(parsed,root)){set_error(error,error_size,"invalid input policy");goto fail;}
+  if(parsed->transition_count>12&&!parsed->input_v1){set_error(error,error_size,"extended transitions require input v1");goto fail;}
+  const cJSON *surface=cJSON_GetObjectItemCaseSensitive(root,"surface");
+  if(surface&&!media){
+    if(!runtime_v4||instrument||!pet_surface_parse(surface,&parsed->surface)||!parsed->surface.app||
+      (!!legacy_game!=parsed->surface.game_view)|| (!!data!=parsed->surface.data_view.enabled)||
+      (!!scene!=parsed->surface.scene_view.enabled)){
+      set_error(error,error_size,"invalid application surface");goto fail;
+    }
+    if(scene&&cJSON_HasObjectItem(scene,"sprites")){set_error(error,error_size,"scene view sprites belong to surface");goto fail;}
+    if(scene){const cJSON *grid=cJSON_GetObjectItemCaseSensitive(scene,"grid");if(cJSON_HasObjectItem(grid,"rows")||cJSON_HasObjectItem(grid,"solid_tones")){set_error(error,error_size,"scene surface v1 requires an open field");goto fail;}}
+    if(scene){const cJSON *e;cJSON_ArrayForEach(e,cJSON_GetObjectItemCaseSensitive(scene,"entities"))if(cJSON_HasObjectItem(e,"sprite")){set_error(error,error_size,"scene view uses entity image mapping");goto fail;}}
+    for(int i=0;i<parsed->surface.count;i++){
+      const pet_surface_node_t *n=&parsed->surface.nodes[i];
+      if(n->state_mask&&(!parsed->input_v1||(n->state_mask>>parsed->state_count))){set_error(error,error_size,"state visibility requires input v1 and declared states");goto fail;}
+      if(n->host_mask&&(!parsed->input_v1||!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root,"host")))){set_error(error,error_size,"host visibility requires input v1 host");goto fail;}
+      const char *refs[]={n->tile_var,n->tile_max_var,n->show_var};
+      for(int k=0;k<3;k++)if(refs[k][0]){int v=find_var(parsed,refs[k]);if(v<0||parsed->vars[v].type!=MINIAPP_VAR_INT){set_error(error,error_size,"surface variable must be a declared integer");goto fail;}}
+      if((n->action[0]&&!runtime_has_transition_action(parsed,n->action))||(n->key_for[0]&&!runtime_has_button_action(parsed,n->key_for))||(n->page!=4&&n->page>=(parsed->page_count?parsed->page_count:1))){set_error(error,error_size,"unknown surface action/page");goto fail;}
+    }
+  }
+  if(!parse_save(parsed,cJSON_GetObjectItemCaseSensitive(root,"persist"))){set_error(error,error_size,"invalid app save declaration");goto fail;}
+  if(!parse_local(parsed,root)){set_error(error,error_size,"invalid offline tools declaration");goto fail;}
+  const cJSON *host=cJSON_GetObjectItemCaseSensitive(root,"host");
+  if(host){
+    if(!cJSON_IsTrue(host)||!parsed->surface.app||parsed->save_version||parsed->tick_count||parsed->var_count){set_error(error,error_size,"invalid host application");goto fail;}
+    const cJSON *r; cJSON_ArrayForEach(r,cJSON_GetObjectItemCaseSensitive(root,"transitions")){
+      static const char *const keys[]={"from","on"};
+      if(!object_keys_allowed(r,keys,2)||strcmp(json_string(r,"from"),"*")||strncmp(json_string(r,"on"),"host.",5)){set_error(error,error_size,"invalid host action");goto fail;}
+    }
+    parsed->app_host=true;
+  }
   if (!parse_game(parsed, legacy_game, error, error_size)) goto fail;
   if (sprites) parsed->sprites = *sprites;
+  if(parsed->surface.image_count){
+    if(parsed->surface.image_count!=parsed->sprites.count){set_error(error,error_size,"surface images missing");goto fail;}
+    for(int i=0;i<parsed->surface.image_count;i++){
+      pet_p4_miniapp_sprite_t *im=&parsed->sprites.items[i];
+      if(strcmp(im->id,parsed->surface.image_ids[i])||im->frame_width!=parsed->surface.image_w[i]||im->frame_height!=parsed->surface.image_h[i]||im->frames!=1||im->fps!=0){
+        set_error(error,error_size,"surface image metadata mismatch");goto fail;
+      }
+    }
+  }
+  if(!parsed->surface.image_count && parsed->sprites.data_length>4096*3){set_error(error,error_size,"scene sprites exceed pixel budget");goto fail;}
   if (!parse_bounded_scene(parsed, scene, runtime_v4, error, error_size)) goto fail;
+  parsed->record_var=-1;
+  const cJSON *lifecycle=cJSON_GetObjectItemCaseSensitive(root,"lifecycle");
+  if(lifecycle){
+    static const char *const keys[]={"pause_action","record_var"};
+    if(!parsed->game.active||parsed->game.result_state<0||!object_keys_allowed(lifecycle,keys,2)){
+      set_error(error,error_size,"lifecycle requires a scored round-based game");goto fail;
+    }
+    const char *pause=json_string(lifecycle,"pause_action");
+    bool valid_pause=false;
+    for(int i=0;i<parsed->transition_count;i++){
+      const miniapp_transition_t *t=&parsed->transitions[i];
+      if(!strcmp(t->action,pause)&&t->from_state==parsed->game.playing_state&&t->to_state>=0
+        &&t->to_state!=parsed->game.playing_state&&t->to_state!=parsed->game.result_state){
+        for(int j=0;j<parsed->transition_count;j++){
+          const miniapp_transition_t *back=&parsed->transitions[j];
+          if(!strcmp(back->action,pause)&&back->from_state==t->to_state&&back->to_state==parsed->game.playing_state)valid_pause=true;
+        }
+      }
+    }
+    if(!pause[0]||!valid_pause||!runtime_has_button_action(parsed,pause)){
+      set_error(error,error_size,"lifecycle pause must leave playing through a declared input");goto fail;
+    }
+    copy_utf8(parsed->pause_action,sizeof(parsed->pause_action),pause);
+    if(cJSON_GetObjectItemCaseSensitive(lifecycle,"record_var")){
+      parsed->record_var=find_var(parsed,json_string(lifecycle,"record_var"));
+      if(parsed->record_var<0||parsed->vars[parsed->record_var].type!=MINIAPP_VAR_INT
+        ||parsed->record_var==parsed->game.score_var
+        ||(parsed->game.engine.bounded.motion&&parsed->record_var==parsed->game.charge_var)
+        ||!(parsed->save_vars&(1u<<parsed->record_var))){
+        set_error(error,error_size,"record_var requires an independent saved integer");goto fail;
+      }
+    }
+  }
+  if(parsed->surface.scene_view.enabled){
+    if(parsed->game.engine.kind!=PET_P4_GAME_BOUNDED){set_error(error,error_size,"scene view requires bounded scene");goto fail;}
+    for(int i=0;i<parsed->surface.scene_view.count;i++){
+      bool found=false;for(int j=0;j<parsed->game.engine.bounded.entity_count;j++)if(!strcmp(parsed->surface.scene_view.sprites[i].entity,parsed->game.engine.bounded.entities[j].id))found=true;
+      if(!found){set_error(error,error_size,"unknown scene view entity");goto fail;}
+    }
+  }
   parsed->active = true;
   refresh_view(parsed);
   *runtime = *parsed;
@@ -1385,12 +1827,15 @@ fail:
 
 static bool apply_effects(miniapp_runtime_t *runtime, const miniapp_effect_t *effects, int count) {
   bool changed = false;
+  int32_t original[MINIAPP_MAX_VARS];for(int i=0;i<runtime->var_count;i++)original[i]=runtime->vars[i].int_value;
   for (int i = 0; i < count; i += 1) {
     const miniapp_effect_t *effect = &effects[i];
     miniapp_var_t *var = &runtime->vars[effect->var_index];
     if (var->type == MINIAPP_VAR_INT) {
       int32_t next = effect->op == MINIAPP_EFFECT_INC
         ? clamp_i64((long long) var->int_value + effect->int_value) : effect->int_value;
+      if(effect->source_var>=0)next=original[effect->source_var];
+      if(next<var->int_min)next=var->int_min;if(next>var->int_max)next=var->int_max;
       if (next != var->int_value) {
         var->int_value = next;
         changed = true;
@@ -1413,9 +1858,15 @@ static bool game_command_for_action(
   if (strcmp(action, game->start_action) == 0) {
     *command = PET_P4_GAME_COMMAND_START;
   } else if (strcmp(action, game->left_action) == 0) {
-    *command = PET_P4_GAME_COMMAND_LEFT;
+    *command = game->absolute_directions?PET_P4_GAME_COMMAND_WEST:PET_P4_GAME_COMMAND_LEFT;
   } else if (strcmp(action, game->right_action) == 0) {
-    *command = PET_P4_GAME_COMMAND_RIGHT;
+    *command = game->absolute_directions?PET_P4_GAME_COMMAND_EAST:PET_P4_GAME_COMMAND_RIGHT;
+  } else if(game->up_action[0]&&!strcmp(action,game->up_action)){
+    *command=PET_P4_GAME_COMMAND_NORTH;
+  } else if(game->down_action[0]&&!strcmp(action,game->down_action)){
+    *command=PET_P4_GAME_COMMAND_SOUTH;
+  } else if(game->soft_drop_action[0]&&!strcmp(action,game->soft_drop_action)){
+    *command=PET_P4_GAME_COMMAND_SOFT_DROP;
   } else if (game->rotate_action[0] && strcmp(action, game->rotate_action) == 0) {
     *command = PET_P4_GAME_COMMAND_ROTATE;
   } else if (game->drop_action[0] && strcmp(action, game->drop_action) == 0) {
@@ -1432,10 +1883,18 @@ static bool sync_game_runtime(miniapp_runtime_t *runtime) {
   bool changed = false;
   miniapp_game_t *game = &runtime->game;
   if (!game->active) return false;
+  if(game->engine.bounded.motion&&game->charge_var>=0){
+    int charge=game->engine.frame.charge_percent;
+    if(runtime->vars[game->charge_var].int_value!=charge){runtime->vars[game->charge_var].int_value=charge;changed=true;}
+  }
   if (game->score_var >= 0
       && runtime->vars[game->score_var].int_value != game->engine.score) {
     runtime->vars[game->score_var].int_value = game->engine.score;
     changed = true;
+  }
+  if(runtime->record_var>=0&&game->engine.score>runtime->vars[runtime->record_var].int_value){
+    runtime->vars[runtime->record_var].int_value=game->engine.score;
+    changed=true;
   }
   if (game->result_state >= 0 && game->engine.game_over
       && runtime->current_state != game->result_state) {
@@ -1449,7 +1908,55 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
   bool handled = false;
   if (!action || !action[0]) return false;
   bool media=false;
+  char confirmed[48],confirmed_context[65]={0};
   portENTER_CRITICAL(&g_runtime_lock);
+  uint64_t context=((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;
+  if(g_confirm_action[0]&&(now_ms>=g_confirm_until||context!=g_confirm_context))g_confirm_action[0]=0;
+  bool approved=false;
+  if(g_confirm_action[0]){
+    bool yes=!strcmp(action,"input.confirm"),no=!strcmp(action,"input.cancel");
+    for(int i=0;i<g_runtime.button_count;i++)if(!strcmp(action,g_runtime.buttons[i].action)){
+      yes|=!strcmp(g_runtime.buttons[i].event,"button.sw1.short_press");
+      no|=!strcmp(g_runtime.buttons[i].event,"button.sw2.short_press");
+    }
+    if(no){g_confirm_action[0]=0;g_runtime.view.revision++;portEXIT_CRITICAL(&g_runtime_lock);return true;}
+    if(!yes){portEXIT_CRITICAL(&g_runtime_lock);return true;}
+    copy_utf8(confirmed,sizeof(confirmed),g_confirm_action);copy_utf8(confirmed_context,sizeof(confirmed_context),g_confirm_host_token);action=confirmed;approved=true;g_confirm_action[0]=0;g_runtime.view.revision++;
+  }
+  if(g_runtime.active&&g_runtime.input_v1&&!approved&&runtime_action_enabled(&g_runtime,action)){
+    if(g_runtime.app_host&&!pet_app_host_enabled(g_runtime.widget_id,action,now_ms)){portEXIT_CRITICAL(&g_runtime_lock);return true;}
+    for(int i=0;i<3;i++)if(g_runtime.confirm_actions[i][0]&&!strcmp(action,g_runtime.confirm_actions[i])){
+      copy_utf8(g_confirm_action,48,action);copy_utf8(g_confirm_prompt,121,g_runtime.confirm_prompts[i]);
+      g_confirm_host_token[0]=0;if(g_runtime.app_host)pet_app_host_context(g_runtime.widget_id,g_confirm_host_token);
+      g_confirm_until=now_ms+30000;g_confirm_context=context;g_runtime.view.revision++;
+      if(g_runtime.game.engine.bounded.motion){
+        pet_p4_game_release(&g_runtime.game.engine,true,now_ms);
+        sync_game_runtime(&g_runtime);refresh_view(&g_runtime);
+      }
+      portEXIT_CRITICAL(&g_runtime_lock);return true;
+    }
+  }
+  if(g_runtime.active&&g_runtime.input_v1&&!runtime_action_enabled(&g_runtime,action)){
+    portEXIT_CRITICAL(&g_runtime_lock);return false;
+  }
+  if(g_runtime.active&&g_runtime.app_host){
+    char id[48];copy_utf8(id,sizeof(id),g_runtime.widget_id);uint32_t rev=g_image_revision;uint8_t page=g_runtime.current_page<0?0:g_runtime.current_page;
+    bool declared=runtime_has_transition_action(&g_runtime,action);portEXIT_CRITICAL(&g_runtime_lock);
+    return declared&&(approved?pet_app_host_confirmed_action(id,rev,page,action,confirmed_context,now_ms):pet_app_host_action(id,rev,page,action,now_ms));
+  }
+  if(g_runtime.active&&g_runtime.local.enabled){
+    int32_t values[7];local_values(&g_runtime,values,false);
+    bool ok=pet_local_action(&g_runtime.local,&g_runtime.local_state,values,action,now_ms,local_wall_seconds(now_ms),esp_random());
+    if(ok){local_values(&g_runtime,values,true);refresh_local_view(&g_runtime,now_ms);}
+    portEXIT_CRITICAL(&g_runtime_lock);return ok;
+  }
+  if(g_runtime.active&&g_runtime.slicing) {
+    if(!pet_p4_touch_ready()){portEXIT_CRITICAL(&g_runtime_lock);return false;}
+    if(!strcmp(action,"slice.restart")) {pet_fruit_start_or_resume(&g_runtime.fruit,now_ms,(uint32_t)now_ms);handled=true;}
+    else if(!strcmp(action,"slice.pause")) {pet_fruit_pause(&g_runtime.fruit,now_ms);handled=true;}
+    portEXIT_CRITICAL(&g_runtime_lock);
+    return handled;
+  }
   if(g_runtime.active&&g_runtime.instrument) {
     portEXIT_CRITICAL(&g_runtime_lock);
     return !strcmp(action,"instrument.strike") && pet_p4_audio_instrument_strike(now_ms);
@@ -1459,7 +1966,7 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
     if(!media) {portEXIT_CRITICAL(&g_runtime_lock);return false;}
   }
   portEXIT_CRITICAL(&g_runtime_lock);
-  if(media)return pet_p4_media_action(action);
+  if(media){char source[48];if(pet_p4_miniapp_media_config(source,NULL))return pet_p4_media_live_action(source,action);return pet_p4_media_action(action);}
   portENTER_CRITICAL(&g_runtime_lock);
   if (!g_runtime.active) goto done;
   for (int i = 0; i < g_runtime.transition_count; i += 1) {
@@ -1468,8 +1975,19 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
     pet_p4_game_command_t game_command;
     if (strcmp(transition->action, action) != 0) continue;
     if (transition->from_state >= 0 && transition->from_state != g_runtime.current_state) continue;
+    bool resuming=false;
+    if(g_runtime.game.active&&g_runtime.pause_action[0]&&!strcmp(action,g_runtime.pause_action)
+        &&transition->to_state==g_runtime.game.playing_state&&g_runtime.current_state!=g_runtime.game.playing_state)
+      for(int t=0;t<g_runtime.transition_count;t++){
+        const miniapp_transition_t *p=&g_runtime.transitions[t];
+        if(g_runtime.pause_action[0]&&!strcmp(p->action,g_runtime.pause_action)&&p->from_state==g_runtime.current_state&&p->to_state==g_runtime.game.playing_state)resuming=true;
+      }
     if (transition->to_state >= 0 && transition->to_state != g_runtime.current_state) {
+      pet_p4_game_release(&g_runtime.game.engine,true,now_ms);
       g_runtime.current_state = transition->to_state;
+      // Paused time must never be replayed as catch-up motion on resume.
+      if(g_runtime.game.active)g_runtime.game.engine.last_tick_ms=now_ms;
+      for(int t=0;t<g_runtime.tick_count;t++)g_runtime.ticks[t].last_ms=now_ms;
       changed = true;
     }
     if (transition->page_op != -1 && g_runtime.page_count > 0) {
@@ -1483,7 +2001,7 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
       }
     }
     changed |= apply_effects(&g_runtime, transition->effects, transition->effect_count);
-    if (g_runtime.game.active
+    if (!resuming&&g_runtime.game.active
         && g_runtime.game.engine.kind == PET_P4_GAME_BOUNDED) {
       changed |= pet_p4_game_dispatch_action(
         &g_runtime.game.engine,
@@ -1491,7 +2009,7 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
         now_ms
       );
       changed |= sync_game_runtime(&g_runtime);
-    } else if (game_command_for_action(&g_runtime.game, action, &game_command)) {
+    } else if (!resuming&&game_command_for_action(&g_runtime.game, action, &game_command)) {
       changed |= pet_p4_game_command(&g_runtime.game.engine, game_command, now_ms);
       changed |= sync_game_runtime(&g_runtime);
     }
@@ -1500,6 +2018,9 @@ bool pet_p4_miniapp_dispatch_action(const char *action, uint64_t now_ms) {
     break;
   }
 done:
+  if(handled)for(int i=0;i<3;i++)if(g_runtime.cooldown_ms[i]&&!strcmp(g_runtime.cooldown_actions[i],action)){
+    g_runtime.cooldown_used|=1u<<i;g_runtime.cooldown_at[i]=now_ms;
+  }
   portEXIT_CRITICAL(&g_runtime_lock);
   return handled;
 }
@@ -1548,6 +2069,32 @@ done:
   return true;
 }
 
+static unsigned g_hold_owner;
+static uint64_t g_hold_context;
+static uint64_t hold_context(void){return ((uint64_t)g_input_epoch<<56)|((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;}
+bool pet_p4_miniapp_hold_input(const char *event_name){
+  char action[48];if(!pet_p4_miniapp_resolve_input(event_name,action,sizeof(action)))return false;
+  portENTER_CRITICAL(&g_runtime_lock);bool yes=g_runtime.hold_action[0]&&!strcmp(action,g_runtime.hold_action);portEXIT_CRITICAL(&g_runtime_lock);return yes;
+}
+bool pet_p4_miniapp_hold_event(const char *action,int phase,unsigned owner,uint64_t now_ms){
+  if(owner<1||owner>2||phase<0||phase>2)return false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(phase){
+    bool accepted=g_hold_owner==owner;
+    if(accepted){pet_p4_game_release(&g_runtime.game.engine,phase==2||g_hold_context!=hold_context()||!g_input_visible,now_ms);g_hold_owner=0;sync_game_runtime(&g_runtime);refresh_view(&g_runtime);}
+    portEXIT_CRITICAL(&g_runtime_lock);return accepted;
+  }
+  if(g_hold_owner&&g_hold_context!=hold_context()){pet_p4_game_release(&g_runtime.game.engine,true,now_ms);g_hold_owner=0;}
+  bool accepted=!g_hold_owner&&g_runtime.active&&action&&g_runtime.hold_action[0]&&!strcmp(action,g_runtime.hold_action);
+  unsigned revision=g_image_revision;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(!accepted||!pet_p4_miniapp_dispatch_action(action,now_ms))return false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  accepted=revision==g_image_revision&&g_runtime.game.engine.charging;
+  if(accepted){g_hold_owner=owner;g_hold_context=hold_context();}
+  portEXIT_CRITICAL(&g_runtime_lock);return accepted;
+}
+
 bool pet_p4_miniapp_dispatch_input(
   const char *event_name,
   uint64_t now_ms,
@@ -1564,7 +2111,15 @@ bool pet_p4_miniapp_dispatch_input(
   return pet_p4_miniapp_dispatch_action(resolved_action, now_ms);
 }
 
-void pet_p4_miniapp_process(uint64_t now_ms) {
+void pet_p4_miniapp_process(uint64_t now_ms, bool visible) {
+  char pause[PET_P4_MINIAPP_ACTION_MAX]={0};
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(g_input_visible!=visible){g_input_visible=visible;g_input_epoch++;g_confirm_action[0]=0;g_pressed_node=-1;pet_p4_game_release(&g_runtime.game.engine,true,now_ms);}
+  if(!visible&&g_runtime.active&&g_runtime.game.active
+     &&g_runtime.current_state==g_runtime.game.playing_state)
+    copy_utf8(pause,sizeof(pause),g_runtime.pause_action);
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(pause[0])pet_p4_miniapp_dispatch_action(pause,now_ms);
   pet_p4_media_tick(now_ms);
   bool changed = false;
   portENTER_CRITICAL(&g_runtime_lock);
@@ -1610,14 +2165,26 @@ void pet_p4_miniapp_process(uint64_t now_ms) {
     }
     if (!completed) tick->last_ms += (uint64_t) steps * tick->every_ms;
   }
-  if (g_runtime.game.active
+  bool motion_confirm=g_runtime.game.engine.bounded.motion&&g_confirm_action[0]
+    &&now_ms<g_confirm_until&&g_confirm_context==(((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page);
+  if(g_runtime.game.active&&(!visible||motion_confirm||g_runtime.current_state!=g_runtime.game.playing_state))
+    g_runtime.game.engine.last_tick_ms=now_ms;
+  if (visible && !motion_confirm && g_runtime.game.active
       && g_runtime.current_state == g_runtime.game.playing_state) {
     changed |= pet_p4_game_process(&g_runtime.game.engine, now_ms);
     changed |= sync_game_runtime(&g_runtime);
   }
   if (changed) refresh_view(&g_runtime);
+  if(g_runtime.local.enabled){
+    int32_t values[7];local_values(&g_runtime,values,false);
+    bool update=pet_local_tick(&g_runtime.local,&g_runtime.local_state,values,now_ms,local_wall_seconds(now_ms));
+    local_values(&g_runtime,values,true);
+    if(update||!g_runtime.view.eyebrow[0])refresh_local_view(&g_runtime,now_ms);
+  }
 done:
   portEXIT_CRITICAL(&g_runtime_lock);
+  static uint64_t saved_at;
+  if(now_ms-saved_at>=1000){saved_at=now_ms;save_app_runtime();}
 }
 
 bool pet_p4_miniapp_active(void) {
@@ -1628,10 +2195,255 @@ bool pet_p4_miniapp_active(void) {
   return active;
 }
 
+bool pet_p4_miniapp_slicing_active(void) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&g_runtime.slicing;
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+bool pet_p4_miniapp_fruit_snapshot(pet_fruit_t *out) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&g_runtime.slicing;
+  if(active&&out)*out=g_runtime.fruit;
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+void pet_p4_miniapp_fruit_process(uint64_t now_ms,bool visible) {
+  unsigned sounds=0,volume=0;
+  bool audible=false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(g_runtime.active&&g_runtime.slicing) {
+    if(visible)pet_fruit_tick(&g_runtime.fruit,now_ms);
+    else pet_fruit_suspend(&g_runtime.fruit,now_ms);
+    sounds=g_runtime.fruit.sounds;volume=g_runtime.fruit.sound_volume;g_runtime.fruit.sounds=0;
+    audible=visible&&g_runtime.fruit.phase!=PET_FRUIT_PAUSED;
+  }
+  portEXIT_CRITICAL(&g_runtime_lock);
+  pet_p4_audio_fruit_sound(audible?sounds:0,volume,audible);
+}
+bool pet_p4_miniapp_pointer_active(void){
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&(g_runtime.surface.app||g_runtime.surface.media_touch||(g_runtime.instrument&&g_runtime.input_v1));
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+bool pet_p4_miniapp_input_policy(const char *event_name,bool press) {
+  bool enabled=false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  /* Only explicit opt-in permits repeated mutations. */
+  if(g_runtime.active&&g_runtime.input_v1)for(int i=0;i<g_runtime.button_count;i++)
+    if(!strcmp(event_name,g_runtime.buttons[i].event)){
+      enabled=((press?g_runtime.press_mask:g_runtime.repeat_mask)&(1u<<i))!=0;
+      break;
+    }
+  portEXIT_CRITICAL(&g_runtime_lock);return enabled;
+}
+uint64_t pet_p4_miniapp_input_context(void) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  uint64_t context=((uint64_t)g_image_revision<<24)|((uint64_t)g_input_epoch<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;
+  portEXIT_CRITICAL(&g_runtime_lock);return context;
+}
+bool pet_p4_miniapp_confirmation(char prompt[121],uint64_t now_ms) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  uint64_t context=((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;
+  bool active=g_confirm_action[0]&&now_ms<g_confirm_until&&context==g_confirm_context;
+  if(!active)g_confirm_action[0]=0;
+  if(active&&prompt)copy_utf8(prompt,121,g_confirm_prompt);
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+
+static void miniapp_drag_point(miniapp_runtime_t *r,int x,int y){
+  const pet_surface_scene_view_t *v=&r->surface.scene_view;
+  if(!r->drag_axis||!v->enabled||r->game.engine.kind!=PET_P4_GAME_BOUNDED||r->current_state!=r->game.playing_state)return;
+  int w=r->game.engine.width,h=r->game.engine.height;if(!w||!h)return;
+  int cell=v->w/w;if(v->h/h<cell)cell=v->h/h;if(cell<1)return;
+  int ox=v->x+(v->w-cell*w)/2,oy=v->y+(v->h-cell*h)/2;
+  for(int i=0;i<r->game.engine.bounded.entity_count;i++)if(!strcmp(r->drag_entity,r->game.engine.bounded.entities[i].id)){
+    if(pet_p4_game_pointer(&r->game.engine,i,(x-ox)/cell,(y-oy)/cell,r->drag_axis)){sync_game_runtime(r);refresh_view(r);}
+    break;
+  }
+}
+void pet_p4_miniapp_pointer(const pet_p4_pointer_event_t *event) {
+  static bool touch_holding=false;
+  static int hold_x,hold_y,hold_w,hold_h;
+  static bool pressed=false;
+  static bool stroke=false;
+  static bool early=false;
+  static bool dragging=false;
+  static int media_row=-1,slider_node=-1;
+  static uint32_t media_revision;
+  static int start_x,start_y;
+  static uint64_t start_ms;
+  static int8_t press_page,press_state;
+  static int press_node=-1;
+  static unsigned press_revision;
+  static uint8_t press_epoch;
+  static char press_widget[48],press_action[48];
+  char dispatch[48]={0};
+  int select_row=-1,set_volume=-1;
+  char media_source[48]={0};
+  if(!event)return;
+  if(touch_holding&&event->kind!=PET_P4_POINTER_DOWN){
+    bool outside=event->x<hold_x||event->x>=hold_x+hold_w||event->y<hold_y||event->y>=hold_y+hold_h;
+    if(event->kind==PET_P4_POINTER_UP||event->kind==PET_P4_POINTER_CANCEL||outside){
+      pet_p4_miniapp_hold_event(NULL,event->kind==PET_P4_POINTER_UP&&!outside?1:2,2,event->ts_ms);touch_holding=false;g_pressed_node=-1;
+    }
+    return;
+  }
+  if(touch_holding){pet_p4_miniapp_hold_event(NULL,2,2,event->ts_ms);touch_holding=false;}
+  bool begin_hold=false;
+    static EXT_RAM_BSS_ATTR pet_p4_media_view_t media_view;pet_p4_media_view(&media_view);
+  if(pet_p4_miniapp_confirmation(NULL,event->ts_ms)){
+    static int confirm_button;
+    if(event->kind==PET_P4_POINTER_DOWN){
+      confirm_button=event->y>=276&&event->y<332&&event->x>=136&&event->x<504?(event->x<312?1:2):0;
+      start_x=event->x;start_y=event->y;start_ms=event->ts_ms;
+    }else if(event->kind==PET_P4_POINTER_UP){
+      int target=event->y>=276&&event->y<332&&event->x>=136&&event->x<504?(event->x<312?1:2):0;
+      if(target&&target==confirm_button&&event->ts_ms-start_ms<700&&abs(event->x-start_x)<=14&&abs(event->y-start_y)<=14)
+        pet_p4_miniapp_dispatch_action(target==1?"input.cancel":"input.confirm",event->ts_ms);
+      confirm_button=0;
+    }else if(event->kind==PET_P4_POINTER_CANCEL)confirm_button=0;
+    stroke=pressed=dragging=false;g_pressed_node=-1;return;
+  }
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(dragging&&event->kind!=PET_P4_POINTER_DOWN){
+    bool same=press_epoch==g_input_epoch&&press_state==g_runtime.current_state&&press_revision==g_image_revision&&!strcmp(press_widget,g_runtime.widget_id);
+    if(same&&(event->kind==PET_P4_POINTER_MOVE||event->kind==PET_P4_POINTER_UP))miniapp_drag_point(&g_runtime,event->x,event->y);
+    if(!same||event->kind==PET_P4_POINTER_UP||event->kind==PET_P4_POINTER_CANCEL)dragging=false;
+    stroke=pressed=false;g_pressed_node=-1;portEXIT_CRITICAL(&g_runtime_lock);return;
+  }
+  if(event->kind==PET_P4_POINTER_DOWN)dragging=false;
+  if(g_runtime.active&&g_runtime.slicing)pet_fruit_pointer(&g_runtime.fruit,event);
+  if(g_runtime.active&&g_runtime.instrument&&g_runtime.input_v1&&event->kind==PET_P4_POINTER_DOWN)
+    copy_utf8(dispatch,sizeof(dispatch),"instrument.strike");
+  if(g_runtime.active&&(g_runtime.surface.app||g_runtime.surface.media_touch)){
+    int current_page=g_runtime.surface.media_touch?media_view.page:g_runtime.current_page;
+    if(event->kind==PET_P4_POINTER_DOWN){
+      stroke=pressed=true;early=false;start_x=event->x;start_y=event->y;start_ms=event->ts_ms;press_action[0]=0;press_node=-1;
+      media_row=slider_node=-1;media_revision=media_view.queue_revision;
+      copy_utf8(press_widget,sizeof(press_widget),g_runtime.widget_id);
+      press_page=current_page;press_state=g_runtime.current_state;press_revision=g_image_revision;
+      press_epoch=g_input_epoch;
+      int page=current_page<0?0:current_page;
+      for(int i=g_runtime.surface.count-1;i>=0;i--){
+        const pet_surface_node_t *n=&g_runtime.surface.nodes[i];
+        if(n->state_mask&&!(n->state_mask&(1u<<g_runtime.current_state)))continue;
+        if(g_runtime.app_host&&((n->host_mask&&!(n->host_mask&(1u<<pet_app_host_mode(g_runtime.widget_id,event->ts_ms))))||!pet_app_host_enabled(g_runtime.widget_id,n->action,event->ts_ms)))continue;
+        if(g_runtime.input_v1&&g_runtime.surface.media_touch&&(n->page==2||n->page==current_page)){
+          if(n->type==4&&n->h>=48&&event->x>=n->x&&event->x<n->x+n->w&&event->y>=n->y&&event->y<n->y+n->h){
+            int rows=n->h/48,row=(media_view.selected/rows)*rows+(event->y-n->y)/48;
+            if(row<media_view.count){media_row=row;press_node=i;break;}
+          }
+          if(n->type==2&&n->bind==4&&event->x>=n->x&&event->x<n->x+n->w&&event->y>=n->y-20&&event->y<n->y+n->h+20){
+            slider_node=press_node=i;break;
+          }
+        }
+        if(!runtime_action_enabled(&g_runtime,n->action))continue;
+        int show=n->show_var[0]?find_var(&g_runtime,n->show_var):-1;
+        if(show>=0&&(g_runtime.vars[show].int_value<n->show_min||g_runtime.vars[show].int_value>n->show_max))continue;
+        if(n->action[0]&&(n->page==(g_runtime.surface.media_touch?2:4)||n->page==page)&&event->x>=n->x&&event->x<n->x+n->w&&event->y>=n->y&&event->y<n->y+n->h){copy_utf8(press_action,sizeof(press_action),n->action);press_node=i;break;}
+      }
+      g_pressed_node=press_node;
+      if(press_node>=0&&g_runtime.hold_action[0]&&!strcmp(press_action,g_runtime.hold_action)){
+        const pet_surface_node_t *n=&g_runtime.surface.nodes[press_node];hold_x=n->x;hold_y=n->y;hold_w=n->w;hold_h=n->h;
+        copy_utf8(dispatch,sizeof(dispatch),press_action);begin_hold=true;early=true;
+      }
+      g_pressed_context=((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;
+      for(int b=0;b<g_runtime.button_count;b++)if(g_runtime.input_v1&&(g_runtime.press_mask&(1u<<b))&&!strcmp(press_action,g_runtime.buttons[b].action)){
+        copy_utf8(dispatch,sizeof(dispatch),press_action);early=true;break;
+      }
+      const pet_surface_scene_view_t *v=&g_runtime.surface.scene_view;
+      if(press_node<0&&g_runtime.drag_axis&&v->enabled&&g_runtime.current_state==g_runtime.game.playing_state
+         &&event->x>=v->x&&event->x<v->x+v->w&&event->y>=v->y&&event->y<v->y+v->h){
+        dragging=true;early=true;miniapp_drag_point(&g_runtime,event->x,event->y);
+      }
+    }else if(event->kind==PET_P4_POINTER_MOVE&&(abs(event->x-start_x)>14||abs(event->y-start_y)>14)){pressed=false;g_pressed_node=-1;}
+    else if(event->kind==PET_P4_POINTER_UP){
+      bool same=stroke&&!early&&press_epoch==g_input_epoch&&press_page==current_page&&press_state==g_runtime.current_state&&press_revision==g_image_revision&&!strcmp(press_widget,g_runtime.widget_id)&&event->ts_ms>=start_ms&&event->ts_ms-start_ms<700;
+      int dx=event->x-start_x,dy=event->y-start_y,ax=abs(dx),ay=abs(dy);
+      bool media_same=stroke&&press_epoch==g_input_epoch&&press_page==current_page&&press_revision==g_image_revision&&media_revision==media_view.queue_revision&&!strcmp(press_widget,g_runtime.widget_id)&&event->ts_ms>=start_ms;
+      if(media_same&&media_row>=0&&event->ts_ms-start_ms<700&&ax<=14&&ay<=14){
+        select_row=media_row;copy_utf8(media_source,48,g_runtime.media_source);pressed=false;
+      }else if(media_same&&slider_node>=0&&slider_node<g_runtime.surface.count&&event->ts_ms-start_ms<10000&&ay<=28){
+        const pet_surface_node_t *n=&g_runtime.surface.nodes[slider_node];
+        set_volume=(event->x-n->x)*100/n->w;if(set_volume<0)set_volume=0;if(set_volume>100)set_volume=100;
+        copy_utf8(media_source,48,g_runtime.media_source);pressed=false;
+      }
+      if(same&&g_runtime.input_v1&&(ax>=40||ay>=40)&&(ax*2>=ay*3||ay*2>=ax*3)){
+        int direction=ax>ay?(dx<0?0:1):(dy<0?2:3);
+        const char *action=g_runtime.swipe_actions[direction];
+        if(action[0]&&runtime_action_enabled(&g_runtime,action))copy_utf8(dispatch,sizeof(dispatch),action);
+        pressed=false;
+      }
+      if(press_node<0||press_node>=g_runtime.surface.count)pressed=false;
+      else {
+        const pet_surface_node_t *n=&g_runtime.surface.nodes[press_node];
+        int show=n->show_var[0]?find_var(&g_runtime,n->show_var):-1;
+        if(show>=0&&(g_runtime.vars[show].int_value<n->show_min||g_runtime.vars[show].int_value>n->show_max))pressed=false;
+        if(event->x<n->x||event->x>=n->x+n->w||event->y<n->y||event->y>=n->y+n->h)pressed=false;
+      }
+      if(pressed&&same&&runtime_action_enabled(&g_runtime,press_action)&&abs(event->x-start_x)<=14&&abs(event->y-start_y)<=14)copy_utf8(dispatch,sizeof(dispatch),press_action);
+      stroke=pressed=false;g_pressed_node=-1;
+    }else if(event->kind==PET_P4_POINTER_CANCEL){stroke=pressed=false;g_pressed_node=-1;}
+  }else {stroke=pressed=false;g_pressed_node=-1;}
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(media_source[0])pet_p4_media_touch(media_source,select_row,set_volume,media_revision,event->ts_ms);
+  if(dispatch[0]){if(begin_hold){touch_holding=pet_p4_miniapp_hold_event(dispatch,0,2,event->ts_ms);stroke=pressed=false;}else pet_p4_miniapp_dispatch_action(dispatch,event->ts_ms);}
+}
+
 bool pet_p4_miniapp_media_active(void) {
   portENTER_CRITICAL(&g_runtime_lock);
   bool active=g_runtime.active&&g_runtime.media;
   portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+bool pet_p4_miniapp_app_surface(pet_surface_t *surface) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&g_runtime.surface.app;
+  if(active&&surface){
+    *surface=g_runtime.surface;
+    static const char *const events[]={"button.sw1.short_press","button.sw2.short_press","button.sw3.short_press","button.encoder.short_press","button.encoder.long_press","knob.rotate_ccw","knob.rotate_cw","joystick.up","joystick.down"};
+    static const char *const labels[]={"SW1","SW2","SW3","中按","中长","左","右","上","下"};
+    for(int i=0;i<surface->count;i++){
+      pet_surface_node_t *n=&surface->nodes[i];
+      n->disabled=n->action[0]&&!runtime_action_enabled(&g_runtime,n->action);
+      if(g_runtime.app_host&&n->action[0]&&!pet_app_host_enabled(g_runtime.widget_id,n->action,esp_timer_get_time()/1000ULL))n->disabled=true;
+      uint64_t context=((uint64_t)g_image_revision<<16)|((uint8_t)g_runtime.current_state<<8)|(uint8_t)g_runtime.current_page;
+      n->pressed=!n->disabled&&i==g_pressed_node&&g_pressed_context==context;
+      int show=n->show_var[0]?find_var(&g_runtime,n->show_var):-1;
+      n->hidden=(show>=0&&(g_runtime.vars[show].int_value<n->show_min||g_runtime.vars[show].int_value>n->show_max))||(n->state_mask&&!(n->state_mask&(1u<<g_runtime.current_state)));
+      if(n->host_mask&&!(n->host_mask&(1u<<pet_app_host_mode(g_runtime.widget_id,esp_timer_get_time()/1000ULL))))n->hidden=true;
+      int tile=n->tile_var[0]?find_var(&g_runtime,n->tile_var):-1;
+      if(tile>=0&&n->tile_cols){
+        int64_t value=g_runtime.vars[tile].int_value;
+        int max=n->tile_max_var[0]?find_var(&g_runtime,n->tile_max_var):-1;
+        if(max>=0){int32_t total=g_runtime.vars[max].int_value;value=total>0?value*n->tile_cols/total:0;if(value<0)value=0;if(value>=n->tile_cols)value=n->tile_cols-1;}
+        else value=(value%n->tile_cols+n->tile_cols)%n->tile_cols;
+        n->tile_index=value;
+      }
+      if(!n->key_for[0])continue;
+      copy_utf8(n->text,sizeof(n->text),"—");
+      for(int b=0;b<g_runtime.button_count;b++)if(!strcmp(n->key_for,g_runtime.buttons[b].action)){
+        for(int e=0;e<9;e++)if(!strcmp(g_runtime.buttons[b].event,events[e]))copy_utf8(n->text,sizeof(n->text),labels[e]);
+        break;
+      }
+    }
+  }
+  portEXIT_CRITICAL(&g_runtime_lock);return active;
+}
+bool pet_p4_miniapp_media_config(char source[48],pet_surface_t *surface) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool active=g_runtime.active&&g_runtime.media&&g_runtime.surface.count;
+  if(active){memcpy(source,g_runtime.media_source,48);if(surface)*surface=g_runtime.surface;}
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return active;
+}
+
+bool pet_p4_miniapp_media_surface_animated(void) {
+  bool animated=false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(g_runtime.active&&g_runtime.media)for(int i=0;i<g_runtime.surface.count;i++){
+    if(g_runtime.surface.nodes[i].rotate_ms){animated=true;break;}
+  }
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return animated;
 }
 
 bool pet_p4_miniapp_instrument_config(uint8_t *effect, uint8_t *ambience) {
@@ -1659,14 +2471,49 @@ bool pet_p4_miniapp_get_view(pet_p4_miniapp_view_t *out) {
   portENTER_CRITICAL(&g_runtime_lock);
   *out = g_runtime.view;
   portEXIT_CRITICAL(&g_runtime_lock);
+  if(out->app_host)pet_app_host_view(out,esp_timer_get_time()/1000ULL);
   pet_p4_widget_data_view(out->data_source, out->data_page, esp_timer_get_time() / 1000ULL, &out->data);
   return true;
+}
+
+void pet_p4_miniapp_host_process(uint64_t now_ms,bool visible){
+  char media_source[48]="";
+  bool media_active=pet_p4_miniapp_media_config(media_source,NULL);
+  pet_p4_media_visibility(media_source,visible&&media_active,now_ms);
+  static char prior[48];
+  char id[48]="";uint32_t rev;uint8_t page;
+  portENTER_CRITICAL(&g_runtime_lock);
+  if(g_runtime.active&&g_runtime.app_host)copy_utf8(id,sizeof(id),g_runtime.widget_id);
+  rev=g_image_revision;page=g_runtime.current_page<0?0:g_runtime.current_page;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if(prior[0]&&(!visible||strcmp(prior,id))){
+    static EXT_RAM_BSS_ATTR pet_p4_media_view_t media;pet_p4_media_view(&media);
+    if(!strncmp(media.source,"app.",4)&&!strcmp(media.source+4,prior)&&pet_p4_audio_music_active())pet_p4_audio_stream_flush();
+  }
+  copy_utf8(prior,sizeof(prior),id);
+  if(id[0])pet_app_host_tick(id,rev,page,visible,now_ms);
+}
+bool pet_p4_miniapp_host_source(const char *source){
+  if(!source||strncmp(source,"app.",4))return false;
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool ok=g_runtime.active&&g_runtime.app_host&&!strcmp(source+4,g_runtime.widget_id);
+  portEXIT_CRITICAL(&g_runtime_lock);return ok;
+}
+
+bool pet_p4_miniapp_get_surface_images(pet_p4_miniapp_sprite_pack_t *out,uint32_t *revision) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool changed=*revision!=g_image_revision;
+  if(changed){*revision=g_image_revision;out->count=g_runtime.sprites.count;out->data_length=g_runtime.sprites.data_length;
+    memcpy(out->items,g_runtime.sprites.items,sizeof(out->items));memcpy(out->pixels,g_runtime.sprites.pixels,out->data_length);}
+  portEXIT_CRITICAL(&g_runtime_lock);return changed;
 }
 
 bool pet_p4_miniapp_get_sprites(pet_p4_miniapp_sprite_pack_t *out) {
   if (!out) return false;
   portENTER_CRITICAL(&g_runtime_lock);
-  *out = g_runtime.sprites;
+  out->count=g_runtime.sprites.count;out->data_length=g_runtime.sprites.data_length;
+  memcpy(out->items,g_runtime.sprites.items,sizeof(out->items));
+  memcpy(out->pixels,g_runtime.sprites.pixels,out->data_length);
   portEXIT_CRITICAL(&g_runtime_lock);
   return out->count > 0;
 }
@@ -1761,9 +2608,13 @@ bool pet_p4_miniapp_installed_id(char *out, size_t out_size) {
 
 static bool write_file_atomic(const char *tmp_path, const char *path, const char *data, size_t len) {
   FILE *file = fopen(tmp_path, "wb");
-  if (!file) return false;
+  if (!file) {
+    snprintf(g_storage_failure, sizeof(g_storage_failure), "open %s errno=%d", tmp_path, errno);
+    return false;
+  }
   bool ok = fwrite(data, 1, len, file) == len && fflush(file) == 0;
-  fclose(file);
+  int saved_errno = errno;
+  if (fclose(file) != 0) { ok = false; saved_errno = errno; }
   /*
    * SPIFFS garbage collection can take several seconds when the appearance
    * partition is populated. Let the idle task run between transactional file
@@ -1771,11 +2622,17 @@ static bool write_file_atomic(const char *tmp_path, const char *path, const char
    */
   vTaskDelay(pdMS_TO_TICKS(1));
   if (!ok) {
+    snprintf(g_storage_failure, sizeof(g_storage_failure), "write/close %s errno=%d bytes=%u", tmp_path, saved_errno, (unsigned)len);
     remove(tmp_path);
     return false;
   }
-  remove(path);
+  if (remove(path) != 0 && errno != ENOENT) {
+    snprintf(g_storage_failure, sizeof(g_storage_failure), "replace %s errno=%d", path, errno);
+    remove(tmp_path);
+    return false;
+  }
   if (rename(tmp_path, path) != 0) {
+    snprintf(g_storage_failure, sizeof(g_storage_failure), "rename %s errno=%d", path, errno);
     remove(tmp_path);
     return false;
   }
@@ -1808,6 +2665,10 @@ static uint32_t sprite_pack_checksum(const pet_p4_miniapp_sprite_pack_t *pack) {
     SPRITE_CHECKSUM_BYTES(sprite->id, strlen(sprite->id) + 1);
     SPRITE_CHECKSUM_BYTES(&sprite->frame_width, 1);
     SPRITE_CHECKSUM_BYTES(&sprite->frame_height, 1);
+    // Preserve existing package checksums; high dimensions only exist in P4J1.
+    if(sprite->frame_width>255||sprite->frame_height>255){
+      uint8_t hi[2]={sprite->frame_width>>8,sprite->frame_height>>8};SPRITE_CHECKSUM_BYTES(hi,2);
+    }
     SPRITE_CHECKSUM_BYTES(&sprite->frames, 1);
     SPRITE_CHECKSUM_BYTES(&sprite->fps, 1);
     if ((size_t) sprite->data_offset + sprite->data_length > pack->data_length) return 0;
@@ -1904,9 +2765,16 @@ static bool append_sprite_file(
   }
   if (sprite_pack_find(pack, id) >= 0) return true;
   if (pack->count >= PET_P4_MINIAPP_SPRITE_MAX
-      || memcmp(file_data, "P4S1", 4) != 0) {
+      || (memcmp(file_data, "P4S1", 4) != 0 && memcmp(file_data,"P4I1",4)!=0 && memcmp(file_data,"P4I2",4)!=0 && memcmp(file_data,"P4J1",4)!=0)) {
     set_error(error, error_size, "sprite file header is unsupported");
     return false;
+  }
+  if(!memcmp(file_data,"P4I1",4)||!memcmp(file_data,"P4I2",4)||!memcmp(file_data,"P4J1",4)) {
+    if(!pet_image_decode(file_data,file_length,NULL,0)||pack->data_length+file_length>sizeof(pack->pixels)){set_error(error,error_size,"invalid bounded image");return false;}
+    sprite=&pack->items[pack->count++];memset(sprite,0,sizeof(*sprite));copy_utf8(sprite->id,sizeof(sprite->id),id);
+    bool wide=file_data[2]=='J'||file_data[3]=='2';sprite->frame_width=wide?(file_data[4]|(uint16_t)file_data[5]<<8):file_data[4];sprite->frame_height=wide?(file_data[6]|(uint16_t)file_data[7]<<8):file_data[5];sprite->frames=1;sprite->fps=0;
+    sprite->data_offset=pack->data_length;sprite->data_length=file_length;
+    memcpy(pack->pixels+pack->data_length,file_data,file_length);pack->data_length+=file_length;return true;
   }
   const uint8_t frame_width = file_data[4];
   const uint8_t frame_height = file_data[5];
@@ -1921,7 +2789,7 @@ static bool append_sprite_file(
   }
   pixel_count = (size_t) frame_width * frame_height * frames;
   pixel_bytes = pixel_count * 3U;
-  if (file_length != MINIAPP_SPRITE_FILE_HEADER_SIZE + pixel_bytes
+  if (pixel_bytes>4096*3 || file_length != MINIAPP_SPRITE_FILE_HEADER_SIZE + pixel_bytes
       || (size_t) pack->data_length + pixel_bytes > sizeof(pack->pixels)) {
     set_error(error, error_size, "sprite pixel payload is invalid or too large");
     return false;
@@ -1934,13 +2802,13 @@ static bool append_sprite_file(
   sprite->frames = frames;
   sprite->fps = fps;
   sprite->data_offset = pack->data_length;
-  sprite->data_length = (uint16_t) pixel_bytes;
+  sprite->data_length = (uint32_t) pixel_bytes;
   memcpy(
     pack->pixels + pack->data_length,
     file_data + MINIAPP_SPRITE_FILE_HEADER_SIZE,
     pixel_bytes
   );
-  pack->data_length = (uint16_t) ((size_t) pack->data_length + pixel_bytes);
+  pack->data_length = (uint32_t) ((size_t) pack->data_length + pixel_bytes);
   pack->count += 1;
   return true;
 }
@@ -1966,6 +2834,7 @@ static bool load_sprite_pack(
         "sprites"
       )
     : NULL;
+  if(!sprites && root) sprites=cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root,"surface"),"images");
   if (!sprites) {
     ok = true;
     goto done;
@@ -2008,8 +2877,16 @@ static bool persist_sprite_pack(
   uint8_t *file_data = NULL;
   bool ok = true;
   if (!pack) return false;
-  file_data = (uint8_t *) malloc(MINIAPP_SPRITE_FILE_MAX);
-  if (!file_data && pack->count > 0) return false;
+  /* Surface images are already encoded and written directly. Only legacy
+   * animated sprites need a temporary P4S header; avoid an unused 128 KiB
+   * allocation during every full-resolution surface transaction. */
+  for (uint8_t i = 0; i < pack->count; ++i) {
+    if (pack->items[i].fps) {
+      file_data = (uint8_t *) malloc(MINIAPP_SPRITE_FILE_MAX);
+      if (!file_data) { snprintf(g_storage_failure, sizeof(g_storage_failure), "sprite scratch allocation failed"); return false; }
+      break;
+    }
+  }
   for (uint8_t index = 0; index < PET_P4_MINIAPP_SPRITE_MAX; index += 1) {
     char path[48];
     char temporary_path[48];
@@ -2024,6 +2901,10 @@ static bool persist_sprite_pack(
     if ((size_t) sprite->data_offset + sprite->data_length > pack->data_length) {
       ok = false;
       break;
+    }
+    if(sprite->fps==0){
+      if(!write_file_atomic(temporary_path,path,(const char*)pack->pixels+sprite->data_offset,sprite->data_length)){ok=false;break;}
+      continue;
     }
     memcpy(file_data, "P4S1", 4);
     file_data[4] = sprite->frame_width;
@@ -2244,6 +3125,10 @@ static bool load_catalog_runtime_item(
     error,
     error_size
   );
+  if (ok) {
+    item->image_count = sprites->count;
+    item->resource_state = pet_p4_builtin_is_bootstrap(item->widget_id, widget_checksum) ? 2 : 1;
+  }
 
 done:
   free(widget_json);
@@ -2258,6 +3143,7 @@ static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
   if (!snapshot) return false;
   runtime = (miniapp_runtime_t *) calloc(1, sizeof(*runtime));
   if (!runtime) return false;
+  bool complete = true;
   for (size_t i = 0; i < snapshot->count; i += 1) {
     bool missing_checksums = snapshot->items[i].widget_checksum == 0
       || snapshot->items[i].buttons_checksum == 0;
@@ -2278,14 +3164,15 @@ static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
         snapshot->items[i].widget_id,
         error
       );
-      free(runtime);
-      return false;
+      snapshot->items[i].resource_state = 3;
+      complete = false;
+      continue;
     }
     snapshot->needs_upgrade |= missing_checksums;
   }
   free(runtime);
-  snapshot->valid = true;
-  return true;
+  snapshot->valid = complete;
+  return complete;
 }
 
 static bool load_catalog_snapshot(
@@ -2315,7 +3202,6 @@ static bool load_catalog_snapshot(
       || sequence->valuedouble > UINT32_MAX) {
     goto fail;
   }
-  snapshot->parsed = true;
   snapshot->needs_upgrade = version->valueint != MINIAPP_CATALOG_VERSION;
   snapshot->sequence = (uint32_t) sequence->valuedouble;
   active_widget_id = cJSON_GetObjectItemCaseSensitive(root, "activeWidgetId");
@@ -2389,7 +3275,8 @@ static bool load_catalog_snapshot(
     snapshot->active_widget_id[0] = '\0';
     snapshot->needs_upgrade = true;
   }
-  if (!validate_catalog_snapshot(snapshot)) goto fail;
+  snapshot->parsed = true;
+  (void) validate_catalog_snapshot(snapshot);
   cJSON_Delete(root);
   free(json);
   return true;
@@ -2438,6 +3325,7 @@ static bool parse_bounded_sprites(
     "id", "asset", "frame_width", "frame_height", "frames", "fps",
   };
   if (!sprites) {
+    if(runtime&&runtime->surface.scene_view.enabled)return true;
     if (runtime && runtime->sprites.count > 0) {
       set_error(error, error_size, "component contains undeclared sprite data");
       return false;
@@ -2893,6 +3781,11 @@ static bool parse_bounded_op(
     op->kind = strcmp(name, "show") == 0 ? PET_P4_GAME_OP_SHOW : PET_P4_GAME_OP_HIDE;
     return true;
   }
+  if(!strcmp(name,"charge")){
+    static const char *const keys[]={"op","entity"};
+    if(!config->motion||!object_keys_allowed(object,keys,2)||!parse_bounded_entity_ref(config,object,"entity",&op->entity_index))return false;
+    op->kind=PET_P4_GAME_OP_CHARGE;return true;
+  }
   if (strcmp(name, "score") == 0) {
     static const char *const allowed[] = {"op", "add", "set"};
     const cJSON *add = cJSON_GetObjectItemCaseSensitive(object, "add");
@@ -2990,8 +3883,8 @@ static bool parse_bounded_rules(
     rule->with_index = -1;
     if (strcmp(on, "tick") == 0) {
       rule->trigger = PET_P4_GAME_TRIGGER_TICK;
-    } else if (strcmp(on, "collision") == 0) {
-      rule->trigger = PET_P4_GAME_TRIGGER_COLLISION;
+    } else if (strcmp(on, "collision") == 0 || (config->motion&&!strcmp(on,"landed"))) {
+      rule->trigger = !strcmp(on,"landed")?PET_P4_GAME_TRIGGER_LANDED:PET_P4_GAME_TRIGGER_COLLISION;
       if (!parse_bounded_entity_ref(config, item, "entity", &rule->entity_index)
           || !parse_bounded_entity_ref(config, item, "with", &rule->with_index)
           || rule->entity_index == rule->with_index) {
@@ -3053,7 +3946,7 @@ static bool parse_bounded_scene(
 ) {
   static const char *const allowed[] = {
     "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-    "grid", "sprites", "entities", "rules",
+    "grid", "sprites", "entities", "rules", "motion",
   };
   pet_p4_bounded_game_config_t config;
   const cJSON *tick;
@@ -3062,11 +3955,40 @@ static bool parse_bounded_scene(
   const char *result_state;
   int tick_ms;
   if (!scene) return true;
+  if (!strcmp(json_string(scene,"engine"),"p4-touch-slice-v1")) {
+    static const char *const keys[]={"engine","duration_sec","lives","sound_volume","sprites","revision"};
+    int seconds,lives,volume,revision=1;
+    const cJSON *revision_value=cJSON_GetObjectItemCaseSensitive(scene,"revision");
+    if(!runtime_v4 || !object_keys_allowed(scene,keys,6)
+       || (revision_value&&!json_int_range(revision_value,1,2,&revision))
+       || runtime->var_count || runtime->tick_count || runtime->page_count || runtime->media || runtime->instrument || runtime->data_source[0]
+       || runtime->state_count!=1 || strcmp(runtime->states[0],"idle")
+       || !json_int_range(cJSON_GetObjectItemCaseSensitive(scene,"duration_sec"),30,120,&seconds)
+       || !json_int_range(cJSON_GetObjectItemCaseSensitive(scene,"lives"),1,5,&lives)
+       || !json_int_range(cJSON_GetObjectItemCaseSensitive(scene,"sound_volume"),0,100,&volume)
+       || runtime->transition_count!=2 || runtime->button_count!=2
+       || !runtime_has_transition_action(runtime,"slice.restart") || !runtime_has_transition_action(runtime,"slice.pause")
+       || !runtime_has_button_action(runtime,"slice.restart") || !runtime_has_button_action(runtime,"slice.pause")) {
+      set_error(error,error_size,"touch slice requires ready touch, bounded config and restart/pause controls");return false;
+    }
+    for(unsigned i=0;i<runtime->transition_count;i++) {
+      const miniapp_transition_t *t=&runtime->transitions[i];
+      if(t->from_state>=0 || t->to_state>=0 || t->effect_count || t->page_op!=-1) {
+        set_error(error,error_size,"touch slice actions cannot contain extra effects");return false;
+      }
+    }
+    if(!parse_bounded_sprites(runtime,cJSON_GetObjectItemCaseSensitive(scene,"sprites"),true,error,error_size))return false;
+    if(runtime->sprites.count!=4){set_error(error,error_size,"touch slice requires four fruit sprites");return false;}
+    for(unsigned i=0;i<4;i++)if(runtime->sprites.items[i].frames!=1){set_error(error,error_size,"fruit sprites use one frame");return false;}
+    runtime->slicing=true;pet_fruit_init(&runtime->fruit,seconds,lives,volume);return true;
+  }
   if (!runtime || !object_keys_allowed(scene, allowed, sizeof(allowed) / sizeof(allowed[0]))) {
     set_error(error, error_size, "scene contains an unsupported field");
     return false;
   }
   memset(&config, 0, sizeof(config));
+  config.motion=cJSON_GetObjectItemCaseSensitive(scene,"motion")!=NULL;
+  runtime->game.charge_var=-1;
   runtime->game.score_var = -1;
   runtime->game.playing_state = (int8_t) find_name(
     runtime->states,
@@ -3100,7 +4022,7 @@ static bool parse_bounded_scene(
     }
   }
   tick = cJSON_GetObjectItemCaseSensitive(scene, "tick_ms");
-  if (!json_int_range(tick, 100, 2000, &tick_ms)) {
+  if (!json_int_range(tick, config.motion?16:100, config.motion?40:2000, &tick_ms)) {
     set_error(error, error_size, "scene.tick_ms must be in 100-2000");
     return false;
   }
@@ -3143,6 +4065,50 @@ static bool parse_bounded_scene(
       && runtime->current_state != runtime->game.playing_state) {
     set_error(error, error_size, "scene.auto_start requires initial_state == active_state");
     return false;
+  }
+  if(config.motion){
+    const cJSON *m=cJSON_GetObjectItemCaseSensitive(scene,"motion"),*platforms=cJSON_GetObjectItemCaseSensitive(m,"platforms"),*speed=cJSON_GetObjectItemCaseSensitive(m,"speed");
+    static const char *const keys[]={"engine","body","platforms","gravity","lift","speed","charge_ms","charge_var","track"};
+    int gravity,lift,low,high,ms;
+    config.motion_body=bounded_find_entity(&config,json_string(m,"body"));
+    runtime->game.charge_var=find_var(runtime,json_string(m,"charge_var"));
+    if(!object_keys_allowed(m,keys,9)||strcmp(json_string(m,"engine"),"p4-motion-v1")||config.motion_body<0
+      ||runtime->game.charge_var<0||runtime->game.charge_var==runtime->game.score_var||runtime->vars[runtime->game.charge_var].type!=MINIAPP_VAR_INT
+      ||!cJSON_IsArray(platforms)||cJSON_GetArraySize(platforms)<1||cJSON_GetArraySize(platforms)>11
+      ||!json_int_range(cJSON_GetObjectItemCaseSensitive(m,"gravity"),4,64,&gravity)
+      ||!json_int_range(cJSON_GetObjectItemCaseSensitive(m,"lift"),2,16,&lift)
+      ||!json_int_range(cJSON_GetObjectItemCaseSensitive(m,"charge_ms"),300,3000,&ms)
+      ||!cJSON_IsArray(speed)||cJSON_GetArraySize(speed)!=2
+      ||!json_int_range(cJSON_GetArrayItem(speed,0),1,24,&low)||!json_int_range(cJSON_GetArrayItem(speed,1),low,24,&high)
+      ||config.solid_tone_mask||cJSON_GetObjectItemCaseSensitive(scene,"sprites"))return false;
+    const cJSON *p;cJSON_ArrayForEach(p,platforms){int i=cJSON_IsString(p)?bounded_find_entity(&config,p->valuestring):-1;if(i<0||i==config.motion_body||(config.platform_mask&(1u<<i)))return false;config.platform_mask|=1u<<i;}
+    config.gravity=gravity;config.lift=lift;config.launch_min=low;config.launch_max=high;config.charge_ms=ms;
+    const cJSON *track=cJSON_GetObjectItemCaseSensitive(m,"track");
+    if(track){
+      static const char *const tk[]={"engine","camera_x","gap","width","tones"};
+      const cJSON *gap=cJSON_GetObjectItemCaseSensitive(track,"gap"),*width=cJSON_GetObjectItemCaseSensitive(track,"width"),*tones=cJSON_GetObjectItemCaseSensitive(track,"tones");
+      int camera,gap_min,gap_max,width_min,width_max;
+      if(!object_keys_allowed(track,tk,5)||strcmp(json_string(track,"engine"),"p4-platform-track-v1")
+        ||!json_int_range(cJSON_GetObjectItemCaseSensitive(track,"camera_x"),2,config.width/2,&camera)
+        ||!cJSON_IsArray(gap)||cJSON_GetArraySize(gap)!=2||!cJSON_IsArray(width)||cJSON_GetArraySize(width)!=2
+        ||!json_int_range(cJSON_GetArrayItem(gap,0),1,6,&gap_min)||!json_int_range(cJSON_GetArrayItem(gap,1),gap_min,6,&gap_max)
+        ||!json_int_range(cJSON_GetArrayItem(width,0),2,4,&width_min)||!json_int_range(cJSON_GetArrayItem(width,1),width_min,4,&width_max)
+        ||!cJSON_IsArray(tones)||cJSON_GetArraySize(tones)<2||cJSON_GetArraySize(tones)>4)return false;
+      const cJSON *tone;cJSON_ArrayForEach(tone,tones){int t;if(!json_int_range(tone,1,4,&t)||(config.tone_mask&(1u<<t)))return false;config.tone_mask|=1u<<t;}
+      config.track=true;config.camera_x=camera;config.gap_min=gap_min;config.gap_max=gap_max;config.width_min=width_min;config.width_max=width_max;
+    }
+    for(int i=0;i<config.entity_count;i++)if(config.entities[i].vx||config.entities[i].vy)return false;
+    bool has_charge=false;
+    for(int i=0;i<config.rule_count;i++){
+      const pet_p4_game_rule_t *r=&config.rules[i];
+      if(r->trigger==PET_P4_GAME_TRIGGER_COLLISION||r->trigger==PET_P4_GAME_TRIGGER_BLOCKED||r->trigger==PET_P4_GAME_TRIGGER_TICK)return false;
+      for(int j=0;j<r->op_count;j++){
+        const pet_p4_game_op_t *o=&r->ops[j];
+        if(o->kind==PET_P4_GAME_OP_CHARGE){if(o->entity_index!=config.motion_body||r->trigger!=PET_P4_GAME_TRIGGER_ACTION||strcmp(r->action,runtime->hold_action))return false;has_charge=true;}
+        if(o->kind==PET_P4_GAME_OP_MOVE||o->kind==PET_P4_GAME_OP_VELOCITY||o->kind==PET_P4_GAME_OP_ACCELERATE||o->kind==PET_P4_GAME_OP_BOUNCE)return false;
+      }
+    }
+    if(!has_charge||!runtime->hold_action[0])return false;
   }
   if (!pet_p4_game_configure_bounded(
         &runtime->game.engine,
@@ -3229,7 +4195,42 @@ static bool load_catalog_runtime(
   size_t error_size
 ) {
   if (!runtime || index >= g_catalog_count) return false;
-  return load_catalog_runtime_item(&g_catalog[index], runtime, false, error, error_size);
+  if (g_catalog[index].resource_state == 1
+      && load_catalog_runtime_item(&g_catalog[index], runtime, false, error, error_size)) return true;
+  if (g_catalog[index].resource_state == 1) g_catalog[index].resource_state = 3;
+  {
+    memset(runtime, 0, sizeof(*runtime));
+    runtime->active = true;
+    runtime->resource_incomplete = true;
+    copy_utf8(runtime->widget_id, sizeof(runtime->widget_id), g_catalog[index].widget_id);
+    runtime->view.active = true;
+    copy_utf8(runtime->view.widget_id, sizeof(runtime->view.widget_id), g_catalog[index].widget_id);
+    copy_utf8(runtime->view.title, sizeof(runtime->view.title), g_catalog[index].title);
+    copy_utf8(runtime->view.headline, sizeof(runtime->view.headline), "组件资源需要恢复");
+    copy_utf8(runtime->view.note, sizeof(runtime->view.note), "请连接客户端恢复完整资源，原有记录已保留。");
+    return true;
+  }
+}
+
+/* Recover only this component from an independently verified committed catalog.
+ * Never roll the entire directory back or trust an uncommitted spare generation.
+ * A known complete package must not degrade to an image-free fallback. */
+static bool recover_catalog_items(miniapp_catalog_snapshot_t *latest,
+                                  const miniapp_catalog_snapshot_t *older) {
+  bool changed = false;
+  if (!latest || !older || !older->parsed) return false;
+  for (size_t i = 0; i < latest->count; ++i) {
+    miniapp_catalog_item_t *item = &latest->items[i];
+    if (item->resource_state == 1) continue;
+    int index = catalog_find(older->items, older->count, item->widget_id);
+    if (index < 0) continue;
+    const miniapp_catalog_item_t *fallback = &older->items[index];
+    if (fallback->resource_state != 1 || fallback->slot != item->slot
+        || (item->sprites_checksum && !fallback->sprites_checksum)) continue;
+    *item = *fallback;
+    changed = true;
+  }
+  return changed;
 }
 
 static bool catalog_entry_visible(size_t index) {
@@ -3260,8 +4261,9 @@ static bool activate_catalog_index_in_memory(size_t index) {
     free(next);
     return false;
   }
+  save_app_runtime();restore_app_runtime(next);
   portENTER_CRITICAL(&g_runtime_lock);
-  g_runtime = *next;
+  g_runtime = *next; g_image_revision++;
   g_catalog_selected = index;
   portEXIT_CRITICAL(&g_runtime_lock);
   free(next);
@@ -3278,6 +4280,17 @@ static bool activate_catalog_index(size_t index) {
   miniapp_runtime_t *next;
   char error[128] = {0};
   if (!catalog_entry_visible(index)) return false;
+  /* Reopening the already loaded media component is navigation, not an
+   * install/reset. Rewriting its unchanged catalog can stall the serial task
+   * behind Flash I/O long enough to exhaust live audio. Package commit/delete
+   * replace g_runtime atomically, so this never bypasses package validation.
+   * Games deliberately retain their existing restart-on-open behavior. */
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool resume_media = g_runtime.active && (g_runtime.media||g_runtime.save_version)
+    && strcmp(g_runtime.widget_id, g_catalog[index].widget_id) == 0;
+  if (resume_media) g_catalog_selected = index;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  if (resume_media) return true;
   next = (miniapp_runtime_t *) calloc(1, sizeof(*next));
   if (!next) return false;
   if (!load_catalog_runtime(index, next, error, sizeof(error))) {
@@ -3285,13 +4298,17 @@ static bool activate_catalog_index(size_t index) {
     free(next);
     return false;
   }
-  if (!persist_catalog_snapshot(g_catalog, g_catalog_count, g_catalog[index].widget_id)) {
+  /* Navigation is not a package transaction. Keep the previous committed
+   * directory as a recovery source instead of overwriting it on each open. */
+  if (!write_file_atomic(MINIAPP_LAST_ID_TMP_PATH, MINIAPP_LAST_ID_PATH,
+                         g_catalog[index].widget_id, strlen(g_catalog[index].widget_id))) {
     ESP_LOGW(TAG, "failed to commit active component id=%s", g_catalog[index].widget_id);
     free(next);
     return false;
   }
+  save_app_runtime();restore_app_runtime(next);
   portENTER_CRITICAL(&g_runtime_lock);
-  g_runtime = *next;
+  g_runtime = *next; g_image_revision++;
   g_catalog_selected = index;
   portEXIT_CRITICAL(&g_runtime_lock);
   free(next);
@@ -3306,8 +4323,17 @@ static bool activate_catalog_index(size_t index) {
   return true;
 }
 
+static bool remove_component(const char *widget_id, char *error, size_t error_size, bool preserve_save);
+bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size) {
+  return remove_component(widget_id, error, error_size, false);
+}
+bool pet_p4_miniapp_remove_preserving_save(const char *widget_id, char *error, size_t error_size) {
+  return remove_component(widget_id, error, error_size, true);
+}
+
 esp_err_t pet_p4_miniapp_init(void) {
   pet_p4_media_init();
+  if(!pet_app_store_init())return ESP_ERR_NO_MEM;
   char widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX + 1] = {0};
   char error[128] = {0};
   miniapp_catalog_snapshot_t *snapshot0;
@@ -3316,15 +4342,25 @@ esp_err_t pet_p4_miniapp_init(void) {
   uint32_t highest_seen_sequence = 0;
   memset(&g_runtime, 0, sizeof(g_runtime));
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   memset(g_catalog, 0, sizeof(g_catalog));
   g_catalog_count = 0;
   g_catalog_selected = 0;
   g_catalog_file_generation = -1;
   g_catalog_sequence = 0;
+  g_catalog_recovery_blocked = false;
+  struct stat catalog_stat;
+  char catalog_path[48];
+  bool catalog_files_present = false;
+  for (uint8_t i = 0; i < MINIAPP_CATALOG_GENERATION_COUNT; ++i) {
+    catalog_snapshot_path(i, false, catalog_path, sizeof(catalog_path));
+    if (stat(catalog_path, &catalog_stat) == 0 || errno != ENOENT) catalog_files_present = true;
+  }
 
   snapshot0 = (miniapp_catalog_snapshot_t *) calloc(1, sizeof(*snapshot0));
   snapshot1 = (miniapp_catalog_snapshot_t *) calloc(1, sizeof(*snapshot1));
   if (!snapshot0 || !snapshot1) {
+    g_catalog_recovery_blocked = true;
     free(snapshot0);
     free(snapshot1);
     return ESP_ERR_NO_MEM;
@@ -3337,24 +4373,29 @@ esp_err_t pet_p4_miniapp_init(void) {
   if (snapshot1->parsed && snapshot1->sequence > highest_seen_sequence) {
     highest_seen_sequence = snapshot1->sequence;
   }
-  if (snapshot0->valid) selected = snapshot0;
-  if (snapshot1->valid && (!selected || snapshot1->sequence > selected->sequence)) {
+  if (snapshot0->parsed) selected = snapshot0;
+  if (snapshot1->parsed && (!selected || snapshot1->sequence > selected->sequence)) {
     selected = snapshot1;
   }
 
   if (selected) {
+    bool recovered = recover_catalog_items(selected, selected == snapshot0 ? snapshot1 : snapshot0);
     memcpy(g_catalog, selected->items, sizeof(g_catalog));
     g_catalog_count = selected->count;
     g_catalog_file_generation = selected->file_generation;
     g_catalog_sequence = highest_seen_sequence;
     copy_utf8(widget_id, sizeof(widget_id), selected->active_widget_id);
+    char last_opened[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
+    if (read_file(MINIAPP_LAST_ID_PATH, last_opened, sizeof(last_opened))
+        && catalog_find(g_catalog, g_catalog_count, last_opened) >= 0) {
+      copy_utf8(widget_id, sizeof(widget_id), last_opened);
+    }
     if (!widget_id[0] && g_catalog_count > 0) {
       copy_utf8(widget_id, sizeof(widget_id), g_catalog[0].widget_id);
       selected->needs_upgrade = true;
     }
     int preferred = catalog_find(g_catalog, g_catalog_count, widget_id);
     if (preferred < 0 && g_catalog_count > 0) preferred = 0;
-    bool recovered = selected->sequence < highest_seen_sequence;
     if ((selected->needs_upgrade || recovered)
         && !persist_catalog_snapshot(g_catalog, g_catalog_count, widget_id)) {
       ESP_LOGW(TAG, "component catalog recovery could not be committed");
@@ -3367,13 +4408,21 @@ esp_err_t pet_p4_miniapp_init(void) {
       (unsigned int) g_catalog_count,
       g_catalog_file_generation,
       (unsigned int) g_catalog_sequence,
-      recovered ? " after rollback" : ""
+      recovered ? " after per-component recovery" : ""
     );
     free(snapshot0);
     free(snapshot1);
     return activated ? ESP_OK : ESP_ERR_INVALID_STATE;
   }
 
+  if (catalog_files_present) {
+    /* Do not overwrite unrecognized/corrupt modern directories with legacy or
+     * bootstrap data. Leave every file/save intact for explicit recovery. */
+    g_catalog_recovery_blocked = true;
+    free(snapshot0); free(snapshot1);
+    ESP_LOGE(TAG, "component directories unreadable; automatic bootstrap replacement blocked");
+    return ESP_ERR_INVALID_STATE;
+  }
   miniapp_catalog_snapshot_t *legacy = snapshot0;
   memset(legacy, 0, sizeof(*legacy));
   if (load_legacy_catalog(legacy)) {
@@ -3409,6 +4458,7 @@ esp_err_t pet_p4_miniapp_init(void) {
     ESP_LOGW(TAG, "ignored persisted mini-app: %s", error);
     memset(&g_runtime, 0, sizeof(g_runtime));
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return ESP_ERR_INVALID_STATE;
   }
   copy_utf8(g_catalog[0].widget_id, sizeof(g_catalog[0].widget_id), g_runtime.widget_id);
@@ -3440,10 +4490,19 @@ esp_err_t pet_p4_miniapp_init(void) {
     ESP_LOGW(TAG, "legacy component opened but catalog migration could not be persisted");
   }
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   ESP_LOGI(TAG, "migrated bounded component id=%s states=%u vars=%u", g_runtime.widget_id,
            (unsigned int) g_runtime.state_count, (unsigned int) g_runtime.var_count);
   if (!catalog_entry_visible(0)) memset(&g_runtime, 0, sizeof(g_runtime));
   return ESP_OK;
+}
+
+bool pet_p4_miniapp_catalog_recovery_blocked(void) {
+  return g_catalog_recovery_blocked;
+}
+
+bool pet_p4_miniapp_resource_repair_active(void) {
+  return g_staging.active && g_staging.repair_resources;
 }
 
 size_t pet_p4_miniapp_catalog_count(void) {
@@ -3476,6 +4535,8 @@ bool pet_p4_miniapp_catalog_get(size_t index, pet_p4_miniapp_catalog_entry_t *ou
     copy_utf8(out->title, sizeof(out->title), g_catalog[index].title);
     out->active = g_runtime.active
       && strcmp(g_runtime.widget_id, g_catalog[index].widget_id) == 0;
+    out->resource_state = g_catalog[index].resource_state;
+    out->image_count = g_catalog[index].image_count;
     available = true;
   }
   portEXIT_CRITICAL(&g_runtime_lock);
@@ -3491,6 +4552,14 @@ void pet_p4_miniapp_catalog_focus_active(void) {
     }
   }
   portEXIT_CRITICAL(&g_runtime_lock);
+}
+
+bool pet_p4_miniapp_catalog_select(size_t index) {
+  portENTER_CRITICAL(&g_runtime_lock);
+  bool valid=index<g_catalog_count&&catalog_entry_visible(index);
+  if(valid)g_catalog_selected=index;
+  portEXIT_CRITICAL(&g_runtime_lock);
+  return valid;
 }
 
 bool pet_p4_miniapp_catalog_move(int delta) {
@@ -3538,12 +4607,20 @@ bool pet_p4_miniapp_install_begin(const cJSON *payload, char *error, size_t erro
     return false;
   }
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   if (!safe_id(transfer_id, sizeof(g_staging.transfer_id))
       || !safe_widget_id(widget_id)) {
     set_error(error, error_size, "invalid transferId or widgetId");
     return false;
   }
   g_staging.active = true;
+  g_staging.repair_resources = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "repairResources"));
+  if (g_staging.repair_resources && (pet_p4_audio_active() || pet_p4_audio_playback_active()
+      || pet_p4_audio_conversation_active() || pet_p4_audio_music_active())) {
+    memset(&g_staging, 0, sizeof(g_staging));
+    set_error(error, error_size, "audio is active; resource repair deferred without changing data");
+    return false;
+  }
   copy_utf8(g_staging.transfer_id, sizeof(g_staging.transfer_id), transfer_id);
   copy_utf8(g_staging.widget_id, sizeof(g_staging.widget_id), widget_id);
   return true;
@@ -3664,6 +4741,24 @@ bool pet_p4_miniapp_install_chunk(const cJSON *payload, char *error, size_t erro
       return false;
     }
     g_staging.buttons_next_index += 1U;
+  } else if (strncmp(path,"runtime/images/",15)==0) {
+    const char *name=path+15;size_t len=strlen(name);char id[16]={0};
+    if(len<=4||len-4>=sizeof(id)||strcmp(name+len-4,".p4i")){set_error(error,error_size,"invalid image path");return false;}
+    memcpy(id,name,len-4);
+    if(!safe_id(id,sizeof(id))){set_error(error,error_size,"invalid image id");return false;}
+    if(sprite_pack_find(&g_staging.sprites,id)>=0)return true;
+    if(index==0 && (strcmp(id,g_image_id)||!g_image_next)){g_image_used=0;g_image_next=0;strcpy(g_image_id,id);}
+    if(strcmp(id,g_image_id)){set_error(error,error_size,"image transfer interleaved");return false;}
+    if((uint32_t)index+1==g_image_next)return true;
+    if((uint32_t)index!=g_image_next){set_error(error,error_size,"image chunk sequence");return false;}
+    size_t before=g_image_used;
+    if(!decode_chunk(data,(char*)g_image_staging,sizeof(g_image_staging),&g_image_used,&decoded_len,false,error,error_size))return false;
+    if(!verify_chunk_integrity(payload,g_image_staging+before,decoded_len,error,error_size)){g_image_used=before;return false;}
+    if(g_image_used<12||(memcmp(g_image_staging,"P4I1",4)&&memcmp(g_image_staging,"P4I2",4)&&memcmp(g_image_staging,"P4J1",4))){g_image_used=before;set_error(error,error_size,"invalid image header");return false;}
+    size_t expected=(uint32_t)g_image_staging[8]|(uint32_t)g_image_staging[9]<<8|(uint32_t)g_image_staging[10]<<16|(uint32_t)g_image_staging[11]<<24;
+    if(expected<(g_image_staging[2]=='J'?16:PET_IMAGE_HEADER)||expected>PET_IMAGE_MAX_BYTES||g_image_used>expected){g_image_used=before;set_error(error,error_size,"image overflow");return false;}
+    if(g_image_used==expected&&!append_sprite_file(&g_staging.sprites,id,g_image_staging,g_image_used,error,error_size)){g_image_used=before;return false;}
+    g_image_next++;
   } else if (strncmp(path, "runtime/sprites/", 16) == 0) {
     const char *file_name = path + 16;
     const size_t file_name_length = strlen(file_name);
@@ -3716,10 +4811,33 @@ bool pet_p4_miniapp_install_chunk(const cJSON *payload, char *error, size_t erro
   return true;
 }
 
+static bool component_install_touch_allowed(bool requires_touch) {
+  /* Firmware-owned preinstallation runs before LCD/I2C touch initialization.
+   * It stores a verified package, not a claim that touch hardware is ready.
+   * External PC installs and live slice input must still require ready touch. */
+  return !requires_touch || g_builtin_sync_in_progress || pet_p4_touch_ready();
+}
+
+static bool resource_repair_package_matches(const miniapp_catalog_item_t *item,
+                                          uint32_t widget_checksum, uint32_t images_checksum) {
+  if (!item || !images_checksum) return false;
+  if (item->resource_state == 2) return true;
+  /* A damaged full package may be repaired only by its exact committed
+   * payload, never silently upgraded/downgraded to the client's bundle. */
+  return item->resource_state == 3 && item->widget_checksum == widget_checksum
+    && item->sprites_checksum == images_checksum;
+}
+
 bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t error_size) {
+  g_storage_failure[0] = '\0';
+  if (g_catalog_recovery_blocked) {
+    set_error(error, error_size, "component directories need recovery; stored packages were preserved");
+    return false;
+  }
   const char *widget_id = json_string(payload, "widgetId");
   miniapp_runtime_t *next;
-  miniapp_catalog_item_t next_catalog[PET_P4_MINIAPP_CATALOG_MAX];
+  miniapp_catalog_item_t *next_catalog __attribute__((cleanup(catalog_scratch_free))) = calloc(PET_P4_MINIAPP_CATALOG_MAX, sizeof(*next_catalog));
+  if (!next_catalog) { set_error(error,error_size,"not enough memory for component catalog");return false; }
   size_t next_count;
   size_t catalog_index;
   int slot;
@@ -3733,6 +4851,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
       || g_staging.widget_len == 0) {
     set_error(error, error_size, "mini-app staging is incomplete or invalid");
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return false;
   }
   next = (miniapp_runtime_t *) calloc(1, sizeof(*next));
@@ -3740,15 +4859,56 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
     set_error(error, error_size, "not enough memory to activate mini-app");
     return false;
   }
+  if (g_staging.repair_resources) {
+    if (pet_p4_audio_active() || pet_p4_audio_playback_active()
+        || pet_p4_audio_conversation_active() || pet_p4_audio_music_active()) {
+      free(next);
+      set_error(error, error_size, "audio started; resource repair deferred before flash writes");
+      return false;
+    }
+    int repair_index = catalog_find(g_catalog, g_catalog_count, g_staging.widget_id);
+    char old_buttons_path[40];
+    if (repair_index < 0 || !g_staging.sprites.count
+        || !resource_repair_package_matches(&g_catalog[repair_index],
+            miniapp_checksum(g_staging.widget_json, g_staging.widget_len),
+            sprite_pack_checksum(&g_staging.sprites))) {
+      free(next);
+      set_error(error, error_size, "resource repair requires bootstrap or exact committed damaged package; original data preserved");
+      return false;
+    }
+    catalog_slot_path(g_catalog[repair_index].slot, g_catalog[repair_index].package_generation,
+                     true, false, old_buttons_path, sizeof(old_buttons_path));
+    if (!read_file(old_buttons_path, g_staging.buttons_json, sizeof(g_staging.buttons_json))
+        || miniapp_checksum(g_staging.buttons_json, strlen(g_staging.buttons_json)) != g_catalog[repair_index].buttons_checksum) {
+      free(next);
+      set_error(error, error_size, "existing button configuration is damaged; automatic resource repair stopped");
+      return false;
+    }
+    g_staging.buttons_len = strlen(g_staging.buttons_json);
+  }
   if (!parse_runtime(next, g_staging.widget_id, g_staging.widget_json,
                      g_staging.buttons_json, &g_staging.sprites, error, error_size)) {
     free(next);
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return false;
   }
-  memcpy(next_catalog, g_catalog, sizeof(next_catalog));
+  memcpy(next_catalog, g_catalog, sizeof(g_catalog));
+  if(!component_install_touch_allowed(next->slicing)) {
+    set_error(error,error_size,"continuous touch is not ready; component was not installed");
+    free(next);memset(&g_staging,0,sizeof(g_staging));return false;
+  }
   next_count = g_catalog_count;
   int existing = catalog_find(next_catalog, next_count, g_staging.widget_id);
+  if (existing >= 0 && next_catalog[existing].sprites_checksum
+      && pet_p4_builtin_is_bootstrap(g_staging.widget_id,
+           miniapp_checksum(g_staging.widget_json, g_staging.widget_len))) {
+    free(next);
+    memset(&g_staging, 0, sizeof(g_staging));
+    g_image_used=0;g_image_next=0;g_image_id[0]=0;
+    set_error(error, error_size, "refused image-free bootstrap over existing full resource package");
+    return false;
+  }
   if (existing >= 0) {
     catalog_index = (size_t) existing;
     slot = next_catalog[catalog_index].slot;
@@ -3759,6 +4919,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
       free(next);
       set_error(error, error_size, "component center has no free storage slot");
       memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
       return false;
     }
     catalog_index = next_count++;
@@ -3769,6 +4930,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
     free(next);
     set_error(error, error_size, "component center is full");
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return false;
   }
   copy_utf8(
@@ -3846,19 +5008,25 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
             error,
             error_size
           ))
-      || !persist_catalog_snapshot(next_catalog, next_count, g_staging.widget_id)) {
+      || !persist_catalog_snapshot(next_catalog, next_count,
+           g_staging.repair_resources && g_runtime.active ? g_runtime.widget_id : g_staging.widget_id)) {
     free(next);
     if (!error || !error[0]) {
-      set_error(error, error_size, "failed to commit mini-app package generation");
+      if (error && error_size) snprintf(error, error_size, "component commit failed: %s", g_storage_failure[0] ? g_storage_failure : "catalog allocation/validation");
     }
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return false;
   }
+  save_app_runtime();restore_app_runtime(next);
   portENTER_CRITICAL(&g_runtime_lock);
-  g_runtime = *next;
+  if (!g_staging.repair_resources || !g_runtime.active
+      || strcmp(g_runtime.widget_id, g_staging.widget_id) == 0) {
+    g_runtime = *next; g_image_revision++;
+    g_catalog_selected = catalog_index;
+  }
   memcpy(g_catalog, next_catalog, sizeof(g_catalog));
   g_catalog_count = next_count;
-  g_catalog_selected = catalog_index;
   portEXIT_CRITICAL(&g_runtime_lock);
   free(next);
   ESP_LOGI(TAG, "installed bounded component id=%s slot=%u package-generation=%u catalog-generation=%d sequence=%u catalog=%u states=%u vars=%u transitions=%u ticks=%u",
@@ -3869,6 +5037,7 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
            (unsigned int) g_runtime.var_count, (unsigned int) g_runtime.transition_count,
            (unsigned int) g_runtime.tick_count);
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   return true;
 }
 
@@ -3884,6 +5053,7 @@ static bool commit_builtin_package(
   cJSON *payload;
   if (!safe_widget_id(widget_id) || !widget_json || !buttons_json) return false;
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   g_staging.active = true;
   copy_utf8(g_staging.transfer_id, sizeof(g_staging.transfer_id), transfer_id);
   copy_utf8(g_staging.widget_id, sizeof(g_staging.widget_id), widget_id);
@@ -3895,6 +5065,7 @@ static bool commit_builtin_package(
   if (!cJSON_IsArray(sprite_files)
       || cJSON_GetArraySize(sprite_files) > PET_P4_MINIAPP_SPRITE_MAX) {
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     set_error(error, error_size, "embedded built-in sprite list is invalid");
     return false;
   }
@@ -3902,30 +5073,25 @@ static bool commit_builtin_package(
   cJSON_ArrayForEach(sprite_file, sprite_files) {
     const char *sprite_id = json_string(sprite_file, "id");
     const char *data = json_string(sprite_file, "data");
-    char path[64];
-    cJSON *chunk = NULL;
+    size_t used=0,decoded=0;
     if (!cJSON_IsObject(sprite_file)
         || !safe_id(sprite_id, PET_P4_MINIAPP_SPRITE_ID_MAX)
         || !data[0]) {
       memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
       set_error(error, error_size, "embedded built-in sprite file is invalid");
       return false;
     }
-    snprintf(path, sizeof(path), "runtime/sprites/%s.p4s", sprite_id);
-    chunk = cJSON_CreateObject();
-    if (!chunk
-        || !cJSON_AddStringToObject(chunk, "transferId", transfer_id)
-        || !cJSON_AddStringToObject(chunk, "widgetId", widget_id)
-        || !cJSON_AddStringToObject(chunk, "path", path)
-        || !cJSON_AddStringToObject(chunk, "data", data)
-        || !cJSON_AddNumberToObject(chunk, "index", 0)
-        || !pet_p4_miniapp_install_chunk(chunk, error, error_size)) {
-      cJSON_Delete(chunk);
+    /* Firmware-owned base64 is already in memory. Decode into the bounded
+     * staging buffer; accept P4S1 and native P4I1/P4J1 through one validator.
+     * Do not turn a 100 KiB image into a synthetic oversized USB chunk. */
+    if (!decode_chunk(data,(char*)g_image_staging,sizeof(g_image_staging),&used,&decoded,true,error,error_size)
+        || !append_sprite_file(&g_staging.sprites,sprite_id,g_image_staging,used,error,error_size)) {
       memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
       if (!error || !error[0]) set_error(error, error_size, "failed to stage built-in sprite");
       return false;
     }
-    cJSON_Delete(chunk);
   }
 
   payload = cJSON_CreateObject();
@@ -3934,6 +5100,7 @@ static bool commit_builtin_package(
       || !cJSON_AddStringToObject(payload, "widgetId", widget_id)) {
     cJSON_Delete(payload);
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     set_error(error, error_size, "not enough memory to stage built-in component");
     return false;
   }
@@ -3946,43 +5113,33 @@ static bool restore_active_after_builtin_sync(const char *preferred_widget_id) {
   int index = preferred_widget_id && preferred_widget_id[0]
     ? catalog_find(g_catalog, g_catalog_count, preferred_widget_id)
     : -1;
-  if (index < 0) index = catalog_find(g_catalog, g_catalog_count, "stock-watchlist");
   if (index < 0 && g_catalog_count > 0) index = 0;
   index = catalog_visible_preferred(index);
   return index < 0 || activate_catalog_index((size_t) index);
 }
 
-static bool builtin_bundle_contains_id(const cJSON *components, const char *widget_id) {
-  const cJSON *package;
-  if (!cJSON_IsArray(components) || !safe_widget_id(widget_id)) return false;
-  cJSON_ArrayForEach(package, components) {
-    if (strcmp(json_string(package, "id"), widget_id) == 0) return true;
-  }
-  return false;
-}
-
 static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
-  miniapp_catalog_item_t ordered[PET_P4_MINIAPP_CATALOG_MAX] = {0};
+  miniapp_catalog_item_t *ordered __attribute__((cleanup(catalog_scratch_free))) = calloc(PET_P4_MINIAPP_CATALOG_MAX, sizeof(*ordered));
+  if (!ordered) return false;
   bool used[PET_P4_MINIAPP_CATALOG_MAX] = {0};
   size_t ordered_count = 0;
   const cJSON *package;
   if (!cJSON_IsArray(components)) return false;
 
-  // Set the default tool sequence during migration; later installs still prepend normally.
-  static const char *const default_tools[] = {
-    "stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status",
-  };
-  for (size_t i = 0; i < sizeof(default_tools) / sizeof(default_tools[0]); ++i) {
-    const int index = catalog_find(g_catalog, g_catalog_count, default_tools[i]);
-    if (index >= 0) {
+  // Bundle order is generated from the same factory-config.json used by the PC.
+  // Move records, never slot contents, checksums, saved state or component ids.
+  for (size_t index = 0; index < g_catalog_count; ++index) {
+    bool builtin = false;
+    cJSON_ArrayForEach(package, components) {
+      if (strcmp(json_string(package, "id"), g_catalog[index].widget_id) == 0) {
+        builtin = true;
+        break;
+      }
+    }
+    if (!builtin) {
       ordered[ordered_count++] = g_catalog[index];
       used[index] = true;
     }
-  }
-  for (size_t index = 0; index < g_catalog_count; index += 1) {
-    if (used[index] || builtin_bundle_contains_id(components, g_catalog[index].widget_id)) continue;
-    ordered[ordered_count++] = g_catalog[index];
-    used[index] = true;
   }
   cJSON_ArrayForEach(package, components) {
     const int index = catalog_find(g_catalog, g_catalog_count, json_string(package, "id"));
@@ -4009,6 +5166,7 @@ static bool reorder_catalog_for_builtin_bundle(const cJSON *components) {
 }
 
 esp_err_t pet_p4_miniapp_sync_builtins(void) {
+  if (g_catalog_recovery_blocked) return ESP_ERR_INVALID_STATE;
   char marker[128] = {0};
   char expected_marker[128] = {0};
   char restore_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
@@ -4018,16 +5176,41 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
   const cJSON *components;
   bool catalog_changed = false;
   size_t updated = 0;
+  size_t failed = 0;
 
   /* Dirty builds may share an identity while their bundled components change. */
   snprintf(expected_marker, sizeof(expected_marker), "%s:%08lx", PET_P4_BUILD_ID,
-    (unsigned long) miniapp_checksum((const char *) pet_p4_builtin_components_json,
-      strlen((const char *) pet_p4_builtin_components_json)));
+    (unsigned long) miniapp_checksum((const char *) pet_p4_builtin_components_zlib,
+      pet_p4_builtin_components_zlib_size));
   if (read_file(MINIAPP_BUILTIN_MARKER_PATH, marker, sizeof(marker))
       && strcmp(marker, expected_marker) == 0) {
     return ESP_OK;
   }
-  bundle = cJSON_Parse((const char *) pet_p4_builtin_components_json);
+  /* Build-owned, bounded data only. Allocate once on migration, release before
+   * loading packages; do not keep decompression scratch on the task stack. */
+  if (!pet_p4_builtin_components_json_size || pet_p4_builtin_components_json_size > 160*1024)
+    return ESP_ERR_INVALID_SIZE;
+  char *json = malloc(pet_p4_builtin_components_json_size);
+  if (!json) return ESP_ERR_NO_MEM;
+  /* The ROM convenience wrapper puts ~11 KiB of Huffman state on stack.
+   * app_main has only 10 KiB: use the low-level API with heap-owned state. */
+  tinfl_decompressor *inflater = calloc(1, sizeof(*inflater));
+  if (!inflater) { free(json); return ESP_ERR_NO_MEM; }
+  tinfl_init(inflater);
+  size_t consumed=pet_p4_builtin_components_zlib_size;
+  size_t decoded=pet_p4_builtin_components_json_size;
+  const tinfl_status inflated=tinfl_decompress(inflater,
+    pet_p4_builtin_components_zlib, &consumed,
+    (mz_uint8*)json, (mz_uint8*)json, &decoded,
+    TINFL_FLAG_PARSE_ZLIB_HEADER | TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  free(inflater);
+  if (inflated != TINFL_STATUS_DONE || consumed != pet_p4_builtin_components_zlib_size
+      || decoded != pet_p4_builtin_components_json_size || json[decoded-1] != '\0') {
+    free(json);
+    return ESP_ERR_INVALID_RESPONSE;
+  }
+  bundle = cJSON_Parse(json);
+  free(json);
   bundle_version = cJSON_GetObjectItemCaseSensitive(bundle, "version");
   components = cJSON_GetObjectItemCaseSensitive(bundle, "components");
   if (!cJSON_IsObject(bundle)
@@ -4060,6 +5243,10 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
   g_builtin_sync_in_progress = true;
   cJSON_ArrayForEach(package, components) {
     const char *widget_id = json_string(package, "id");
+    /* Artwork-rich packages are upgraded by PC/factory resource transactions.
+     * Never replace an installed complete package with the OTA bootstrap. */
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(package, "resourcePackage"))
+        && catalog_find(g_catalog, g_catalog_count, widget_id) >= 0) continue;
     const cJSON *widget = cJSON_GetObjectItemCaseSensitive(package, "widget");
     const cJSON *buttons = cJSON_GetObjectItemCaseSensitive(package, "buttons");
     const cJSON *sprite_files = cJSON_GetObjectItemCaseSensitive(package, "spriteFiles");
@@ -4076,10 +5263,8 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
       cJSON_free(widget_json);
       cJSON_free(buttons_json);
       ESP_LOGW(TAG, "embedded built-in id=%s exceeds runtime JSON limits", widget_id);
-      g_builtin_sync_in_progress = false;
-      (void) restore_active_after_builtin_sync(restore_widget_id);
-      cJSON_Delete(bundle);
-      return ESP_ERR_INVALID_SIZE;
+      failed += 1;
+      continue;
     }
 
     const uint32_t widget_checksum = miniapp_checksum(widget_json, strlen(widget_json));
@@ -4102,10 +5287,8 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
         cJSON_free(widget_json);
         cJSON_free(buttons_json);
         ESP_LOGW(TAG, "failed to sync built-in id=%s: %s", widget_id, error);
-        g_builtin_sync_in_progress = false;
-        (void) restore_active_after_builtin_sync(restore_widget_id);
-        cJSON_Delete(bundle);
-        return ESP_FAIL;
+        failed += 1;
+        continue;
       }
       catalog_changed = true;
       updated += 1;
@@ -4124,6 +5307,14 @@ esp_err_t pet_p4_miniapp_sync_builtins(void) {
     ESP_LOGW(TAG, "built-in components synced but active component could not be restored");
     cJSON_Delete(bundle);
     return ESP_ERR_INVALID_STATE;
+  }
+  if (failed) {
+    /* Keep successful additions; no completion marker means the failed ones
+     * are retried on a later boot. Never hide all packages after one failure. */
+    ESP_LOGW(TAG, "built-in sync incomplete failed=%u updated=%u catalog=%u",
+      (unsigned int) failed, (unsigned int) updated, (unsigned int) g_catalog_count);
+    cJSON_Delete(bundle);
+    return ESP_FAIL;
   }
   if (!write_file_atomic(
         MINIAPP_BUILTIN_MARKER_TMP_PATH,
@@ -4151,10 +5342,11 @@ static bool remove_file_if_present(const char *path) {
   return errno == ENOENT;
 }
 
-bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size) {
+static bool remove_component(const char *widget_id, char *error, size_t error_size, bool preserve_save) {
   char active_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
   char next_active_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
-  miniapp_catalog_item_t next_catalog[PET_P4_MINIAPP_CATALOG_MAX];
+  miniapp_catalog_item_t *next_catalog __attribute__((cleanup(catalog_scratch_free))) = calloc(PET_P4_MINIAPP_CATALOG_MAX, sizeof(*next_catalog));
+  if (!next_catalog) { set_error(error,error_size,"not enough memory for component catalog");return false; }
   miniapp_runtime_t *next_runtime = NULL;
   size_t next_count;
   size_t next_selected;
@@ -4169,7 +5361,7 @@ bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size
   if (g_runtime.active) {
     copy_utf8(active_id, sizeof(active_id), g_runtime.widget_id);
   }
-  memcpy(next_catalog, g_catalog, sizeof(next_catalog));
+  memcpy(next_catalog, g_catalog, sizeof(g_catalog));
   next_count = g_catalog_count;
   next_selected = g_catalog_selected;
   portEXIT_CRITICAL(&g_runtime_lock);
@@ -4177,6 +5369,7 @@ bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size
   catalog_index = catalog_find(next_catalog, next_count, widget_id);
   if (catalog_index < 0) {
     memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
     return true;
   }
   removed_slot = next_catalog[catalog_index].slot;
@@ -4225,19 +5418,22 @@ bool pet_p4_miniapp_remove(const char *widget_id, char *error, size_t error_size
     set_error(error, error_size, "failed to commit component catalog deletion");
     return false;
   }
+  if(removing_active&&next_runtime)restore_app_runtime(next_runtime);
   portENTER_CRITICAL(&g_runtime_lock);
   memcpy(g_catalog, next_catalog, sizeof(g_catalog));
   g_catalog_count = next_count;
   g_catalog_selected = next_selected;
   if (removing_active) {
-    if (next_runtime) g_runtime = *next_runtime;
+    if (next_runtime) {g_runtime = *next_runtime;g_image_revision++;}
     else memset(&g_runtime, 0, sizeof(g_runtime));
   }
   memset(&g_staging, 0, sizeof(g_staging));
+  g_image_used=0;g_image_next=0;g_image_id[0]=0;
   portEXIT_CRITICAL(&g_runtime_lock);
   free(next_runtime);
 
   bool package_cleanup_ok = remove_file_if_present(MINIAPP_ID_PATH);
+  if (!preserve_save) pet_app_store_forget(widget_id);
   package_cleanup_ok = remove_file_if_present(MINIAPP_ID_TMP_PATH) && package_cleanup_ok;
   for (uint8_t package_generation = 0;
        package_generation < MINIAPP_PACKAGE_GENERATION_COUNT;

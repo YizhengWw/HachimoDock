@@ -1,0 +1,15 @@
+[
+  {
+    "action": "jump.charge",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "按住蓄力，松开跳跃"
+  },
+  {
+    "action": "session.pause",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "暂停 / 继续"
+  },
+  {"action":"session.restart","control":"前方摇杆","event":"button.encoder.short_press","label":"重开本局（需确认）"}
+]

@@ -8,6 +8,16 @@
  * All public PCM frames are 320 samples / 20 ms / mono / 16 kHz. */
 bool pet_p4_afe_init(void);
 bool pet_p4_afe_ready(void);
+/* Preparation/recovery is performed only by the capture/DSP owner, once per
+ * reset generation. Control and playback tasks must never recreate DSP. */
+bool pet_p4_afe_prepare(void);
+bool pet_p4_afe_preparing(void);
+const char *pet_p4_afe_failure(void);
+typedef struct {
+  uint32_t frames, last_us, max_us, aec_us, ns_us, vad_us;
+  uint32_t reference_samples;
+} pet_p4_afe_metrics_t;
+pet_p4_afe_metrics_t pet_p4_afe_metrics(void);
 void pet_p4_afe_reset_stream(void);
 bool pet_p4_afe_feed(const int16_t *mic);
 bool pet_p4_afe_take(int16_t *pcm, bool *speech);

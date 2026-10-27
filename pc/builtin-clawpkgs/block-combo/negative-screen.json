@@ -2,14 +2,16 @@
   "dashboard": {
     "title": "像素方块",
     "eyebrow": "准备开始",
-    "headline": "按 SW1 开始",
+    "headline": "准备好了吗",
     "metricLabel": "分数",
     "metricValue": "0",
     "note": "READY",
-    "footer": "SW1开始 · 摇杆四向操作 · 全局键退出",
-    "visualStyle": "pixel",
-    "visualPalette": "arcade",
+    "footer": "SW1开始 · SW2旋转 · 摇杆左右/下 · 全局键退出",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
     "visualLayout": "arcade",
-    "visualSprite": "blocks"
+    "visualSprite": "blocks",
+    "metricUnit": "开始游戏",
+    "badge": "0"
   }
 }

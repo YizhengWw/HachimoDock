@@ -1,33 +1,88 @@
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
+  "engine": "p4-bounded-runtime-v4",
   "vars": {
-    "agent_label": { "type": "string", "init": "当前 Agent" },
-    "headline_text": { "type": "string", "init": "等待今日统计" },
-    "total_display": { "type": "string", "init": "—" },
-    "input_display": { "type": "string", "init": "—" },
-    "output_display": { "type": "string", "init": "—" },
-    "cache_display": { "type": "string", "init": "缓存 —" },
-    "breakdown_text": { "type": "string", "init": "" }
+    "agent_label": {
+      "type": "string",
+      "init": "当前 Agent"
+    },
+    "headline_text": {
+      "type": "string",
+      "init": "等待今日统计"
+    },
+    "total_display": {
+      "type": "string",
+      "init": "—"
+    },
+    "input_display": {
+      "type": "string",
+      "init": "—"
+    },
+    "output_display": {
+      "type": "string",
+      "init": "—"
+    },
+    "cache_display": {
+      "type": "string",
+      "init": "缓存 —"
+    },
+    "breakdown_text": {
+      "type": "string",
+      "init": ""
+    }
   },
-  "states": ["live"],
+  "states": [
+    "live"
+  ],
   "initial_state": "live",
   "pages": [
-    { "id": "total" },
-    { "id": "input" },
-    { "id": "output" }
+    {
+      "id": "total"
+    },
+    {
+      "id": "input"
+    },
+    {
+      "id": "output"
+    }
   ],
   "initial_page": "total",
   "transitions": [
-    { "from": "*", "on": "stats.show_total", "page": "total" },
-    { "from": "*", "on": "stats.show_input", "page": "input" },
-    { "from": "*", "on": "stats.show_output", "page": "output" }
+    {
+      "from": "*",
+      "on": "stats.show_total",
+      "page": "total"
+    },
+    {
+      "from": "*",
+      "on": "stats.show_input",
+      "page": "input"
+    },
+    {
+      "from": "*",
+      "on": "stats.show_output",
+      "page": "output"
+    },
+    {
+      "from": "*",
+      "on": "stats.previous",
+      "page": "prev"
+    },
+    {
+      "from": "*",
+      "on": "stats.next",
+      "page": "next"
+    }
   ],
   "tick": [],
   "dashboard": {
     "title": "Token 仪表盘",
-    "eyebrow": { "var": "agent_label" },
-    "headline": { "var": "headline_text" },
+    "eyebrow": {
+      "var": "agent_label"
+    },
+    "headline": {
+      "var": "headline_text"
+    },
     "metricLabel": {
       "switch_page": {
         "total": "总 Token",
@@ -37,22 +92,24 @@
     },
     "metricValue": {
       "switch_page": {
-        "total": { "var": "total_display" },
-        "input": { "var": "input_display" },
-        "output": { "var": "output_display" }
+        "total": {
+          "var": "total_display"
+        },
+        "input": {
+          "var": "input_display"
+        },
+        "output": {
+          "var": "output_display"
+        }
       }
     },
     "metricUnit": "TOKEN",
-    "note": { "var": "cache_display" },
-    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · 全局键退出",
-    "visualStyle": "pixel",
-    "visualPalette": {
-      "switch_page": {
-        "total": "arcade",
-        "input": "mint",
-        "output": "sunset"
-      }
+    "note": {
+      "var": "cache_display"
     },
+    "footer": "统计来自当前 Agent 的本地可读记录，不代表账单。",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "tool",
     "visualSprite": {
       "switch_page": {
@@ -60,6 +117,705 @@
         "input": "bolt",
         "output": "gauge"
       }
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 4261,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 128,
+        "frame_height": 144,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 4261,
+        "image": "background"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 24,
+        "w": 21,
+        "h": 21,
+        "color": 61343,
+        "icon": "agent"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 20,
+        "w": 310,
+        "h": 28,
+        "color": 61343,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 88,
+        "w": 410,
+        "h": 25,
+        "color": 42393,
+        "font_size": 16,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 130,
+        "w": 400,
+        "h": 66,
+        "color": 61343,
+        "font_size": 28,
+        "bind": "headline",
+        "line_height": 35,
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 218,
+        "w": 300,
+        "h": 26,
+        "color": 42393,
+        "font_size": 16,
+        "bind": "metricLabel"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 259,
+        "w": 370,
+        "h": 48,
+        "color": 61343,
+        "font_size": 32,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 324,
+        "w": 420,
+        "h": 44,
+        "color": 42393,
+        "font_size": 16,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 48606,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 4359,
+        "padding": 18,
+        "weight": 600,
+        "text": "总量",
+        "action": "stats.show_total",
+        "page": 0,
+        "stroke": 17070,
+        "stroke_width": 0
+      },
+      {
+        "type": "button",
+        "x": 166,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "输入",
+        "action": "stats.show_input",
+        "page": 0,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 304,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "输出",
+        "action": "stats.show_output",
+        "page": 0,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "总量",
+        "action": "stats.show_total",
+        "page": 1,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 166,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 48606,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 4359,
+        "padding": 18,
+        "weight": 600,
+        "text": "输入",
+        "action": "stats.show_input",
+        "page": 1,
+        "stroke": 17070,
+        "stroke_width": 0
+      },
+      {
+        "type": "button",
+        "x": 304,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "输出",
+        "action": "stats.show_output",
+        "page": 1,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "总量",
+        "action": "stats.show_total",
+        "page": 2,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 166,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 8585,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 18,
+        "weight": 600,
+        "text": "输入",
+        "action": "stats.show_input",
+        "page": 2,
+        "stroke": 17070,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 304,
+        "y": 378,
+        "w": 124,
+        "h": 48,
+        "color": 48606,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 4359,
+        "padding": 18,
+        "weight": 600,
+        "text": "输出",
+        "action": "stats.show_output",
+        "page": 2,
+        "stroke": 17070,
+        "stroke_width": 0
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 4261,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 42393,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 4261,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 42393,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "stats.show_total"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 42393,
+        "font_size": 15,
+        "text": "总量"
+      },
+      {
+        "type": "button",
+        "x": 119,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 4261,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 42393,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "stats.show_input"
+      },
+      {
+        "type": "text",
+        "x": 157,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 42393,
+        "font_size": 15,
+        "text": "输入"
+      },
+      {
+        "type": "text",
+        "x": 212,
+        "y": 446,
+        "w": 298,
+        "h": 24,
+        "color": 42393,
+        "font_size": 14,
+        "text": "摇杆右输出"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 42393,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:",
+        "metrics": [
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            9,
+            11,
+            29
+          ]
+        ],
+        "cell": [
+          32,
+          48
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "Token 仪表盘总输入出OKEN统计来自当前Agt的本地可读记录，不代账单。claub量—摇杆右",
+        "metrics": [
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            17,
+            2,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            24,
+            4,
+            28
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            23,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            18,
+            11,
+            32
+          ],
+          [
+            12,
+            6,
+            28
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            16,
+            11,
+            28
+          ],
+          [
+            9,
+            2,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            20,
+            3,
+            28
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "stats.next",
+      "right": "stats.previous"
     }
   }
 }

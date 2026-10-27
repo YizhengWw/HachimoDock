@@ -10,6 +10,7 @@ def test_media_sessions_queue_controls_and_watchdog(tmp_path):
         "esp_err.h": "typedef int esp_err_t;\n#define ESP_OK 0\n",
         "esp_heap_caps.h": "#include <stdlib.h>\n#define MALLOC_CAP_SPIRAM 0\n#define MALLOC_CAP_8BIT 0\n#define heap_caps_malloc(n,c) malloc(n)\n",
         "esp_timer.h": "#include <stdint.h>\nint64_t esp_timer_get_time(void);\n",
+        "esp_random.h": "#include <stdint.h>\nstatic inline uint32_t esp_random(void){return 42;}\n",
         "freertos/FreeRTOS.h": "#define portMAX_DELAY 0\n",
         "freertos/semphr.h": "typedef int SemaphoreHandle_t;\n#define xSemaphoreCreateMutex() 1\n#define xSemaphoreTake(a,b) ((void)0)\n#define xSemaphoreGive(a) ((void)0)\n",
         "mbedtls/base64.h": "#include <stddef.h>\nint mbedtls_base64_decode(unsigned char*,size_t,size_t*,const unsigned char*,size_t);\n",
@@ -30,6 +31,7 @@ static unsigned int flushes;
 static uint32_t played;
 static int64_t clock_us=1000000;
 static cJSON *reply;
+bool pet_p4_miniapp_host_source(const char *source){return source&&!strcmp(source,"app.test");}
 int64_t esp_timer_get_time(void){return clock_us;}
 bool pet_p4_audio_music_active(void){return active;}
 bool pet_p4_audio_music_paused(void){return paused;}
@@ -53,6 +55,19 @@ static bool call(const char *topic,const char *json){cJSON *p=cJSON_Parse(json);
 static const char *field(const char *name){return cJSON_GetObjectItemCaseSensitive(payload(),name)->valuestring;}
 int main(void){
   pet_p4_media_init();
+  pet_p4_media_transport(sent,NULL);
+  pet_p4_media_visibility("pc.test",true,1000);assert(!strcmp(field("operation"),"visibility"));
+  assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload(),"visible")));
+  int entry_epoch=cJSON_GetObjectItemCaseSensitive(payload(),"epoch")->valueint;
+  pet_p4_media_visibility("pc.test",true,4000);assert(cJSON_GetObjectItemCaseSensitive(payload(),"epoch")->valueint==entry_epoch);
+  pet_p4_media_visibility("",false,4100);assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(payload(),"visible")));
+  assert(cJSON_GetObjectItemCaseSensitive(payload(),"epoch")->valueint>entry_epoch);
+  {cJSON *big=cJSON_CreateObject(),*q=cJSON_AddArrayToObject(big,"queue"),*keys=cJSON_AddArrayToObject(big,"keys");
+  for(int i=0;i<128;i++){char text[32];sprintf(text,"station%d",i);cJSON_AddItemToArray(q,cJSON_CreateString(text));cJSON_AddItemToArray(keys,cJSON_CreateString(text));}
+  char *big_text=cJSON_PrintUnformatted(big);assert(call("media/library",big_text));cJSON_free(big_text);
+  pet_p4_media_view_t big_view;pet_p4_media_view(&big_view);assert(big_view.count==128);
+  cJSON_AddItemToArray(q,cJSON_CreateString("overflow"));cJSON_AddItemToArray(keys,cJSON_CreateString("overflow"));
+  big_text=cJSON_PrintUnformatted(big);assert(!call("media/library",big_text));cJSON_free(big_text);cJSON_Delete(big);}
   assert(call("media/library","{\"queue\":[\"重复标题\",\"重复标题\"],\"keys\":[\"local:1\",\"local:2\"],\"volume\":25}"));
   assert(pet_p4_media_action("media.queue"));assert(pet_p4_media_action("media.down"));assert(pet_p4_media_action("media.select"));assert(!strcmp(field("key"),"local:2"));
   pet_p4_media_view_t view;pet_p4_media_view(&view);assert(view.selected==1&&view.page==1);
@@ -105,7 +120,61 @@ int main(void){
   assert(call("media/library","{\"queue\":[],\"keys\":[]}"));pet_p4_media_tick(9000);assert(!active);
   pet_p4_media_view(&view);assert(!strcmp(view.status,"error"));
   assert(!pet_p4_media_action("media.shell"));
-  cJSON_Delete(reply);puts("PASS media stale sessions, seq, queue identities, atomic validation, controls, lease expiry");
+  assert(pet_p4_media_live_action("pc.first","media.queue"));assert(!strcmp(field("source"),"pc.first"));assert(!strcmp(field("operation"),"sync"));
+  assert(call("media/library","{\"source\":\"pc.first\",\"queue\":[\"One\",\"Two\"],\"keys\":[\"1\",\"2\"],\"volume\":20}"));
+  assert(pet_p4_media_live_action("pc.first","media.down"));assert(pet_p4_media_live_action("pc.first","media.select"));assert(!strcmp(field("key"),"2"));
+  assert(pet_p4_media_live_action("pc.first","media.toggle"));assert(!strcmp(field("operation"),"select"));assert(!strcmp(field("key"),"2"));
+  assert(pet_p4_media_live_action("pc.first","media.down"));pet_p4_media_view(&view);assert(view.selected==0);
+  assert(pet_p4_media_live_action("pc.first","media.up"));pet_p4_media_view(&view);assert(view.selected==1);
+  assert(pet_p4_media_live_action("pc.first","media.queue"));pet_p4_media_view(&view);assert(view.page==0);
+  assert(pet_p4_media_live_action("pc.first","media.toggle"));assert(!strcmp(field("operation"),"toggle"));
+  assert(pet_p4_media_live_action("pc.first","media.next"));assert(!strcmp(field("operation"),"next"));
+  assert(pet_p4_media_live_action("pc.first","media.previous"));assert(!strcmp(field("operation"),"previous"));
+  assert(!pet_p4_media_live_action("pc.first","media.lyrics"));
+  // Touch must use the exact queue generation and identity. Stale/upstream
+  // replacement lists and out-of-range slider values cannot trigger commands.
+  pet_p4_media_view(&view);uint32_t revision=view.queue_revision;
+  assert(!pet_p4_media_touch("pc.foreign",-1,50,revision,10000));
+  assert(!pet_p4_media_touch("pc.first",-1,101,revision,10000));
+  assert(pet_p4_media_touch("pc.first",-1,55,revision,10000));
+  assert(!strcmp(field("operation"),"volume"));
+  assert(cJSON_GetObjectItemCaseSensitive(payload(),"volume")->valueint==55);
+  assert(pet_p4_media_live_action("pc.first","media.queue"));
+  assert(!pet_p4_media_touch("pc.first",2,-1,revision,11000));
+  assert(pet_p4_media_touch("pc.first",0,-1,revision,11000));
+  assert(!strcmp(field("key"),"1"));
+  assert(pet_p4_media_live_action("pc.first","media.queue"));
+  assert(!pet_p4_media_touch("pc.first",1,-1,revision,11100));
+  assert(pet_p4_media_touch("pc.first",1,-1,revision,11400));
+  assert(!strcmp(field("key"),"2"));
+  assert(call("media/library","{\"source\":\"pc.first\",\"queue\":[\"Changed\"],\"keys\":[\"new\"]}"));
+  assert(pet_p4_media_live_action("pc.first","media.queue"));
+  assert(!pet_p4_media_touch("pc.first",0,-1,revision,12000));
+  // All 128 real queue identities remain reachable, including wrap across pages.
+  assert(pet_p4_media_live_action("pc.navigation","media.queue"));
+  cJSON *catalog=cJSON_CreateObject(),*titles=cJSON_AddArrayToObject(catalog,"queue"),*keys=cJSON_AddArrayToObject(catalog,"keys");
+  cJSON_AddStringToObject(catalog,"source","pc.navigation");
+  for(int i=0;i<128;i++){char item[8];snprintf(item,sizeof(item),"%d",i);cJSON_AddItemToArray(titles,cJSON_CreateString(item));cJSON_AddItemToArray(keys,cJSON_CreateString(item));}
+  char *catalog_json=cJSON_PrintUnformatted(catalog);assert(call("media/library",catalog_json));cJSON_free(catalog_json);cJSON_Delete(catalog);
+  for(int i=0;i<128;i++){pet_p4_media_view(&view);assert(view.selected==i);assert(pet_p4_media_live_action("pc.navigation","media.select"));char key[8];snprintf(key,sizeof(key),"%d",i);assert(!strcmp(field("key"),key));assert(pet_p4_media_live_action("pc.navigation","media.down"));}
+  pet_p4_media_view(&view);assert(view.selected==0);assert(pet_p4_media_live_action("pc.navigation","media.up"));pet_p4_media_view(&view);assert(view.selected==127);
+  assert(pet_p4_media_live_action("pc.second","media.toggle"));assert(!strcmp(field("source"),"pc.second"));
+  pet_p4_media_view(&view);assert(view.count==0); // no prior component's queue leaks
+  assert(call("media/notice","{\"source\":\"pc.second\",\"state\":\"error\",\"message\":\"请先在 PC 启用\"}"));
+  pet_p4_media_view(&view);assert(!strcmp(view.status,"error")&&!strcmp(view.message,"请先在 PC 启用"));
+  assert(!call("media/notice","{\"source\":\"pc.first\",\"state\":\"error\",\"message\":\"stale\"}"));
+  assert(!call("media/notice","{\"source\":\"pc.second\",\"state\":\"playing\",\"message\":\"fake\"}"));
+  assert(call("media/begin",begin));
+  assert(!call("media/library","{\"source\":\"pc.second\",\"queue\":[],\"keys\":[]}"));
+  assert(!call("media/notice","{\"source\":\"pc.second\",\"state\":\"error\",\"message\":\"foreign\"}"));
+  cJSON *owned=cJSON_Parse(begin);cJSON_AddStringToObject(owned,"source","pc.second");
+  char *owned_json=cJSON_PrintUnformatted(owned);assert(call("media/begin",owned_json));cJSON_free(owned_json);cJSON_Delete(owned);
+  assert(call("media/library","{\"source\":\"pc.second\",\"queue\":[],\"keys\":[]}"));
+  music_flushes=flushes;
+  assert(call("media/notice","{\"source\":\"pc.second\",\"state\":\"error\",\"message\":\"not allowed to interrupt\"}"));
+  pet_p4_media_view(&view);assert(active&&flushes==music_flushes&&!strcmp(view.status,"playing"));
+  clock_us+=6000000;pet_p4_media_tick(clock_us/1000);assert(!active); // notices do not renew audio lease
+  cJSON_Delete(reply);puts("PASS media stale sessions, seq, queue identities, atomic validation, controls, lease expiry, source-scoped notices");
 }
 ''')
     exe = tmp_path / "media-test"

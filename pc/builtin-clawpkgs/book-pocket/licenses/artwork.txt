@@ -1,0 +1,3 @@
+Background illustration generated specifically for this project with image_gen.imagegen.
+It is not a copied book cover, third-party component screenshot or stock illustration.
+Native asset is 640x480 RGB PNG. Prompts and original renders are kept outside this resource package.

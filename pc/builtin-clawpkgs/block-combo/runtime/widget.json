@@ -1,8 +1,12 @@
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
+  "engine": "p4-bounded-runtime-v4",
   "vars": {
     "score": {
+      "type": "int",
+      "init": 0
+    },
+    "best": {
       "type": "int",
       "init": 0
     }
@@ -10,7 +14,8 @@
   "states": [
     "ready",
     "playing",
-    "result"
+    "result",
+    "paused"
   ],
   "initial_state": "ready",
   "transitions": [
@@ -45,6 +50,25 @@
     {
       "from": "playing",
       "on": "blocks.drop"
+    },
+    {
+      "from": "playing",
+      "on": "session.pause",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "session.pause",
+      "to": "playing"
+    },
+    {
+      "from": "paused",
+      "on": "blocks.start",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "blocks.soft_drop"
     }
   ],
   "tick": [],
@@ -59,7 +83,8 @@
       "left": "blocks.left",
       "right": "blocks.right",
       "rotate": "blocks.rotate",
-      "drop": "blocks.drop"
+      "drop": "blocks.drop",
+      "soft_drop": "blocks.soft_drop"
     }
   },
   "dashboard": {
@@ -68,14 +93,16 @@
       "switch_state": {
         "ready": "准备开始",
         "playing": "自动下落",
-        "result": "本轮结束"
+        "result": "本轮结束",
+        "paused": "休息一下"
       }
     },
     "headline": {
       "switch_state": {
-        "ready": "按 SW1 开始",
-        "playing": "方块下落中",
-        "result": "堆满结束"
+        "ready": "准备好了吗",
+        "playing": "保持节奏",
+        "result": "再试一次吧",
+        "paused": "已暂停"
       }
     },
     "metricLabel": "分数",
@@ -86,25 +113,857 @@
       "switch_state": {
         "ready": "READY",
         "playing": "PLAY",
-        "result": "GAME OVER"
+        "result": "GAME OVER",
+        "paused": "PAUSED"
       }
     },
     "footer": {
       "switch_state": {
-        "ready": "SW1开始 · 摇杆四向操作 · 全局键退出",
-        "playing": "摇杆四向操作 · 全局键退出",
-        "result": "SW1重开 · 全局键退出"
+        "ready": "SW1开始 · SW2旋转 · 摇杆左右/下 · 全局键退出",
+        "playing": "SW2旋转 · 摇杆左右移动/下落 · 全局键退出",
+        "result": "SW1重开 · 全局键退出",
+        "paused": "暂停中 · 按暂停键继续"
       }
     },
-    "visualStyle": "pixel",
-    "visualPalette": "arcade",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
     "visualLayout": "arcade",
     "visualSprite": {
       "switch_state": {
         "ready": "blocks",
         "playing": "blocks",
-        "result": "trophy"
+        "result": "trophy",
+        "paused": "timer"
       }
+    },
+    "metricUnit": {
+      "switch_state": {
+        "ready": "开始游戏",
+        "playing": "游戏进行中",
+        "result": "重新开始",
+        "paused": "继续游戏"
+      }
+    },
+    "badge": {
+      "var": "best"
     }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 8487,
+    "game_view": {
+      "engine": "p4-game-surface-v1",
+      "x": 96,
+      "y": 74,
+      "w": 220,
+      "h": 352
+    },
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 8487,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 92,
+        "y": 70,
+        "w": 228,
+        "h": 360,
+        "color": 4294,
+        "radius": 16,
+        "opacity": 155
+      },
+      {
+        "type": "panel",
+        "x": 378,
+        "y": 86,
+        "w": 236,
+        "h": 158,
+        "color": 8487,
+        "radius": 18,
+        "opacity": 220
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 20,
+        "w": 420,
+        "h": 32,
+        "color": 63359,
+        "font_size": 23,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 394,
+        "y": 104,
+        "w": 204,
+        "h": 26,
+        "color": 63359,
+        "font_size": 15,
+        "bind": "metricLabel"
+      },
+      {
+        "type": "text",
+        "x": 394,
+        "y": 138,
+        "w": 204,
+        "h": 48,
+        "color": 63359,
+        "font_size": 32,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 390,
+        "y": 199,
+        "w": 212,
+        "h": 36,
+        "color": 63359,
+        "font_size": 14,
+        "bind": "headline",
+        "align": "center"
+      },
+      {
+        "type": "button",
+        "x": 378,
+        "y": 263,
+        "w": 236,
+        "h": 48,
+        "color": 33720,
+        "font_size": 16,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 8,
+        "weight": 600,
+        "bind": "metricUnit",
+        "action": "blocks.start",
+        "state_mask": 13
+      },
+      {
+        "type": "button",
+        "x": 378,
+        "y": 324,
+        "w": 112,
+        "h": 44,
+        "color": 8487,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 63359,
+        "padding": 8,
+        "weight": 600,
+        "text": "左移",
+        "action": "blocks.left",
+        "state_mask": 2
+      },
+      {
+        "type": "button",
+        "x": 502,
+        "y": 324,
+        "w": 112,
+        "h": 44,
+        "color": 8487,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 63359,
+        "padding": 8,
+        "weight": 600,
+        "text": "右移",
+        "action": "blocks.right",
+        "state_mask": 2
+      },
+      {
+        "type": "button",
+        "x": 378,
+        "y": 376,
+        "w": 112,
+        "h": 44,
+        "color": 8487,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 63359,
+        "padding": 8,
+        "weight": 600,
+        "text": "旋转 SW2",
+        "action": "blocks.rotate",
+        "state_mask": 2
+      },
+      {
+        "type": "button",
+        "x": 502,
+        "y": 376,
+        "w": 112,
+        "h": 44,
+        "color": 8487,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 63359,
+        "padding": 8,
+        "weight": 600,
+        "text": "直落",
+        "action": "blocks.drop",
+        "state_mask": 2
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 438,
+        "w": 640,
+        "h": 42,
+        "color": 8487,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 22,
+        "y": 451,
+        "w": 40,
+        "h": 18,
+        "color": 8487,
+        "text": "SW1",
+        "key_for": "blocks.start",
+        "font_size": 11,
+        "line_height": 14,
+        "padding": 2,
+        "radius": 4,
+        "foreground": 63359,
+        "opacity": 0,
+        "stroke": 63359,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 70,
+        "y": 447,
+        "w": 112,
+        "h": 26,
+        "color": 63359,
+        "font_size": 14,
+        "text": "开始 / 重开"
+      },
+      {
+        "type": "button",
+        "x": 196,
+        "y": 451,
+        "w": 40,
+        "h": 18,
+        "color": 8487,
+        "text": "SW2",
+        "key_for": "blocks.rotate",
+        "font_size": 11,
+        "line_height": 14,
+        "padding": 2,
+        "radius": 4,
+        "foreground": 63359,
+        "opacity": 0,
+        "stroke": 63359,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 244,
+        "y": 447,
+        "w": 44,
+        "h": 26,
+        "color": 63359,
+        "font_size": 14,
+        "text": "旋转"
+      },
+      {
+        "type": "text",
+        "x": 306,
+        "y": 447,
+        "w": 180,
+        "h": 26,
+        "color": 63359,
+        "font_size": 12,
+        "text": "左右移动 · 下缓降 · 上直落"
+      },
+      {
+        "type": "text",
+        "x": 505,
+        "y": 447,
+        "w": 108,
+        "h": 26,
+        "color": 63359,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 492,
+        "y": 16,
+        "w": 122,
+        "h": 44,
+        "color": 8487,
+        "foreground": 63359,
+        "font_size": 15,
+        "radius": 14,
+        "padding": 10,
+        "text": "暂停/继续",
+        "action": "session.pause",
+        "state_mask": 10
+      },
+      {
+        "type": "text",
+        "x": 130,
+        "y": 52,
+        "w": 300,
+        "h": 28,
+        "color": 63359,
+        "font_size": 18,
+        "bind": "badge"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 54,
+        "w": 96,
+        "h": 24,
+        "color": 63359,
+        "font_size": 15,
+        "text": "历史最高"
+      },
+      {
+        "type": "button",
+        "x": 378,
+        "y": 263,
+        "w": 236,
+        "h": 48,
+        "color": 63454,
+        "foreground": 16970,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "缓降",
+        "action": "blocks.soft_drop",
+        "state_mask": 2
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 准备好了吗保持节奏再试一次吧score分数开始游戏进行中重新",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            15,
+            11,
+            28
+          ],
+          [
+            16,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "像素方块自动下落本轮结束READYPLGMOV左移右旋转SW摇杆四向操作全局键退出",
+        "metrics": [
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            22,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            22,
+            4,
+            28
+          ],
+          [
+            26,
+            4,
+            28
+          ],
+          [
+            24,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            28,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "lifecycle": {
+    "pause_action": "session.pause",
+    "record_var": "best"
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "best"
+    ],
+    "states": {
+      "ready": "ready",
+      "playing": "ready",
+      "result": "ready",
+      "paused": "ready"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "repeat": [
+      "blocks.left",
+      "blocks.right",
+      "blocks.soft_drop"
+    ]
   }
 }

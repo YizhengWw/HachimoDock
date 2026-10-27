@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "灵感胶囊",
+    "visualStyle": "clean",
+    "visualPalette": "candy",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "PC 通用服务 · 连接后即可使用",
+    "headline": "接住一个想法",
+    "metricValue": "",
+    "note": "录音转写后，由你确认保存或转为待办。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "开始录制",
+    "metricUnit": "保存笔记"
+  }
+}

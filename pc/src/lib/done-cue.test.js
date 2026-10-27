@@ -11,7 +11,13 @@ test("completion audio has exactly four triple-beep groups and matches bundled P
   assert.equal(manifest.systemCues, true);
   assert.ok(manifest.families.every((family) => !family.audioPath));
   const cmake = readFileSync(new URL("../../../firmware/main/CMakeLists.txt", import.meta.url), "utf8");
-  assert.ok(cmake.includes("foreach(cue done error waiting_user)"));
+  assert.ok(cmake.includes("foreach(cue done error)"));
+  assert.ok(cmake.includes("PET_WAIT_CUE_SHA"));
+  assert.deepEqual(
+    readFileSync(new URL("../../public/terrier-clips/error.wav", import.meta.url)),
+    readFileSync(new URL("../../public/terrier-clips/waiting_user.wav", import.meta.url)),
+    "deduplicated waiting cue must stay byte-identical to error cue",
+  );
   assert.ok(cmake.includes("pc/public/terrier-clips/${cue}.wav"));
   assert.equal(wav.readUInt32LE(24), 16000);
   assert.equal(wav.readUInt16LE(22), 1);

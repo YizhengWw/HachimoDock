@@ -3,6 +3,7 @@
 Import("env")
 
 import re
+import importlib.util
 from pathlib import Path
 
 
@@ -17,6 +18,19 @@ def bound_chip_image(source, target, env):
         raise RuntimeError(f"P4 {family} requires chip bounds {expected}, found {values}; regenerate sdkconfig")
     output = Path(str(target[0]))
     elf = output.with_suffix(".elf")
+    if output.name == "firmware.bin":
+        report = output.parent / "main" / "pet_p4_renderer.c.su"
+        # These are nested in the main-task component/media path. Optimized-away
+        # (inlined) functions are accounted for in their emitted caller's frame.
+        frames = {}
+        for line in report.read_text(encoding="utf-8").splitlines():
+            fields = line.split("\t")
+            if len(fields) >= 3:
+                name = fields[0].rsplit(":", 1)[-1].split(".", 1)[0]
+                frames[name] = max(frames.get(name, 0), int(fields[1]))
+        chain = ["pet_p4_renderer_render", "render_miniapp_page", "render_media_page", "render_package_media"]
+        if "pet_p4_renderer_render" not in frames or sum(frames.get(name, 0) for name in chain) > 4096:
+            raise RuntimeError(f"Component/media render stack exceeds 4096-byte budget: {frames}")
     # PlatformIO's default ElfToBin omits revision bounds. Regenerate through
     # esptool (including its checksum/hash), never patch an already signed image.
     app_flags = " --elf-sha256-offset 0xb0" if output.name == "firmware.bin" else ""
@@ -34,6 +48,11 @@ def bound_chip_image(source, target, env):
         raise RuntimeError("P4 image chip bounds verification failed")
     if output.name == "firmware.bin":
         # PlatformIO may have merged its convenience image before this action.
+        spec = importlib.util.spec_from_file_location("firmware_budget", project / "tools/firmware_budget.py")
+        budget = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(budget)
+        size_tool = env.subst("$CC").replace("gcc", "size")
+        budget.check(output, project / "partitions.csv", size_tool)
         # Re-merge from bounded inputs so no generated image keeps stale limits.
         merged = output.with_name("firmware.factory.bin")
         command = ("$ERASETOOL --chip esp32p4 merge-bin --flash-mode dio"

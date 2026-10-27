@@ -1,6 +1,6 @@
 # 实时对话模式（形象人设 + 声音 + 双向语音）设计方案
 
-> 本文保留早期方案讨论，不作为已实现功能清单。当前公开版本的使用、实际架构和双端日志说明见 [实时对话：使用与排查](realtime-chat.md)。下文的 LiveKit/sidecar、旧目录、manifest 保存与热更新等设想不能视为当前实现。
+> 本文保留早期方案讨论，不作为已实现功能清单。当前 0.1.60 / 0.7.56 的使用、实际架构和双端日志说明见 [实时对话：使用与排查](realtime-chat.md)。下文的 LiveKit/sidecar、旧目录、manifest 保存与热更新等设想不能视为当前实现。
 
 > 状态：**方案（rev 3，实施中）** · 2026-09-18 · rev 3 变更：P1 不引入 Python sidecar / LiveKit，PC 端用 Rust 原生流水线（见 §8 末尾）
 >
@@ -203,7 +203,7 @@ USB 预算：上行 32 kB/s + 下行 32 kB/s + 控制帧，远低于 4 Mbaud（�
 | React 新增 `PersonaVoiceModal.jsx` + `lib/persona-voice.js` | 表单、模板、缺省推导、试听、校验；被画廊、详情页、四条创建流程共用 |
 | React `CustomAvatarWizard.jsx` 等创建流程 | 插入必填步骤 |
 | React `DeviceDashboard.jsx` | `BUTTON_FUNCTION_OPTIONS` 增 `realtime_chat`；实时对话状态卡（进行中/最近一次/失败原因） |
-| React 设置页 `api-configuration.js` | 新增「对话大模型」（OpenAI 兼容：DeepSeek / 豆包方舟 / MiMo 预设）与「豆包 TTS」凭据；ASR 沿用现有；服务凭据由用户在客户端配置 |
+| React 设置页 `api-configuration.js` | 新增「对话大模型」（OpenAI 兼容：DeepSeek / 豆包方舟 / MiMo 预设）与「豆包 TTS」凭据；ASR 沿用现有；内部分发版走 seed 预置，与 OpenDeskBotV2 同一套 key 名 |
 | Rust `lib.rs` | `appearance_persona_voice_get/set` 命令；manifest 读写与缺省补齐 |
 | Rust 新增 `rtc_session.rs` | §6 状态机；USB 音频转发；播放回写；HUD/动画事件；超时 |
 | Rust `usb_audio.rs` | 从"录完一段"扩展为"持续帧流"模式，帧直接转发不再攒 30 s |
@@ -221,7 +221,7 @@ USB 预算：上行 32 kB/s + 下行 32 kB/s + 控制帧，远低于 4 Mbaud（�
 | `src-tauri/src/volcengine_asr.rs`（已有） | 豆包流式 ASR |
 | `src-tauri/src/persona_llm.rs` | OpenAI 兼容流式对话 + 按句切分给 TTS |
 | `src-tauri/src/doubao_tts.rs` | 豆包 Seed TTS 2.0 双向 WebSocket 协议（复用连接，复刻音色自动切 `seed-icl-2.0`） |
-| `src-tauri/src/voice_chat_settings.rs` | 大模型与 TTS 凭据（`voice-chat-settings.json`，由用户在客户端配置） |
+| `src-tauri/src/voice_chat_settings.rs` | 大模型与 TTS 凭据（`voice-chat-settings.json`） |
 | `src-tauri/src/pc_playback.rs` | 试听走 PC 扬声器 |
 
 OpenDeskBotV2 的复用体现在协议与经验（豆包双向 TTS 帧格式、ASR 插件行为、半句/打断策略），而不是进程级复用。LiveKit 仍是 P2 全双工打断的备选。
@@ -230,9 +230,9 @@ OpenDeskBotV2 的复用体现在协议与经验（豆包双向 TTS 帧格式、A
 
 | 用途 | 键 | 来源 |
 |---|---|---|
-| 对话大模型 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | 用户在 API 配置页填写 |
+| 对话大模型 | `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` | API 配置页；内部包 seed 预置 |
 | ASR | 现有豆包 ASR 配置 | 沿用 |
-| TTS | `DOUBAO_TTS_API_KEY` / `DOUBAO_TTS_RESOURCE_ID` / 默认音色 / 复刻音色 ID | 用户在 API 配置页填写 |
+| TTS | `DOUBAO_TTS_API_KEY` / `DOUBAO_TTS_RESOURCE_ID` / 默认音色 / 复刻音色 ID | API 配置页；内部包 seed 预置 |
 | 全局默认音色 | 设置页一项，新形象缺省取它 | 本地 |
 
 公开版一律不内置任何 key（与两个项目现有做法一致）；缺凭据时「实时对话」按键触发在设备上提示"先在电脑端配置语音服务"。

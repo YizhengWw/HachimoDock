@@ -6,9 +6,16 @@
 
 ## 1. 目标设备
 
+应用级界面与原生 640×480 背景、图标、按钮和精细排版参见
+[app-surface.md](app-surface.md)。只有显式声明 `p4-app-graphics-v1` 且设备支持的
+应用包使用 32 节点/8191 字节配额；旧包、媒体、游戏配额不变。
+
 - 逻辑画布：`640x480` 横向。
 - 新组件统一运行时：`p4-bounded-runtime-v4`。`game` 与 `tool` 共用变量、状态、计时、Dashboard、输入解释器和受控精灵资源；v3 继续兼容历史包。
 - 可选通用场景子系统：`p4-grid-scene-v2`，用于网格、语义形状、受控精灵、移动、碰撞和边界玩法；v1 继续兼容历史包。
+- 可选连续单角色运动：`scene.motion.engine="p4-motion-v1"`，需设备 `widgetMotion` 与统一输入能力；固定步长重力、静态平台、按住蓄力/松开发射，见 [motion.md](motion.md)。不支持任意刚体物理。
+- 连续轨道可在 motion 中声明 `track.engine="p4-platform-track-v1"`，需额外 `widgetPlatformTrack`；固定平台池复用、可配置间距/宽度/色阶与跟随镜头。不是每次落台复位主角，也不支持任意地形脚本。
+- 可选受控触屏切果场景：`scene.engine="p4-touch-slice-v1"`，需要 `widgetPointer="p4-pointer-v1"` 与 `touchInput.ready=true`。配置、玩法、素材和实测边界见 [touch-slice.md](touch-slice.md)；它不使用通用网格场景的 entities/rules 字段。
 - `blocks`、`snake`、`flappy` 仅是历史原生预设，供旧包兼容，不是新组件可选的三种引擎。
 - 默认不假设触控可用。只有能力文件明确给出 `touchInput.ready=true` 时才允许触屏事件。
 - 第三方组件不能执行任意代码，也不能自行访问网络或本地文件。
@@ -63,7 +70,7 @@
 - `negative-screen.json.dashboard` 是初始预览，必须与 runtime 的初始 state/page/vars 相符。
 - `share.json` 必须是 JSON 对象，至少包含非空 `title`。
 - 允许在 `assets/` 放运行时支持的静态 PNG 资源；单个 sprite sheet 不超过 128 KiB。禁止 JS、Python、HTML、CSS、SVG、shell、PowerShell、批处理和可执行文件。
-- `assets/` 只允许 `.keep` 与最终发布用 PNG。每个 PNG 必须被 `runtime/widget.json scene.sprites` 精确引用；不得遗留未使用的候选图、单帧临时图、提示词或把 JPEG/WebP 改为 `.png`。
+- `assets/` 只允许 `.keep` 与最终发布用 PNG。游戏的每个 PNG 必须被 `runtime/widget.json scene.sprites` 精确引用；媒体切图必须被受控 `surface.images` 精确引用；不得遗留未使用的候选图、单帧临时图、提示词或把 JPEG/WebP 改为 `.png`。
 - 包内不得包含符号链接。
 
 ## 3. Dashboard 槽位
@@ -214,6 +221,11 @@ PC 数据源、刷新与验收边界见 [live-data.md](live-data.md)。实时列
 模拟通过不等于完成网络、断连恢复或真机显示验收。
 
 ### 5.2 可选 PC 音频播放器
+
+新直播组件使用 `media={"source":"pc.<component-id>","mode":"live"}`、
+包内 surface 与独立的 `pc/extension.json`，需要 `widgetMediaSurface=p4-media-surface-v1`。
+完整布局、权限、搜索映射和持久化契约见 [pc-extensions.md](pc-extensions.md)。
+PC 文件不下发设备，收藏和凭据不能随包分发；不接受歌词与进度跳转。
 
 仅支持 `widgetMedia=p4-media-v1` 的设备接受 v4 tool 的
 `"media":{"source":"audio.player"}`。media 只含 source，不能混用 data/scene/game。

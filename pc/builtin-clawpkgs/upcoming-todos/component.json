@@ -1,7 +1,8 @@
 {
   "id": "upcoming-todos",
   "name": "近期待办",
-  "version": "1.0.1",
-  "description": "查看事项和截止时间，蓝色未完成、绿色已完成；通过 PC 或实时对话管理待办。",
-  "kind": "tool"
+  "version": "1.2.0",
+  "description": "真实待办清单：在设备选中事项查看全文、确认完成或撤销完成；支持未完成与已完成筛选。需保持 PC 连接，本机统一保存。",
+  "kind": "tool",
+  "author": "土豆泥"
 }

@@ -1,8 +1,12 @@
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
+  "engine": "p4-bounded-runtime-v4",
   "vars": {
     "score": {
+      "type": "int",
+      "init": 0
+    },
+    "best": {
       "type": "int",
       "init": 0
     }
@@ -10,13 +14,34 @@
   "states": [
     "ready",
     "playing",
-    "result"
+    "result",
+    "paused"
   ],
   "initial_state": "ready",
   "transitions": [
     {
-      "from": "*",
+      "from": "ready",
       "on": "flappy.flap",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "flappy.flap",
+      "to": "playing"
+    },
+    {
+      "from": "result",
+      "on": "flappy.flap",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "session.pause",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "session.pause",
       "to": "playing"
     }
   ],
@@ -29,15 +54,17 @@
     "score_var": "score",
     "actions": {
       "flap": "flappy.flap"
-    }
+    },
+    "vertical_speed_percent": 50
   },
   "dashboard": {
     "title": "像素飞鸟",
     "headline": {
       "switch_state": {
-        "ready": "SW1 拍翅开始",
-        "playing": "穿过管道",
-        "result": "撞到了！"
+        "ready": "准备好了吗",
+        "playing": "飞得轻一点",
+        "result": "再试一次吧",
+        "paused": "已暂停"
       }
     },
     "metricLabel": "得分",
@@ -48,24 +75,601 @@
       "switch_state": {
         "ready": "SW1 拍翅 · 全局键退出",
         "playing": "SW1 拍翅 · 全局键退出",
-        "result": "SW1 重开 · 全局键退出"
+        "result": "SW1 重开 · 全局键退出",
+        "paused": "暂停中 · 按暂停键继续"
       }
     },
-    "visualStyle": "pixel",
-    "visualPalette": {
-      "switch_state": {
-        "ready": "arcade",
-        "playing": "mint",
-        "result": "sunset"
-      }
-    },
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "arcade",
     "visualSprite": {
       "switch_state": {
         "ready": "flappy",
         "playing": "flappy",
-        "result": "trophy"
+        "result": "trophy",
+        "paused": "timer"
       }
+    },
+    "metricUnit": {
+      "switch_state": {
+        "ready": "拍翅开始",
+        "playing": "轻轻拍翅",
+        "result": "重新开始",
+        "paused": "先继续游戏"
+      }
+    },
+    "badge": {
+      "var": "best"
     }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 63421,
+    "game_view": {
+      "engine": "p4-game-surface-v1",
+      "x": 36,
+      "y": 102,
+      "w": 432,
+      "h": 270
+    },
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 64,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 63421,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 32,
+        "y": 98,
+        "w": 440,
+        "h": 278,
+        "color": 63421,
+        "radius": 16,
+        "opacity": 60
+      },
+      {
+        "type": "panel",
+        "x": 492,
+        "y": 86,
+        "w": 122,
+        "h": 158,
+        "color": 63421,
+        "radius": 18,
+        "opacity": 220
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 20,
+        "w": 420,
+        "h": 32,
+        "color": 15052,
+        "font_size": 23,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 508,
+        "y": 104,
+        "w": 90,
+        "h": 26,
+        "color": 15052,
+        "font_size": 15,
+        "bind": "metricLabel"
+      },
+      {
+        "type": "text",
+        "x": 508,
+        "y": 138,
+        "w": 90,
+        "h": 48,
+        "color": 15052,
+        "font_size": 32,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 504,
+        "y": 199,
+        "w": 98,
+        "h": 36,
+        "color": 15052,
+        "font_size": 14,
+        "bind": "headline",
+        "align": "center"
+      },
+      {
+        "type": "button",
+        "x": 492,
+        "y": 263,
+        "w": 122,
+        "h": 48,
+        "color": 46024,
+        "font_size": 16,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 8,
+        "weight": 600,
+        "bind": "metricUnit",
+        "action": "flappy.flap",
+        "state_mask": 7
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 438,
+        "w": 640,
+        "h": 42,
+        "color": 63421,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 22,
+        "y": 451,
+        "w": 40,
+        "h": 18,
+        "color": 63421,
+        "text": "SW1",
+        "key_for": "flappy.flap",
+        "font_size": 11,
+        "line_height": 14,
+        "padding": 2,
+        "radius": 4,
+        "foreground": 15052,
+        "opacity": 0,
+        "stroke": 15052,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 70,
+        "y": 447,
+        "w": 160,
+        "h": 26,
+        "color": 15052,
+        "font_size": 14,
+        "text": "拍翅 / 重开"
+      },
+      {
+        "type": "text",
+        "x": 244,
+        "y": 447,
+        "w": 240,
+        "h": 26,
+        "color": 15052,
+        "font_size": 14,
+        "text": "也可点击拍翅按钮"
+      },
+      {
+        "type": "text",
+        "x": 505,
+        "y": 447,
+        "w": 108,
+        "h": 26,
+        "color": 15052,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 492,
+        "y": 16,
+        "w": 122,
+        "h": 44,
+        "color": 63421,
+        "foreground": 15052,
+        "font_size": 15,
+        "radius": 14,
+        "padding": 10,
+        "text": "暂停/继续",
+        "action": "session.pause",
+        "state_mask": 10
+      },
+      {
+        "type": "text",
+        "x": 130,
+        "y": 52,
+        "w": 300,
+        "h": 28,
+        "color": 15052,
+        "font_size": 18,
+        "bind": "badge"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 54,
+        "w": 96,
+        "h": 24,
+        "color": 15052,
+        "font_size": 15,
+        "text": "历史最高"
+      },
+      {
+        "type": "panel",
+        "x": 36,
+        "y": 102,
+        "w": 432,
+        "h": 270,
+        "color": 0,
+        "opacity": 0,
+        "action": "flappy.flap",
+        "state_mask": 7
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 准备好了吗飞得轻一点再试次吧score分拍翅开始重新像素鸟S",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            15,
+            11,
+            28
+          ],
+          [
+            16,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            19,
+            4,
+            28
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "W也可击按钮全局键退出",
+        "metrics": [
+          [
+            28,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "lifecycle": {
+    "pause_action": "session.pause",
+    "record_var": "best"
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "best"
+    ],
+    "states": {
+      "ready": "ready",
+      "playing": "ready",
+      "result": "ready",
+      "paused": "ready"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "press": [
+      "flappy.flap"
+    ]
   }
 }

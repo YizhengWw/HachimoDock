@@ -1,0 +1,6 @@
+Component-center background: generated for this project using the built-in imagegen tool.
+Prompt: 4:3 refined desktop-pet launcher background; warm sandstone, muted apricot,
+soft paper and ceramic texture, quiet center, gentle corner illumination; no text,
+buttons, panels, icons, logos or objects. Downsampled to the native 640 x 480 canvas.
+Thumbnails: deterministic encodings of the referenced built-in component artwork.
+Original component notices remain in each package. No UI text is baked into images.

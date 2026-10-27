@@ -1,20 +1,20 @@
 {
   "dashboard": {
     "title": "喝水提醒",
-    "eyebrow": "距离下次喝水",
-    "headline": "补水倒计时",
-    "metricLabel": "剩余",
+    "eyebrow": "给自己一个喝水的间隙",
+    "headline": "慢慢喝，不必等口渴。",
+    "metricLabel": "距离下次提醒",
     "metricValue": "60",
-    "metricUnit": "分钟",
+    "metricUnit": "暂停提醒",
     "badge": "0",
-    "note": "每 60 分钟提醒一次",
-    "footer": "SW1我喝了 · SW2暂停 · 摇杆右切换 · 全局键退出",
+    "note": "间隔调整在下次确认喝水后生效。",
+    "footer": "主键记录  副键暂停/恢复  摇杆右切换  全局键退出",
     "progress": {
       "value": 100,
       "label": "距提醒"
     },
-    "visualStyle": "pixel",
-    "visualPalette": "mint",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "tool",
     "visualSprite": "droplet"
   }

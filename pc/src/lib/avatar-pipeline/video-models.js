@@ -29,6 +29,14 @@ export function selectDefaultVideoModel(models, currentModel = "", manual = fals
   return candidates[0]?.id || "";
 }
 
+export async function discoverDefaultVideoModel(config, fetcher = pipelineFetch) {
+  const models = await listVideoModels(config, fetcher);
+  if (config.signal?.aborted) throw new DOMException("aborted", "AbortError");
+  const selected = selectDefaultVideoModel(models);
+  if (!selected) throw new Error("当前列表没有可自动选择的 Fast 视频模型，请刷新重试，或在高级设置中指定模型。");
+  return selected;
+}
+
 export async function listVideoModels({ apiKey, baseUrl = DEFAULT_VOLCANO_BASE_URL, signal }, fetcher = pipelineFetch) {
   if (!apiKey?.trim()) throw new Error("请先在 API 配置中填写火山 API Key。");
   const response = await fetcher(`${baseUrl.replace(/\/+$/, "")}/api/v3/models`, {
@@ -66,6 +74,9 @@ export async function requireAvailableVideoModel(config, signal) {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   if (!config.apiKey?.trim()) throw new Error("请先配置火山 API Key。");
   if (!config.model?.trim()) throw new Error("请选择或填写视频模型。");
+  if (/doubao-seedance-2-0-(fast|mini)/i.test(config.model) && config.resolution && !["auto", "480p", "720p"].includes(config.resolution)) {
+    throw new Error("所选 Seedance Fast / Mini 模型请使用 480p 或 720p；尚未发起图片或视频生成。");
+  }
   // Some deployments expose ep-* inference IDs but no compatible /models
   // listing. A failed/advisory list must not disable an otherwise valid task.
   if (isVolcanoModelRejected(config.apiKey, config.model)) {

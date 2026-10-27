@@ -114,6 +114,41 @@ static bool bounded_entities_overlap(
     && left->y + left->height > right->y;
 }
 
+/* Reuse an off-screen slot after the furthest platform. All coordinates stay
+ * local to the camera; endless play never allocates or grows world positions. */
+static void track_append(pet_p4_game_engine_t *g,unsigned index,int previous){
+  const pet_p4_bounded_game_config_t *c=&g->bounded;
+  pet_p4_game_entity_t *e=&g->bounded_entities[index],*p=&g->bounded_entities[previous];
+  unsigned gap=c->gap_min+(game_random(g)>>8)%(c->gap_max-c->gap_min+1);
+  e->x_q8=p->x_q8+(p->width+gap)*256;
+  e->width=c->width_min+(game_random(g)>>8)%(c->width_max-c->width_min+1);
+  unsigned tones[4],n=0;
+  for(unsigned t=1;t<=4;t++)if((c->tone_mask&(1u<<t))&&t!=p->tone)tones[n++]=t;
+  e->tone=tones[(game_random(g)>>8)%n];e->y_q8=p->y_q8;
+  e->x=(int8_t)(e->x_q8/256);e->y=p->y;e->active=true;
+  g->track_visited&=~(1u<<index);
+}
+
+static bool track_camera(pet_p4_game_engine_t *g){
+  const pet_p4_bounded_game_config_t *c=&g->bounded;
+  if(!c->track)return false;
+  int32_t delta=g->bounded_entities[c->motion_body].x_q8-c->camera_x*256;
+  if(delta<=0)return false;
+  int32_t shift=delta>4?delta/4:delta;
+  for(unsigned i=0;i<c->entity_count;i++){
+    pet_p4_game_entity_t *e=&g->bounded_entities[i];e->x_q8-=shift;e->x=(int8_t)(e->x_q8/256);
+  }
+  g->camera_travel_q8+=shift;
+  for(unsigned i=0;i<c->entity_count;i++){
+    pet_p4_game_entity_t *e=&g->bounded_entities[i];
+    if(!(c->platform_mask&(1u<<i))||e->x_q8+e->width*256>=-256)continue;
+    int last=-1;
+    for(unsigned j=0;j<c->entity_count;j++)if((c->platform_mask&(1u<<j))&&(last<0||g->bounded_entities[j].x_q8>g->bounded_entities[last].x_q8))last=j;
+    track_append(g,i,last);
+  }
+  return true;
+}
+
 static void bounded_reset(
   pet_p4_game_engine_t *game,
   uint64_t now_ms,
@@ -129,6 +164,23 @@ static void bounded_reset(
   game->running = running;
   game->game_over = false;
   game->last_tick_ms = now_ms;
+  game->charging=false;game->grounded=true;game->charge_elapsed_ms=0;
+  game->motion_vx_q8=game->motion_vy_q8=0;
+  game->track_visited=0;game->camera_travel_q8=0;
+  for(unsigned i=0;i<game->bounded.entity_count;i++){
+    game->bounded_entities[i].x_q8=game->bounded_entities[i].x*256;
+    game->bounded_entities[i].y_q8=game->bounded_entities[i].y*256;
+  }
+  if(game->bounded.track){
+    pet_p4_game_entity_t *b=&game->bounded_entities[game->bounded.motion_body];int home=-1;
+    for(unsigned i=0;i<game->bounded.entity_count;i++){
+      pet_p4_game_entity_t *p=&game->bounded_entities[i];
+      if((game->bounded.platform_mask&(1u<<i))&&b->y+b->height==p->y&&b->x*2+b->width>=p->x*2&&b->x*2+b->width<(p->x+p->width)*2){home=i;break;}
+    }
+    game->track_visited=1u<<home;
+    int last=home;
+    for(unsigned i=0;i<game->bounded.entity_count;i++)if((game->bounded.platform_mask&(1u<<i))&&(int)i!=home){track_append(game,i,last);last=i;}
+  }
 }
 
 static bool bounded_move_entity(
@@ -325,7 +377,12 @@ static bool bounded_apply_op(
     return changed;
   }
   if (op->kind == PET_P4_GAME_OP_PLACE) {
-    return bounded_place_entity(game, op);
+    bool changed=bounded_place_entity(game, op);
+    if(game->bounded.motion&&entity){
+      entity->x_q8=entity->x*256;entity->y_q8=entity->y*256;
+      if(op->entity_index==game->bounded.motion_body){game->motion_vx_q8=game->motion_vy_q8=0;game->grounded=true;game->charging=false;game->charge_elapsed_ms=0;}
+    }
+    return changed;
   }
   if (op->kind == PET_P4_GAME_OP_SHOW && entity) {
     bool changed = !entity->active;
@@ -378,6 +435,24 @@ static bool bounded_apply_op(
     entity->tone = op->tone;
     return changed;
   }
+  if(game->bounded.motion&&op->entity_index==game->bounded.motion_body){
+    if(op->kind==PET_P4_GAME_OP_CANCEL){bool changed=game->charging;game->charging=false;game->charge_elapsed_ms=0;return changed;}
+    if(op->kind==PET_P4_GAME_OP_CHARGE){
+      if(game->game_over)bounded_reset(game,now_ms,true);
+      else if(!game->running){
+        /* Entry already prepared the visible board. Starting it must not
+         * consume RNG or replace the platforms the player aimed at. */
+        game->running=true;game->last_tick_ms=now_ms;
+      }
+    }
+    if(op->kind==PET_P4_GAME_OP_CHARGE&&game->running&&game->grounded&&!game->charging){game->charging=true;game->charge_elapsed_ms=1;return true;}
+    if(op->kind==PET_P4_GAME_OP_LAUNCH&&game->running&&game->grounded&&game->charging){
+      unsigned ms=game->charge_elapsed_ms;
+      if(ms>game->bounded.charge_ms)ms=game->bounded.charge_ms;
+      game->motion_vx_q8=256*game->bounded.launch_min+(256*(game->bounded.launch_max-game->bounded.launch_min)*ms)/game->bounded.charge_ms;
+      game->motion_vy_q8=-256*game->bounded.lift;game->grounded=false;game->charging=false;game->charge_elapsed_ms=0;return true;
+    }
+  }
   return false;
 }
 
@@ -397,6 +472,7 @@ static bool bounded_rule_matches(
     return (rule->entity_index == entity_index && rule->with_index == with_index)
       || (rule->entity_index == with_index && rule->with_index == entity_index);
   }
+  if(trigger==PET_P4_GAME_TRIGGER_LANDED)return rule->entity_index==entity_index&&rule->with_index==with_index;
   if (trigger == PET_P4_GAME_TRIGGER_EDGE || trigger == PET_P4_GAME_TRIGGER_BLOCKED) {
     return rule->entity_index == entity_index
       && (rule->edge == PET_P4_GAME_EDGE_NONE || rule->edge == edge);
@@ -461,7 +537,7 @@ static bool bounded_process_trigger(
     events,
     &event_count
   );
-  if (trigger == PET_P4_GAME_TRIGGER_TICK && game->running && !game->game_over) {
+  if (trigger == PET_P4_GAME_TRIGGER_TICK && game->running && !game->game_over && !game->bounded.motion) {
     for (int index = 0; index < game->bounded.entity_count; index += 1) {
       pet_p4_game_entity_t *entity = &game->bounded_entities[index];
       if (!entity->active || (entity->vx == 0 && entity->vy == 0)) continue;
@@ -489,7 +565,7 @@ static bool bounded_process_trigger(
       NULL
     );
   }
-  for (int left = 0; left < game->bounded.entity_count; left += 1) {
+  for (int left = 0; !game->bounded.motion && left < game->bounded.entity_count; left += 1) {
     for (int right = left + 1; right < game->bounded.entity_count; right += 1) {
       if (!bounded_entities_overlap(
             &game->bounded_entities[left],
@@ -511,6 +587,64 @@ static bool bounded_process_trigger(
     }
   }
   return changed;
+}
+
+/* Bounded continuous body integration, shared by firmware and WASM. Positions
+ * are Q8 grid units, velocities grid units/second; no floating point or heap.
+ * Only top-side descending crossings can land, never ascent/side overlap. */
+static bool bounded_motion_step(pet_p4_game_engine_t *game,uint64_t now_ms){
+  const pet_p4_bounded_game_config_t *c=&game->bounded;
+  pet_p4_game_entity_t *body=&game->bounded_entities[c->motion_body];
+  bool changed=bounded_process_trigger(game,PET_P4_GAME_TRIGGER_TICK,NULL,now_ms);
+  if(!game->running||!body->active)return changed;
+  changed|=track_camera(game);
+  if(game->charging){
+    unsigned before=game->charge_elapsed_ms;game->charge_elapsed_ms+=game->tick_ms;
+    if(game->charge_elapsed_ms>c->charge_ms)game->charge_elapsed_ms=c->charge_ms;
+    return changed||before!=game->charge_elapsed_ms;
+  }
+  if(game->grounded)return changed;
+  int32_t old_x=body->x_q8,old_bottom=body->y_q8+body->height*256;
+  game->motion_vy_q8+=(int32_t)c->gravity*256*game->tick_ms/1000;
+  body->x_q8+=game->motion_vx_q8*(int32_t)game->tick_ms/1000;
+  body->y_q8+=game->motion_vy_q8*(int32_t)game->tick_ms/1000;
+  int32_t bottom=body->y_q8+body->height*256;
+  int landed=-1;int32_t nearest=INT32_MAX,landing_x=body->x_q8;
+  for(unsigned i=0;game->motion_vy_q8>=0&&i<c->entity_count;i++){
+    if(!(c->platform_mask&(1u<<i)))continue;
+    const pet_p4_game_entity_t *p=&game->bounded_entities[i];
+    int32_t top=p->y_q8;
+    if(!p->active||old_bottom>top||bottom<top||bottom<=old_bottom)continue;
+    int32_t cross_left=old_x+(int64_t)(body->x_q8-old_x)*(top-old_bottom)/(bottom-old_bottom);
+    /* Use the central half of the body as a foot span, not a zero-width
+     * centre point or the full (often transparent) sprite rectangle. Strict
+     * overlap excludes a mere tangent and never catches ascent/side impact.
+     * Test at the swept top crossing, not at this tick's final position. */
+    int32_t foot_left=cross_left+body->width*64;
+    int32_t foot_right=cross_left+body->width*192;
+    if(foot_right>p->x_q8&&foot_left<p->x_q8+p->width*256&&top<nearest){
+      nearest=top;landed=i;landing_x=cross_left;
+    }
+  }
+  if(landed>=0){
+    /* Stop both axes at contact: retaining the remaining horizontal step can
+     * draw the character beyond its support, especially on slow frames. */
+    body->x_q8=landing_x;body->y_q8=nearest-body->height*256;game->grounded=true;game->motion_vx_q8=game->motion_vy_q8=0;
+    body->x=(int8_t)(body->x_q8/256);body->y=(int8_t)(body->y_q8/256);
+    /* A track slot earns its arrival event once until recycled. Landing back
+     * on the same platform must not farm points. The character is never reset. */
+    if(!c->track||!(game->track_visited&(1u<<landed))){
+      game->track_visited|=1u<<landed;
+      bounded_execute_rules(game,PET_P4_GAME_TRIGGER_LANDED,NULL,c->motion_body,landed,PET_P4_GAME_EDGE_NONE,now_ms,NULL,NULL);
+    }
+  }else if(body->y_q8>game->height*256||body->x_q8>game->width*256||body->x_q8 < -body->width*256){
+    pet_p4_game_edge_t edge=body->y_q8>game->height*256?PET_P4_GAME_EDGE_BOTTOM:body->x_q8<0?PET_P4_GAME_EDGE_LEFT:PET_P4_GAME_EDGE_RIGHT;
+    bounded_execute_rules(game,PET_P4_GAME_TRIGGER_EDGE,NULL,c->motion_body,-1,edge,now_ms,NULL,NULL);
+    /* No unbounded fall even if a malformed rule omitted stop. */
+    game->running=false;game->game_over=true;game->charging=false;
+  }
+  body->x=(int8_t)(body->x_q8/256);body->y=(int8_t)(body->y_q8/256);
+  return true;
 }
 
 static bool block_mask_cell(uint8_t piece, uint8_t rotation, int x, int y) {
@@ -552,6 +686,8 @@ static void game_refresh_frame(pet_p4_game_engine_t *game) {
   frame->running = game->running;
   frame->game_over = game->game_over;
   frame->entity_count = 0;
+  frame->motion=game->kind==PET_P4_GAME_BOUNDED&&game->bounded.motion;
+  frame->charge_percent=frame->motion&&game->charging?(uint8_t)(1+99*game->charge_elapsed_ms/game->bounded.charge_ms):0;
   if (game->kind == PET_P4_GAME_BOUNDED) {
     memcpy(
       frame->cells,
@@ -735,6 +871,7 @@ static void snake_reset(pet_p4_game_engine_t *game, uint64_t now_ms, bool runnin
   game->last_tick_ms = now_ms;
   game->snake_length = 4;
   game->snake_direction = 0;
+  game->snake_turn_pending = false;
   for (uint16_t i = 0; i < game->snake_length; i += 1) {
     game->snake_x[i] = (uint8_t) (game->width / 2 - i);
     game->snake_y[i] = (uint8_t) (game->height / 2);
@@ -746,6 +883,10 @@ static void snake_reset(pet_p4_game_engine_t *game, uint64_t now_ms, bool runnin
 static bool snake_step(pet_p4_game_engine_t *game) {
   static const int8_t dx[] = {1, 0, -1, 0};
   static const int8_t dy[] = {0, 1, 0, -1};
+  if(game->snake_turn_pending){
+    game->snake_direction=game->snake_pending_direction;
+    game->snake_turn_pending=false;
+  }
   int next_x = (int) game->snake_x[0] + dx[game->snake_direction];
   int next_y = (int) game->snake_y[0] + dy[game->snake_direction];
   bool growing;
@@ -818,7 +959,10 @@ static bool flappy_collides(const pet_p4_game_engine_t *game) {
 }
 
 static bool flappy_step(pet_p4_game_engine_t *game) {
-  game->flappy_y_q8 = (int16_t) (game->flappy_y_q8 + game->flappy_velocity_q8);
+  /* Package-owned vertical speed; preserve tick, pipe cadence and legacy
+   * physics at 100%. Scaling displacement scales the entire velocity curve. */
+  game->flappy_y_q8 = (int16_t) (game->flappy_y_q8
+    + game->flappy_velocity_q8 * game->flappy_vertical_speed_percent / 100);
   game->flappy_velocity_q8 = (int16_t) (
     game->flappy_velocity_q8 + FLAPPY_GRAVITY_Q8
   );
@@ -883,6 +1027,7 @@ bool pet_p4_game_configure(
   memset(game, 0, sizeof(*game));
   game->kind = kind;
   game->tick_ms = tick_ms;
+  game->flappy_vertical_speed_percent = 100;
   game->rng = seed ? seed : 0x70657434U;
   if (kind == PET_P4_GAME_BLOCKS) {
     game->width = BLOCKS_WIDTH;
@@ -901,6 +1046,13 @@ bool pet_p4_game_configure(
   return true;
 }
 
+bool pet_p4_game_set_vertical_speed(pet_p4_game_engine_t *game, unsigned percent) {
+  if (!game || game->kind != PET_P4_GAME_FLAPPY || percent < 25 || percent > 100)
+    return false;
+  game->flappy_vertical_speed_percent = (uint8_t)percent;
+  return true;
+}
+
 bool pet_p4_game_configure_bounded(
   pet_p4_game_engine_t *game,
   const pet_p4_bounded_game_config_t *config,
@@ -909,10 +1061,26 @@ bool pet_p4_game_configure_bounded(
   if (!game || !config
       || config->width < 4 || config->width > PET_P4_GAME_GRID_MAX_WIDTH
       || config->height < 4 || config->height > PET_P4_GAME_GRID_MAX_HEIGHT
-      || config->tick_ms < GAME_TICK_MIN_MS || config->tick_ms > GAME_TICK_MAX_MS
+      || config->tick_ms < (config->motion?16U:GAME_TICK_MIN_MS) || config->tick_ms > (config->motion?40U:GAME_TICK_MAX_MS)
       || config->entity_count == 0 || config->entity_count > PET_P4_GAME_MAX_ENTITIES
       || config->rule_count == 0 || config->rule_count > PET_P4_GAME_MAX_RULES) {
     return false;
+  }
+  if(config->motion&&(config->motion_body<0||config->motion_body>=config->entity_count||!config->platform_mask
+    ||(config->platform_mask&(1u<<config->motion_body))||(config->platform_mask>>config->entity_count)
+    ||config->gravity<4||config->gravity>64||config->lift<2||config->lift>16
+    ||config->launch_min<1||config->launch_max<config->launch_min||config->launch_max>24
+    ||config->charge_ms<300||config->charge_ms>3000||config->solid_tone_mask))return false;
+  if(config->track){
+    unsigned count=0,tones=0;
+    for(unsigned i=0;i<config->entity_count;i++)if(config->platform_mask&(1u<<i))count++;
+    for(unsigned i=1;i<=4;i++)if(config->tone_mask&(1u<<i))tones++;
+    if(!config->motion||count<4||count>8||count+1!=config->entity_count
+      ||config->camera_x<2||config->camera_x>config->width/2
+      ||config->gap_min<1||config->gap_max<config->gap_min||config->gap_max>6
+      ||config->width_min<2||config->width_max<config->width_min||config->width_max>4
+      ||(config->gap_max+config->width_max)*config->gravity>2*config->lift*config->launch_max
+      ||tones<2||(config->tone_mask&~30u))return false;
   }
   for (int index = 0; index < config->width * config->height; index += 1) {
     if (config->base_cells[index] > 4) return false;
@@ -939,10 +1107,28 @@ bool pet_p4_game_configure_bounded(
     const pet_p4_game_rule_t *rule = &config->rules[index];
     if (rule->op_count == 0 || rule->op_count > PET_P4_GAME_MAX_OPS_PER_RULE
         || rule->trigger < PET_P4_GAME_TRIGGER_ACTION
-        || rule->trigger > PET_P4_GAME_TRIGGER_BLOCKED
+        || rule->trigger > PET_P4_GAME_TRIGGER_LANDED
         || (rule->trigger == PET_P4_GAME_TRIGGER_ACTION && !rule->action[0])) {
       return false;
     }
+    if(rule->trigger==PET_P4_GAME_TRIGGER_LANDED&&(!config->motion||rule->entity_index!=config->motion_body
+        ||rule->with_index<0||rule->with_index>=config->entity_count||!(config->platform_mask&(1u<<rule->with_index))))return false;
+    for(unsigned j=0;j<rule->op_count;j++){
+      const pet_p4_game_op_t *o=&rule->ops[j];
+      if(config->track&&(o->kind==PET_P4_GAME_OP_PLACE||o->kind==PET_P4_GAME_OP_SHOW||o->kind==PET_P4_GAME_OP_HIDE
+        ||o->kind==PET_P4_GAME_OP_MOVE||o->kind==PET_P4_GAME_OP_VELOCITY||o->kind==PET_P4_GAME_OP_ACCELERATE||o->kind==PET_P4_GAME_OP_BOUNCE))return false;
+      if(o->kind>=PET_P4_GAME_OP_CHARGE&&(!config->motion||o->kind!=PET_P4_GAME_OP_CHARGE||o->entity_index!=config->motion_body))return false;
+    }
+  }
+  if(config->motion){
+    const pet_p4_game_entity_t *b=&config->entities[config->motion_body];bool supported=false;
+    for(unsigned i=0;i<config->entity_count;i++){
+      const pet_p4_game_entity_t *p=&config->entities[i];if(p->vx||p->vy)return false;
+      if(config->track&&(config->platform_mask&(1u<<i))&&(!p->active||p->y!=b->y+b->height))return false;
+      if((config->platform_mask&(1u<<i))&&p->active&&b->y+b->height==p->y
+          &&b->x*2+b->width>=p->x*2&&b->x*2+b->width<(p->x+p->width)*2)supported=true;
+    }
+    if(!b->active||!supported)return false;
   }
   memset(game, 0, sizeof(*game));
   game->kind = PET_P4_GAME_BOUNDED;
@@ -996,6 +1182,11 @@ bool pet_p4_game_command(
         game->block_rotation = next_rotation;
         changed = true;
       }
+    } else if(command==PET_P4_GAME_COMMAND_SOFT_DROP) {
+      if(blocks_can_place(game,game->block_piece,game->block_rotation,game->block_x,game->block_y+1)){
+        game->block_y++;game->score++;changed=true;
+      }
+      /* Do not lock/spawn a new piece on a held key. Gravity handles contact. */
     } else if (command == PET_P4_GAME_COMMAND_DROP) {
       int distance = 0;
       while (blocks_can_place(game, game->block_piece, game->block_rotation,
@@ -1008,7 +1199,13 @@ bool pet_p4_game_command(
       changed = true;
     }
   } else if (game->kind == PET_P4_GAME_SNAKE) {
-    if (command == PET_P4_GAME_COMMAND_LEFT) {
+    if(command>=PET_P4_GAME_COMMAND_WEST&&command<=PET_P4_GAME_COMMAND_SOUTH){
+      static const uint8_t directions[]={2,0,3,1};
+      uint8_t next=directions[command-PET_P4_GAME_COMMAND_WEST];
+      if(!game->snake_turn_pending&&next!=game->snake_direction&&next!=(game->snake_direction+2)%4){
+        game->snake_pending_direction=next;game->snake_turn_pending=true;changed=true;
+      }
+    }else if (command == PET_P4_GAME_COMMAND_LEFT) {
       game->snake_direction = (uint8_t) ((game->snake_direction + 3U) % 4U);
       changed = true;
     } else if (command == PET_P4_GAME_COMMAND_RIGHT) {
@@ -1052,10 +1249,10 @@ bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms) {
   uint64_t elapsed = now_ms - game->last_tick_ms;
   uint32_t steps = (uint32_t) (elapsed / game->tick_ms);
   if (steps == 0) return false;
-  if (steps > 8U) steps = 8U;
+  if (steps > 8U) {steps = 8U;if(game->bounded.motion)game->last_tick_ms=now_ms-(uint64_t)steps*game->tick_ms;}
   for (uint32_t step = 0; step < steps && game->running; step += 1) {
     if (game->kind == PET_P4_GAME_BOUNDED) {
-      changed |= bounded_process_trigger(
+      changed |= game->bounded.motion?bounded_motion_step(game,now_ms):bounded_process_trigger(
         game,
         PET_P4_GAME_TRIGGER_TICK,
         NULL,
@@ -1068,6 +1265,25 @@ bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms) {
   game->last_tick_ms += (uint64_t) steps * game->tick_ms;
   if (changed) game_refresh_frame(game);
   return changed;
+}
+
+bool pet_p4_game_pointer(pet_p4_game_engine_t *game,unsigned index,int x,int y,unsigned axes){
+  if(!game||game->kind!=PET_P4_GAME_BOUNDED||game->bounded.motion||!game->running||game->game_over||index>=game->bounded.entity_count||axes<1||axes>3||x < -1024||x>1024||y < -1024||y>1024)return false;
+  pet_p4_game_entity_t *e=&game->bounded_entities[index];
+  if(!e->active||e->bounds!=PET_P4_GAME_BOUNDS_CLAMP)return false;
+  int nx=x-e->width/2,ny=y-e->height/2;
+  if(nx<0)nx=0;if(ny<0)ny=0;if(nx>game->width-e->width)nx=game->width-e->width;if(ny>game->height-e->height)ny=game->height-e->height;
+  bool changed=false;
+  if((axes&1)&&e->x!=nx){e->x=nx;changed=true;}
+  if((axes&2)&&e->y!=ny){e->y=ny;changed=true;}
+  if(changed)game_refresh_frame(game);
+  return changed;
+}
+
+bool pet_p4_game_release(pet_p4_game_engine_t *game,bool cancel,uint64_t now_ms){
+  if(!game||!game->bounded.motion||!game->charging)return false;
+  pet_p4_game_op_t op={.kind=cancel?PET_P4_GAME_OP_CANCEL:PET_P4_GAME_OP_LAUNCH,.entity_index=game->bounded.motion_body};
+  bool changed=bounded_apply_op(game,&op,now_ms,NULL,NULL);if(changed)game_refresh_frame(game);return changed;
 }
 
 void pet_p4_game_get_frame(

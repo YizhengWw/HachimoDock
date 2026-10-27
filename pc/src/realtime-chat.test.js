@@ -166,7 +166,7 @@ test("saved persona refreshes the device target and the active session without s
 
 test("firmware implements conversation capture, streamed playback, the key action and the HUD", () => {
   const audio = read("firmware/main/pet_p4_audio.c");
-  assert.match(audio, /esp_err_t pet_p4_audio_conversation_set\(bool enabled, bool half_duplex\)/);
+  assert.match(audio, /esp_err_t pet_p4_audio_conversation_set\(bool enabled, bool half_duplex, const char \*session_id\)/);
   assert.match(audio, /esp_err_t pet_p4_audio_stream_push\(const uint8_t \*pcm, size_t length\)/);
   assert.match(audio, /PET_P4_AUDIO_STREAM_START_BYTES 6400/);
   assert.match(audio, /if \(playback_gates_capture\(now_ms\)\) \{/);

@@ -1,0 +1,72 @@
+# HachimoDock 项目许可证 / HachimoDock Project License
+
+版本 / Version: 1.0 — 2026-09-04
+Copyright (C) 2026 Yizheng Wang. 保留所有权利 / All rights reserved.
+
+## 中文条款
+
+### 1. 适用范围及权属
+
+本许可证适用于本次发布中由权利人拥有并明确按本许可证提供的 HachimoDock 自有源码、PC 客户端、固件、内置组件、素材及文档（“授权作品”）。第三方软件、字体、驱动和素材不受本许可证的额外限制，继续适用其各自许可证，参见 THIRD_PARTY_NOTICES.md 及各文件中的声明。用户自行创作的组件及素材，其权属不因使用本项目而转移。
+
+### 2. 非商业使用授权
+
+在遵守本许可证的前提下，权利人授予您有限、非排他、免费且不可转授权的许可，允许为非商业目的学习、运行、复制、修改和再分发授权作品，以使用、研究、修复或扩展 HachimoDock 项目。允许个人非商业自制设备，以及为 HachimoDock 创建、调试和分享非商业组件。对工作场所内个人自用的桌面宠物功能，不因使用地点而自动认定为商业用途。
+
+### 3. 另行授权的用途
+
+未经权利人事先书面授权，不得将授权作品用于收费销售、出租、付费服务、商业产品集成、预装销售、委托生产销售或其他直接或间接经营性获利活动；也不得将授权作品用于开发或提供独立于 HachimoDock 项目的 APP、Web 服务或其他软件、硬件产品。本条不限制第 2 条明确允许的项目内修改及组件扩展。商业用途或其他超出本许可证范围的用途，须另行取得书面许可。
+
+### 4. 再分发及标识
+
+在许可范围内以源码或二进制形式再分发，无论是否修改，必须附上本许可证，并保留适用的版权、第三方许可及免责声明。修改版本必须清楚标明修改事实，不得暗示其为官方版本。再分发不授予您为权利人的作品另设许可的权利；接收者依据本许可证直接取得相应许可。
+
+### 5. 品牌及权利保留
+
+本许可证不授予 HachimoDock、Pet Manager、项目标识或其他品牌的商标权或宣传背书权。除准确说明来源、保留法律声明及必要的事实性兼容说明外，未经书面许可不得以项目名称、标识或权利人名义宣传推广产品，不得造成官方授权、合作或背书的误认。未明确授予的权利均予保留。
+
+### 6. 终止
+
+违反许可范围、移除必要声明或以授权作品制造、委托制造、销售冒充官方的仿冒产品时，权利人可终止本许可证下的授权。若您就授权作品向权利人提起知识产权侵权主张或相关专利无效请求，权利人亦可在适用法律允许的范围内终止授权。本条不排除法律赋予且不得通过合同排除的权利。终止不影响依法有效取得独立许可的接收者或第三方许可证项下的权利。
+
+### 7. 免责声明
+
+授权作品按“现状”提供。在适用法律允许的最大范围内，权利人不提供明示或默示担保，包括适销性、特定用途适用性、不侵权、准确性、连续可用性或无错误的担保；对因使用或无法使用授权作品产生的损失不承担责任。本条不排除适用法律规定不得排除或限制的责任。
+
+### 8. 历史版本及语言
+
+本许可证不撤销历史版本已经授予的许可，也不覆盖第三方许可证。中英文条款表达相同许可意图；存在歧义时，以中文条款为准，但不得因此限制不可排除的法定权利。本项目为非商业源码可见项目，本许可证不是 GPL、AGPL 或其他标准开源许可证。
+
+## English terms
+
+### 1. Scope and ownership
+
+This license covers only HachimoDock source code, desktop clients, firmware, built-in components, media and documentation owned by the copyright holder and expressly released under this license (the “Work”). Third-party software, fonts, drivers and materials retain their own licenses without additional restrictions from this license; see THIRD_PARTY_NOTICES.md and individual notices. Users retain ownership of independently created components and materials.
+
+### 2. Non-commercial permission
+
+Subject to these terms, you receive a limited, non-exclusive, royalty-free, non-sublicensable permission to study, run, copy, modify and redistribute the Work for non-commercial use, research, repair or extension of HachimoDock. Personal non-commercial device builds and creation, testing and sharing of non-commercial HachimoDock components are permitted. Personal use of desktop-pet functionality at a workplace is not commercial merely because of its location.
+
+### 3. Uses requiring separate permission
+
+Prior written permission is required for sale, rental, paid services, commercial product integration, preinstalled product sales, manufacturing for sale (including contract manufacturing), or other activities intended to obtain direct or indirect business profit from the Work. Separate permission is also required to use the Work to develop or provide apps, web services or other software or hardware products independent of HachimoDock. This does not prohibit the modifications and component extensions expressly allowed in section 2. Commercial and other out-of-scope uses require a separate written license.
+
+### 4. Redistribution
+
+Permitted source and binary redistributions, modified or unmodified, must include this license and preserve applicable copyright, third-party and disclaimer notices. Modifications must be identified and must not be represented as official releases. You may not relicense the holder's Work; recipients receive their applicable permission directly under this license.
+
+### 5. Branding and reserved rights
+
+No trademark, promotional endorsement or branding rights in HachimoDock, Pet Manager or project logos are granted. Except for accurate attribution, required notices and necessary factual compatibility descriptions, written permission is required to promote products using project names, logos or the holder's identity. Do not imply official authorization, affiliation or endorsement. All ungranted rights are reserved.
+
+### 6. Termination
+
+The holder may terminate permission for violations of these terms, removal of required notices, or use of the Work to manufacture, commission or sell counterfeit products represented as official. To the extent allowed by applicable law, the holder may also terminate permission if you assert intellectual-property infringement claims concerning the Work against the holder or seek invalidation of related patents. Non-waivable legal rights remain unaffected. Termination does not revoke recipients' independently valid licenses or rights under third-party licenses.
+
+### 7. Disclaimer
+
+The Work is provided “AS IS”. To the maximum extent permitted by law, the holder disclaims express and implied warranties, including merchantability, fitness for purpose, non-infringement, accuracy, availability and freedom from errors, and liability for losses arising from use or inability to use the Work. Liability that cannot lawfully be excluded or limited remains unaffected.
+
+### 8. Earlier releases and language
+
+This license does not revoke permissions already granted for earlier releases or override third-party licenses. The Chinese and English text express the same intent; the Chinese text governs ambiguities, subject to non-waivable law. This is a non-commercial source-available project, not a GPL, AGPL or other standard open-source license.

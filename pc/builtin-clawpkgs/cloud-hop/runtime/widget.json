@@ -1,0 +1,808 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    },
+    "best": {
+      "type": "int",
+      "init": 0
+    },
+    "charge": {
+      "type": "int",
+      "init": 0
+    },
+    "hundred": {
+      "type": "int",
+      "init": 100
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "paused",
+    "result"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {"from":"*","on":"session.restart","to":"playing","set":{"charge":0}},
+    {
+      "from": "ready",
+      "on": "jump.charge",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "jump.charge",
+      "to": "playing"
+    },
+    {
+      "from": "result",
+      "on": "jump.charge",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "session.pause",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "session.pause",
+      "to": "playing"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "云端跳一跳",
+    "eyebrow": "蓄一点力，向前一点点",
+    "headline": {
+      "switch_state": {
+        "ready": "陪小狗，跳过下一朵云",
+        "playing": "松开，出发！",
+        "paused": "歇一下，云朵会等你",
+        "result": "没关系，再跳一次"
+      }
+    },
+    "metricValue": {
+      "var": "score"
+    },
+    "metricLabel": {
+      "switch_state": {
+        "ready": "按住开始",
+        "playing": "按住蓄力",
+        "paused": "已暂停",
+        "result": "按住重来"
+      }
+    },
+    "metricUnit": {
+      "switch_state": {
+        "ready": "暂停",
+        "playing": "暂停",
+        "paused": "继续",
+        "result": "暂停"
+      }
+    },
+    "badge": {
+      "var": "best"
+    },
+    "note": "按住越久，跳得越远",
+    "footer": "落上下一座平台得 1 分 · 掉落结束",
+    "progress": {
+      "pct_of": "charge",
+      "of_max": "hundred"
+    },
+    "visualStyle": "clean",
+    "visualPalette": "mint",
+    "visualLayout": "scoreboard",
+    "visualSprite": "star"
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "hold": "jump.charge",
+    "confirm": {"session.restart":"重新开始本局？最高分会保留。"}
+  },
+  "lifecycle": {
+    "pause_action": "session.pause",
+    "record_var": "best"
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "best"
+    ],
+    "states": {
+      "ready": "ready",
+      "playing": "ready",
+      "paused": "ready",
+      "result": "ready"
+    }
+  },
+  "scene": {
+    "tick_ms": 20,
+    "active_state": "playing",
+    "result_state": "result",
+    "score_var": "score",
+    "grid": {
+      "width": 16,
+      "height": 8
+    },
+    "motion": {
+      "engine": "p4-motion-v1",
+      "body": "puppy",
+      "platforms": [
+        "home",
+        "next",
+        "ahead",
+        "far"
+      ],
+      "gravity": 18,
+      "lift": 7,
+      "speed": [
+        2,
+        15
+      ],
+      "charge_ms": 1200,
+      "charge_var": "charge",
+      "track": {
+        "engine": "p4-platform-track-v1",
+        "camera_x": 4,
+        "gap": [2, 5],
+        "width": [2, 4],
+        "tones": [1, 2, 3, 4]
+      }
+    },
+    "entities": [
+      {
+        "id": "puppy",
+        "x": 2,
+        "y": 4,
+        "width": 2,
+        "height": 2,
+        "tone": 1,
+        "shape": "character",
+        "bounds": "stop"
+      },
+      {
+        "id": "home",
+        "x": 1,
+        "y": 6,
+        "width": 4,
+        "height": 1,
+        "tone": 2,
+        "shape": "capsule"
+      },
+      {
+        "id": "next",
+        "x": 8,
+        "y": 6,
+        "width": 3,
+        "height": 1,
+        "tone": 3,
+        "shape": "capsule"
+      },
+      {
+        "id": "ahead", "x": 8, "y": 6, "width": 2, "height": 1,
+        "tone": 1, "shape": "capsule"
+      },
+      {
+        "id": "far", "x": 12, "y": 6, "width": 3, "height": 1,
+        "tone": 4, "shape": "capsule"
+      }
+    ],
+    "rules": [
+      {"on":"session.restart","do":[{"op":"restart"}]},
+      {
+        "on": "jump.charge",
+        "do": [
+          {
+            "op": "charge",
+            "entity": "puppy"
+          }
+        ]
+      },
+      {
+        "on": "landed",
+        "entity": "puppy",
+        "with": "next",
+        "do": [
+          {
+            "op": "score",
+            "add": 1
+          }
+        ]
+      },
+      {"on": "landed", "entity": "puppy", "with": "home", "do": [{"op": "score", "add": 1}]},
+      {"on": "landed", "entity": "puppy", "with": "ahead", "do": [{"op": "score", "add": 1}]},
+      {"on": "landed", "entity": "puppy", "with": "far", "do": [{"op": "score", "add": 1}]},
+      {
+        "on": "edge",
+        "entity": "puppy",
+        "edge": "any",
+        "do": [
+          {
+            "op": "stop"
+          }
+        ]
+      }
+    ]
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 65501,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "hero",
+        "asset": "assets/hero.png",
+        "frame_width": 80,
+        "frame_height": 80,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "digits",
+        "asset": "assets/digits.png",
+        "frame_width": 160,
+        "frame_height": 128,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "labels",
+        "asset": "assets/labels.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "scene_view": {
+      "engine": "p4-scene-surface-v1",
+      "x": 24,
+      "y": 138,
+      "w": 592,
+      "h": 216,
+      "colors": [
+        45366,
+        21583,
+        54508,
+        32092,
+        44501
+      ],
+      "sprites": [
+        {
+          "entity": "puppy",
+          "image": "hero",
+          "columns": 1,
+          "fps": 1
+        }
+      ]
+    },
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "image": "background",
+        "color": 65535
+      },
+      {
+        "type": "icon",
+        "x": 24,
+        "y": 22,
+        "w": 24,
+        "h": 24,
+        "color": 21583,
+        "icon": "cloud"
+      },
+      {
+        "type": "text",
+        "x": 58,
+        "y": 20,
+        "w": 260,
+        "h": 30,
+        "color": 18918,
+        "font_size": 22,
+        "line_height": 29,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 444,
+        "y": 22,
+        "w": 72,
+        "h": 24,
+        "color": 18918,
+        "font_size": 16,
+        "line_height": 21,
+        "text": "最佳"
+      },
+      {
+        "type": "text",
+        "x": 528,
+        "y": 18,
+        "w": 84,
+        "h": 32,
+        "color": 18918,
+        "font_size": 24,
+        "line_height": 31,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 64,
+        "w": 470,
+        "h": 38,
+        "color": 18918,
+        "font_size": 24,
+        "line_height": 31,
+        "bind": "headline"
+      },
+      {
+        "type": "text",
+        "x": 542,
+        "y": 63,
+        "w": 70,
+        "h": 56,
+        "color": 18918,
+        "font_size": 44,
+        "line_height": 57,
+        "bind": "metricValue",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 109,
+        "w": 360,
+        "h": 25,
+        "color": 21583,
+        "font_size": 16,
+        "line_height": 21,
+        "bind": "note"
+      },
+      {
+        "type": "panel",
+        "x": 24,
+        "y": 361,
+        "w": 592,
+        "h": 8,
+        "color": 57082,
+        "radius": 4
+      },
+      {
+        "type": "meter",
+        "x": 24,
+        "y": 361,
+        "w": 592,
+        "h": 8,
+        "color": 21583,
+        "bind": "progress"
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 387,
+        "w": 280,
+        "h": 48,
+        "color": 21583,
+        "foreground": 65501,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "jump.charge",
+        "bind": "metricLabel",
+        "icon": "arrow",
+        "state_mask": 11
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 387,
+        "w": 280,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "已暂停 · 点右侧继续",
+        "state_mask": 4
+      },
+      {
+        "type": "button",
+        "x": 318,
+        "y": 387,
+        "w": 142,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "session.pause",
+        "bind": "metricUnit",
+        "icon": "pause"
+      },
+      {"type":"button","x":474,"y":387,"w":142,"h":48,"color":65501,"foreground":18918,"radius":16,"font_size":20,"padding":14,"action":"session.restart","text":"重开"},
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 448,
+        "w": 640,
+        "h": 32,
+        "color": 65501,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 20,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW1",
+        "key_for": "jump.charge"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 453,
+        "w": 166,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "按住蓄力 · 松开跳"
+      },
+      {
+        "type": "button",
+        "x": 246,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW2",
+        "key_for": "session.pause"
+      },
+      {
+        "type": "text",
+        "x": 285,
+        "y": 453,
+        "w": 96,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "暂停 / 继续"
+      },
+      {"type":"button","x":395,"y":454,"w":54,"h":20,"color":65501,"foreground":18918,"radius":4,"font_size":11,"padding":0,"text":"中按","key_for":"session.restart"},
+      {"type":"text","x":455,"y":453,"w":46,"h":22,"color":18918,"font_size":13,"line_height":17,"text":"重开"},
+      {
+        "type": "text",
+        "x": 510,
+        "y": 453,
+        "w": 106,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "digits",
+        "chars": "0123456789",
+        "metrics": [
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ]
+        ],
+        "cell": [
+          32,
+          64
+        ]
+      },
+      {
+        "image": "labels",
+        "chars": "云端跳一陪小狗过下朵蓄力松开出发暂停继续最佳按住始重来歇会等你没关系再次分局键退·",
+        "metrics": [
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            29
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            12,
+            19
+          ]
+        ],
+        "cell": [
+          32,
+          32
+        ]
+      }
+    ]
+  }
+}

@@ -9,12 +9,30 @@
     "action": "snake.turn_left",
     "control": "前方摇杆",
     "event": "knob.rotate_ccw",
-    "label": "向左转"
+    "label": "向左"
   },
   {
     "action": "snake.turn_right",
     "control": "前方摇杆",
     "event": "knob.rotate_cw",
-    "label": "向右转"
+    "label": "向右"
+  },
+  {
+    "action": "session.pause",
+    "event": "button.sw2.short_press",
+    "label": "暂停/继续",
+    "control": "SW2"
+  },
+  {
+    "action": "snake.up",
+    "event": "joystick.up",
+    "label": "向上",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "snake.down",
+    "event": "joystick.down",
+    "label": "向下",
+    "control": "前方摇杆"
   }
 ]

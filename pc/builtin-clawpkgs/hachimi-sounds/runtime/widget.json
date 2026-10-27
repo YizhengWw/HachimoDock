@@ -1,0 +1,827 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.primary"
+    },
+    {
+      "from": "*",
+      "on": "host.secondary"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    },
+    {
+      "from": "*",
+      "on": "host.up"
+    },
+    {
+      "from": "*",
+      "on": "host.down"
+    },
+    {
+      "from": "*",
+      "on": "host.rain"
+    },
+    {
+      "from": "*",
+      "on": "host.sea"
+    },
+    {
+      "from": "*",
+      "on": "host.fire"
+    },
+    {
+      "from": "*",
+      "on": "host.insects"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "自然声景",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "PC 通用服务 · 连接后即可使用",
+    "headline": "窗边细雨",
+    "metricValue": "35%",
+    "note": "点选声景；左右切换，上下调音量。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "开始播放",
+    "metricUnit": "十五分钟"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 4452,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 160,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 4452,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 290,
+        "h": 436,
+        "color": 4452,
+        "opacity": 245,
+        "opacity_end": 200
+      },
+      {
+        "type": "panel",
+        "x": 290,
+        "y": 0,
+        "w": 350,
+        "h": 436,
+        "color": 4452,
+        "opacity": 200,
+        "opacity_end": 60
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 61341,
+        "icon": "sound"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 61341,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 95,
+        "w": 440,
+        "h": 25,
+        "color": 44531,
+        "font_size": 13,
+        "text": "AMBIENT / 自然声景"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 126,
+        "w": 560,
+        "h": 48,
+        "color": 61341,
+        "font_size": 32,
+        "bind": "headline"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 252,
+        "w": 555,
+        "h": 30,
+        "color": 50775,
+        "font_size": 16,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 300,
+        "w": 560,
+        "h": 48,
+        "color": 52887,
+        "font_size": 16,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 366,
+        "w": 155,
+        "h": 48,
+        "color": 57079,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8613,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "sound",
+        "action": "host.primary"
+      },
+      {
+        "type": "button",
+        "x": 191,
+        "y": 366,
+        "w": 194,
+        "h": 48,
+        "color": 14890,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61341,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "clock",
+        "action": "host.secondary",
+        "opacity": 170,
+        "stroke": 27535,
+        "stroke_width": 1
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 4452,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 48726,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 4452,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 48726,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 48726,
+        "font_size": 15,
+        "text": "播放/停止"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 4452,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 48726,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 48726,
+        "font_size": 15,
+        "text": "定时"
+      },
+      {
+        "type": "text",
+        "x": 257,
+        "y": 446,
+        "w": 253,
+        "h": 24,
+        "color": 48726,
+        "font_size": 14,
+        "text": "摇杆切换/音量"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 48726,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 188,
+        "w": 139,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "窗边细雨",
+        "action": "host.rain"
+      },
+      {
+        "type": "button",
+        "x": 173,
+        "y": 188,
+        "w": 139,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "海边潮汐",
+        "action": "host.sea"
+      },
+      {
+        "type": "button",
+        "x": 320,
+        "y": 188,
+        "w": 139,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "暖炉微火",
+        "action": "host.fire"
+      },
+      {
+        "type": "button",
+        "x": 467,
+        "y": 188,
+        "w": 139,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "安静虫鸣",
+        "action": "host.insects"
+      },
+      {
+        "type": "button",
+        "x": 442,
+        "y": 366,
+        "w": 48,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "−",
+        "action": "host.down"
+      },
+      {
+        "type": "text",
+        "x": 492,
+        "y": 378,
+        "w": 68,
+        "h": 28,
+        "color": 61341,
+        "font_size": 18,
+        "bind": "metricValue",
+        "align": "center"
+      },
+      {
+        "type": "button",
+        "x": 564,
+        "y": 366,
+        "w": 48,
+        "h": 48,
+        "color": 12811,
+        "foreground": 61341,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "+",
+        "action": "host.up"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 窗边细雨开始播放十五分钟自然声景P通用服务·连接后即可使原创",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            4,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "合成，退出或启语音停止。AMBIENT定时摇杆切换量全局键",
+        "metrics": [
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            26,
+            4,
+            28
+          ],
+          [
+            21,
+            4,
+            28
+          ],
+          [
+            9,
+            4,
+            28
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            23,
+            4,
+            28
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "host": true,
+  "input": {
+    "engine": "p4-input-v1",
+    "repeat": [
+      "host.up",
+      "host.down"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "engine": "pc-app-services-v1",
+  "service": "soundscape",
+  "actions": {
+    "host.primary": "toggle",
+    "host.secondary": "timer",
+    "host.previous": "previous",
+    "host.next": "next",
+    "host.up": "up",
+    "host.down": "down",
+    "host.rain": "rain",
+    "host.sea": "sea",
+    "host.fire": "fire",
+    "host.insects": "insects"
+  }
+}

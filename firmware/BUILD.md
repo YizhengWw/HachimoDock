@@ -1,12 +1,14 @@
 # 固件构建与烧录 / Firmware build and flashing
 
+当前公开版本为 **0.7.103-p4-r1**，对应桌面端 **0.1.167**，不包含 0.7.108 开发分支。部分 Windows 环境下的串口打开问题仍在排查，不因源码同步而标记解决。
+
 目标为 ESP32-P4、32 MiB Flash；硬件参数见 `boards/`、`sdkconfig.defaults`、`partitions.csv`。完整技术说明见 [README.md](README.md)。
 
 ## 获取与构建 / Build
 
 只想使用设备，无需安装编译环境：下载对应芯片的 [完整烧录包](https://github.com/YizhengWw/HachimoDock/releases/latest)，按包内中文指南操作。烧录需要 Python **3.10+**，包内脚本会安装并检查 **esptool 5.4.0**；不要用旧版工具或 `--force` 绕过芯片检查。
 
-自行构建需要 Git LFS、Python 3.10+、PlatformIO Core **6.1.19**（6.1.18 不支持 v3 平台）。在独立 Python 环境中安装：`python -m pip install platformio==6.1.19 pytest Pillow`。项目通过 `platformio.ini` 固定平台版本，由其安装 ESP-IDF 和 P4 工具链；首次构建需要联网下载依赖。
+自行构建需要 Git、Python 3.10+、PlatformIO Core **6.1.19**（6.1.18 不支持 v3 平台）。当前素材由普通 Git 保存，不依赖 LFS 额度。在独立 Python 环境中安装：`python -m pip install platformio==6.1.19 pytest Pillow`。项目通过 `platformio.ini` 固定平台版本，由其安装 ESP-IDF 和 P4 工具链；首次构建需要联网下载依赖。
 
 | 项目 | v1 构建 | v3 构建 |
 | --- | --- | --- |
@@ -21,7 +23,6 @@
 
 ```sh
 # 仓库根目录 / repository root
-git lfs pull
 python firmware/tools/build_builtin_bundle.py --check
 python -m pytest firmware/tests
 cd firmware
@@ -39,7 +40,7 @@ PC 打包前，将两个环境的 `firmware.bin` 分别放入 `pc/src-tauri/firm
 
 屏幕排线必须接 **DSI**（显示输出），不能接 CSI（摄像头输入）；请断电后插拔排线。针对配套屏幕的 v3 固件采用 24 MHz 显示时序，相关修复已在 v3 板确认恢复宠物动画。未连接摇杆或启动校准无效时，方向输入停用，连接摇杆并保持居中后重启可重新校准。
 
-当前公开固件为 0.7.72-p4，包含双向音频前端、实时字幕、独立于形象的系统提示音及 PC 下发的实时行情组件。v1/v3 均提供独立构建及完整烧录包。历史 v3 显示时序、形象播放验证，以及部分 v1 音频测试，不代表本版所有板型和声学环境均完成实机验收；按键、麦克风、近远场打断、完整资源传输和断电恢复仍需按实际硬件检查。详见 [双向语音验证边界](../pc/docs/realtime-duplex.md)。
+0.7.53-p4 修复了部分形象循环播放或切换状态后停止的问题。v3.2 已完成保留数据的 OTA，以及休息、工作、等待、结束和返回休息的连续播放验证；v1 已完成编译和共享播放代码的主机回归，尚未完成本版实机验证。以上不代表全部功能已验收，按键/摇杆、麦克风、完整形象下发、断线重连及断电恢复仍需分别验证。
 
 ## 完整出厂镜像 / Complete factory image
 

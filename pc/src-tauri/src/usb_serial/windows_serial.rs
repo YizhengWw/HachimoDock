@@ -79,7 +79,9 @@ impl WindowsSerialPort {
         };
         if ok == 0 {
             let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(ERROR_IO_PENDING as i32) { return Err(error); }
+            if error.raw_os_error() != Some(ERROR_IO_PENDING as i32) {
+                return Err(if reading {error} else {super::live_audio_pacing::uncertain_write_error(error)});
+            }
             // Driver read timeout is short; this deadline is a cancellation backstop.
             let wait_ms = self.timeout.as_millis().clamp(1, u32::MAX as u128 - 2001) as u32 + 2000;
             let wait = unsafe { WaitForSingleObject(event, wait_ms) };
@@ -93,17 +95,23 @@ impl WindowsSerialPort {
                 let completed = unsafe { GetOverlappedResult(self.handle(), &operation, &mut transferred, 1) };
                 if completed != 0 { return Self::transfer_result(transferred, reading); }
                 let error = io::Error::last_os_error();
-                return Err(if error.raw_os_error() == Some(ERROR_OPERATION_ABORTED as i32) { wait_error } else { error });
+                // A failed completion does not establish zero-byte progress.
+                // Never turn it into a retryable write timeout; this may have
+                // transmitted a prefix even though the operation was cancelled.
+                return Err(if reading {
+                    if error.raw_os_error() == Some(ERROR_OPERATION_ABORTED as i32) { wait_error } else { error }
+                } else { super::live_audio_pacing::uncertain_write_error(error) });
             }
             if unsafe { GetOverlappedResult(self.handle(), &operation, &mut transferred, 1) } == 0 {
-                return Err(io::Error::last_os_error());
+                let error=io::Error::last_os_error();
+                return Err(if reading {error} else {super::live_audio_pacing::uncertain_write_error(error)});
             }
         }
         Self::transfer_result(transferred, reading)
     }
 
     fn transfer_result(bytes: u32, reading: bool) -> io::Result<usize> {
-        if bytes == 0 && reading { Err(io::Error::new(io::ErrorKind::TimedOut, "serial read timed out")) }
+        if bytes == 0 { Err(io::Error::new(io::ErrorKind::TimedOut, if reading {"serial read timed out"} else {"serial write completed with zero bytes"})) }
         else { Ok(bytes as usize) }
     }
 }

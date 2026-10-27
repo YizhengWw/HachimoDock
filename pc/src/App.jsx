@@ -1,12 +1,12 @@
 /**
  * [Input] Consume DeviceSetup.jsx and DeviceDashboard.jsx.
- * [Output] Pet Manager desktop app shell with a native macOS Accessibility consent request at startup, first-level device/gallery/component-center/API-configuration sidebar tabs plus an inline version-gated bundled-firmware updater, a mounted-while-bound device dashboard that keeps Session/device synchronization alive across tabs, browser-only dev direct-dashboard fallback, USB-only first-run routing, setup-completion and avatar-generation DeviceContext refreshes, preserved generation state while API settings is open, and binding-scoped appearance management/downlink routing.
+ * [Output] Always-accessible desktop navigation, retryable USB setup, retained API drafts and explicitly active component observers. Accessibility consent is requested by native Agent operations, not app launch.
  * [Pos] component node in pc/src
  * Generation notifications distinguish reference-image rejection with retained partial results from full success.
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ImagePlus,
@@ -18,13 +18,13 @@ import {
 } from "lucide-react";
 import DeviceSetup from "./DeviceSetup";
 import DeviceDashboard from "./DeviceDashboard";
-import AppearanceGallery from "./AppearanceGallery";
-import CustomAvatarWizard from "./CustomAvatarWizard";
-import AppearanceDetail from "./AppearanceDetail";
-import ComponentCenter from "./ComponentCenter";
+const AppearanceGallery = lazy(() => import("./AppearanceGallery"));
+const CustomAvatarWizard = lazy(() => import("./CustomAvatarWizard"));
+const AppearanceDetail = lazy(() => import("./AppearanceDetail"));
+const ComponentCenter = lazy(() => import("./ComponentCenter"));
 import ComponentCenterBoundary from "./component-center/ComponentCenterBoundary.jsx";
-import ApiSettings from "./ApiSettings";
-import SmartHome from "./SmartHome.jsx";
+const ApiSettings = lazy(() => import("./ApiSettings"));
+const SmartHome = lazy(() => import("./SmartHome.jsx"));
 import { DeviceContextProvider, useDeviceContext } from "./shell/DeviceContext.jsx";
 import ToastStack, { ToastProvider, useToast } from "./shell/ToastStack.jsx";
 import ContextRail from "./shell/ContextRail.jsx";
@@ -34,6 +34,10 @@ import {
   subscribeGenerationTask,
 } from "./lib/generation-task.js";
 import petManagerMark from "./assets/logo/pet-manager-mark.svg";
+import { version as clientVersion } from "../package.json";
+import { initializeProviderConfigs } from "./lib/avatar-pipeline/provider-config.js";
+import { loadDesktopStartup } from "./lib/desktop-startup.js";
+import { installBrowserExitProtection, setExitReason, useExitReasons } from "./lib/exit-protection.js";
 
 const DEV_DIRECT_DASHBOARD_BINDING = {
   boardDeviceId: "board-dev-direct-001",
@@ -50,17 +54,14 @@ function hasTauriRuntime() {
 }
 
 export default function App() {
+  useEffect(installBrowserExitProtection, []);
   const [view, setView] = useState("loading"); // loading | dashboard | setup | gallery | wizard | detail | components | home | api
   const [binding, setBinding] = useState(null);
   const [detailAppearanceId, setDetailAppearanceId] = useState("");
   const [apiReturnView, setApiReturnView] = useState("");
-
-  useEffect(() => {
-    if (!hasTauriRuntime()) return;
-    invoke("request_codex_accessibility_permission").catch((error) => {
-      console.warn("[app] failed to request native macOS Accessibility consent", error);
-    });
-  }, []);
+  const [startupError, setStartupError] = useState("");
+  const [configReadError, setConfigReadError] = useState("");
+  const [startupAttempt, setStartupAttempt] = useState(0);
 
   const isPreviewBinding = useCallback((item) => {
     const boardId = String(item?.boardDeviceId || "").trim().toLowerCase();
@@ -71,7 +72,7 @@ export default function App() {
 
   const enterBestAvailableDeviceSurface = useCallback((bindings) => {
     const stableBindings = Array.isArray(bindings)
-      ? bindings.filter((item) => !isPreviewBinding(item))
+      ? bindings.filter((item) => String(item?.boardDeviceId || "").trim() && !isPreviewBinding(item))
       : [];
     const devBinding = devDirectDashboardBinding();
     if (stableBindings.length > 0) {
@@ -87,19 +88,30 @@ export default function App() {
   }, [isPreviewBinding]);
 
   useEffect(() => {
-    invoke("load_device_bindings")
-      .then(enterBestAvailableDeviceSurface)
-      .catch(() => enterBestAvailableDeviceSurface([]));
-  }, [enterBestAvailableDeviceSurface]);
+    let current = true;
+    setStartupError("");
+    loadDesktopStartup(initializeProviderConfigs, () => invoke("load_device_bindings"))
+      .then(({bindings, configError}) => {
+        if (!current) return;
+        setConfigReadError(configError);
+        enterBestAvailableDeviceSurface(bindings);
+      })
+      .catch(error => {
+        if (!current) return;
+        if (!hasTauriRuntime()) enterBestAvailableDeviceSurface([]);
+        else setStartupError(error?.message || String(error));
+      });
+    return () => { current = false; };
+  }, [enterBestAvailableDeviceSurface, startupAttempt]);
 
   const handleSetupComplete = useCallback(async () => {
-    try {
-      const bindings = await invoke("load_device_bindings");
-      enterBestAvailableDeviceSurface(bindings);
-    } catch {
-      // DeviceSetup keeps polling while a completed binding cannot be reloaded.
+    const bindings = await invoke("load_device_bindings");
+    if (!Array.isArray(bindings) || !bindings.some(item =>
+      String(item?.boardDeviceId || "").trim() && !isPreviewBinding(item))) {
+      throw new Error("设备绑定尚未读回，请重新扫描。");
     }
-  }, [enterBestAvailableDeviceSurface]);
+    enterBestAvailableDeviceSurface(bindings);
+  }, [enterBestAvailableDeviceSurface, isPreviewBinding]);
 
   const handleUnbind = useCallback(() => {
     setBinding(null);
@@ -162,8 +174,9 @@ export default function App() {
         <div className="auth-shell">
           <div className="auth-card">
             <div className="auth-loading">
-              <Loader2 size={18} className="spin" />
-              <span>正在打开管理端…</span>
+              {startupError ? <div role="alert"><p>读取本机配置失败，原数据未清空。</p><p>{startupError}</p>
+                <button className="btn-primary" onClick={() => setStartupAttempt(n => n + 1)}>重试</button></div>
+                : <><Loader2 size={18} className="spin" /><span>正在打开管理端…</span></>}
             </div>
           </div>
         </div>
@@ -178,6 +191,7 @@ export default function App() {
         onBindingChange={(next) => setBinding(next)}
       >
         <AppInner
+          configReadError={configReadError}
           view={view}
           binding={binding}
           apiReturnView={apiReturnView}
@@ -205,6 +219,7 @@ export default function App() {
 }
 
 function AppInner({
+  configReadError,
   view,
   binding,
   apiReturnView,
@@ -226,17 +241,23 @@ function AppInner({
   handleDetailBack,
 }) {
   const { push, dismiss } = useToast();
+  const activity = useExitReasons();
   const { refresh, usb } = useDeviceContext();
   const lastEpochRef = useRef(0);
   const generationToastRef = useRef(null);
+  const [componentsVisited, setComponentsVisited] = useState(view === "components");
+  useEffect(() => { if (view === "components") setComponentsVisited(true); }, [view]);
+  const [apiVisited, setApiVisited] = useState(view === "api");
+  useEffect(() => { if (view === "api") setApiVisited(true); }, [view]);
 
   const handleSetupCompleteWithRefresh = useCallback(async () => {
     await refresh();
-    handleSetupComplete();
+    await handleSetupComplete();
   }, [handleSetupComplete, refresh]);
 
   useEffect(() => {
     return subscribeGenerationTask((s) => {
+      setExitReason("avatar-generation",s.status === "running" ? "形象生成尚未完成" : "");
       // Closing the gallery result or starting another run also removes its
       // persistent toast. Clear the ref first: dismiss can notify this listener.
       if (s.status !== "completed" && s.status !== "failed") {
@@ -256,8 +277,8 @@ function AppInner({
         tone: s.status === "completed" ? "success" : "error",
         title:
           s.status === "completed"
-            ? `「${s.appearanceName}」${s.progress?.referenceImageError ? "部分生成完成" : "生成完成"}`
-            : `「${s.appearanceName}」生成失败`,
+            ? `「${s.appearanceName}」${s.progress?.referenceImageError || s.resumable ? "部分生成完成" : "生成完成"}`
+            : `「${s.appearanceName}」${s.appearanceId ? "部分已保存，后续未完成" : "生成失败"}`,
         message: s.status === "failed" ? s.error : s.progress?.referenceImageError ? s.progress.message : "",
         ttl: 0,
         onDismiss: () => acknowledgeGenerationTask(s.completionEpoch),
@@ -274,29 +295,6 @@ function AppInner({
     });
   }, [push, dismiss, handleOpenDetail, refresh]);
 
-  if (isSetup) {
-    return (
-      <div className="app-shell wizard-mode">
-        <div className="wizard-page">
-          <header className="wizard-header wizard-header--shell">
-            <div className="wizard-header-leading">
-              <div className="wizard-brand">
-                <img src={petManagerMark} alt="" />
-              </div>
-              <div className="wizard-header-copy">
-                <span className="wizard-title">连接桌宠</span>
-                <span className="wizard-subtitle">连接 USB，Pet Manager 会自动识别设备。</span>
-              </div>
-            </div>
-          </header>
-          <div className="wizard-page-body">
-            <DeviceSetup onComplete={handleSetupCompleteWithRefresh} />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="app-shell">
       <div className="app-layout">
@@ -307,8 +305,8 @@ function AppInner({
                 <img src={petManagerMark} alt="" />
               </span>
               <span className="sidebar-brand__copy">
-                <strong className="sidebar-brand-name">桌宠管理端</strong>
-                <span>Pet Manager</span>
+                <strong className="sidebar-brand-name">HachimiDock</strong>
+                <span>桌宠管理端 · v{clientVersion}</span>
               </span>
             </div>
           </div>
@@ -354,6 +352,9 @@ function AppInner({
             </button>
             <FirmwareUpdateNavItem usb={usb} />
           </nav>
+          {!!activity.length && <details className="app-activity"><summary>{activity.length} 项进行中或未保存</summary>
+            <ul>{activity.map(item => <li key={item}>{item}</li>)}</ul>
+          </details>}
           <div className="sidebar-spacer" />
           <ContextRail
             onOpenDevice={() => setView(hasBinding ? "dashboard" : "setup")}
@@ -364,6 +365,16 @@ function AppInner({
         </aside>
         <section className="app-main">
           <main className="app-content">
+            {configReadError && <div className="message-banner message-banner--warning" role="alert">
+              <strong>已有 API 配置暂时无法读取，原文件已保留。</strong>
+              <p>设备管理和本地组件仍可使用；依赖这些凭据的服务暂不可用。不会自动清空或覆盖原配置。</p>
+              <p>{configReadError}</p>
+            </div>}
+            <Suspense fallback={<p role="status">正在载入页面…</p>}>
+            {isSetup && <>
+              <p role="status">连接设备后可同步内容；也可以先浏览组件、创建形象或配置 API。</p>
+              <DeviceSetup onComplete={handleSetupCompleteWithRefresh} />
+            </>}
             {binding && (
               <DeviceDashboard
                 active={isDashboard}
@@ -404,13 +415,18 @@ function AppInner({
                   />
                 </div>
             )}
-            {view === "components" && (
-              <ComponentCenterBoundary><ComponentCenter /></ComponentCenterBoundary>
+            {(componentsVisited || view === "components") && (
+              <div hidden={view !== "components"}>
+                <ComponentCenterBoundary><ComponentCenter active={view === "components"} /></ComponentCenterBoundary>
+              </div>
             )}
-            {view === "api" && (
-              <ApiSettings onBack={handleApiSettingsBack} />
+            {(apiVisited || view === "api") && (
+              <div hidden={view !== "api"}>
+                <ApiSettings onBack={handleApiSettingsBack} configReadError={configReadError} />
+              </div>
             )}
             {view === "home" && <SmartHome />}
+            </Suspense>
           </main>
         </section>
       </div>

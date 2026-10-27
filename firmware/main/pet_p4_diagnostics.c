@@ -30,6 +30,7 @@
 #include "pet_p4_miniapp.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_touch.h"
+#include "pet_p4_renderer.h"
 
 #define PET_P4_DIAGNOSTICS_NVS_NAMESPACE "pet_diag"
 #define PET_P4_DIAGNOSTICS_NVS_KEY "boot"
@@ -191,6 +192,14 @@ static void send_status(
     (double) ((unsigned long long) esp_timer_get_time() / 1000ULL)
   );
   cJSON_AddNumberToObject(runtime, "taskCount", uxTaskGetNumberOfTasks());
+  pet_p4_render_metrics_t render = pet_p4_renderer_metrics();
+  cJSON_AddNumberToObject(runtime, "renderLastUs", render.last_us);
+  cJSON_AddNumberToObject(runtime, "renderP95Us", render.p95_us);
+  cJSON_AddNumberToObject(runtime, "renderMaxUs", render.max_us);
+  cJSON_AddNumberToObject(runtime, "renderDecodeUs", render.last_decode_us);
+  cJSON_AddNumberToObject(runtime, "renderWindowSamples", render.window_samples);
+  cJSON_AddNumberToObject(runtime, "renderSubmittedFrames", render.submitted_frames);
+  cJSON_AddNumberToObject(runtime, "renderUnchangedFrames", render.unchanged_frames);
   cJSON_AddNumberToObject(runtime, "inputDroppedEvents", pet_p4_input_dropped_events());
   pet_p4_input_joystick_snapshot_t joystick_snapshot = {0};
   pet_p4_input_get_joystick_snapshot(&joystick_snapshot);
@@ -209,6 +218,34 @@ static void send_status(
   }
   cJSON_AddBoolToObject(runtime, "touchReady", pet_p4_touch_ready());
   cJSON_AddNumberToObject(runtime, "touchDroppedEvents", pet_p4_touch_dropped_events());
+  pet_p4_touch_health_t touch_health = {0};
+  pet_p4_touch_health(&touch_health);
+  cJSON *touch = cJSON_AddObjectToObject(runtime, "touchHealth");
+  if (touch) {
+    cJSON_AddStringToObject(touch, "stage", touch_health.stage);
+    cJSON_AddStringToObject(touch, "controller", pet_p4_touch_controller());
+    cJSON_AddNumberToObject(touch, "chipId", touch_health.chip_id);
+    cJSON_AddNumberToObject(touch, "vendorId", touch_health.vendor_id);
+    cJSON_AddStringToObject(touch, "error", esp_err_to_name(touch_health.error));
+    cJSON_AddNumberToObject(touch, "address", touch_health.address);
+    cJSON_AddStringToObject(touch, "primaryProbe", esp_err_to_name(touch_health.primary_error));
+    cJSON_AddStringToObject(touch, "backupProbe", esp_err_to_name(touch_health.backup_error));
+    cJSON_AddStringToObject(touch, "probe0x15", esp_err_to_name(touch_health.probe_15));
+    cJSON_AddStringToObject(touch, "probe0x38", esp_err_to_name(touch_health.probe_38));
+    cJSON_AddStringToObject(touch, "probe0x10", esp_err_to_name(touch_health.probe_10));
+    cJSON_AddStringToObject(touch, "probe0x18", esp_err_to_name(touch_health.probe_18));
+    cJSON_AddNumberToObject(touch, "samples", touch_health.samples);
+    cJSON_AddNumberToObject(touch, "contacts", touch_health.contacts);
+    cJSON_AddNumberToObject(touch, "panelX", touch_health.panel_x);
+    cJSON_AddNumberToObject(touch, "panelY", touch_health.panel_y);
+    cJSON_AddNumberToObject(touch, "uiX", touch_health.ui_x);
+    cJSON_AddNumberToObject(touch, "uiY", touch_health.ui_y);
+    cJSON_AddNumberToObject(touch, "pointerAgeMs", touch_health.pointer_age_ms);
+    cJSON_AddNumberToObject(touch, "staleEvents", touch_health.stale_events);
+    cJSON_AddNumberToObject(touch, "pollErrors", touch_health.poll_errors);
+    cJSON_AddNumberToObject(touch, "consecutiveErrors", touch_health.consecutive_errors);
+    cJSON_AddNumberToObject(touch, "testScore", state ? state->touch_test.score : 0);
+  }
   cJSON_AddStringToObject(runtime, "screenPage", state ? state->screen_page : "");
   cJSON_AddStringToObject(runtime, "agentState", state ? state->current_state : "");
   unsigned int retained_session_count = 0;
@@ -313,7 +350,7 @@ esp_err_t pet_p4_diagnostics_init(void) {
 bool pet_p4_diagnostics_handle_topic(
   const char *topic,
   const cJSON *payload,
-  const pet_p4_runtime_state_t *state,
+  pet_p4_runtime_state_t *state,
   pet_p4_send_line_fn send_line,
   void *ctx
 ) {
@@ -325,6 +362,26 @@ bool pet_p4_diagnostics_handle_topic(
   }
   if (strcmp(topic, "diagnostics/query") == 0) {
     send_status(payload, state, send_line, ctx);
+  } else if (strcmp(topic, "diagnostics/touch-test") == 0) {
+    const cJSON *op = cJSON_GetObjectItemCaseSensitive(payload, "action");
+    bool start = cJSON_IsString(op) && !strcmp(op->valuestring, "start");
+    bool stop = cJSON_IsString(op) && !strcmp(op->valuestring, "stop");
+    bool available = state && !pet_p4_ota_active() && !state->asset_transfer_active
+      && (!state->conversation_state[0] || !strcmp(state->conversation_state, "ended"))
+      && pet_p4_touch_ready();
+    if (stop && state) {
+      if (!strcmp(state->screen_page, "touch_test")) snprintf(state->screen_page, sizeof(state->screen_page), "main");
+      state->touch_test_until_ms = 0;
+      memset(&state->touch_test, 0, sizeof(state->touch_test));
+      send_action(payload, send_line, ctx, "touch-test", true, "touch test stopped");
+    } else if (start && available) {
+      uint64_t now = esp_timer_get_time() / 1000ULL;
+      pet_p4_slice_start(&state->touch_test, now);
+      state->touch_test_until_ms = now + 120000;
+      snprintf(state->screen_page, sizeof(state->screen_page), "touch_test");
+      send_action(payload, send_line, ctx, "touch-test", true, "native touch test started (120s)");
+    } else send_action(payload, send_line, ctx, "touch-test", false,
+      start ? "touch unavailable or device busy; no test started" : "expected start or stop");
   } else if (strcmp(topic, "system/reset-inputs") == 0) {
     esp_err_t err = pet_p4_input_reset_config();
     send_action(

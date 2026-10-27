@@ -16,6 +16,7 @@ extern "C" {
 #define PET_P4_AUDIO_BITS_PER_SAMPLE 16
 #define PET_P4_AUDIO_FRAME_MS 20
 void pet_p4_audio_instrument_set(bool active, unsigned effect, unsigned ambience);
+void pet_p4_audio_fruit_sound(unsigned events,unsigned volume,bool active);
 bool pet_p4_audio_instrument_strike(uint64_t now_ms);
 uint32_t pet_p4_audio_instrument_age(uint64_t now_ms);
 pet_instrument_motion_t pet_p4_audio_instrument_motion(uint64_t now_ms);
@@ -36,6 +37,8 @@ bool pet_p4_audio_playback_active(void);
 esp_err_t pet_p4_audio_set_enabled(bool enabled);
 esp_err_t pet_p4_audio_capture_start(bool session_queue_empty);
 esp_err_t pet_p4_audio_capture_stop(void);
+esp_err_t pet_p4_audio_capture_start_owned(bool session_queue_empty,const char *owner);
+esp_err_t pet_p4_audio_capture_stop_owned(const char *owner);
 
 /* 实时对话：PC 经 audio/conversation 打开后麦克风持续采集上行（不受
  * 30 s 上限）；AEC/VAD 可用时支持双向语音，旧客户端半双工播放期间不上行。
@@ -43,7 +46,7 @@ esp_err_t pet_p4_audio_capture_stop(void);
  * 流式下发 16 kHz PCM，设备缓冲约 200 ms 后起播。 */
 #define PET_P4_AUDIO_STREAM_CHUNK_MAX 4096
 #define PET_P4_AUDIO_STREAM_CHUNK_B64_MAX (((PET_P4_AUDIO_STREAM_CHUNK_MAX + 2) / 3) * 4 + 4)
-esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex);
+esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex, const char *session_id);
 bool pet_p4_audio_conversation_active(void);
 esp_err_t pet_p4_audio_stream_begin(const char *session_id);
 bool pet_p4_audio_stream_matches(const char *session_id);

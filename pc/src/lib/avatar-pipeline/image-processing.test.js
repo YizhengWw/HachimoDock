@@ -78,12 +78,14 @@ test("alpha matte decontamination prevents pale subjects blending into black", (
   ]);
 });
 
-test("image preprocessing uses Ark editing with a non-blocking original-image fallback", () => {
+test("image preprocessing blocks failed editing unless original fallback is explicitly allowed", () => {
   const source = readFileSync(join(srcDir, "image-processing.js"), "utf8");
 
   assert.match(source, /editImageBackgroundWithArk/);
   assert.match(source, /onProgress\?\.\("cloud_editing"\)/);
   assert.match(source, /onProgress\?\.\("cloud_fallback"/);
   assert.match(source, /using original image/);
+  assert.match(source, /allowOriginalFallback = false/);
+  assert.match(source, /if \(!allowOriginalFallback\) throw new Error/);
   assert.doesNotMatch(source, /@imgly\/background-removal|removeBackground\(/);
 });

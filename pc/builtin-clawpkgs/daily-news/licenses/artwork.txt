@@ -1,0 +1,3 @@
+Original generated artwork created for this component. No third-party source
+code, branding, newspaper text or personal data is included. The native device
+background is 640 x 480; the host compiles a bounded JPEG resource.

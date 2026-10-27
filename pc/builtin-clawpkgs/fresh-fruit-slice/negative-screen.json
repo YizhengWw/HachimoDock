@@ -1,0 +1,12 @@
+{
+  "dashboard": {
+    "title": "鲜果一刀",
+    "headline": "一指划开，快乐爆汁。",
+    "note": "经典挑战 · 限时冲分 · 轻松练习",
+    "footer": "点击模式卡选择 · 开始键开局 · 全局键退出",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "arcade",
+    "visualSprite": "target"
+  }
+}

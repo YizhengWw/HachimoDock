@@ -1,0 +1,648 @@
+{
+  "category": {
+    "captureDiagnostics": null,
+    "content": [],
+    "enabled": true,
+    "knowledge": {
+      "candidate": "全部书籍",
+      "categories": [
+        {
+          "count": 100,
+          "name": "全部书籍"
+        },
+        {
+          "count": 10,
+          "name": "组织系统"
+        },
+        {
+          "count": 10,
+          "name": "行为认知"
+        },
+        {
+          "count": 10,
+          "name": "判断决策"
+        },
+        {
+          "count": 10,
+          "name": "习惯效率"
+        },
+        {
+          "count": 10,
+          "name": "经济基础"
+        },
+        {
+          "count": 10,
+          "name": "当代经济"
+        },
+        {
+          "count": 10,
+          "name": "创业产品"
+        },
+        {
+          "count": 10,
+          "name": "商业战略"
+        },
+        {
+          "count": 10,
+          "name": "营销传播"
+        },
+        {
+          "count": 10,
+          "name": "财富常识"
+        }
+      ],
+      "category": "全部书籍",
+      "choosing": true,
+      "current": {
+        "category": "行为认知",
+        "id": "book-003",
+        "license": "Original commentary",
+        "revision": "editorial-1",
+        "source": "Daniel Kahneman · 原创导读",
+        "text": "同一份方案，为何分数差这么多？ 同一份方案，上午被夸稳妥，下午又被嫌保守，究竟是方案变了，还是评判它的尺子变了？《噪声》让人注意到一种容易被误认为正常的差异：面对本应采用相同标准的信息，判断者却给出不必要的分歧。它和判断错向某一边不是同一回事。偏差关心是否系统性偏离合理目标，噪声关心那些本不该出现的分散。即使平均分看起来合理，具体落到某个人头上的结果，也可能因轮到哪位评审而差很多。下面的故事是原创假设，不是原书案例。 假设一家设计公司选宣传海报，三位评审分别给同一张作品很不一样的分数。有人重视信息清晰，有人看重新颖，还有人刚看过一张惊艳的作品，眼前这张就突然显得平淡。前两种差异首先提醒我们，大家可能连任务都没定义一致；后一种差异则可能来自与当前作品无关的比较背景。如果公司声称评分衡量的是统一的交付质量，却没有拆清楚标准，个人偏好和临时情境就会悄悄混进同一个数字里。 这时，负责人最容易做的事是把大家叫到一起商量，直到分数接近。但接近不等于准确。假设资历最深的人先说这张很普通，其他人可能会收起原来的判断，讨论很快结束，分歧也看不见了。问题不一定解决，只是被共同意见盖住。先独立记录，再交换依据，可以让差异留在桌面上接受检查。独立判断本身不是噪声的原因；它有助于避免意见相互污染，让不同信息得到表达，而汇总方式仍需要设计。 更有效的讨论会问：我们究竟在评什么？比如把可读性、信息完整性和制作可行性分别记录，再对照事先约定的标准看整体，而不是先凭喜欢不喜欢给总分，再寻找理由。假设某评审认为字太小，他需要指出在什么观看距离下看不清。另一位若认为构图更有吸引力，也要说明这和当前传播任务怎样相关。讨论从争论分数，变成检查可以核对的依据。 不过，把评价拆细也不是无限加表格。过多栏目会制造另一种假精确：每项都有数字，却没人知道数字怎么来。真正有用的是少数与任务相关、含义明确的维度，以及在看到具体作品之前就确定的使用方式。对于审美探索，保留不同口味可能恰恰是价值；对于按同一规范验收，随人变化的标准才更值得警惕。不能把任何不同意见都叫噪声，更不能用减少噪声的名义压掉合理异议。 还要分清一致与正确。所有评审共用一条错误标准，分数会非常整齐，却可能一起选错。检查噪声要和检查目标、依据及偏差一起进行。有时信息本来就不足，合理做法是写明不确定范围，而不是强迫每个人报出同一个精确数字。作者提出的是改进判断流程的方向，不是一套可以保证公平或正确的万能算法。 可以做个小观察：下次讨论一个低风险方案，先让每个人独立写一句结论和两条依据，再开始交流。保留最初的纸条，结束后看看改变了什么：是补到了新信息，重新理解了目标，还是仅仅跟随了先发言的人？这不需要给谁贴偏见标签，也不要求意见必须一致。它只是把原先藏在感觉里的尺子拿出来，让你知道，下一次该调整的是方案，还是评判方案的方法。",
+        "title": "噪声",
+        "url": "https://openlibrary.org/works/OL17962180W"
+      },
+      "page": 14,
+      "pages": 15,
+      "total": 100
+    },
+    "locationProfile": null,
+    "notes": [],
+    "permissions": {
+      "autoRead": true,
+      "desktopReceipts": false,
+      "deviceAudio": true,
+      "microphone": false,
+      "networkHosts": [],
+      "speechProvider": true,
+      "startVoiceConversation": false,
+      "storage": true,
+      "todoWrites": false,
+      "todos": false
+    },
+    "service": "books",
+    "state": {
+      "auto_city": false,
+      "calendar": {
+        "date": null,
+        "details": false,
+        "page": 0
+      },
+      "city": {
+        "city": "",
+        "lat": 0.0,
+        "lon": 0.0
+      },
+      "city_candidate": 0,
+      "city_from_ip": false,
+      "city_select": false,
+      "collection": false,
+      "details": false,
+      "favorites": [],
+      "geo": {
+        "error": "",
+        "key": "",
+        "location": {
+          "city": "",
+          "lat": 0.0,
+          "lon": 0.0
+        },
+        "next": 0
+      },
+      "knowledge": {
+        "article": "book-003",
+        "candidate": 0,
+        "category": "全部书籍",
+        "choosing": true,
+        "include_all": true,
+        "page": 14
+      },
+      "selected": 0,
+      "sound_timer": 0,
+      "sound_volume": null,
+      "todos": {
+        "completed": false,
+        "detail": false,
+        "page": 0,
+        "selected": "",
+        "text_page": 0
+      },
+      "trip": null,
+      "trip_candidate": null,
+      "visits": 0,
+      "weather": {
+        "data": null,
+        "error": "",
+        "fetched": 0,
+        "key": "",
+        "modified": "",
+        "next": 0
+      }
+    },
+    "ui": {
+      "actions": [
+        "host.category",
+        "host.next",
+        "host.previous",
+        "host.random"
+      ],
+      "context": "",
+      "mode": 3
+    },
+    "values": {
+      "badge": "1/11",
+      "eyebrow": "返回阅读",
+      "footer": "浏览分类不会改变正在阅读的内容；点右上角或再按副键可取消。",
+      "headline": "全部书籍",
+      "metricLabel": "确认分类",
+      "metricUnit": "读本页",
+      "metricValue": "按分类随机 · 本轮不重复",
+      "note": "本类有 100 本书。左右选择分类，确认后随机抽取一本导读。"
+    }
+  },
+  "last": {
+    "captureDiagnostics": null,
+    "content": [],
+    "enabled": true,
+    "knowledge": {
+      "candidate": "全部书籍",
+      "categories": [
+        {
+          "count": 100,
+          "name": "全部书籍"
+        },
+        {
+          "count": 10,
+          "name": "组织系统"
+        },
+        {
+          "count": 10,
+          "name": "行为认知"
+        },
+        {
+          "count": 10,
+          "name": "判断决策"
+        },
+        {
+          "count": 10,
+          "name": "习惯效率"
+        },
+        {
+          "count": 10,
+          "name": "经济基础"
+        },
+        {
+          "count": 10,
+          "name": "当代经济"
+        },
+        {
+          "count": 10,
+          "name": "创业产品"
+        },
+        {
+          "count": 10,
+          "name": "商业战略"
+        },
+        {
+          "count": 10,
+          "name": "营销传播"
+        },
+        {
+          "count": 10,
+          "name": "财富常识"
+        }
+      ],
+      "category": "全部书籍",
+      "choosing": false,
+      "current": {
+        "category": "行为认知",
+        "id": "book-003",
+        "license": "Original commentary",
+        "revision": "editorial-1",
+        "source": "Daniel Kahneman · 原创导读",
+        "text": "同一份方案，为何分数差这么多？ 同一份方案，上午被夸稳妥，下午又被嫌保守，究竟是方案变了，还是评判它的尺子变了？《噪声》让人注意到一种容易被误认为正常的差异：面对本应采用相同标准的信息，判断者却给出不必要的分歧。它和判断错向某一边不是同一回事。偏差关心是否系统性偏离合理目标，噪声关心那些本不该出现的分散。即使平均分看起来合理，具体落到某个人头上的结果，也可能因轮到哪位评审而差很多。下面的故事是原创假设，不是原书案例。 假设一家设计公司选宣传海报，三位评审分别给同一张作品很不一样的分数。有人重视信息清晰，有人看重新颖，还有人刚看过一张惊艳的作品，眼前这张就突然显得平淡。前两种差异首先提醒我们，大家可能连任务都没定义一致；后一种差异则可能来自与当前作品无关的比较背景。如果公司声称评分衡量的是统一的交付质量，却没有拆清楚标准，个人偏好和临时情境就会悄悄混进同一个数字里。 这时，负责人最容易做的事是把大家叫到一起商量，直到分数接近。但接近不等于准确。假设资历最深的人先说这张很普通，其他人可能会收起原来的判断，讨论很快结束，分歧也看不见了。问题不一定解决，只是被共同意见盖住。先独立记录，再交换依据，可以让差异留在桌面上接受检查。独立判断本身不是噪声的原因；它有助于避免意见相互污染，让不同信息得到表达，而汇总方式仍需要设计。 更有效的讨论会问：我们究竟在评什么？比如把可读性、信息完整性和制作可行性分别记录，再对照事先约定的标准看整体，而不是先凭喜欢不喜欢给总分，再寻找理由。假设某评审认为字太小，他需要指出在什么观看距离下看不清。另一位若认为构图更有吸引力，也要说明这和当前传播任务怎样相关。讨论从争论分数，变成检查可以核对的依据。 不过，把评价拆细也不是无限加表格。过多栏目会制造另一种假精确：每项都有数字，却没人知道数字怎么来。真正有用的是少数与任务相关、含义明确的维度，以及在看到具体作品之前就确定的使用方式。对于审美探索，保留不同口味可能恰恰是价值；对于按同一规范验收，随人变化的标准才更值得警惕。不能把任何不同意见都叫噪声，更不能用减少噪声的名义压掉合理异议。 还要分清一致与正确。所有评审共用一条错误标准，分数会非常整齐，却可能一起选错。检查噪声要和检查目标、依据及偏差一起进行。有时信息本来就不足，合理做法是写明不确定范围，而不是强迫每个人报出同一个精确数字。作者提出的是改进判断流程的方向，不是一套可以保证公平或正确的万能算法。 可以做个小观察：下次讨论一个低风险方案，先让每个人独立写一句结论和两条依据，再开始交流。保留最初的纸条，结束后看看改变了什么：是补到了新信息，重新理解了目标，还是仅仅跟随了先发言的人？这不需要给谁贴偏见标签，也不要求意见必须一致。它只是把原先藏在感觉里的尺子拿出来，让你知道，下一次该调整的是方案，还是评判方案的方法。",
+        "title": "噪声",
+        "url": "https://openlibrary.org/works/OL17962180W"
+      },
+      "page": 14,
+      "pages": 15,
+      "total": 100
+    },
+    "locationProfile": null,
+    "notes": [],
+    "permissions": {
+      "autoRead": true,
+      "desktopReceipts": false,
+      "deviceAudio": true,
+      "microphone": false,
+      "networkHosts": [],
+      "speechProvider": true,
+      "startVoiceConversation": false,
+      "storage": true,
+      "todoWrites": false,
+      "todos": false
+    },
+    "service": "books",
+    "state": {
+      "auto_city": false,
+      "calendar": {
+        "date": null,
+        "details": false,
+        "page": 0
+      },
+      "city": {
+        "city": "",
+        "lat": 0.0,
+        "lon": 0.0
+      },
+      "city_candidate": 0,
+      "city_from_ip": false,
+      "city_select": false,
+      "collection": false,
+      "details": false,
+      "favorites": [],
+      "geo": {
+        "error": "",
+        "key": "",
+        "location": {
+          "city": "",
+          "lat": 0.0,
+          "lon": 0.0
+        },
+        "next": 0
+      },
+      "knowledge": {
+        "article": "book-003",
+        "candidate": 0,
+        "category": "全部书籍",
+        "choosing": false,
+        "include_all": true,
+        "page": 14
+      },
+      "selected": 0,
+      "sound_timer": 0,
+      "sound_volume": null,
+      "todos": {
+        "completed": false,
+        "detail": false,
+        "page": 0,
+        "selected": "",
+        "text_page": 0
+      },
+      "trip": null,
+      "trip_candidate": null,
+      "visits": 0,
+      "weather": {
+        "data": null,
+        "error": "",
+        "fetched": 0,
+        "key": "",
+        "modified": "",
+        "next": 0
+      }
+    },
+    "ui": {
+      "actions": [
+        "host.category",
+        "host.previous",
+        "host.random"
+      ],
+      "context": "",
+      "mode": 0
+    },
+    "values": {
+      "badge": "15/15",
+      "eyebrow": "全部书籍 · 分类",
+      "footer": "还是评判方案的方法。",
+      "headline": "噪声",
+      "metricLabel": "换一本",
+      "metricUnit": "读本页",
+      "metricValue": "原创导读 · 1077字",
+      "note": "也不要求意见必须一致。它只是把原先藏在感觉里的尺子拿出来，让你知道，下一次该调整的是方案，"
+    }
+  },
+  "reading": {
+    "captureDiagnostics": null,
+    "content": [],
+    "enabled": true,
+    "knowledge": {
+      "candidate": "全部书籍",
+      "categories": [
+        {
+          "count": 100,
+          "name": "全部书籍"
+        },
+        {
+          "count": 10,
+          "name": "组织系统"
+        },
+        {
+          "count": 10,
+          "name": "行为认知"
+        },
+        {
+          "count": 10,
+          "name": "判断决策"
+        },
+        {
+          "count": 10,
+          "name": "习惯效率"
+        },
+        {
+          "count": 10,
+          "name": "经济基础"
+        },
+        {
+          "count": 10,
+          "name": "当代经济"
+        },
+        {
+          "count": 10,
+          "name": "创业产品"
+        },
+        {
+          "count": 10,
+          "name": "商业战略"
+        },
+        {
+          "count": 10,
+          "name": "营销传播"
+        },
+        {
+          "count": 10,
+          "name": "财富常识"
+        }
+      ],
+      "category": "全部书籍",
+      "choosing": false,
+      "current": {
+        "category": "行为认知",
+        "id": "book-003",
+        "license": "Original commentary",
+        "revision": "editorial-1",
+        "source": "Daniel Kahneman · 原创导读",
+        "text": "同一份方案，为何分数差这么多？ 同一份方案，上午被夸稳妥，下午又被嫌保守，究竟是方案变了，还是评判它的尺子变了？《噪声》让人注意到一种容易被误认为正常的差异：面对本应采用相同标准的信息，判断者却给出不必要的分歧。它和判断错向某一边不是同一回事。偏差关心是否系统性偏离合理目标，噪声关心那些本不该出现的分散。即使平均分看起来合理，具体落到某个人头上的结果，也可能因轮到哪位评审而差很多。下面的故事是原创假设，不是原书案例。 假设一家设计公司选宣传海报，三位评审分别给同一张作品很不一样的分数。有人重视信息清晰，有人看重新颖，还有人刚看过一张惊艳的作品，眼前这张就突然显得平淡。前两种差异首先提醒我们，大家可能连任务都没定义一致；后一种差异则可能来自与当前作品无关的比较背景。如果公司声称评分衡量的是统一的交付质量，却没有拆清楚标准，个人偏好和临时情境就会悄悄混进同一个数字里。 这时，负责人最容易做的事是把大家叫到一起商量，直到分数接近。但接近不等于准确。假设资历最深的人先说这张很普通，其他人可能会收起原来的判断，讨论很快结束，分歧也看不见了。问题不一定解决，只是被共同意见盖住。先独立记录，再交换依据，可以让差异留在桌面上接受检查。独立判断本身不是噪声的原因；它有助于避免意见相互污染，让不同信息得到表达，而汇总方式仍需要设计。 更有效的讨论会问：我们究竟在评什么？比如把可读性、信息完整性和制作可行性分别记录，再对照事先约定的标准看整体，而不是先凭喜欢不喜欢给总分，再寻找理由。假设某评审认为字太小，他需要指出在什么观看距离下看不清。另一位若认为构图更有吸引力，也要说明这和当前传播任务怎样相关。讨论从争论分数，变成检查可以核对的依据。 不过，把评价拆细也不是无限加表格。过多栏目会制造另一种假精确：每项都有数字，却没人知道数字怎么来。真正有用的是少数与任务相关、含义明确的维度，以及在看到具体作品之前就确定的使用方式。对于审美探索，保留不同口味可能恰恰是价值；对于按同一规范验收，随人变化的标准才更值得警惕。不能把任何不同意见都叫噪声，更不能用减少噪声的名义压掉合理异议。 还要分清一致与正确。所有评审共用一条错误标准，分数会非常整齐，却可能一起选错。检查噪声要和检查目标、依据及偏差一起进行。有时信息本来就不足，合理做法是写明不确定范围，而不是强迫每个人报出同一个精确数字。作者提出的是改进判断流程的方向，不是一套可以保证公平或正确的万能算法。 可以做个小观察：下次讨论一个低风险方案，先让每个人独立写一句结论和两条依据，再开始交流。保留最初的纸条，结束后看看改变了什么：是补到了新信息，重新理解了目标，还是仅仅跟随了先发言的人？这不需要给谁贴偏见标签，也不要求意见必须一致。它只是把原先藏在感觉里的尺子拿出来，让你知道，下一次该调整的是方案，还是评判方案的方法。",
+        "title": "噪声",
+        "url": "https://openlibrary.org/works/OL17962180W"
+      },
+      "page": 0,
+      "pages": 15,
+      "total": 100
+    },
+    "locationProfile": null,
+    "notes": [],
+    "permissions": {
+      "autoRead": true,
+      "desktopReceipts": false,
+      "deviceAudio": true,
+      "microphone": false,
+      "networkHosts": [],
+      "speechProvider": true,
+      "startVoiceConversation": false,
+      "storage": true,
+      "todoWrites": false,
+      "todos": false
+    },
+    "service": "books",
+    "state": {
+      "auto_city": false,
+      "calendar": {
+        "date": null,
+        "details": false,
+        "page": 0
+      },
+      "city": {
+        "city": "",
+        "lat": 0.0,
+        "lon": 0.0
+      },
+      "city_candidate": 0,
+      "city_from_ip": false,
+      "city_select": false,
+      "collection": false,
+      "details": false,
+      "favorites": [],
+      "geo": {
+        "error": "",
+        "key": "",
+        "location": {
+          "city": "",
+          "lat": 0.0,
+          "lon": 0.0
+        },
+        "next": 0
+      },
+      "knowledge": {
+        "article": "book-003",
+        "candidate": 0,
+        "category": "全部书籍",
+        "choosing": false,
+        "include_all": true,
+        "page": 0
+      },
+      "selected": 0,
+      "sound_timer": 0,
+      "sound_volume": null,
+      "todos": {
+        "completed": false,
+        "detail": false,
+        "page": 0,
+        "selected": "",
+        "text_page": 0
+      },
+      "trip": null,
+      "trip_candidate": null,
+      "visits": 0,
+      "weather": {
+        "data": null,
+        "error": "",
+        "fetched": 0,
+        "key": "",
+        "modified": "",
+        "next": 0
+      }
+    },
+    "ui": {
+      "actions": [
+        "host.category",
+        "host.next",
+        "host.random"
+      ],
+      "context": "",
+      "mode": 0
+    },
+    "values": {
+      "badge": "1/15",
+      "eyebrow": "全部书籍 · 分类",
+      "footer": "还是评判它的尺子变了？《噪声》让人注意到一种容易被误认为正常的差异：",
+      "headline": "噪声",
+      "metricLabel": "换一本",
+      "metricUnit": "读本页",
+      "metricValue": "原创导读 · 1077字",
+      "note": "同一份方案，为何分数差这么多？ 同一份方案，上午被夸稳妥，下午又被嫌保守，究竟是方案变了，"
+    }
+  },
+  "second": {
+    "captureDiagnostics": null,
+    "content": [],
+    "enabled": true,
+    "knowledge": {
+      "candidate": "全部书籍",
+      "categories": [
+        {
+          "count": 100,
+          "name": "全部书籍"
+        },
+        {
+          "count": 10,
+          "name": "组织系统"
+        },
+        {
+          "count": 10,
+          "name": "行为认知"
+        },
+        {
+          "count": 10,
+          "name": "判断决策"
+        },
+        {
+          "count": 10,
+          "name": "习惯效率"
+        },
+        {
+          "count": 10,
+          "name": "经济基础"
+        },
+        {
+          "count": 10,
+          "name": "当代经济"
+        },
+        {
+          "count": 10,
+          "name": "创业产品"
+        },
+        {
+          "count": 10,
+          "name": "商业战略"
+        },
+        {
+          "count": 10,
+          "name": "营销传播"
+        },
+        {
+          "count": 10,
+          "name": "财富常识"
+        }
+      ],
+      "category": "全部书籍",
+      "choosing": false,
+      "current": {
+        "category": "行为认知",
+        "id": "book-003",
+        "license": "Original commentary",
+        "revision": "editorial-1",
+        "source": "Daniel Kahneman · 原创导读",
+        "text": "同一份方案，为何分数差这么多？ 同一份方案，上午被夸稳妥，下午又被嫌保守，究竟是方案变了，还是评判它的尺子变了？《噪声》让人注意到一种容易被误认为正常的差异：面对本应采用相同标准的信息，判断者却给出不必要的分歧。它和判断错向某一边不是同一回事。偏差关心是否系统性偏离合理目标，噪声关心那些本不该出现的分散。即使平均分看起来合理，具体落到某个人头上的结果，也可能因轮到哪位评审而差很多。下面的故事是原创假设，不是原书案例。 假设一家设计公司选宣传海报，三位评审分别给同一张作品很不一样的分数。有人重视信息清晰，有人看重新颖，还有人刚看过一张惊艳的作品，眼前这张就突然显得平淡。前两种差异首先提醒我们，大家可能连任务都没定义一致；后一种差异则可能来自与当前作品无关的比较背景。如果公司声称评分衡量的是统一的交付质量，却没有拆清楚标准，个人偏好和临时情境就会悄悄混进同一个数字里。 这时，负责人最容易做的事是把大家叫到一起商量，直到分数接近。但接近不等于准确。假设资历最深的人先说这张很普通，其他人可能会收起原来的判断，讨论很快结束，分歧也看不见了。问题不一定解决，只是被共同意见盖住。先独立记录，再交换依据，可以让差异留在桌面上接受检查。独立判断本身不是噪声的原因；它有助于避免意见相互污染，让不同信息得到表达，而汇总方式仍需要设计。 更有效的讨论会问：我们究竟在评什么？比如把可读性、信息完整性和制作可行性分别记录，再对照事先约定的标准看整体，而不是先凭喜欢不喜欢给总分，再寻找理由。假设某评审认为字太小，他需要指出在什么观看距离下看不清。另一位若认为构图更有吸引力，也要说明这和当前传播任务怎样相关。讨论从争论分数，变成检查可以核对的依据。 不过，把评价拆细也不是无限加表格。过多栏目会制造另一种假精确：每项都有数字，却没人知道数字怎么来。真正有用的是少数与任务相关、含义明确的维度，以及在看到具体作品之前就确定的使用方式。对于审美探索，保留不同口味可能恰恰是价值；对于按同一规范验收，随人变化的标准才更值得警惕。不能把任何不同意见都叫噪声，更不能用减少噪声的名义压掉合理异议。 还要分清一致与正确。所有评审共用一条错误标准，分数会非常整齐，却可能一起选错。检查噪声要和检查目标、依据及偏差一起进行。有时信息本来就不足，合理做法是写明不确定范围，而不是强迫每个人报出同一个精确数字。作者提出的是改进判断流程的方向，不是一套可以保证公平或正确的万能算法。 可以做个小观察：下次讨论一个低风险方案，先让每个人独立写一句结论和两条依据，再开始交流。保留最初的纸条，结束后看看改变了什么：是补到了新信息，重新理解了目标，还是仅仅跟随了先发言的人？这不需要给谁贴偏见标签，也不要求意见必须一致。它只是把原先藏在感觉里的尺子拿出来，让你知道，下一次该调整的是方案，还是评判方案的方法。",
+        "title": "噪声",
+        "url": "https://openlibrary.org/works/OL17962180W"
+      },
+      "page": 1,
+      "pages": 15,
+      "total": 100
+    },
+    "locationProfile": null,
+    "notes": [],
+    "permissions": {
+      "autoRead": true,
+      "desktopReceipts": false,
+      "deviceAudio": true,
+      "microphone": false,
+      "networkHosts": [],
+      "speechProvider": true,
+      "startVoiceConversation": false,
+      "storage": true,
+      "todoWrites": false,
+      "todos": false
+    },
+    "service": "books",
+    "state": {
+      "auto_city": false,
+      "calendar": {
+        "date": null,
+        "details": false,
+        "page": 0
+      },
+      "city": {
+        "city": "",
+        "lat": 0.0,
+        "lon": 0.0
+      },
+      "city_candidate": 0,
+      "city_from_ip": false,
+      "city_select": false,
+      "collection": false,
+      "details": false,
+      "favorites": [],
+      "geo": {
+        "error": "",
+        "key": "",
+        "location": {
+          "city": "",
+          "lat": 0.0,
+          "lon": 0.0
+        },
+        "next": 0
+      },
+      "knowledge": {
+        "article": "book-003",
+        "candidate": 0,
+        "category": "全部书籍",
+        "choosing": false,
+        "include_all": true,
+        "page": 1
+      },
+      "selected": 0,
+      "sound_timer": 0,
+      "sound_volume": null,
+      "todos": {
+        "completed": false,
+        "detail": false,
+        "page": 0,
+        "selected": "",
+        "text_page": 0
+      },
+      "trip": null,
+      "trip_candidate": null,
+      "visits": 0,
+      "weather": {
+        "data": null,
+        "error": "",
+        "fetched": 0,
+        "key": "",
+        "modified": "",
+        "next": 0
+      }
+    },
+    "ui": {
+      "actions": [
+        "host.category",
+        "host.next",
+        "host.previous",
+        "host.random"
+      ],
+      "context": "",
+      "mode": 0
+    },
+    "values": {
+      "badge": "2/15",
+      "eyebrow": "全部书籍 · 分类",
+      "footer": "偏差关心是否系统性偏离合理目标，噪声关心那些本不该出现的分散。即使平均分看起来合理，",
+      "headline": "噪声",
+      "metricLabel": "换一本",
+      "metricUnit": "读本页",
+      "metricValue": "原创导读 · 1077字",
+      "note": "面对本应采用相同标准的信息，判断者却给出不必要的分歧。它和判断错向某一边不是同一回事。"
+    }
+  }
+}

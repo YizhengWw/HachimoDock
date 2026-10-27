@@ -33,6 +33,7 @@ import {
 import { applyDesktopPetAssignment } from "../lib/desktop-pet-assignment.js";
 import { getAppearance, listAppearances } from "../lib/appearance-store.js";
 import { buildRealtimeChatStartInput, PERSONA_VOICE_UPDATED_EVENT } from "../lib/persona-voice.js";
+import { componentPetVoice, createComponentVoiceSync } from "../lib/component-pet-voice.js";
 import {
   readActiveComponentForTarget,
   readConfiguredComponentSshHost,
@@ -45,6 +46,7 @@ import {
 } from "./DeviceContext.pure.js";
 
 export { deriveCurrentDisplay };
+import { createStatusReconciler, mergeStatus } from "../lib/status-reconciler.js";
 
 const EMPTY_APPEARANCE_SYNC = {
   pending: false,
@@ -59,7 +61,7 @@ const AGENT_SCAN_FOCUS_STALE_MS = 5 * 60_000;
 const USB_STATUS_POLL_MS = 3_000;
 const USB_STATUS_SLOW_WARNING_MS = 10_000;
 
-const DeviceContext = createContext(null);
+export const DeviceContext = createContext(null);
 const EMPTY_USAGE_HELP = buildUsageHelp();
 
 function bridgeEnabledAgents(profile) {
@@ -120,6 +122,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   const appearanceSyncTokenRef = useRef(0);
   // 实时对话（2026-09-18）：Rust 持有会话，这里只镜像状态并把板端按键请求解析成当前形象。
   const [realtimeChat, setRealtimeChat] = useState({ active: false, state: "idle", error: "", reason: "" });
+  const realtimeReconcilerRef = useRef(null);
 
   // --- USB status poll (3s); serial auto-connect is owned by the Rust backend. ---
   useEffect(() => {
@@ -410,6 +413,15 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
   );
 
   const realtimeTargetRef = useRef({ appearance: null, boardDeviceId: "" });
+  const componentVoiceSync = useRef(null);
+  if (!componentVoiceSync.current) componentVoiceSync.current = createComponentVoiceSync(invoke);
+  useEffect(() => {
+    const input = componentPetVoice(currentDisplay.appearance, usb);
+    const sync = () => componentVoiceSync.current(input);
+    void sync();
+    const timer = setInterval(sync, 5000);
+    return () => { clearInterval(timer); void componentVoiceSync.current(null); };
+  }, [currentDisplay.appearance, usb.boardDeviceId, usb.connected]);
   useEffect(() => {
     const onPersonaSaved = (event) => {
       const { appearanceId, personaVoice } = event.detail || {};
@@ -440,37 +452,46 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       throw new Error(`「${appearance.name}」还没有设置人设与声音，先在画廊卡片右下角设置`);
     }
     if (!boardDeviceId) throw new Error("设备未通过 USB 连接");
+    realtimeReconcilerRef.current?.invalidate();
     const status = await invoke("realtime_chat_start", { input: buildRealtimeChatStartInput(appearance, boardDeviceId) });
-    setRealtimeChat((current) => ({ ...current, ...status, error: "" }));
+    realtimeReconcilerRef.current?.invalidate();
+    setRealtimeChat((current) => mergeStatus(current, { ...status, error: "" }));
     return status;
   }, []);
 
   const stopRealtimeChat = useCallback(async (reason = "ui") => {
+    realtimeReconcilerRef.current?.invalidate();
     const status = await invoke("realtime_chat_stop", { reason });
-    setRealtimeChat((current) => ({ ...current, ...status }));
+    realtimeReconcilerRef.current?.invalidate();
+    setRealtimeChat((current) => mergeStatus(current, status));
     return status;
   }, []);
 
   useEffect(() => {
     let disposed = false;
     const unlisteners = [];
-    invoke("realtime_chat_status")
-      .then((status) => { if (!disposed && status) setRealtimeChat((current) => ({ ...current, ...status })); })
-      .catch(() => {});
+    const reconciler = createStatusReconciler();
+    realtimeReconcilerRef.current = reconciler;
+    const pollStatus = () => reconciler.poll(
+      () => invoke("realtime_chat_status"),
+      status => setRealtimeChat(current => mergeStatus(current, status)),
+    ).catch(() => {});
+    pollStatus();
     listen("realtime-chat-state", (event) => {
       const status = event?.payload;
-      if (status && typeof status === "object") setRealtimeChat((current) => ({ ...current, ...status }));
+      if (!disposed && status && typeof status === "object") {
+        reconciler.invalidate();
+        setRealtimeChat((current) => mergeStatus(current, status));
+      }
     }).then((stop) => { if (disposed) stop(); else unlisteners.push(stop); }).catch(() => {});
     // Recover the final error even if a fast failure raced listener registration.
-    const refresh = setInterval(() => {
-      invoke("realtime_chat_status").then((status) => {
-        if (!disposed && status?.sessionId) setRealtimeChat((current) => ({ ...current, ...status }));
-      }).catch(() => {});
-    }, 2000);
+    const refresh = setInterval(pollStatus, 2000);
     // 板端「实时对话」键：Rust 不知道设备上是哪个形象，由这里用当前形象拉起会话。
     listen("realtime-chat-request", (event) => {
       const boardDeviceId = String(event?.payload?.boardDeviceId || "").trim();
       startRealtimeChat({ boardDeviceId }).catch((error) => {
+        reconciler.invalidate();
+        if (disposed) return;
         const message = error?.message || String(error);
         setRealtimeChat((current) => ({ ...current, active: false, state: "idle", error: message }));
         invoke("usb_send_speech", { text: message.slice(0, 60) }).catch(() => {});
@@ -478,6 +499,8 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
     }).then((stop) => { if (disposed) stop(); else unlisteners.push(stop); }).catch(() => {});
     return () => {
       disposed = true;
+      reconciler.dispose();
+      if (realtimeReconcilerRef.current === reconciler) realtimeReconcilerRef.current = null;
       clearInterval(refresh);
       unlisteners.forEach((stop) => { try { stop(); } catch { /* ignore */ } });
     };

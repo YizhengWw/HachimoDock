@@ -2,7 +2,7 @@
   "id": "drink-reminder",
   "name": "喝水提醒",
   "kind": "tool",
-  "version": "1.1.4",
-  "author": "openclaw",
-  "description": "60 分钟补水倒计时：SW1 确认喝水、SW2 暂停、摇杆右切换视图；退出跟随设备全局设置。"
+  "version": "1.2.3",
+  "author": "柠檬水",
+  "description": "每隔 15–120 分钟提醒喝水，默认 60 分钟，可暂停或恢复；新间隔在下一次确认喝水后生效。累计实际确认次数，不推算饮水量。"
 }

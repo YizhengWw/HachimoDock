@@ -9261,6 +9261,12 @@ select:focus-visible {
   min-height: 0;                  /* drop the old min-height calc */
   container-type: inline-size;
 }
+.component-device-screen.component-device-screen--native {
+  position: relative;
+  display: block;
+  padding: 0;
+  grid-template-rows: none;
+}
 .component-device-screen[data-palette="candy"]:not(.component-device-screen--pixel) {
   --classic-bg: #5ad7ff;
   --classic-panel: #fff3b8;
@@ -12946,11 +12952,15 @@ select:focus-visible {
 
 .candidate-card__goal {
   margin: 0;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   line-height: 1.5;
   min-height: 33px;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .candidate-card__play-guide {
@@ -12958,7 +12968,7 @@ select:focus-visible {
   padding-top: 6px;
   border-top: 1px solid var(--line-soft);
   color: var(--text-soft);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -14497,3 +14507,17 @@ select:focus-visible {
 .usage-help__operations dt { font-weight: 600; color: var(--text-primary, #20242b); }
 .usage-help__operations dd { margin: 0; }
 @media (max-width: 620px) { .usage-help__operations { grid-template-columns: 1fr; gap: 3px; } .usage-help__operations dd { margin-bottom: 8px; } }
+.app-activity {
+  margin: 12px 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.app-activity summary { cursor: pointer; color: var(--text); }
+.app-activity ul { padding-left: 16px; margin: 8px 0 0; max-height: 160px; overflow: auto; }
+.api-settings__draft { color: var(--accent, #db641c); font-size: 13px; }

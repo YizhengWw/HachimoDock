@@ -42,10 +42,484 @@
   "dashboard": {
     "title": "电脑状态",
     "headline": "等待数据",
-    "footer": "摇杆左右翻页 · 主操作回首页",
+    "footer": "主键回首页 · 摇杆左右翻页 · 全局键退出",
     "visualStyle": "clean",
     "visualPalette": "ocean",
     "visualLayout": "tool",
     "visualSprite": "gauge"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 4325,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 32,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 4325,
+        "image": "background"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 23,
+        "w": 21,
+        "h": 21,
+        "color": 40478,
+        "icon": "desk"
+      },
+      {
+        "type": "text",
+        "x": 60,
+        "y": 18,
+        "w": 320,
+        "h": 30,
+        "color": 61343,
+        "font_size": 22,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 350,
+        "y": 24,
+        "w": 262,
+        "h": 24,
+        "color": 40313,
+        "font_size": 13,
+        "text": "电脑状态 · 实时同步",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 396,
+        "w": 176,
+        "h": 48,
+        "color": 8683,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 10,
+        "weight": 600,
+        "text": "上一页",
+        "action": "previous_page"
+      },
+      {
+        "type": "button",
+        "x": 218,
+        "y": 396,
+        "w": 184,
+        "h": 48,
+        "color": 40478,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 4391,
+        "padding": 10,
+        "weight": 600,
+        "text": "回首页",
+        "icon": "home",
+        "action": "first_page"
+      },
+      {
+        "type": "button",
+        "x": 416,
+        "y": 396,
+        "w": 196,
+        "h": 48,
+        "color": 8683,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61343,
+        "padding": 10,
+        "weight": 600,
+        "text": "下一页",
+        "action": "next_page"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 446,
+        "w": 640,
+        "h": 34,
+        "color": 4325,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 455,
+        "w": 36,
+        "h": 17,
+        "color": 4325,
+        "text": "SW1",
+        "key_for": "first_page",
+        "font_size": 10,
+        "line_height": 13,
+        "padding": 2,
+        "radius": 3,
+        "foreground": 40313,
+        "opacity": 0,
+        "stroke": 40313,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 67,
+        "y": 451,
+        "w": 146,
+        "h": 24,
+        "color": 40313,
+        "font_size": 13,
+        "text": "回首页"
+      },
+      {
+        "type": "text",
+        "x": 504,
+        "y": 451,
+        "w": 112,
+        "h": 24,
+        "color": 40313,
+        "font_size": 13,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 218,
+        "y": 451,
+        "w": 260,
+        "h": 24,
+        "color": 40313,
+        "font_size": 13,
+        "text": "摇杆左右翻页"
+      }
+    ],
+    "data_view": {
+      "engine": "p4-data-surface-v1",
+      "layout": "metrics",
+      "x": 28,
+      "y": 66,
+      "w": 584,
+      "h": 324,
+      "colors": [
+        61343,
+        40313,
+        40478,
+        17484,
+        6537
+      ]
+    },
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 等待数据电脑状态·实时同步上一页回首下SW全局键退出摇杆左右",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            28,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "翻",
+        "metrics": [
+          [
+            32,
+            1,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "list_page"
+    ],
+    "states": {
+      "view": "view"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "next_page",
+      "right": "previous_page"
+    }
   }
 }

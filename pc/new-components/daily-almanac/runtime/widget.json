@@ -1,0 +1,693 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "host": true,
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.today"
+    },
+    {
+      "from": "*",
+      "on": "host.details"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "每日黄历",
+    "eyebrow": "按北京时间 · PC 连接后可用",
+    "headline": "今天，慢慢过",
+    "metricValue": "—",
+    "metricLabel": "回到今天",
+    "metricUnit": "宜忌详情",
+    "badge": "",
+    "note": "连接 Pet Manager，读取本地黄历。",
+    "footer": "民俗参考 · 节日不等于法定休假",
+    "visualStyle": "clean",
+    "visualPalette": "ember",
+    "visualLayout": "tool",
+    "visualSprite": "timer"
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 65501,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "digits",
+        "asset": "assets/digits.png",
+        "frame_width": 160,
+        "frame_height": 128,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "labels",
+        "asset": "assets/labels.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "image": "background",
+        "color": 65535
+      },
+      {
+        "type": "icon",
+        "x": 24,
+        "y": 23,
+        "w": 22,
+        "h": 22,
+        "color": 43590,
+        "icon": "sun"
+      },
+      {
+        "type": "text",
+        "x": 55,
+        "y": 20,
+        "w": 270,
+        "h": 30,
+        "color": 18918,
+        "font_size": 20,
+        "line_height": 26,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 504,
+        "y": 22,
+        "w": 110,
+        "h": 25,
+        "color": 18918,
+        "font_size": 16,
+        "line_height": 21,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 27,
+        "y": 73,
+        "w": 470,
+        "h": 32,
+        "color": 18918,
+        "font_size": 19,
+        "line_height": 25,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 24,
+        "y": 105,
+        "w": 185,
+        "h": 116,
+        "color": 43590,
+        "font_size": 88,
+        "line_height": 114,
+        "bind": "metricValue",
+        "host_mask": 1
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 235,
+        "w": 370,
+        "h": 45,
+        "color": 18918,
+        "font_size": 30,
+        "line_height": 39,
+        "bind": "headline",
+        "host_mask": 1
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 289,
+        "w": 368,
+        "h": 48,
+        "color": 18918,
+        "font_size": 19,
+        "line_height": 25,
+        "bind": "note",
+        "host_mask": 1
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 344,
+        "w": 370,
+        "h": 30,
+        "color": 33709,
+        "font_size": 17,
+        "line_height": 22,
+        "bind": "footer",
+        "host_mask": 1
+      },
+      {
+        "type": "panel",
+        "x": 20,
+        "y": 108,
+        "w": 600,
+        "h": 268,
+        "color": 65501,
+        "opacity": 242,
+        "radius": 20,
+        "host_mask": 2
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 120,
+        "w": 560,
+        "h": 40,
+        "color": 18918,
+        "font_size": 28,
+        "line_height": 36,
+        "bind": "headline",
+        "host_mask": 2
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 172,
+        "w": 568,
+        "h": 90,
+        "color": 18918,
+        "font_size": 21,
+        "line_height": 28,
+        "bind": "note",
+        "host_mask": 2
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 270,
+        "w": 568,
+        "h": 90,
+        "color": 18918,
+        "font_size": 21,
+        "line_height": 28,
+        "bind": "footer",
+        "host_mask": 2
+      },
+      {
+        "type": "panel",
+        "x": 20,
+        "y": 108,
+        "w": 600,
+        "h": 268,
+        "color": 65501,
+        "opacity": 242,
+        "radius": 20,
+        "host_mask": 128
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 135,
+        "w": 560,
+        "h": 48,
+        "color": 18918,
+        "font_size": 28,
+        "line_height": 36,
+        "bind": "headline",
+        "host_mask": 128
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 202,
+        "w": 568,
+        "h": 120,
+        "color": 18918,
+        "font_size": 21,
+        "line_height": 28,
+        "bind": "note",
+        "host_mask": 128
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 387,
+        "w": 156,
+        "h": 48,
+        "color": 43590,
+        "foreground": 65501,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.today",
+        "bind": "metricLabel",
+        "icon": "clock"
+      },
+      {
+        "type": "button",
+        "x": 190,
+        "y": 387,
+        "w": 156,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.details",
+        "bind": "metricUnit",
+        "icon": "list"
+      },
+      {
+        "type": "button",
+        "x": 478,
+        "y": 387,
+        "w": 62,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.previous",
+        "text": "‹"
+      },
+      {
+        "type": "button",
+        "x": 550,
+        "y": 387,
+        "w": 62,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.next",
+        "text": "›"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 448,
+        "w": 640,
+        "h": 32,
+        "color": 65501,
+        "opacity": 240
+      },
+      {
+        "type": "button",
+        "x": 20,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW1",
+        "key_for": "host.today"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 453,
+        "w": 65,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "今天"
+      },
+      {
+        "type": "button",
+        "x": 125,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW2",
+        "key_for": "host.details"
+      },
+      {
+        "type": "text",
+        "x": 164,
+        "y": 453,
+        "w": 128,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "详情 / 返回"
+      },
+      {
+        "type": "text",
+        "x": 295,
+        "y": 453,
+        "w": 180,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "左右切日 / 翻页"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 453,
+        "w": 106,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "digits",
+        "chars": "0123456789",
+        "metrics": [
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ]
+        ],
+        "cell": [
+          32,
+          64
+        ]
+      },
+      {
+        "image": "labels",
+        "chars": "每日黄历今天回到宜忌详情返民俗参考年月星期一二三四五六正冬腊初十廿卅闰—/·‹›",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            5,
+            28
+          ],
+          [
+            32,
+            4,
+            29
+          ],
+          [
+            32,
+            3,
+            30
+          ],
+          [
+            32,
+            4,
+            30
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            10,
+            12,
+            26
+          ],
+          [
+            10,
+            12,
+            26
+          ]
+        ],
+        "cell": [
+          32,
+          32
+        ]
+      }
+    ]
+  }
+}

@@ -1,10 +1,11 @@
 /*
  * [Input] 对话大模型（DeepSeek / 豆包 / MiMo 预设或自定义 OpenAI 兼容端点）与豆包 Seed TTS 2.0
  *         的凭据；ASR/TTS 共用语音识别凭据存储，旧版独立 TTS Key 仅用于无 ASR Key 时迁移。
- * [Output] One JSON settings file under the app data dir (`voice-chat-settings.json`, 0600 on
- *          unix), masked status for the UI, and resolved LLM/TTS configs for the realtime chat
+ * [Output] One authenticated encrypted JSON file under the app data dir (`voice-chat-settings.json`,
+ *          local private key on macOS / OS vault on Windows, 0600 on unix), masked status for the UI, and resolved LLM/TTS configs for the realtime chat
  *          pipeline. LLM keys are saved per provider (custom keys also per endpoint),
- *          with only masks exposed to the UI. Public builds embed nothing; internal builds may embed defaults.
+ *          with only masks exposed to the UI. Separate global realtime volume persistence migrates legacy per-pet gain once.
+ *          Public builds embed nothing; internal builds may embed defaults.
  * [Pos] Tauri-side credential store for realtime persona chat (mirrors volcengine_asr's file mode).
  * [Sync] If fields change, update `ApiSettings.jsx`, `pc/.folder.md`, and `pc/docs/realtime-chat.md`.
  */
@@ -14,7 +15,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use crate::doubao_tts::{DoubaoTtsConfig, DEFAULT_RESOURCE_ID as TTS_DEFAULT_RESOURCE_ID};
 use crate::persona_llm::{LlmConfig, DEFAULT_BASE_URL as LLM_DEFAULT_BASE_URL, DEFAULT_MODEL as LLM_DEFAULT_MODEL};
@@ -22,6 +23,65 @@ use crate::persona_llm::{LlmConfig, DEFAULT_BASE_URL as LLM_DEFAULT_BASE_URL, DE
 const FILE_NAME: &str = "voice-chat-settings.json";
 
 static STORAGE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+// Separate from credentials and per-appearance voices. Saving volume must not
+// rewrite keys, and switching appearance must never restore an old gain.
+const VOLUME_FILE: &str = "realtime-voice-volume.json";
+static VOLUME_LOCK: Mutex<()> = Mutex::new(());
+static SETTINGS_MUTATION: Mutex<()> = Mutex::new(());
+
+fn valid_volume(volume: f32) -> bool {
+    volume.is_finite() && (0.2..=1.5).contains(&volume)
+}
+
+fn write_volume_at(dir: &Path, volume: f32) -> Result<f32, String> {
+    if !valid_volume(volume) { return Err("实时对话音量须在 0.20–1.50 之间".into()); }
+    fs::create_dir_all(dir).map_err(|_| "无法创建音量配置目录")?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|_| "无法创建音量配置临时文件")?;
+    let bytes = serde_json::to_vec(&serde_json::json!({"version":1,"volume":volume})).map_err(|_| "音量配置无效")?;
+    temp.write_all(&bytes).and_then(|_| temp.as_file().sync_all()).map_err(|_| "无法写入音量配置")?;
+    temp.persist(dir.join(VOLUME_FILE)).map_err(|_| "无法保存音量配置")?;
+    Ok(volume)
+}
+
+fn read_volume_at(dir: &Path) -> Result<f32, String> {
+    match fs::read(dir.join(VOLUME_FILE)) {
+        Ok(raw) => {
+            let value: serde_json::Value = serde_json::from_slice(&raw).map_err(|_| "全局音量配置损坏，请重新保存音量")?;
+            return value["volume"].as_f64().map(|v| v as f32).filter(|v| valid_volume(*v))
+                .ok_or_else(|| "全局音量配置无效，请重新保存音量".into());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {},
+        Err(_) => return Err("无法读取全局音量配置".into()),
+    }
+    // One-time migration: preserve the user's most recently saved voice gain.
+    // Do not read media or credentials, follow symlinks, or export persona text.
+    let mut latest = None;
+    if let Ok(entries) = fs::read_dir(dir.join("custom-appearances")) {
+        for entry in entries.take(1024).flatten() {
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) { continue; }
+            let path = entry.path().join("persona-voice.json");
+            let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+            if !meta.is_file() || meta.len() > 65536 { continue; }
+            let Ok(raw) = fs::read(&path) else { continue };
+            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) else { continue };
+            let Some(volume) = value["voice"]["volume"].as_f64().map(|v| v as f32).filter(|v| valid_volume(*v)) else { continue };
+            let Ok(modified) = meta.modified() else { continue };
+            if latest.is_none_or(|(time, _)| modified > time) { latest = Some((modified, volume)); }
+        }
+    }
+    write_volume_at(dir, latest.map(|(_, v)| v).unwrap_or(1.0))
+}
+
+pub fn realtime_volume() -> Result<f32, String> {
+    let _lock = VOLUME_LOCK.lock().map_err(|_| "音量配置暂不可用")?;
+    read_volume_at(STORAGE_DIR.get().ok_or("语音对话配置目录尚未初始化")?)
+}
+
+pub fn save_realtime_volume(volume: f32) -> Result<f32, String> {
+    let _lock = VOLUME_LOCK.lock().map_err(|_| "音量配置暂不可用")?;
+    write_volume_at(STORAGE_DIR.get().ok_or("语音对话配置目录尚未初始化")?, volume)
+}
 
 /// Built-in chat defaults: endpoints are fixed, model names may be overridden.
 pub struct LlmPreset {
@@ -33,7 +93,7 @@ pub struct LlmPreset {
 
 pub const LLM_PRESETS: &[LlmPreset] = &[
     LlmPreset { id: "deepseek", label: "DeepSeek", base_url: "https://api.deepseek.com", model: "deepseek-flash" },
-    LlmPreset { id: "doubao", label: "豆包（火山方舟）", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260428" },
+    LlmPreset { id: "doubao", label: "豆包（火山方舟）", base_url: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-1-lite-260915" },
     LlmPreset { id: "mimo", label: "Xiaomi MiMo", base_url: "https://api.xiaomimimo.com/v1", model: "mimo-v2.6-flash" },
 ];
 pub const DEFAULT_LLM_PROVIDER: &str = "doubao";
@@ -126,8 +186,8 @@ pub fn mask_secret(value: &str) -> String {
 }
 
 fn read_file(path: &Path) -> Result<Option<VoiceChatSettings>, String> {
-    match fs::read_to_string(path) {
-        Ok(raw) => serde_json::from_str::<VoiceChatSettings>(&raw)
+    match crate::secure_config::read(path,"voice-chat")? {
+        Some(raw) => serde_json::from_str::<VoiceChatSettings>(&raw)
             .map(|mut settings| {
                 // Pre-provider files used DeepSeek by default. Do not redirect
                 // an old credential when changing the first-install default.
@@ -140,9 +200,8 @@ fn read_file(path: &Path) -> Result<Option<VoiceChatSettings>, String> {
                 }
                 Some(settings)
             })
-            .map_err(|error| format!("语音对话配置损坏 {}: {error}", path.display())),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(format!("读取语音对话配置失败 {}: {error}", path.display())),
+            .map_err(|_| "语音对话配置格式损坏；请保留原文件".into()),
+        None => Ok(None),
     }
 }
 
@@ -151,12 +210,7 @@ fn write_file(path: &Path, settings: &VoiceChatSettings) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|error| format!("创建配置目录失败: {error}"))?;
     }
     let raw = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
-    let mut temporary = tempfile::NamedTempFile::new_in(path.parent().ok_or("配置目录无效")?)
-        .map_err(|_| "无法创建语音配置临时文件")?;
-    temporary.write_all(raw.as_bytes()).and_then(|_| temporary.as_file().sync_all())
-        .map_err(|_| "无法写入语音配置")?;
-    temporary.persist(path).map_err(|_| "无法保存语音配置")?;
-    Ok(())
+    crate::secure_config::write(path,"voice-chat",raw.as_bytes())
 }
 
 /// Stored values first, then internal-build defaults, then public defaults.
@@ -168,7 +222,7 @@ pub fn load() -> Result<(VoiceChatSettings, &'static str), String> {
     if settings.llm_api_key.trim().is_empty() {
         settings.llm_api_key = settings.llm_api_keys.get(&credential_scope(&settings)).cloned().unwrap_or_default();
     }
-    if apply_internal_ark_default(&mut settings, crate::internal_credentials::ark_key()) { source = "internal-build"; }
+    if apply_internal_ark_default(&mut settings, crate::service_credentials::ark_key()) { source = "internal-build"; }
     apply_llm_defaults(&mut settings);
     settings.tts_resource_id = TTS_DEFAULT_RESOURCE_ID.to_string();
     Ok((settings, source))
@@ -230,6 +284,7 @@ pub fn migrate_shared_speech_key() -> Result<(), String> {
 
 fn migrate_shared_speech_key_at(path: &Path, asr_configured: bool, legacy_key: &str,
     save_asr: impl FnOnce(&str) -> Result<(), String>) -> Result<(), String> {
+    let _guard = SETTINGS_MUTATION.lock().map_err(|_| "语音配置繁忙")?;
     if !asr_configured && !legacy_key.trim().is_empty() {
         save_asr(legacy_key.trim())?;
     }
@@ -256,7 +311,7 @@ pub fn status() -> Result<VoiceChatSettingsStatus, String> {
         llm_base_url: settings.llm_base_url.clone(),
         llm_model: settings.llm_model.clone(),
         llm_api_key_masked: mask_secret(&settings.llm_api_key),
-        llm_api_key_masks: credential_masks(&settings, crate::internal_credentials::ark_key()),
+        llm_api_key_masks: credential_masks(&settings, crate::service_credentials::ark_key()),
         llm_custom_base_url: settings.llm_custom_base_url.clone(),
         tts_api_key_masked: mask_secret(&tts_key),
         tts_resource_id: settings.tts_resource_id.clone(),
@@ -296,9 +351,11 @@ fn credential_masks(settings: &VoiceChatSettings, internal_ark: Option<&str>) ->
 /// Keep each saved credential in its own scope. An empty input reuses only the
 /// target provider/endpoint's key, never the previously selected provider's key.
 pub fn save(input: VoiceChatSettingsInput) -> Result<VoiceChatSettingsStatus, String> {
+    let guard = SETTINGS_MUTATION.lock().map_err(|_| "语音配置繁忙")?;
     let path = settings_path()?;
     let settings = merge_settings(read_file(&path)?.unwrap_or_default(), input);
     write_file(&path, &settings)?;
+    drop(guard);
     status()
 }
 
@@ -345,6 +402,7 @@ fn merge_settings(mut settings: VoiceChatSettings, input: VoiceChatSettingsInput
 }
 
 pub fn clear_secret(which: &str) -> Result<VoiceChatSettingsStatus, String> {
+    let guard = SETTINGS_MUTATION.lock().map_err(|_| "语音配置繁忙")?;
     let path = settings_path()?;
     let mut settings = read_file(&path)?.unwrap_or_default();
     match which {
@@ -356,6 +414,7 @@ pub fn clear_secret(which: &str) -> Result<VoiceChatSettingsStatus, String> {
         _ => return Err("unknown secret".to_string()),
     }
     write_file(&path, &settings)?;
+    drop(guard);
     status()
 }
 
@@ -366,6 +425,76 @@ pub fn llm_config() -> Result<LlmConfig, String> {
         base_url: settings.llm_base_url,
         model: settings.llm_model,
         api_key: settings.llm_api_key,
+    })
+}
+
+fn catalog_settings(settings: VoiceChatSettings, input: VoiceChatSettingsInput) -> Result<VoiceChatSettings, String> {
+    let mut settings = merge_settings(settings, input);
+    if settings.llm_provider == "custom" && settings.llm_base_url.trim().is_empty() {
+        return Err("请先填写自定义接口地址".into());
+    }
+    apply_llm_defaults(&mut settings);
+    if settings.llm_api_key.trim().is_empty() { return Err("请先保存或填写这家服务的 API Key".into()); }
+    let url = reqwest::Url::parse(&settings.llm_base_url).map_err(|_| "接口地址无效")?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some()
+        || url.query().is_some() || url.fragment().is_some() {
+        return Err("模型目录需要不含凭据的 HTTPS 接口地址".into());
+    }
+    Ok(settings)
+}
+
+fn catalog_model_ids(value: &serde_json::Value) -> Result<Vec<String>, String> {
+    let rows = value["data"].as_array().filter(|_| value["has_more"] != true)
+        .ok_or("模型目录不完整，请手动填写模型 ID")?;
+    let mut ids = std::collections::BTreeSet::new();
+    for row in rows.iter().take(4096) {
+        let Some(id) = row["id"].as_str().map(str::trim).filter(|id| !id.is_empty() && id.len() <= 200) else { continue };
+        if ["available", "enabled", "active"].iter().any(|key| row[*key] == false) { continue; }
+        let status = row["lifecycle"]["status"].as_str().or_else(|| row["lifecycle"].as_str()).or_else(|| row["status"].as_str()).unwrap_or("").to_ascii_lowercase();
+        if ["retir", "shutdown", "disabled", "unavailable"].iter().any(|word| status.contains(word)) { continue; }
+        if row["modalities"]["output_modalities"].as_array().is_some_and(|outputs| !outputs.iter().any(|o| o == "text")) { continue; }
+        if ["seedance", "seedream", "embedding", "rerank", "tts", "asr"].iter().any(|word| id.to_ascii_lowercase().contains(word)) { continue; }
+        ids.insert(id.to_owned());
+    }
+    Ok(ids.into_iter().collect())
+}
+
+/// Read-only: scope the credential exactly like save, but never persist the
+/// draft or return secrets. Redirects are disabled by the shared network layer.
+pub async fn list_models(input: VoiceChatSettingsInput) -> Result<Vec<String>, String> {
+    let settings = catalog_settings(load()?.0, input)?;
+    let client = crate::llm_network::client(std::time::Duration::from_secs(15))?;
+    let mut response = client.get(format!("{}/models", settings.llm_base_url.trim_end_matches('/')))
+        .bearer_auth(&settings.llm_api_key).send().await.map_err(|e| crate::llm_network::connection_error(&e))?;
+    if !response.status().is_success() { return Err(format!("模型目录获取失败（HTTP {}），请检查该服务的 Key 和权限；可手动填写模型 ID", response.status().as_u16())); }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "模型目录读取中断")? {
+        if bytes.len() + chunk.len() > 1024 * 1024 { return Err("模型目录过大，请手动填写模型 ID".into()); }
+        bytes.extend_from_slice(&chunk);
+    }
+    let value = serde_json::from_slice(&bytes).map_err(|_| "模型目录格式不正确")?;
+    catalog_model_ids(&value)
+}
+
+/// News retrieval stays on the explicitly selected Doubao native search,
+/// independently of the model used to edit the briefing. Never persist a
+/// provider switch or reuse another provider's (or speech) credential.
+pub fn news_search_config() -> Result<LlmConfig, String> {
+    news_search_config_from(&load()?.0)
+}
+
+fn news_search_config_from(settings:&VoiceChatSettings)->Result<LlmConfig,String>{
+    if settings.llm_web_search==Some(false){
+        return Err("请在 API 配置启用联网检索，资讯搜索使用豆包".into());
+    }
+    let preset=llm_preset("doubao").expect("built-in Doubao preset");
+    let active=settings.llm_provider=="doubao";
+    let key=if active&&!settings.llm_api_key.trim().is_empty(){Some(&settings.llm_api_key)}
+        else{settings.llm_api_keys.get("doubao")}
+        .filter(|s|!s.trim().is_empty()).ok_or("请先在 API 配置保存豆包对话模型的 Key，用于资讯联网检索；语音合成 Key 不适用")?;
+    Ok(LlmConfig{
+        web_search:true,base_url:preset.base_url.into(),api_key:key.trim().into(),
+        model:if active&&!settings.llm_model.trim().is_empty(){settings.llm_model.trim().into()}else{preset.model.into()},
     })
 }
 
@@ -384,6 +513,78 @@ pub fn tts_config(speaker: &str, clone_speaker_id: &str, speed: f32) -> Result<D
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn catalog_uses_only_target_provider_or_exact_endpoint_key_and_never_mutates_input() {
+        let mut settings = VoiceChatSettings { llm_provider: "deepseek".into(), llm_api_key: "ds-secret".into(), ..Default::default() };
+        settings.llm_api_keys.insert("doubao".into(), "ark-secret".into());
+        settings.llm_api_keys.insert("custom:https://one.invalid/v1".into(), "custom-secret".into());
+        let selected = catalog_settings(settings.clone(), VoiceChatSettingsInput { llm_provider: Some("doubao".into()), ..Default::default() }).unwrap();
+        assert_eq!(selected.llm_api_key, "ark-secret");
+        assert_eq!(selected.llm_base_url, "https://ark.cn-beijing.volces.com/api/v3");
+        assert_eq!(selected.llm_model, "doubao-seed-2-1-lite-260915");
+        let custom = |url: &str| VoiceChatSettingsInput { llm_provider: Some("custom".into()), llm_base_url: Some(url.into()), ..Default::default() };
+        assert!(catalog_settings(settings.clone(), custom("https://two.invalid/v1")).is_err());
+        assert_eq!(catalog_settings(settings.clone(), custom("https://one.invalid/v1/")).unwrap().llm_api_key, "custom-secret");
+        assert_eq!(settings.llm_api_key, "ds-secret");
+    }
+
+    #[test]
+    fn model_catalog_returns_only_active_text_ids_and_checks_completeness() {
+        let ids = catalog_model_ids(&serde_json::json!({"data":[
+            {"id":"doubao-seed-2-1-lite-260915","modalities":{"output_modalities":["text"]}},
+            {"id":"doubao-seed-2-1-pro-260915"}, {"id":"retired","status":"Retiring"},
+            {"id":"gone","status":"Shutdown"}, {"id":"off","enabled":false},
+            {"id":"audio","modalities":{"output_modalities":["audio"]}},
+            {"id":"doubao-seedance-2-0-fast-test"}, {"id":"doubao-seed-2-1-pro-260915"}
+        ]})).unwrap();
+        assert_eq!(ids, ["doubao-seed-2-1-lite-260915", "doubao-seed-2-1-pro-260915"]);
+        assert!(catalog_model_ids(&serde_json::json!({"data":[], "has_more":true})).is_err());
+    }
+
+    #[test]
+    fn news_search_uses_only_doubao_credential_and_keeps_chat_settings(){
+        let mut settings=VoiceChatSettings{llm_provider:"deepseek".into(),llm_model:"deepseek-flash".into(),llm_api_key:"other-provider-key".into(),tts_api_key:"speech-only-key".into(),..Default::default()};
+        assert!(news_search_config_from(&settings).is_err());
+        settings.llm_api_keys.insert("doubao".into(),"doubao-test-key".into());
+        let cfg=news_search_config_from(&settings).unwrap();
+        assert_eq!(cfg.api_key,"doubao-test-key");
+        assert_eq!(cfg.base_url,llm_preset("doubao").unwrap().base_url);
+        assert_eq!(cfg.model,llm_preset("doubao").unwrap().model);
+        assert_eq!(settings.llm_provider,"deepseek");
+        assert_eq!(settings.llm_api_key,"other-provider-key");
+        settings.llm_provider="doubao".into();settings.llm_model="my-doubao-endpoint".into();settings.llm_api_key="active-doubao-key".into();
+        assert_eq!(news_search_config_from(&settings).unwrap().model,"my-doubao-endpoint");
+        assert_eq!(news_search_config_from(&settings).unwrap().api_key,"active-doubao-key");
+        settings.llm_web_search=Some(false);assert!(news_search_config_from(&settings).is_err());
+    }
+    #[test]
+    fn global_volume_migrates_once_and_ignores_future_pet_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let pet = dir.path().join("custom-appearances/pet-a");
+        std::fs::create_dir_all(&pet).unwrap();
+        std::fs::write(pet.join("persona-voice.json"), r#"{"voice":{"volume":0.3},"persona":{"private":"never exported"}}"#).unwrap();
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 0.3);
+        std::fs::write(pet.join("persona-voice.json"), r#"{"voice":{"volume":1.5}}"#).unwrap();
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 0.3);
+        super::write_volume_at(dir.path(), 0.7).unwrap();
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 0.7);
+        let saved = std::fs::read_to_string(dir.path().join(super::VOLUME_FILE)).unwrap();
+        assert!(!saved.contains("private") && !saved.contains("pet-a"));
+        for invalid in [f32::NAN, f32::INFINITY, -1.0, 0.0, 1.6] {
+            assert!(super::write_volume_at(dir.path(), invalid).is_err());
+        }
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 0.7);
+    }
+
+    #[test]
+    fn global_volume_defaults_and_corruption_is_not_silently_full_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 1.0);
+        std::fs::write(dir.path().join(super::VOLUME_FILE), "broken").unwrap();
+        assert!(super::read_volume_at(dir.path()).is_err());
+        super::write_volume_at(dir.path(), 0.3).unwrap();
+        assert_eq!(super::read_volume_at(dir.path()).unwrap(), 0.3);
+    }
     use super::*;
 
     #[test]
@@ -561,7 +762,7 @@ mod tests {
             assert_eq!(settings.llm_model, preset.model);
         }
         assert_eq!(llm_preset("deepseek").unwrap().model, "deepseek-flash");
-        assert_eq!(llm_preset("doubao").unwrap().model, "doubao-seed-2-0-lite-260428");
+        assert_eq!(llm_preset("doubao").unwrap().model, "doubao-seed-2-1-lite-260915");
         let mut custom = VoiceChatSettings { llm_provider: "custom".into(),
             llm_base_url: "https://example.invalid/v1".into(), llm_model: "my-model".into(), ..Default::default() };
         apply_llm_defaults(&mut custom);

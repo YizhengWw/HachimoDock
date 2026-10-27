@@ -15,6 +15,12 @@ pub fn configure(dir: &Path) -> Result<(), String> {
 
 pub fn error_kind(error: &str) -> &'static str {
     let text = error.to_lowercase();
+    if text.starts_with("live serial write failed:") {
+        for kind in ["write_progress_unknown","timeout","would_block","interrupted","broken_pipe","not_connected","write_zero","permission_denied","not_found","io_error"] {
+            if text.contains(kind) { return kind; }
+        }
+        return "io_error";
+    }
     if text.contains("mismatch") || text.contains("55000000") { "tts_resource_mismatch" }
     else if text.contains("certificate") || text.contains("证书") { "tls_certificate" }
     else if text.contains("401") || text.contains("鉴权") { "authentication" }
@@ -30,9 +36,16 @@ pub fn error_kind(error: &str) -> &'static str {
 
 fn metadata(details: Value) -> Value {
     let mut out = serde_json::Map::new();
+    // Only the applied numeric gain, never appearance names or voice IDs.
+    if let Some(gain) = details.get("volume").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0 && *v <= 2.0) {
+        out.insert("volume".into(), json!(gain));
+    }
     // Call sites supply these diagnostic fields only. Unknown strings (including provider bodies)
     // cannot accidentally become persistent logs.
-    for key in ["bytes", "frames", "turn", "chars", "elapsedMs", "bufferedMs", "positionMs", "generation", "uptimeMs", "seq", "ok", "count", "steps", "hintFrames", "rejectedFrames", "peakRms", "replyFrames", "argIndex", "expectedArgs", "actualArgs"] {
+    for key in ["hits","prepared"]{
+        if let Some(v)=details.get(key).and_then(Value::as_u64).filter(|v|*v<=10000){out.insert(key.into(),json!(v));}
+    }
+    for key in ["bytes", "writtenBytes", "retries", "osError", "frames", "turn", "chars", "elapsedMs", "bufferedMs", "positionMs", "generation", "uptimeMs", "seq", "ok", "count", "steps", "hintFrames", "rejectedFrames", "peakRms", "replyFrames", "argIndex", "expectedArgs", "actualArgs", "dspFrames", "dspLastUs", "dspMaxUs", "dspAecUs", "dspNsUs", "dspVadUs", "aecReferenceSamples", "internalFreeBytes", "internalLargestBytes", "captureTxLastUs", "captureTxMaxUs", "captureStackMinBytes"] {
         if let Some(v) = details.get(key).filter(|v| v.is_number() || v.is_boolean()) { out.insert(key.into(), v.clone()); }
     }
     for key in ["state", "reason", "errorKind", "stage"] {
@@ -48,12 +61,17 @@ fn metadata(details: Value) -> Value {
     // Exact enums only: neither raw tool arguments nor arbitrary operation names
     // may leak task titles, dates, identifiers or model-supplied text.
     for (key, allowed) in [
-        ("tool", &["todo_manage", "computer_status", "media_player"][..]),
-        ("operation", &["list", "add", "update", "complete", "reopen", "delete", "search", "status", "play", "enqueue", "next", "previous", "pause", "resume", "toggle", "stop", "seek", "volume", "mode", "move", "remove"][..]),
+        ("service", &["books","knowledge","news","other"][..]),
+        ("taskIdKind", &["absent", "null", "empty", "uuid", "malformed", "wrong_type"][..]),
+        ("tool", &["todo_manage", "computer_status", "media_player", "desktop_agent"][..]),
+        ("operation", &["list", "add", "update", "complete", "reopen", "delete", "search", "status", "play", "enqueue", "next", "previous", "pause", "resume", "toggle", "stop", "seek", "volume", "mode", "move", "remove", "dispatch", "result", "cancel"][..]),
     ] {
         if let Some(v) = details.get(key).and_then(Value::as_str).filter(|v| allowed.contains(v)) {
             out.insert(key.into(), json!(v));
         }
+    }
+    if let Some(v)=details["requestId"].as_str().filter(|v|!v.is_empty()&&v.len()<=128&&v.bytes().all(|b|b.is_ascii_alphanumeric()||b==b'-'||b==b'_')){
+        out.insert("requestId".into(),json!(v));
     }
     for key in ["trackRef","requestedTrackRef"] {
         if let Some(v)=details[key].as_str().filter(|v|v.len()==16 && v.bytes().all(|b|b.is_ascii_hexdigit())) {
@@ -88,6 +106,31 @@ fn append(path: &Path, session: &str, event: &str, details: Value) -> std::io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]fn news_cache_diagnostics_keep_only_bounded_counts(){
+        assert_eq!(metadata(json!({"hits":4,"prepared":16,"componentId":"private","text":"private","key":"private"})),json!({"hits":4,"prepared":16}));
+        assert_eq!(metadata(json!({"hits":"private","prepared":10001})),json!({}));
+    }
+    #[test]
+    fn task_and_asr_diagnostics_never_keep_ids_or_payloads() {
+        assert_eq!(metadata(json!({"taskIdKind":"malformed","taskId":"private-task", "arguments":"secret", "transcript":"private words", "pcm":"private audio", "reason":"unexpected_task_id", "stage":"final_wait", "elapsedMs":8000,"errorKind":"timeout"})),
+            json!({"taskIdKind":"malformed","reason":"unexpected_task_id","stage":"final_wait","elapsedMs":8000,"errorKind":"timeout"}));
+        assert!(metadata(json!({"taskIdKind":"private-value"})).as_object().unwrap().is_empty());
+    }
+    #[test]
+    fn serial_recovery_metadata_excludes_payload_and_driver_strings() {
+        assert_eq!(metadata(json!({"bytes":4400,"writtenBytes":64,"retries":2,"osError":5,
+            "errorKind":"timeout","port":"PRIVATE","data":"PCM","error":"driver path", "session":"PRIVATE"})),
+            json!({"bytes":4400,"writtenBytes":64,"retries":2,"osError":5,"errorKind":"timeout"}));
+        assert_eq!(error_kind("Live serial write failed: write_progress_unknown after 64 bytes (0 retries)"),"write_progress_unknown");
+        assert_eq!(error_kind("Live serial write failed: timeout after 64 bytes (3 retries)"),"timeout");
+    }
+    #[test]
+    fn volume_diagnostics_are_numeric_and_never_include_persona_data() {
+        assert_eq!(metadata(json!({"volume":0.3,"appearance":"private", "speaker":"private"})),json!({"volume":0.3}));
+        for volume in [json!("private"),json!(-1),json!(200)] {
+            assert_eq!(metadata(json!({"volume":volume})),json!({}));
+        }
+    }
     #[test]
     fn local_tool_diagnostics_include_only_fixed_operation_enums() {
         assert_eq!(metadata(json!({"tool":"todo_manage","operation":"add","count":1,"ok":true,"title":"PRIVATE","dueAt":"PRIVATE","id":"PRIVATE"})),
@@ -123,5 +166,20 @@ mod tests {
         append(&path, "rtc-2", "started", json!({})).unwrap();
         assert!(path.with_file_name("realtime-chat.previous.jsonl").exists());
         assert!(fs::metadata(path).unwrap().len() < 1024);
+    }
+
+    #[test]
+    fn dsp_timings_keep_numeric_metadata_not_audio_or_text() {
+        let safe = metadata(json!({"dspFrames":3,"dspLastUs":70000,
+            "dspMaxUs":71000,"dspAecUs":68000,"dspNsUs":1500,"dspVadUs":500,
+            "aecReferenceSamples":640,"internalFreeBytes":64000,"internalLargestBytes":32768,
+            "captureTxLastUs":200,"captureTxMaxUs":1000,"captureStackMinBytes":2048,
+            "pcm":"private audio","transcript":"private words"}));
+        assert_eq!(safe,json!({"dspFrames":3,"dspLastUs":70000,
+            "dspMaxUs":71000,"dspAecUs":68000,"dspNsUs":1500,"dspVadUs":500,
+            "aecReferenceSamples":640,"internalFreeBytes":64000,"internalLargestBytes":32768,
+            "captureTxLastUs":200,"captureTxMaxUs":1000,"captureStackMinBytes":2048}));
+        assert_eq!(metadata(json!({"dspAecUs":"private words", "captureTxMaxUs":"secret",
+            "internalFreeBytes":"private path", "captureStackMinBytes":"secret"})),json!({}));
     }
 }

@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useExitProtection } from "./lib/exit-protection.js";
 
 export default function LlmNetworkSettings() {
   const [settings, setSettings] = useState({ mode: "system", proxyUrl: "", certificateConfigured: false });
@@ -11,6 +12,7 @@ export default function LlmNetworkSettings() {
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState("");
   const [results, setResults] = useState([]);
+  useExitProtection(dirty ? "云服务网络设置有未保存的修改" : "");
   useEffect(() => {
     let cancelled = false;
     invoke("load_llm_network_settings").then((value) => { if (!cancelled) setSettings(value); })

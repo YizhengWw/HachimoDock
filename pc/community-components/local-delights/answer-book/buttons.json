@@ -1,0 +1,1 @@
+[{"action":"local.draw","control":"SW1","event":"button.sw1.short_press","label":"抽取"},{"action":"local.close","control":"SW2","event":"button.sw2.short_press","label":"重新提问"}]

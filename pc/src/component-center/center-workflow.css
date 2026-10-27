@@ -1,0 +1,17 @@
+/* PC workflow chrome only; never changes the 640×480 device resource surface. */
+.component-library-toolbar {display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px}
+.component-library-toolbar>input {flex:1 1 180px;min-width:120px;max-width:360px}
+.component-library-toolbar>input,.component-library-toolbar>select,.component-source-picker select {min-height:36px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);padding:7px 10px;font:inherit}
+.component-library-toolbar .component-library-filters {margin-left:auto}
+.component-source-picker {display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr);align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;color:var(--text-soft);font-size:13px}
+.component-preview-mode {padding:10px 14px;background:var(--surface-muted);color:var(--text-soft);border-radius:10px;font-size:12px;line-height:1.7}
+.component-trash-dialog {max-width:640px;width:calc(100vw - 48px)}
+.component-trash-dialog .modal-body {display:grid;gap:12px;max-height:65vh;overflow:auto}
+.component-trash-dialog article {border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.component-trash-dialog article p {color:var(--text-muted);font-size:12px;margin:0;flex:1}
+.component-trash-dialog .modal-body>p {color:var(--text-soft);font-size:13px;line-height:1.7;margin:0}
+.component-workflow-confirm {z-index:1200}
+.component-workflow-confirm .modal-card {width:min(440px,calc(100vw - 40px))}
+.component-workflow-confirm .modal-body p {line-height:1.7;color:var(--text-soft)}
+.component-source-picker select:focus-visible,.component-library-toolbar>input:focus-visible,.component-library-toolbar>select:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
+@media(max-width:700px){.component-source-picker{grid-template-columns:1fr}.component-library-toolbar .component-library-filters{margin-left:0;width:100%}}

@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import {chromium} from "playwright";
+const browser=await chromium.launch({executablePath:process.env.PET_TEST_BROWSER||"/Applications/360Chrome.app/Contents/MacOS/360Chrome",headless:true});
+try{
+  const page=await browser.newPage();
+  const errors=[];page.on("pageerror",e=>errors.push(e.message));
+  await page.goto(process.env.PET_MEDIA_QA_URL||"http://127.0.0.1:4201/input-surface-qa.html");
+  const calls=async()=>JSON.parse(await page.getByTestId("calls").textContent());
+  const reset=()=>page.getByTestId("reset").click();
+  await page.getByRole("button",{name:"收听 测试 A",exact:true}).click();
+  assert.deepEqual(await calls(),[{operation:"select",id:"a"}]);
+  await reset();
+  let box=await page.getByRole("button",{name:"收听 测试 A",exact:true}).boundingBox();
+  await page.mouse.move(box.x+20,box.y+20);await page.mouse.down();
+  await page.getByTestId("replace").evaluate(el=>el.click());
+  await page.waitForTimeout(40);await page.mouse.up();
+  assert.deepEqual(await calls(),[],"replaced queue must invalidate an in-progress tap");
+  await reset();await page.getByTestId("scale").click();
+  box=await page.getByRole("button",{name:"收听 替换 C",exact:true}).boundingBox();
+  await page.mouse.move(box.x+20,box.y+12);await page.mouse.down();
+  await page.mouse.move(box.x+28,box.y+12);await page.mouse.up();
+  assert.deepEqual(await calls(),[],"8 screen px at half scale exceeds the 14 logical px tap tolerance");
+  const slider=page.getByRole("slider",{name:"音量"});
+  box=await slider.boundingBox();
+  await page.mouse.move(box.x+box.width*.1,box.y+box.height/2);await page.mouse.down();
+  await page.mouse.move(box.x+box.width*.8,box.y+box.height/2,{steps:10});
+  assert.deepEqual(await calls(),[],"drag must not submit a burst of volume commands");
+  await page.mouse.up();assert.deepEqual(await calls(),[{operation:"volume",volume:80}]);
+  await reset();box=await slider.boundingBox();
+  await page.mouse.move(box.x+box.width*.5,box.y+box.height/2);await page.mouse.down();
+  await page.mouse.move(box.x+box.width*.7,box.y+box.height/2+16);await page.mouse.up();
+  assert.deepEqual(await calls(),[],"dragging off the slider cancels the commit");
+  await page.getByRole("button",{name:"开始播放",exact:true}).click();
+  assert.deepEqual(await calls(),[{operation:"toggle"}],"transport bubbles must not toggle twice");
+  assert.deepEqual(errors,[]);
+  console.log("PASS media stable rows, stale-queue cancellation, scaled tap/slider bounds, one release commit, transport single action; no playback.");
+}finally{await browser.close();}

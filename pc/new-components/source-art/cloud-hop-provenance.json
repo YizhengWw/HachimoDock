@@ -1,0 +1,6 @@
+{
+  "tool": "image_gen",
+  "hero": "../cloud-hop/assets/hero.png",
+  "background": "../cloud-hop/assets/background.png",
+  "processing": "Native 640x480 background, cropped transparent 80x80 hero; no text baked into artwork."
+}

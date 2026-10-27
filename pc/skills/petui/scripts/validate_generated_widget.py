@@ -126,6 +126,26 @@ WIDGET_INT_MAX = 1_000_000_000
 DEFAULT_CAPABILITIES = {
     "widgetInstrument": "p4-instrument-v1",
     "widgetMedia": "p4-media-v1",
+    "widgetMediaSurface": "p4-media-surface-v1",
+    "widgetSurfaceImages": "p4-surface-images-v1",
+    "widgetAppSurface": "p4-app-surface-v1",
+    "widgetAppGraphics": "p4-app-graphics-v1",
+    "widgetGameSurface": "p4-game-surface-v1",
+    "widgetDataSurface": "p4-data-surface-v1",
+    "widgetSceneSurface": "p4-scene-surface-v1",
+    "widgetFlappyTuning": "p4-flappy-tuning-v1",
+    "widgetLifecycle": "p4-lifecycle-v1",
+    "widgetInput": "p4-input-v1",
+    "widgetLocalTools": "p4-local-tools-v1",
+    "widgetMotion": "p4-motion-v1",
+    "widgetPlatformTrack": "p4-platform-track-v1",
+    "widgetMediaTouch": "p4-media-touch-v1",
+    "widgetSurfaceAtlas": "p4-wide-atlas-v1",
+    "widgetAppTypography": "p4-app-type-v1",
+    "widgetGlyphCells": "p4-glyph-cells-v1",
+    "widgetAppInteraction": "p4-app-interaction-v1",
+    "widgetAppHost": "p4-app-host-v1",
+    "widgetState": "p4-app-state-v1",
     "widgetLyrics": "p4-lrc-v1",
     "widgetData": "p4-data-list-v1",
     "widgetRuntime": RUNTIME_ENGINE,
@@ -474,6 +494,19 @@ def validate_png_asset_inventory(widget_dir: Path, runtime: Any, errors: list[st
             for sprite in sprites
             if isinstance(sprite, dict) and isinstance(sprite.get("asset"), str)
         }
+    surface=runtime.get("surface",{}) if isinstance(runtime,dict) else {}
+    for im in surface.get("images",[]) if isinstance(surface,dict) else []:
+        if not isinstance(im,dict): continue
+        asset=im.get("asset")
+        if isinstance(asset,str):
+            referenced.add(asset)
+            path=widget_dir/asset
+            try:
+                import struct
+                b=path.read_bytes()
+                if len(b)>(1024*1024 if im.get('encoding')=='jpeg' else 128*1024) or b[:8]!=b"\x89PNG\r\n\x1a\n" or struct.unpack(">II",b[16:24])!=(im.get("frame_width"),im.get("frame_height")):
+                    errors.append("surface PNG 尺寸或格式无效")
+            except (OSError,struct.error): errors.append("surface PNG 缺失")
     for asset in sorted(present - referenced):
         errors.append(f"PNG 素材未被 runtime/widget.json.scene.sprites 引用: {asset}")
 
@@ -657,7 +690,7 @@ def validate_scene_op(
         valid = valid and any(field in operation for field in ("source", "x", "y"))
         if not valid:
             errors.append(f"{location} place 需要合法实体、坐标范围或 source")
-    elif name in {"show", "hide"}:
+    elif name in {"show", "hide", "charge"}:
         if not only_keys(operation, {"op", "entity"}) or not known_entity():
             errors.append(f"{location} {name} 需要一个已声明实体")
     elif name == "score":
@@ -699,22 +732,23 @@ def validate_scene(
     transition_actions: set[str],
     errors: list[str],
 ) -> None:
-    required_scene = SCENE_ENGINE if runtime.get("engine") == RUNTIME_ENGINE else SCENE_ENGINE_V1
+    slicing = isinstance(scene, dict) and scene.get("engine") == "p4-touch-slice-v1"
+    required_scene = "p4-touch-slice-v1" if slicing else SCENE_ENGINE if runtime.get("engine") == RUNTIME_ENGINE else SCENE_ENGINE_V1
     if not capability_supports(capabilities, "widgetScene", "widgetScenes", required_scene):
         errors.append(f"目标能力不支持通用场景引擎: {required_scene}")
     if not only_keys(
         scene,
-        {
+        {"engine", "duration_sec", "lives", "sound_volume", "sprites", "revision"} if slicing else {
             "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-            "grid", "sprites", "entities", "rules",
+            "grid", "sprites", "entities", "rules", "motion",
         },
     ):
         errors.append("runtime/widget.json.scene 含未知字段或不是对象")
         return
-    if not int_between(scene.get("tick_ms"), 100, 2000):
+    if not slicing and not int_between(scene.get("tick_ms"), 16 if 'motion' in scene else 100, 40 if 'motion' in scene else 2000):
         errors.append("runtime/widget.json.scene.tick_ms 必须在 100-2000")
     states = set(runtime.get("states", [])) if isinstance(runtime.get("states"), list) else set()
-    if scene.get("active_state") not in states:
+    if not slicing and scene.get("active_state") not in states:
         errors.append("runtime/widget.json.scene.active_state 必须引用 states")
     if "result_state" in scene and scene.get("result_state") not in states:
         errors.append("runtime/widget.json.scene.result_state 必须引用 states")
@@ -786,6 +820,25 @@ def validate_scene(
             )
     if sprite_pixels > SCENE_MAX_SPRITE_PIXELS:
         errors.append(f"runtime/widget.json.scene.sprites 总像素超过 {SCENE_MAX_SPRITE_PIXELS}")
+
+    if slicing:
+        revision=scene.get("revision",1)
+        available=capabilities.get("widgetSliceRevision",1)
+        if not int_between(revision,1,2) or not isinstance(available,int) or revision>available:
+            errors.append("这个切果版本需要相应的 widgetSliceRevision 能力，请更新固件")
+        if capabilities.get("widgetPointer") != "p4-pointer-v1" or capabilities.get("touchInput", {}).get("ready") is not True:
+            errors.append("触控切果需要已实测就绪的 touchInput.ready=true 与 p4-pointer-v1")
+        expected = [{"on": action, "from": "*"} for action in ("slice.restart", "slice.pause")]
+        transitions = runtime.get("transitions")
+        if (runtime.get("engine") != RUNTIME_ENGINE or runtime.get("vars") != {}
+            or runtime.get("states") != ["idle"] or runtime.get("initial_state") != "idle"
+            or runtime.get("tick") != [] or any(k in runtime for k in ("data","media","instrument","game","pages"))
+            or not int_between(scene.get("duration_sec"),30,120) or not int_between(scene.get("lives"),1,5)
+            or not int_between(scene.get("sound_volume"),0,100)
+            or len(sprites)!=4 or any(not isinstance(s,dict) or s.get("frames")!=1 for s in sprites)
+            or not isinstance(transitions,list) or len(transitions)!=2 or any(t not in transitions for t in expected)):
+            errors.append("触控切果仅接受有界参数、四张单帧水果和开始/暂停动作")
+        return
 
     grid = scene.get("grid")
     grid_valid = only_keys(grid, {"width", "height", "rows", "solid_tones"})
@@ -874,7 +927,7 @@ def validate_scene(
             errors.append(f"{location} 含未知字段或不是对象")
             continue
         trigger = rule.get("on")
-        if trigger == "collision":
+        if trigger in {"collision", "landed"}:
             if rule.get("entity") not in entity_ids or rule.get("with") not in entity_ids or rule.get("entity") == rule.get("with"):
                 errors.append(f"{location} collision 需要两个不同的已声明实体")
         elif trigger in {"edge", "blocked"}:
@@ -920,6 +973,43 @@ def validate_runtime(
         errors.append(f"目标能力不支持统一组件运行时: {runtime_engine}")
     variables = runtime.get("vars")
     data = runtime.get("data")
+    from app_surface import app_runtime_errors
+    errors.extend(app_runtime_errors(runtime))
+    from local_tools import local_errors
+    errors.extend(local_errors(runtime))
+    if 'local' in runtime and capabilities.get('widgetLocalTools')!='p4-local-tools-v1':errors.append('离线抽取与日期编辑需要 p4-local-tools-v1，请先升级固件')
+    from input_policy import input_errors
+    errors.extend(input_errors(runtime))
+    from motion_policy import motion_errors
+    errors.extend(motion_errors(runtime))
+    if isinstance(runtime.get('scene'),dict) and runtime['scene'].get('motion') and capabilities.get('widgetMotion')!='p4-motion-v1':errors.append('连续运动需要 p4-motion-v1，请先升级固件')
+    if isinstance(runtime.get('scene'),dict) and isinstance(runtime['scene'].get('motion'),dict) and 'track' in runtime['scene']['motion'] and capabilities.get('widgetPlatformTrack')!='p4-platform-track-v1':errors.append('连续平台与镜头需要 p4-platform-track-v1，请先升级固件')
+    if 'input' in runtime and capabilities.get('widgetInput')!='p4-input-v1':errors.append('需要组件输入策略能力，请先升级固件')
+    if 'lifecycle' in runtime and capabilities.get('widgetLifecycle')!='p4-lifecycle-v1':errors.append('需要游戏暂停与成绩存档能力，请先升级固件')
+    if runtime.get('surface',{}).get('input') and capabilities.get('widgetMediaTouch')!='p4-media-touch-v1':errors.append('需要媒体触屏控制能力，请先升级固件')
+    if any(im.get('encoding')!='jpeg' and im.get('frame_width',0)>240 for im in runtime.get('surface',{}).get('images',[])) and capabilities.get('widgetSurfaceAtlas')!='p4-wide-atlas-v1':errors.append('需要高清分格素材能力，请先升级固件')
+    if 'host' in runtime and capabilities.get('widgetAppHost')!='p4-app-host-v1':errors.append('需要 PC 应用服务能力，请先升级固件')
+    if 'persist' in runtime:
+        if capabilities.get('widgetState')!='p4-app-state-v1':errors.append('需要组件存档能力，请先升级固件')
+    if 'surface' in runtime and 'media' not in runtime:
+        from app_surface import app_surface_errors
+        errors.extend(app_surface_errors(runtime['surface'],runtime))
+        if runtime['surface'].get('graphics') and capabilities.get('widgetAppGraphics')!='p4-app-graphics-v1':errors.append('请升级支持高清背景、图标和精细排版的设备固件')
+        if runtime['surface'].get('typography') and capabilities.get('widgetAppTypography')!='p4-app-type-v1':errors.append('请升级支持组件字形和动态按键提示的设备固件')
+        if any('cell' in f for f in runtime['surface'].get('fonts',[])) and capabilities.get('widgetGlyphCells')!='p4-glyph-cells-v1':errors.append('请升级支持高清字形格的设备固件')
+        if runtime['surface'].get('interaction') and capabilities.get('widgetAppInteraction')!='p4-app-interaction-v1':errors.append('请升级支持组件分格素材与条件显示的设备固件')
+        game_surface='game_view' in runtime['surface']
+        data_surface='data_view' in runtime['surface']
+        scene_surface='scene_view' in runtime['surface']
+        if scene_surface and capabilities.get('widgetSceneSurface')!='p4-scene-surface-v1':errors.append('精细场景布局需要升级设备固件')
+        if data_surface and capabilities.get('widgetDataSurface')!='p4-data-surface-v1':errors.append('精细数据布局需要升级设备固件')
+        if game_surface and capabilities.get('widgetGameSurface')!='p4-game-surface-v1':errors.append('游戏画面层需要升级设备固件')
+        if runtime_engine!=RUNTIME_ENGINE or (game_surface and kind!='game') or (data_surface and kind!='tool') or (not game_surface and not data_surface and not scene_surface and (kind!='tool' or any(k in runtime for k in ('scene','game','instrument','data')))):
+            errors.append('app surface 仅支持 v4 tool，不与 scene/game/instrument/data 混用')
+        if capabilities.get('widgetAppSurface')!='p4-app-surface-v1':
+            errors.append('需要通用应用界面能力，请先升级固件')
+        if isinstance(runtime['surface'],dict) and runtime['surface'].get('images') and capabilities.get('widgetSurfaceImages')!='p4-surface-images-v1':
+            errors.append('需要受控图片能力，请先升级固件')
     if "instrument" in runtime:
         instrument = runtime["instrument"]
         if (not isinstance(instrument, dict) or set(instrument) != {"source", "effect_volume", "ambience_volume"}
@@ -935,11 +1025,21 @@ def validate_runtime(
     if "media" in runtime:
         if variables != {} or runtime.get("tick", []) != [] or "pages" in runtime:
             errors.append("media 不使用自定义变量、tick 或 pages，状态来自真实媒体服务")
-        if runtime.get("media") != {"source": "audio.player"} or runtime_engine != RUNTIME_ENGINE or kind != "tool" or any(k in runtime for k in ("scene", "game", "data")):
-            errors.append("media 只支持 v4 工具的 audio.player，不能混用 scene/game/data")
+        media = runtime.get("media")
+        radio = isinstance(media,dict) and set(media)=={"source","mode"} and media.get("mode")=="live" and re.fullmatch(r"pc\.[a-z][a-z0-9_-]{0,43}",str(media.get("source",""))) is not None
+        if not (media == {"source":"audio.player"} or radio) or runtime_engine != RUNTIME_ENGINE or kind != "tool" or any(k in runtime for k in ("scene", "game", "data")):
+            errors.append("media 需要 v4 tool 的受控 PC 扩展或兼容播放器，不能混用 scene/game/data")
+        if radio:
+            from pc_extension import surface_errors
+            errors.extend(surface_errors(runtime.get("surface")))
+            if capabilities.get("widgetMediaSurface") != "p4-media-surface-v1":
+                errors.append("目标固件不支持 p4-media-surface-v1，请先升级固件")
+            if runtime.get("surface",{}).get("images") and capabilities.get("widgetSurfaceImages")!="p4-surface-images-v1": errors.append("请更新支持图片与旋转的固件")
         if capabilities.get("widgetMedia") != "p4-media-v1":
             errors.append("目标固件不支持 p4-media-v1，请先升级固件")
         media_actions = {"media.toggle", "media.queue", "media.previous", "media.next", "media.up", "media.down", "media.select", "media.lyrics"}
+        if radio:
+            media_actions.remove("media.lyrics")
         for rule in runtime.get("transitions", []):
             if not isinstance(rule, dict) or set(rule) != {"on", "from"} or rule.get("from") != "*" or rule.get("on") not in media_actions:
                 errors.append("media transition 仅接受受控 on 动作，不接受额外效果")
@@ -1041,8 +1141,8 @@ def validate_runtime(
     if not isinstance(transitions, list):
         errors.append("runtime/widget.json.transitions 必须是数组")
         transitions = []
-    elif len(transitions) > 12:
-        errors.append(f"runtime/widget.json.transitions 最多 12 条，当前为 {len(transitions)}")
+    elif len(transitions) > (24 if runtime.get("input",{}).get("engine")=="p4-input-v1" else 12):
+        errors.append(f"runtime/widget.json.transitions 超出预算（传统 12、p4-input-v1 为 24），当前为 {len(transitions)}")
     for index, transition in enumerate(transitions):
         if not isinstance(transition, dict):
             errors.append(f"transitions[{index}] 必须是对象")
@@ -1092,8 +1192,9 @@ def validate_runtime(
         errors=errors,
         native_surface=isinstance(runtime.get("instrument"), dict),
     )
-    if compact_json_size(runtime) > 4095:
-        errors.append(f"runtime/widget.json 紧凑后超过 4095 字节: {compact_json_size(runtime)}")
+    widget_limit=8191 if runtime.get('surface',{}).get('graphics')=='p4-app-graphics-v1' else 4095
+    if compact_json_size(runtime) > widget_limit:
+        errors.append(f"runtime/widget.json 紧凑后超过 {widget_limit} 字节: {compact_json_size(runtime)}")
     game = runtime.get("game")
     scene = runtime.get("scene")
     if game is not None and scene is not None:
@@ -1102,6 +1203,8 @@ def validate_runtime(
         validate_game(game, runtime, kind, capabilities, transition_actions, errors)
     if scene is not None:
         validate_scene(scene, runtime, widget_dir, capabilities, transition_actions, errors)
+        if isinstance(scene,dict) and scene.get("engine")=="p4-touch-slice-v1" and kind!="game":
+            errors.append("触控切果必须声明 kind=game")
     return transition_actions
 
 
@@ -1131,6 +1234,11 @@ def validate_game(
     if not isinstance(widget_games, list) or game_type not in widget_games:
         errors.append(f"目标设备能力未声明 widgetGamePresets.{game_type}")
     tick_ms = game.get("tick_ms")
+    if "vertical_speed_percent" in game:
+        if game_type!="flappy" or not int_between(game["vertical_speed_percent"],25,100):
+            errors.append("vertical_speed_percent 仅支持 flappy 的 25-100 整数")
+        if capabilities.get("widgetFlappyTuning")!="p4-flappy-tuning-v1":
+            errors.append("飞鸟速度参数需要升级设备固件")
     if not isinstance(tick_ms, int) or not 100 <= tick_ms <= 2000:
         errors.append("runtime/widget.json.game.tick_ms 必须在 100-2000")
     states = set(runtime.get("states", [])) if isinstance(runtime.get("states"), list) else set()
@@ -1142,6 +1250,15 @@ def validate_game(
     if not isinstance(score_spec, dict) or score_spec.get("type") != "int":
         errors.append("runtime/widget.json.game.score_var 必须引用 int 变量")
     actions = game.get("actions")
+    required_keys=set(required_keys)
+    if "direction_mode" in game:
+        if game_type!="snake" or game["direction_mode"]!="absolute" or runtime.get("input",{}).get("engine")!="p4-input-v1":
+            errors.append("绝对方向仅支持声明 p4-input-v1 的贪吃蛇")
+        required_keys|={"up","down"}
+    if isinstance(actions,dict) and "soft_drop" in actions:
+        if game_type!="blocks" or runtime.get("input",{}).get("engine")!="p4-input-v1":
+            errors.append("软降仅支持声明 p4-input-v1 的方块")
+        required_keys.add("soft_drop")
     if not isinstance(actions, dict) or set(actions) != required_keys:
         errors.append(f"{game_type}.actions 必须且只能包含: {', '.join(sorted(required_keys))}")
         return
@@ -1214,7 +1331,11 @@ def validate_buttons(
     missing_transitions = sorted(normal_actions - transition_actions)
     if missing_transitions:
         errors.append(f"按钮 action 未出现在 transitions: {', '.join(missing_transitions)}")
-    unbound = sorted(transition_actions - normal_actions)
+    touch_actions=set()
+    if isinstance(runtime,dict) and runtime.get("input",{}).get("engine")=="p4-input-v1":
+        touch_actions={n.get("action") for n in runtime.get("surface",{}).get("elements",[]) if isinstance(n,dict) and isinstance(n.get("action"),str)}
+        touch_actions.update(runtime["input"].get("swipe",{}).values())
+    unbound = sorted(transition_actions - normal_actions - touch_actions)
     if unbound:
         errors.append(f"transitions 存在未绑定 action: {', '.join(unbound)}")
     if isinstance(runtime, dict) and isinstance(runtime.get("game"), dict):
@@ -1252,6 +1373,31 @@ def validate_widget(
     buttons = load_json(widget_dir / "buttons.json", errors)
     share = load_json(widget_dir / "share.json", errors)
     kind = validate_manifest(manifest, errors)
+    application_file=widget_dir/'pc/application.json'
+    if application_file.exists() or isinstance(runtime,dict) and 'host' in runtime:
+        from app_services import application_errors
+        errors.extend(application_errors(load_json(application_file,errors),runtime))
+        application=load_json(application_file,errors)
+        application_limit=4*1024*1024 if isinstance(application,dict) and (application.get('engine')=='pc-app-services-v3' and application.get('service')=='knowledge' or application.get('engine')=='pc-app-calendar-v1' and application.get('service')=='calendar' or application.get('engine')=='pc-app-books-v1' and application.get('service')=='books') else 16384
+        if application_file.exists() and application_file.stat().st_size>application_limit:errors.append('PC 应用声明超过有界容量')
+        for f in widget_dir.rglob('*'):
+            relative=f.relative_to(widget_dir).as_posix()
+            notice=relative in {'LICENSE.txt','THIRD_PARTY_NOTICES.txt'} or bool(re.fullmatch(r'licenses/[A-Za-z0-9_.-]+\.(?:txt|md)',relative))
+            if f.is_file() and not notice and relative not in REQUIRED_FILES|{'pc/application.json','assets/.keep'}|{i.get('asset') for i in runtime.get('surface',{}).get('images',[]) if isinstance(i,dict)}:errors.append('PC 应用包含额外文件')
+    pc_file=widget_dir / "pc" / "extension.json"
+    source=runtime.get("media",{}).get("source","") if isinstance(runtime,dict) else ""
+    if pc_file.exists() or source.startswith("pc."):
+        from pc_extension import extension_errors
+        extension=load_json(pc_file,errors)
+        errors.extend(extension_errors(extension))
+        if not isinstance(manifest,dict) or source != "pc."+str(manifest.get("id","")):
+            errors.append("PC 扩展必须与组件 ID、媒体源绑定")
+        if pc_file.exists() and pc_file.stat().st_size>16384: errors.append("PC 扩展超过 16 KiB")
+        for f in widget_dir.rglob("*"):
+            relative = f.relative_to(widget_dir).as_posix()
+            legal_notice = relative in {"LICENSE.txt", "THIRD_PARTY_NOTICES.txt"} or bool(re.fullmatch(r"licenses/[A-Za-z0-9_.-]+\.(?:txt|md)", relative))
+            if f.is_file() and not legal_notice and relative not in REQUIRED_FILES | {"pc/extension.json", "assets/.keep"} | {im.get("asset") for im in runtime.get("surface",{}).get("images",[]) if isinstance(im,dict)}:
+                errors.append("声明式媒体包不能携带用户数据、凭据或额外文件")
     validate_png_asset_inventory(widget_dir, runtime, errors)
     if not isinstance(negative, dict):
         if negative is not None:
@@ -1267,6 +1413,9 @@ def validate_widget(
         )
     transition_actions = validate_runtime(runtime, kind, widget_dir, capabilities, errors)
     validate_buttons(buttons, transition_actions, capabilities, runtime, errors)
+    if isinstance(runtime, dict) and isinstance(buttons, list):
+        from input_policy import input_errors
+        errors.extend(input_errors(runtime, buttons))
     validate_initial_preview(negative, runtime, errors)
     validate_claimed_mechanics(manifest, negative, runtime, share, errors)
     if not isinstance(share, dict):

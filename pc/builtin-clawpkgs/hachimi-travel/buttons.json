@@ -1,0 +1,26 @@
+[
+  {
+    "action": "host.primary",
+    "label": "出发或确认下一站",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "host.secondary",
+    "label": "明信片或取消选地",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "host.previous",
+    "label": "上个目的地",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "host.next",
+    "label": "下个目的地",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  }
+]

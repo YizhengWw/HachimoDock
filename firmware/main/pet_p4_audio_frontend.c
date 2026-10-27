@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/task.h"
 
 /* DeskBot V2's microphone/reference topology and cancel boundaries, adapted to
  * ESP-IDF P4 codecs. Standalone ESP-SR DSP avoids unused neural/offline models
@@ -35,7 +36,17 @@ static size_t ref_head, ref_tail, ref_count;
 static int16_t *mic_chunk, *ref_chunk, *clean_chunk;
 static size_t used, filled;
 static int chunk_samples;
-static unsigned feed_generation;
+static atomic_uint feed_generation;
+static atomic_int failure;
+static aec_config_t saved_config;
+/* USB is available before boot initialization finishes. Serialize that one
+ * boot caller with capture-owner recovery; never spin at audio-task priority. */
+static atomic_flag lifecycle_lock = ATOMIC_FLAG_INIT;
+static void lifecycle_enter(void) {
+  while (atomic_flag_test_and_set(&lifecycle_lock)) vTaskDelay(1);
+}
+static void lifecycle_leave(void) { atomic_flag_clear(&lifecycle_lock); }
+static bool initialize(void);
 static uint64_t ref_last_us;
 static output_t assembled;
 static int16_t denoised[FRAME];
@@ -43,6 +54,14 @@ static unsigned slow_frames;
 static unsigned measured_frames;
 static uint64_t processing_us, maximum_us;
 static uint64_t aec_us, ns_us, vad_us;
+static pet_p4_afe_metrics_t metrics;
+pet_p4_afe_metrics_t pet_p4_afe_metrics(void) {
+  portENTER_CRITICAL(&ref_lock);
+  pet_p4_afe_metrics_t copy = metrics;
+  copy.reference_samples = ref_count;
+  portEXIT_CRITICAL(&ref_lock);
+  return copy;
+}
 /* Opt-in bench calibration: no recorded audio leaves the device. */
 #ifdef PET_P4_AUDIO_ALIGNMENT_DIAGNOSTICS
 #define CALIBRATION_SAMPLES 6144
@@ -77,10 +96,32 @@ static void calibrate(const int16_t *mic, const int16_t *ref) {
 }
 #endif
 
-static void fail(const char *reason) {
-  if (atomic_exchange(&ready, false)) ESP_LOGE(TAG, "AEC unavailable: %s; half-duplex required", reason);
+enum { AFE_OK, AFE_INIT_FAILED, AFE_RESET_FAILED, AFE_REFERENCE_OVERFLOW,
+       AFE_OUTPUT_OVERFLOW, AFE_TOO_SLOW };
+const char *pet_p4_afe_failure(void) {
+  switch (atomic_load(&failure)) {
+    case AFE_INIT_FAILED: return "init_failed";
+    case AFE_RESET_FAILED: return "stream_reset_failed";
+    case AFE_REFERENCE_OVERFLOW: return "reference_overflow";
+    case AFE_OUTPUT_OVERFLOW: return "processed_queue_overflow";
+    case AFE_TOO_SLOW: return "dsp_too_slow";
+    default: return "none";
+  }
+}
+static void fail(int code, unsigned timeline) {
+  bool revoked = false;
+  portENTER_CRITICAL(&ref_lock);
+  /* A late overflow/timeout from a retired timeline must not revoke a newer
+   * capture that the control task has already requested. */
+  if (timeline == atomic_load(&generation)) {
+    atomic_store(&failure, code);
+    revoked = atomic_exchange(&ready, false);
+  }
+  portEXIT_CRITICAL(&ref_lock);
+  if (revoked) ESP_LOGE(TAG, "AEC unavailable: %s", pet_p4_afe_failure());
 }
 bool pet_p4_afe_ready(void) { return atomic_load(&ready); }
+bool pet_p4_afe_preparing(void) { return atomic_load(&feed_generation) != atomic_load(&generation); }
 void pet_p4_afe_reference_abort(void) {
   portENTER_CRITICAL(&ref_lock);
   ref_head = ref_tail = ref_count = 0; ref_last_us = 0;
@@ -88,8 +129,13 @@ void pet_p4_afe_reference_abort(void) {
 }
 void pet_p4_afe_reference(const int16_t *pcm, size_t samples) {
   if (!pet_p4_afe_ready() || !pcm || samples > FRAME) return;
+  unsigned current = atomic_load(&generation);
   uint64_t now = esp_timer_get_time(); bool overflow = false;
   portENTER_CRITICAL(&ref_lock);
+  if (!pet_p4_afe_ready() || current != atomic_load(&generation)
+      || current != atomic_load(&feed_generation)) {
+    portEXIT_CRITICAL(&ref_lock); return;
+  }
   if (!ref_last_us || now - ref_last_us > 200000) {
     ref_head = ref_tail = ref_count = 0;
     for (size_t i = 0; i < REF_DELAY; ++i) reference[ref_head++] = 0;
@@ -101,33 +147,81 @@ void pet_p4_afe_reference(const int16_t *pcm, size_t samples) {
     reference[ref_head] = pcm[i]; ref_head = (ref_head + 1) % REF_SIZE; ++ref_count;
   }
   portEXIT_CRITICAL(&ref_lock);
-  if (overflow) fail("reference overflow");
+  if (overflow) fail(AFE_REFERENCE_OVERFLOW, current);
 }
 void pet_p4_afe_reset_stream(void) {
+  portENTER_CRITICAL(&ref_lock);
   atomic_fetch_add(&generation, 1);
-  pet_p4_afe_reference_abort();
+  ref_head = ref_tail = ref_count = 0; ref_last_us = 0;
+  portEXIT_CRITICAL(&ref_lock);
 }
-bool pet_p4_afe_feed(const int16_t *mic) {
-  if (!pet_p4_afe_ready()) return false;
+bool pet_p4_afe_prepare(void) {
+  lifecycle_enter();
   unsigned current = atomic_load(&generation);
-  if (feed_generation != current) {
-    used = filled = 0; feed_generation = current;
-    xQueueReset(output);
+  if (atomic_load(&feed_generation) != current) {
+    atomic_store(&ready, false);
+    used = filled = 0;
+    slow_frames = measured_frames = 0;
+    processing_us = maximum_us = aec_us = ns_us = vad_us = 0;
+    portENTER_CRITICAL(&ref_lock);
+    memset(&metrics, 0, sizeof(metrics));
+    portEXIT_CRITICAL(&ref_lock);
+    pet_p4_afe_reference_abort();
+#ifdef PET_P4_AUDIO_ALIGNMENT_DIAGNOSTICS
+    cal_used = 0;
+#endif
     /* A new capture/reference timeline cannot reuse an old adaptive filter or
      * noise/VAD history. Recreate only on this DSP-owning task, never from the
-     * USB control task while aec_process is running. */
-    aec_config_t config = aec->config;
-    aec_destroy(aec); aec = aec_create_from_config(&config);
-    ns_destroy(ns); ns = ns_create(10);
-    vad_destroy(vad); vad = vad_create_with_param(VAD_MODE_2, 16000, 20, 120, 100);
-    if (!aec || !ns || !vad || aec_get_chunksize(aec) != chunk_samples) {
-      fail("stream DSP reset failed"); return false;
+     * USB control task while aec_process is running. Keep the bulk buffers and
+     * free ALL old DSP handles before allocating replacements. A failed reset
+     * leaves nullable handles; a later generation can still recover safely. */
+    if (!output) {
+      /* Boot allocation failure already cleaned up all resources. */
+      (void) initialize();
+    } else {
+      xQueueReset(output);
+      if (aec) aec_destroy(aec);
+      if (ns) ns_destroy(ns);
+      if (vad) vad_destroy(vad);
+      aec = NULL; ns = NULL; vad = NULL;
+      /* Re-entry must have the SAME internal-RAM protection as boot. ESP-SR
+       * uses small ordinary mallocs as well as config.caps; without the
+       * reserve a reset after loading UI/catalogs can starve USB/DMA. */
+      void *dma_reserve[2] = {NULL, NULL};
+      dma_reserve[0] = heap_caps_malloc(8 * 1024, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      if (dma_reserve[0])
+        dma_reserve[1] = heap_caps_malloc(8 * 1024, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      if (dma_reserve[1]) {
+        aec = aec_create_from_config(&saved_config);
+        if (aec) ns = ns_create(10);
+        if (ns) vad = vad_create_with_param(VAD_MODE_2, 16000, 20, 120, 100);
+      }
+      heap_caps_free(dma_reserve[0]);
+      heap_caps_free(dma_reserve[1]);
+      if (!aec || !ns || !vad || aec_get_chunksize(aec) != chunk_samples) {
+        if (aec) aec_destroy(aec);
+        if (ns) ns_destroy(ns);
+        if (vad) vad_destroy(vad);
+        aec = NULL; ns = NULL; vad = NULL;
+        fail(AFE_RESET_FAILED, current);
+      } else {
+        memset(mic_chunk, 0, chunk_samples * sizeof(int16_t));
+        memset(ref_chunk, 0, chunk_samples * sizeof(int16_t));
+        memset(clean_chunk, 0, chunk_samples * sizeof(int16_t));
+        atomic_store(&failure, AFE_OK);
+        atomic_store(&ready, true);
+      }
     }
-    memset(mic_chunk, 0, chunk_samples * sizeof(int16_t));
-    memset(ref_chunk, 0, chunk_samples * sizeof(int16_t));
-    memset(clean_chunk, 0, chunk_samples * sizeof(int16_t));
-    ESP_LOGI(TAG, "new capture timeline: AEC/NS/VAD reset");
+    atomic_store(&feed_generation, current);
+    ESP_LOGI(TAG, "new capture timeline: AEC/NS/VAD ready=%d", pet_p4_afe_ready());
   }
+  bool available = pet_p4_afe_ready();
+  lifecycle_leave();
+  return available;
+}
+bool pet_p4_afe_feed(const int16_t *mic) {
+  if (!mic || !pet_p4_afe_prepare()) return false;
+  unsigned current = atomic_load(&feed_generation);
   int16_t ref[FRAME];
   portENTER_CRITICAL(&ref_lock);
   for (size_t i = 0; i < FRAME; ++i) {
@@ -136,6 +230,7 @@ bool pet_p4_afe_feed(const int16_t *mic) {
   }
   portEXIT_CRITICAL(&ref_lock);
   uint64_t started = esp_timer_get_time();
+  uint64_t aec_before = aec_us, ns_before = ns_us, vad_before = vad_us;
 #ifdef PET_P4_AUDIO_ALIGNMENT_DIAGNOSTICS
   calibrate(mic, ref);
 #endif
@@ -157,11 +252,19 @@ bool pet_p4_afe_feed(const int16_t *mic) {
       assembled.speech = vad_process_with_trigger(vad, assembled.pcm) == VAD_SPEECH;
       vad_us += (uint64_t)esp_timer_get_time() - step_started;
       assembled.generation = current;
-      if (xQueueSend(output, &assembled, 0) != pdTRUE) {fail("processed queue overflow"); return false;}
+      if (xQueueSend(output, &assembled, 0) != pdTRUE) {fail(AFE_OUTPUT_OVERFLOW, current); return false;}
       filled = 0;
     }
   }
   uint64_t elapsed = (uint64_t)esp_timer_get_time() - started;
+  portENTER_CRITICAL(&ref_lock);
+  ++metrics.frames;
+  metrics.last_us = elapsed;
+  if (elapsed > metrics.max_us) metrics.max_us = elapsed;
+  metrics.aec_us = aec_us - aec_before;
+  metrics.ns_us = ns_us - ns_before;
+  metrics.vad_us = vad_us - vad_before;
+  portEXIT_CRITICAL(&ref_lock);
   processing_us += elapsed;
   if (elapsed > maximum_us) maximum_us = elapsed;
   if (++measured_frames == 50) {
@@ -175,7 +278,7 @@ bool pet_p4_afe_feed(const int16_t *mic) {
   if (slow_frames >= 3) {
     ESP_LOGW(TAG, "DSP over budget: last=%u max=%u aec=%u ns=%u vad=%u us",
              (unsigned)elapsed, (unsigned)maximum_us, (unsigned)aec_us, (unsigned)ns_us, (unsigned)vad_us);
-    fail("DSP too slow");
+    fail(AFE_TOO_SLOW, current);
   }
   return pet_p4_afe_ready();
 }
@@ -189,7 +292,16 @@ bool pet_p4_afe_take(int16_t *pcm, bool *speech) {
   return false;
 }
 bool pet_p4_afe_init(void) {
+  lifecycle_enter();
+  bool available = initialize();
+  lifecycle_leave();
+  return available;
+}
+static bool initialize(void) {
   if (pet_p4_afe_ready()) return true;
+  /* Runtime resources are retained for owner-task preparation, not replaced by
+   * another init call (which used to leak live buffers/handles). */
+  if (output) return false;
   void *dma_reserve[2] = {NULL, NULL};
   ESP_LOGI(TAG, "initializing after core peripherals; internal free=%u largest=%u",
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -213,10 +325,15 @@ bool pet_p4_afe_init(void) {
     .sample_rate = 16000, .caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
 #ifdef PET_P4_AEC_BENCH_FD
     .mode = AEC_MODE_FD_LOW_COST, .nlp_level = AEC_NLP_LEVEL_AGGR,
+#elif defined(CONFIG_ESP32P4_REV_MIN_FULL) && CONFIG_ESP32P4_REV_MIN_FULL >= 300
+    /* P4 v3 uses a different ESP-SR binary. Validate full-duplex performance
+     * on that silicon independently from the legacy VOIP path on v1. */
+    .mode = AEC_MODE_FD_HIGH_PERF, .nlp_level = AEC_NLP_LEVEL_VERYAGGR,
 #else
     .mode = AEC_MODE_VOIP_LOW_COST, .nlp_level = AEC_NLP_LEVEL_VERYAGGR,
 #endif
   };
+  saved_config = config;
   aec = aec_create_from_config(&config);
   ESP_LOGI(TAG, "AEC allocation ok=%d internal=%u", aec != NULL,
            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
@@ -235,6 +352,7 @@ bool pet_p4_afe_init(void) {
   if (output_storage) output = xQueueCreateStatic(4, sizeof(output_t), output_storage, &output_control);
   if (!mic_chunk || !ref_chunk || !clean_chunk || !output) goto failed;
   for (size_t i = 0; i < 2; ++i) {heap_caps_free(dma_reserve[i]); dma_reserve[i] = NULL;}
+  atomic_store(&failure, AFE_OK);
   atomic_store(&ready, true);
   ESP_LOGI(TAG, "AEC/NS/VAD initialized; DSP=%d samples; USB=20 ms; internal free=%u largest=%u",
            chunk_samples, (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -259,6 +377,7 @@ failed:
   heap_caps_free(mic_chunk); mic_chunk = NULL;
   heap_caps_free(ref_chunk); ref_chunk = NULL;
   heap_caps_free(clean_chunk); clean_chunk = NULL;
+  atomic_store(&failure, AFE_INIT_FAILED);
   ESP_LOGW(TAG, "initialization failed; retaining half-duplex");
   return false;
 }

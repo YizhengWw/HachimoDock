@@ -1,12 +1,12 @@
 {
   "dashboard": {
     "title": "蛙蛙养成",
-    "eyebrow": "植物系桌宠",
+    "eyebrow": "小小绿意，慢慢相伴",
     "headline": "来陪我玩吧！",
     "metricLabel": "亲密度",
     "metricValue": "30",
     "metricUnit": "芽",
-    "note": "抚摸 +1，喂食 +10",
+    "note": "抚摸间隔 2 秒，喂食间隔 30 秒；不减少亲密度。",
     "footer": "摇杆移动 · 互动养成 · 全局键退出",
     "progress": {
       "value": 30,

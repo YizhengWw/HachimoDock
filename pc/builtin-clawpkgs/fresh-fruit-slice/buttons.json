@@ -1,0 +1,14 @@
+[
+  {
+    "action": "slice.restart",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "开始或重新开始"
+  },
+  {
+    "action": "slice.pause",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "模式/暂停/继续"
+  }
+]

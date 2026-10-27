@@ -63,6 +63,15 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 
 ## 核心亮点
 
+### 0.1.167：当前公开源码
+
+- 同步桌面端 0.1.167 的语音输入、任务回执、照片图库导入、形象生成与组件交互优化。
+- 配套 v1/v3 固件为 **0.7.103-p4-r1**，包含组件资源完整性与恢复改进；不包含 0.7.108 开发分支。
+- 每日资讯在 PC 后台准备文字与语音缓存，失败保留上一期；阅读及电台组件支持进入自动播放，主动停止后保持停止。
+- 形象生成支持人物与动物、可选风格描述及预览、动作差异化参考帧和已有成果恢复，避免对结果未知的任务自动重复付费提交。
+- 此次为正常对外版的源码同步：不含内置服务 Key、企业证书、固定代理、内部构建入口、服务部署资料或个人验收记录。请在 API 配置中填写自己的服务凭据。
+- 已发布的 0.1.167 安装包和固件资产保持不变，原 Release 标签不移动。部分 Windows 电脑在此固件上的 COM 口打开问题仍在排查，本次源码同步不宣称修复该问题。
+
 ### 0.1.101：桌面组件与交互优化
 
 - 可见内置工具依次为自选股行情、敲木鱼、近期待办、电脑状态，之后为其他组件。
@@ -207,8 +216,8 @@ flowchart LR
 
 前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
 
-- Apple silicon Mac 下载 `HachimoDock-Pet-Manager_0.1.101_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimoDock-Pet-Manager_0.1.101_Windows-x64-setup.exe`；
+- Apple silicon Mac 下载 `HachimiDock_0.1.167_macOS-arm64.dmg`；
+- Windows x64 下载 `HachimiDock_0.1.167_Windows-x64-setup.exe`；
 - 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
 
 公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。
@@ -329,4 +338,6 @@ Current sources are provided under the [HachimoDock Project License](LICENSE) fo
 | [`pc/`](pc/) | Tauri/React 客户端、Agent bridge、生成 Skill、内置形象与组件 | [PC 构建](pc/README.md) |
 | [`firmware/`](firmware/) | ESP32-P4 固件、板级驱动、协议、测试与完整烧录包工具 | [固件构建](firmware/BUILD.md) |
 
-克隆源码后，请安装 Git LFS 并运行 `git lfs pull` 获取配套素材。使用语音识别或形象生成时，在客户端的“API 配置”中填写自己的服务 Key。
+当前 `main` 的配套素材直接保存在普通 Git 中，克隆后即可获取，不依赖 Git LFS 额度。使用语音识别或形象生成时，在客户端的“API 配置”中填写自己的服务 Key。
+
+`main` 现为 0.1.167 正常公开版的功能源码；为保护隐私，已移除仅用于非公开发行的构建选项及本机资料，不是非公开开发仓库的历史镜像。社区客户端调用的公开服务地址与第三方许可仍保留；仓库只提供社区公开页面的静态资源，不包含运营后台及部署配置。原有 Release 标签属于发布时的历史状态，最新源码请使用 `main`。

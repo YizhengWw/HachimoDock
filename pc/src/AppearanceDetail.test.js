@@ -182,7 +182,7 @@ test("appearance detail can regenerate one selected state and replace it on the 
   assert.match(source, /saveProviderConfig/);
   assert.match(source, /handleSingleStateGenerate/);
   assert.match(source, /handleSyncSingleStateToDevice/);
-  assert.match(wizard, /accept="image\/png,image\/jpeg,image\/webp,image\/gif,image\/\*"/);
+  assert.match(wizard, /accept="image\/png,image\/jpeg,image\/webp,image\/gif,image\/\*,\.heic,\.heif"/);
   assert.match(source, /单状态重生成/);
   assert.match(source, /重新生成当前状态/);
   assert.match(source, /singleStateDialogOpen/);

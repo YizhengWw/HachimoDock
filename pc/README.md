@@ -1,5 +1,7 @@
 # PC 客户端 / Desktop client
 
+当前公开源码版本 **0.1.167**，配套固件 **0.7.103-p4-r1**。公开构建仅使用用户在 API 配置中保存的凭据，没有内置 Key 或企业证书构建选项；不需要本机私有目录或 `generated-components` 软链接。
+
 Pet Manager 用于连接设备、管理形象和组件，以及将 Agent 状态与语音输入同步到桌面小屏。支持 macOS arm64 与 Windows x64。
 
 当前源码支持 [WorkBuddy](docs/workbuddy.md)：独立形象绑定、状态与气泡同步、当前可见对话的按键语音草稿及组件生成 Skill 安装。历史会话需在 WorkBuddy 手动打开。已发布安装包的能力以对应版本为准。
@@ -8,12 +10,11 @@ Pet Manager 用于连接设备、管理形象和组件，以及将 Agent 状态�
 
 ## 环境与测试 / Requirements and tests
 
-安装 Git LFS、Node.js 22+、Rust stable，以及 Tauri 对应平台的系统依赖。Windows 需要 MSVC C++ Build Tools 和 WebView2；macOS 需要 Xcode Command Line Tools。
+安装 Git、Node.js 22+、Rust stable，以及 Tauri 对应平台的系统依赖。当前源码素材使用普通 Git 保存，不需要 Git LFS 额度。Windows 需要 MSVC C++ Build Tools 和 WebView2；macOS 需要 Xcode Command Line Tools。
 
 从仓库根目录运行 / From the repository root:
 
 ```sh
-git lfs pull
 cd pc
 npm ci
 npm test

@@ -568,6 +568,9 @@ class GameplaySmokeTests(unittest.TestCase):
         ):
             values[relative] = json.loads((package / relative).read_text(encoding="utf-8"))
         values["assets/bloomfrog.png"] = (package / "assets" / "bloomfrog.png").read_bytes()
+        for asset in (package / "assets").iterdir():
+            if asset.is_file():
+                values[f"assets/{asset.name}"] = asset.read_bytes()
         runtime = values["runtime/widget.json"]
         assert isinstance(runtime, dict)
         scene = runtime["scene"]

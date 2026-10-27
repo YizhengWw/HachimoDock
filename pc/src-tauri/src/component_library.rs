@@ -22,6 +22,8 @@ const LEGACY_DRAFTS_DIR_NAME: &str = "component-drafts";
 const COMPONENTS_DIR_NAME: &str = "components";
 const COMPONENT_STAGING_DIR_NAME: &str = ".staging";
 const COMPONENT_LIBRARY_DIR_NAME: &str = "library";
+static LIBRARY_MUTATION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+static BUNDLED_CONTENT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<(String,String)>>> = std::sync::OnceLock::new();
 const LEGACY_MIGRATION_MARKER: &str = ".legacy-component-migration-v1.json";
 // Import budgets exceed the bounded widget/sprite contract while preventing ZIP bombs.
 const COMPONENT_IMPORT_MAX_FILES: usize = 256;
@@ -36,9 +38,12 @@ const FORBIDDEN_COMPONENT_SUFFIXES: &[&str] = &[
 pub struct ComponentLibraryEntry {
     pub id: String,
     pub name: String,
+    pub author: String,
     pub description: String,
+    pub version: String,
     pub path: String,
     pub version_hash: String,
+    pub is_bundled_copy: bool,
     pub mtime_ms: u64,
     pub created_at_ms: u64,
     pub dashboard: HashMap<String, String>,
@@ -47,6 +52,11 @@ pub struct ComponentLibraryEntry {
     pub runtime_engine: Option<String>,
     pub data_source: Option<String>,
     pub media_source: Option<String>,
+    pub pc_extension: Option<serde_json::Value>,
+    pub media_surface: Option<serde_json::Value>,
+    pub app_runtime: Option<serde_json::Value>,
+    pub input_policy: Option<serde_json::Value>,
+    pub pc_application: Option<serde_json::Value>,
     pub instrument_source: Option<String>,
     pub scene_engine: Option<String>,
     pub game_preset: Option<String>,
@@ -98,6 +108,43 @@ pub struct DeleteLibraryComponentResult {
     pub ok: bool,
     pub deleted_component_id: String,
     pub deleted_path: String,
+    pub recovery_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemovedComponent {
+    pub recovery_id: String,
+    pub component_id: String,
+    pub name: String,
+    pub deleted_at_ms: u64,
+}
+fn trash_root(home: &Path) -> PathBuf { library_root(home).parent().unwrap().join(".trash") }
+pub fn removed(home: &Path) -> Result<Vec<RemovedComponent>, String> {
+    let root=trash_root(home);
+    if !root.exists(){return Ok(vec![]);}
+    let mut records=Vec::new();
+    for entry in fs::read_dir(root).map_err(|e|e.to_string())?.flatten() {
+        if entry.file_type().map_err(|e|e.to_string())?.is_symlink(){continue;}
+        let path=entry.path();
+        if let Ok(bytes)=fs::read(path.join("record.json")) {
+            if let Ok(record)=serde_json::from_slice::<RemovedComponent>(&bytes) {
+                if uuid::Uuid::parse_str(&record.recovery_id).is_ok() && path.file_name().and_then(|s|s.to_str())==Some(record.recovery_id.as_str()) && crate::component_extension::valid_id(&record.component_id) && path.join(&record.component_id).is_dir(){records.push(record);}
+            }
+        }
+    }
+    records.sort_by_key(|r|std::cmp::Reverse(r.deleted_at_ms));
+    Ok(records)
+}
+pub fn restore(home: &Path, recovery_id: &str) -> Result<(), String> {
+    let _guard=LIBRARY_MUTATION.lock().map_err(|_|"组件库繁忙")?;
+    let record=removed(home)?.into_iter().find(|r|r.recovery_id==recovery_id).ok_or("找不到可恢复的组件")?;
+    let root=trash_root(home).canonicalize().map_err(|e|e.to_string())?;
+    let source=root.join(recovery_id).join(&record.component_id).canonicalize().map_err(|e|e.to_string())?;
+    if source.parent().and_then(|p|p.parent())!=Some(root.as_path()){return Err("恢复路径无效".into());}
+    let target=library_root(home).join(&record.component_id);
+    if target.exists(){return Err("本机已存在同 ID 组件。为避免覆盖，请先将当前本地副本移入回收站，再恢复所选版本。".into());}
+    fs::rename(source,target).map_err(|e|format!("恢复未完成，备份仍保留：{e}"))
 }
 
 fn now_ms() -> u64 {
@@ -239,7 +286,7 @@ fn collect_package_files(
     Ok(())
 }
 
-fn package_content_hash(root: &Path) -> Result<String, String> {
+pub(crate) fn package_content_hash(root: &Path) -> Result<String, String> {
     let mut files = Vec::new();
     collect_package_files(root, root, &mut files)?;
     files.sort_by(|left, right| {
@@ -319,14 +366,22 @@ fn read_json_from_dir(path: &Path, relative: &str) -> Option<serde_json::Value> 
         .ok()
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
 }
+fn application_preview(path:&Path)->Option<serde_json::Value>{
+    let mut v=read_json_from_dir(path,"pc/application.json")?;
+    if v["engine"]=="pc-app-services-v3"&&v["service"]=="knowledge"||matches!(v["service"].as_str(),Some("calendar"|"books")){
+        // The list view needs controls, not a multi-megabyte article database.
+        v["content"]=serde_json::json!([]);
+    }
+    Some(v)
+}
 
 fn scene_sprite_previews(
     path: &Path,
     runtime: Option<&serde_json::Value>,
 ) -> Vec<ComponentSceneSpritePreview> {
     runtime
-        .and_then(|value| value.get("scene"))
-        .and_then(|value| value.get("sprites"))
+        .and_then(|value| value.get("scene").or_else(||value.get("surface")))
+        .and_then(|value| value.get("sprites").or_else(||value.get("images")))
         .and_then(|value| value.as_array())
         .into_iter()
         .flatten()
@@ -389,6 +444,12 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
         .and_then(|value| value.get("kind"))
         .and_then(|value| value.as_str())
         .map(str::to_string);
+    let version = fallback_manifest
+        .as_ref()
+        .and_then(|value| value.get("version"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
     let runtime = read_json_from_dir(path, "runtime/widget.json");
     let game_type = runtime
         .as_ref()
@@ -404,8 +465,9 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
     let scene_engine = runtime
         .as_ref()
         .filter(|value| value.get("scene").is_some())
-        .map(|_| {
-            if runtime_engine.as_deref() == Some("p4-bounded-runtime-v4") {
+        .map(|value| {
+            if value["scene"]["engine"]=="p4-touch-slice-v1" {"p4-touch-slice-v1".to_string()}
+            else if runtime_engine.as_deref() == Some("p4-bounded-runtime-v4") {
                 "p4-grid-scene-v2".to_string()
             } else {
                 "p4-grid-scene-v1".to_string()
@@ -428,17 +490,22 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
     } else {
         Vec::new()
     };
-    let version_hash = path
+    let version_hash = match path
         .file_name()
         .and_then(|value| value.to_str())
         .filter(|value| value.len() == 16 && value.chars().all(|ch| ch.is_ascii_hexdigit()))
-        .map(str::to_string)
-        .unwrap_or(package_content_hash(path)?);
+        .map(str::to_string) {
+            Some(hash) => hash,
+            None => package_content_hash(path)?,
+        };
     Ok(ComponentLibraryEntry {
-        id,
+        id: id.clone(),
         name,
+        author: fallback_manifest.as_ref().and_then(|v|v.get("author")).and_then(|v|v.as_str()).map(|v|crate::widget_data::bounded_text(v,120)).unwrap_or_default(),
         description,
+        version,
         path: path.display().to_string(),
+        is_bundled_copy: BUNDLED_CONTENT.get_or_init(Default::default).lock().unwrap().contains(&(id.clone(),version_hash.clone())),
         version_hash,
         mtime_ms: metadata_timestamp_ms(metadata.modified().ok()),
         created_at_ms: metadata_created_at_ms(&metadata),
@@ -448,6 +515,11 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
         runtime_engine,
         data_source: runtime.as_ref().and_then(|v| v.get("data")).and_then(|v| v.get("source")).and_then(|v| v.as_str()).map(str::to_string),
         media_source: runtime.as_ref().and_then(|v| v.get("media")).and_then(|v| v.get("source")).and_then(|v| v.as_str()).map(str::to_string),
+        pc_extension: if validation.ok {read_json_from_dir(path,"pc/extension.json")}else{None},
+        media_surface: if validation.ok {runtime.as_ref().and_then(|v|v.get("surface")).cloned()}else{None},
+        app_runtime: if validation.ok {runtime.as_ref().filter(|v|v["surface"]["engine"]=="p4-app-surface-v1").cloned()}else{None},
+        input_policy: if validation.ok {runtime.as_ref().and_then(|v|v.get("input")).cloned()}else{None},
+        pc_application: if validation.ok {application_preview(path)}else{None},
         instrument_source: runtime.as_ref().and_then(|v| v.get("instrument")).and_then(|v| v.get("source")).and_then(|v| v.as_str()).map(str::to_string),
         scene_engine,
         game_preset,
@@ -514,6 +586,96 @@ pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibr
     })();
     let _ = fs::remove_dir_all(&job_root);
     publish_result
+}
+
+/// Install build-owned resource packages through the same validated atomic
+/// importer as downloaded components. Keep every previous/user revision and
+/// all host state; never copy the user's library into a distributable build.
+pub(crate) fn ensure_bundled(home: &Path, root: &Path) -> Result<(), String> {
+    let _guard=LIBRARY_MUTATION.lock().map_err(|_|"组件库繁忙")?;
+    if !root.is_dir() { return Ok(()); }
+    let removed_ids:std::collections::HashSet<_>=removed(home)?.into_iter().map(|r|r.component_id).collect();
+    for item in fs::read_dir(root).map_err(|e|e.to_string())? {
+        let source=item.map_err(|e|e.to_string())?.path();
+        if !source.is_dir() || !source.join("component.json").is_file() { continue; }
+        let manifest=read_json_from_dir(&source,"component.json").ok_or("内置组件清单不可读")?;
+        let id=manifest["id"].as_str().filter(|id|crate::component_extension::valid_id(id)).ok_or("内置组件 ID 无效")?;
+        // Delisted components must not be silently restored by an upgrade.
+        if matches!(id,"music-player"|"hachimi-agent"|"hachimi-desk") { continue; }
+        if removed_ids.contains(id) {continue;}
+        let hash=package_content_hash(&source)?;
+        BUNDLED_CONTENT.get_or_init(Default::default).lock().unwrap().insert((id.to_owned(),hash.clone()));
+        let destination=library_root(home).join(id).join(&hash);
+        if destination.is_dir() && package_content_hash(&destination)?==hash {continue;}
+        publish_source(home,&source)?;
+    }
+    Ok(())
+}
+
+/// Built-in resources are immutable within a packaged process. Retry failures;
+/// don't re-hash every bundled PNG on each UI refresh. Developer mode remains live.
+pub(crate) fn ensure_bundled_for_ui(home:&Path,root:&Path)->Result<(),String>{
+    if cfg!(debug_assertions){return ensure_bundled(home,root);}
+    static SEEDED:std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<(PathBuf,PathBuf)>>> = std::sync::OnceLock::new();
+    let mut done=SEEDED.get_or_init(Default::default).lock().map_err(|_|"组件初始化繁忙")?;
+    let key=(home.to_path_buf(),root.to_path_buf());
+    if done.contains(&key){return Ok(());}
+    ensure_bundled(home,root)?;if root.is_dir(){done.insert(key);}Ok(())
+}
+
+// Device host requests can arrive before the component-center view has ever
+// mounted (especially on a clean installation). Share the same atomic seed
+// gate with the UI; never require a user to visit a page to install PC data.
+static BUNDLED_HOST_ROOT: std::sync::OnceLock<(PathBuf,PathBuf)> = std::sync::OnceLock::new();
+/// Recovery may use only the shipped, validated package for the same identity.
+/// Never restore a deliberately removed component or substitute a community update.
+pub(crate) fn bundled_repair_source(id:&str)->Result<Option<ComponentLibraryEntry>,String>{
+    if !crate::component_extension::valid_id(id){return Ok(None);}
+    let Some((home,root))=BUNDLED_HOST_ROOT.get()else{return Ok(None);};
+    if removed(home)?.iter().any(|r|r.component_id==id){return Ok(None);}
+    let path=root.join(id);if !path.is_dir(){return Ok(None);}
+    let entry=inspect(&path)?;
+    if !entry.valid||entry.id!=id{return Err("内置恢复包校验失败，设备原数据未修改".into());}
+    Ok(Some(entry))
+}
+pub(crate) fn configure_bundled_host(home:PathBuf,root:PathBuf){
+    if BUNDLED_HOST_ROOT.set((home.clone(),root.clone())).is_err(){return;}
+    std::thread::spawn(move||{
+        if ensure_bundled_for_host(&home,&root).is_err(){
+            eprintln!("[components] bundled initialization failed; host requests may retry");
+        }
+    });
+}
+fn ensure_bundled_for_host(home:&Path,root:&Path)->Result<(),String>{
+    if !root.is_dir(){return Err("客户端内置组件资源缺失，请重新安装客户端；原数据未修改".into());}
+    ensure_bundled_for_ui(home,root).map_err(|_|"客户端组件资源初始化失败，请检查磁盘空间后重试；原数据保留".into())
+}
+
+fn preview_fingerprint(path:&Path)->Result<Vec<u8>,String>{
+    fn visit(path:&Path,depth:usize,count:&mut usize,hash:&mut Sha256)->Result<(),String>{
+        *count+=1;if depth>16||*count>10000{return Err("组件预览文件过多".into());}
+        let meta=fs::symlink_metadata(path).map_err(|_|"组件预览不可读")?;
+        if meta.file_type().is_symlink(){return Err("组件预览不允许符号链接".into());}
+        hash.update(path.as_os_str().to_string_lossy().as_bytes());hash.update(meta.len().to_le_bytes());
+        hash.update(meta.modified().map_err(|_|"无法读取修改时间")?.duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos().to_le_bytes());
+        if meta.is_dir(){let mut entries=fs::read_dir(path).map_err(|_|"组件预览不可读")?.collect::<Result<Vec<_>,_>>().map_err(|_|"组件预览不可读")?;
+            entries.sort_by_key(|e|e.path());for entry in entries{visit(&entry.path(),depth+1,count,hash)?;}}
+        Ok(())
+    }
+    let mut hash=Sha256::new();visit(path,0,&mut 0,&mut hash)?;Ok(hash.finalize().to_vec())
+}
+
+/// UI-only metadata/image cache. Execution and sync still use full validation.
+fn preview_entry(path:&Path)->Result<ComponentLibraryEntry,String>{
+    type Cache=Vec<(PathBuf,Vec<u8>,std::time::Instant,ComponentLibraryEntry)>;
+    static CACHE:std::sync::OnceLock<std::sync::Mutex<Cache>>=std::sync::OnceLock::new();
+    let fingerprint=preview_fingerprint(path)?;
+    let mut cache=CACHE.get_or_init(Default::default).lock().map_err(|_|"组件预览繁忙")?;
+    if let Some((_,_,_,entry))=cache.iter().find(|(p,fp,at,_)|p==path&&fp==&fingerprint&&at.elapsed()<std::time::Duration::from_secs(300)){return Ok(entry.clone());}
+    let mut entry=entry_from_directory(path)?;
+    if package_content_hash(path)?!=entry.version_hash {entry.valid=false;entry.validation_errors.push("组件内容已变化，请重新导入".into());}
+    cache.retain(|(p,_,_,_)|p!=path);if cache.len()>=64{cache.remove(0);}
+    cache.push((path.to_path_buf(),fingerprint,std::time::Instant::now(),entry.clone()));Ok(entry)
 }
 
 fn legacy_roots(home: &Path) -> Vec<PathBuf> {
@@ -597,6 +759,21 @@ fn migrate_legacy_once(home: &Path) -> Result<LegacyMigrationSummary, String> {
     Ok(summary)
 }
 
+fn compare_component_versions(left: &ComponentLibraryEntry, right: &ComponentLibraryEntry) -> std::cmp::Ordering {
+    // Publishing tools preserve source directory timestamps; content hashes do
+    // not order releases. Prefer declared SemVer, then dates for same-version
+    // edits and legacy packages. Option ordering keeps mixed legacy/SemVer
+    // comparisons transitive; build metadata does not affect release precedence.
+    let parse = |value: &str| semver::Version::parse(value.trim()).ok().map(|mut v| {
+        v.build = semver::BuildMetadata::EMPTY;
+        v
+    });
+    parse(&right.version).cmp(&parse(&left.version))
+        .then_with(|| right.created_at_ms.cmp(&left.created_at_ms))
+        .then_with(|| right.mtime_ms.cmp(&left.mtime_ms))
+        .then_with(|| right.version_hash.cmp(&left.version_hash))
+}
+
 fn scan_latest_versions(home: &Path) -> Result<Vec<ComponentLibraryEntry>, String> {
     let root = library_root(home);
     let mut components = Vec::new();
@@ -617,7 +794,7 @@ fn scan_latest_versions(home: &Path) -> Result<Vec<ComponentLibraryEntry>, Strin
                 if !path.is_dir() || !path.join("component.json").is_file() {
                     return None;
                 }
-                match entry_from_directory(&path) {
+                match preview_entry(&path) {
                     Ok(component) => Some(component),
                     Err(error) => {
                         eprintln!(
@@ -630,13 +807,7 @@ fn scan_latest_versions(home: &Path) -> Result<Vec<ComponentLibraryEntry>, Strin
                 }
             })
             .collect();
-        versions.sort_by(|left, right| {
-            right
-                .created_at_ms
-                .cmp(&left.created_at_ms)
-                .then_with(|| right.mtime_ms.cmp(&left.mtime_ms))
-                .then_with(|| right.version_hash.cmp(&left.version_hash))
-        });
+        versions.sort_by(compare_component_versions);
         if let Some(latest) = versions.into_iter().next() {
             components.push(latest);
         }
@@ -661,6 +832,44 @@ pub fn list(home: &Path) -> Result<ComponentLibrarySnapshot, String> {
     })
 }
 
+/// Targeted resolution for host events; do not re-decode every installed package.
+/// Cache only parsed host metadata. Re-hash actual bytes on every request:
+/// timestamps alone must never authorize modified executable/service declarations.
+fn host_entry(path:&Path)->Result<ComponentLibraryEntry,String>{
+    type Cache=Vec<(PathBuf,String,Option<SystemTime>,ComponentLibraryEntry)>;
+    static CACHE:std::sync::OnceLock<std::sync::Mutex<Cache>>=std::sync::OnceLock::new();
+    let hash=package_content_hash(path)?;
+    let modified=fs::metadata(path).map_err(|_|"组件目录不可读")?.modified().ok();
+    let cache=CACHE.get_or_init(Default::default);
+    if let Some(entry)=cache.lock().map_err(|_|"组件缓存不可用")?.iter()
+        .find(|(p,h,m,_)|p==path&&h==&hash&&m==&modified).map(|(_,_,_,v)|v.clone()){return Ok(entry);}
+    let mut entry=entry_from_directory(path)?;
+    // Host events never need base64 artwork or a second copy of the knowledge book.
+    entry.scene_sprites.clear();entry.pc_application=None;
+    if hash!=entry.version_hash {entry.valid=false;entry.validation_errors.push("组件内容已变化，请重新导入".into());}
+    if entry.valid{
+        let mut cache=cache.lock().map_err(|_|"组件缓存不可用")?;
+        cache.retain(|(p,_,_,_)|p!=path);
+        if cache.len()>=8{cache.remove(0);}
+        cache.push((path.into(),hash,modified,entry.clone()));
+    }
+    Ok(entry)
+}
+pub(crate) fn latest(home:&Path,id:&str)->Result<Option<ComponentLibraryEntry>,String>{
+    if !crate::component_extension::valid_id(id){return Err("组件 ID 无效".into());}
+    if let Some((configured_home,root))=BUNDLED_HOST_ROOT.get(){
+        if home==configured_home {ensure_bundled_for_host(home,root)?;}
+    }
+    let root=library_root(home).join(id);
+    if !fs::symlink_metadata(&root).is_ok_and(|m|m.is_dir()&&!m.file_type().is_symlink()){return Ok(None);}
+    let mut versions=Vec::new();
+    for e in fs::read_dir(root).map_err(|_|"无法读取组件库")?.take(128).flatten(){
+        if !e.file_type().is_ok_and(|m|m.is_dir()){continue;}
+        if let Ok(v)=host_entry(&e.path()){if v.id==id{versions.push(v);}}
+    }
+    versions.sort_by(compare_component_versions);Ok(versions.into_iter().next())
+}
+
 pub fn inspect(path: &Path) -> Result<ComponentLibraryEntry, String> {
     if path.is_dir() {
         return entry_from_directory(path);
@@ -677,6 +886,7 @@ pub fn delete(
     home: &Path,
     input: DeleteLibraryComponentInput,
 ) -> Result<DeleteLibraryComponentResult, String> {
+    let _guard=LIBRARY_MUTATION.lock().map_err(|_|"组件库繁忙")?;
     ensure_layout(home)?;
     let root = library_root(home)
         .canonicalize()
@@ -702,23 +912,99 @@ pub fn delete(
         .and_then(|value| value.to_str())
         .ok_or_else(|| "正式组件 ID 无效".to_string())?
         .to_string();
-    fs::remove_dir_all(component_root).map_err(|error| {
-        format!(
-            "删除正式本地组件失败 {}: {}",
-            component_root.display(),
-            error
-        )
-    })?;
+    let recovery_id=uuid::Uuid::new_v4().to_string();
+    let backup=trash_root(home).join(&recovery_id);
+    fs::create_dir_all(&backup).map_err(|e|e.to_string())?;
+    let record=RemovedComponent{recovery_id:recovery_id.clone(),component_id:component_id.clone(),name:read_json_from_dir(&target,"component.json").and_then(|m|m["name"].as_str().map(str::to_owned)).unwrap_or_else(||component_id.clone()),deleted_at_ms:now_ms()};
+    fs::write(backup.join("record.json"),serde_json::to_vec(&record).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+    fs::rename(component_root,backup.join(&component_id)).map_err(|e|format!("移入回收站失败，原组件保留：{e}"))?;
     Ok(DeleteLibraryComponentResult {
         ok: true,
         deleted_component_id: component_id,
         deleted_path: component_root.display().to_string(),
+        recovery_id,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_host_can_resolve_news_without_opening_component_center(){
+        let home=tempfile::tempdir().unwrap();
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs");
+        assert!(latest(home.path(),"daily-news").unwrap().is_none());
+        ensure_bundled_for_host(home.path(),&root).unwrap();
+        let entry=latest(home.path(),"daily-news").unwrap().unwrap();
+        assert!(entry.valid && entry.app_runtime.is_some());
+        ensure_bundled_for_host(home.path(),&root).unwrap();
+        assert_eq!(latest(home.path(),"daily-news").unwrap().unwrap().version_hash,entry.version_hash);
+    }
+
+    #[test]
+    fn missing_bundled_host_root_is_not_reported_as_component_validation_failure(){
+        let home=tempfile::tempdir().unwrap();
+        let error=ensure_bundled_for_host(home.path(),&home.path().join("missing")).unwrap_err();
+        assert!(error.contains("内置组件资源缺失"));
+        assert!(!library_root(home.path()).exists());
+    }
+
+    #[test]
+    fn ui_preview_cache_revalidates_changed_files() {
+        let home=tempfile::tempdir().unwrap();
+        let source=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/hachimi-weather");
+        let published=publish_source(home.path(),&source).unwrap();
+        let path=PathBuf::from(&published.path);
+        assert!(preview_entry(&path).unwrap().valid);
+        assert!(preview_entry(&path).unwrap().valid);
+        let file=path.join("pc/application.json");
+        let original=fs::read(&file).unwrap();let mut changed=original.clone();changed.push(b' ');
+        fs::write(&file,changed).unwrap();
+        assert!(!preview_entry(&path).unwrap().valid);
+        fs::write(&file,original).unwrap();
+        assert!(preview_entry(&path).unwrap().valid);
+    }
+
+    #[test]
+    fn host_cache_reuses_art_free_metadata_but_never_hides_content_changes(){
+        let home=tempfile::tempdir().unwrap();
+        let source=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/hachimi-weather");
+        let published=publish_source(home.path(),&source).unwrap();
+        let first=latest(home.path(),"hachimi-weather").unwrap().unwrap();
+        assert!(first.valid);assert!(first.scene_sprites.is_empty());assert!(first.pc_application.is_none());
+        assert_eq!(latest(home.path(),"hachimi-weather").unwrap().unwrap().version_hash,first.version_hash);
+        let file=PathBuf::from(&published.path).join("pc/application.json");
+        let original=fs::read(&file).unwrap();let mut edited=original.clone();edited.push(b' ');
+        fs::write(&file,&edited).unwrap();
+        assert!(!latest(home.path(),"hachimi-weather").unwrap().unwrap().valid);
+        fs::write(&file,original).unwrap();
+        assert!(latest(home.path(),"hachimi-weather").unwrap().unwrap().valid);
+    }
+
+    #[test]
+    fn bundled_catalog_is_complete_idempotent_and_keeps_user_revisions() {
+        let home=tempfile::tempdir().unwrap();
+        let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs");
+        ensure_bundled(home.path(),&root).unwrap();
+        let first=scan_latest_versions(home.path()).unwrap();
+        assert_eq!(first.len(),29);
+        assert!(first.iter().all(|c|c.is_bundled_copy));
+        for id in ["cloud-hop","daily-almanac","book-pocket","daily-news","decision-capsule","answer-book","hope-train"] {
+            assert!(first.iter().any(|c|c.id==id&&c.valid));
+        }
+        assert!(!first.iter().any(|c|matches!(c.id.as_str(),"music-player"|"hachimi-agent"|"hachimi-desk")));
+        let learn=first.iter().find(|c|c.id=="hachimi-learn").unwrap();
+        assert_eq!(learn.name,"每日新知");assert!(learn.pc_application.is_some());
+        assert!(first.iter().find(|c|c.id=="city-radio").unwrap().pc_extension.is_some());
+        assert_eq!(first.iter().find(|c|c.id=="two-key-pong").unwrap().author,"弹珠汽水");
+        let before:HashMap<_,_>=first.iter().map(|c|(c.id.clone(),c.version_hash.clone())).collect();
+        ensure_bundled(home.path(),&root).unwrap();
+        let after:HashMap<_,_>=scan_latest_versions(home.path()).unwrap().iter().map(|c|(c.id.clone(),c.version_hash.clone())).collect();
+        assert_eq!(before,after);
+        // Importing resources must not create host recordings, todos or API settings.
+        assert!(!home.path().join(".claw-pet/component-apps").exists());
+    }
 
     fn write_package(path: &Path, id: &str) {
         fs::create_dir_all(path.join("runtime")).unwrap();
@@ -767,6 +1053,67 @@ mod tests {
         .unwrap();
         assert_eq!(deleted.deleted_component_id, "timer");
         assert!(list(&home).unwrap().components.is_empty());
+        let records=removed(&home).unwrap();
+        assert_eq!(records.len(),1);
+        assert_eq!(records[0].recovery_id,deleted.recovery_id);
+        restore(&home,&deleted.recovery_id).unwrap();
+        assert_eq!(list(&home).unwrap().components[0].id,"timer");
+        assert!(removed(&home).unwrap().is_empty());
+    }
+
+    #[test]
+    fn recovery_never_overwrites_new_content_and_rejects_traversal() {
+        let temp=tempfile::tempdir().unwrap();let home=temp.path().join("home");let source=temp.path().join("source");
+        write_package(&source,"timer");
+        let first=publish_source(&home,&source).unwrap();
+        let deleted=delete(&home,DeleteLibraryComponentInput{path:first.path}).unwrap();
+        assert!(restore(&home,"../library").is_err());
+        publish_source(&home,&source).unwrap();
+        assert!(restore(&home,&deleted.recovery_id).unwrap_err().contains("同 ID"));
+        assert_eq!(removed(&home).unwrap().len(),1);
+        assert_eq!(list(&home).unwrap().components.len(),1);
+    }
+
+    #[test]
+    fn removed_builtin_is_not_reseeded_while_backup_is_available() {
+        let temp=tempfile::tempdir().unwrap();let home=temp.path().join("home");let bundled=temp.path().join("bundled");
+        write_package(&bundled.join("timer"),"timer");
+        ensure_bundled(&home,&bundled).unwrap();
+        let first=list(&home).unwrap().components.remove(0);
+        let deleted=delete(&home,DeleteLibraryComponentInput{path:first.path}).unwrap();
+        ensure_bundled(&home,&bundled).unwrap();
+        assert!(list(&home).unwrap().components.is_empty());
+        restore(&home,&deleted.recovery_id).unwrap();
+        assert_eq!(list(&home).unwrap().components.len(),1);
+    }
+
+    #[test]
+    fn release_version_wins_over_preserved_timestamps_and_hash_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = library_root(temp.path()).join("radio");
+        for (hash, version) in [("ffffffffffffffff", "1.1.0"), ("0000000000000001", "1.2.0")] {
+            let path = root.join(hash);
+            write_package(&path, "radio");
+            let manifest = fs::read_to_string(path.join("component.json")).unwrap();
+            fs::write(path.join("component.json"), manifest.replace("1.0.0", version)).unwrap();
+        }
+        let selected = scan_latest_versions(temp.path()).unwrap();
+        assert_eq!(selected[0].version, "1.2.0");
+        let mut newer = entry_from_directory(&root.join("0000000000000001")).unwrap();
+        let mut older = entry_from_directory(&root.join("ffffffffffffffff")).unwrap();
+        newer.created_at_ms = 1;
+        newer.mtime_ms = 1;
+        older.created_at_ms = 99;
+        older.mtime_ms = 99;
+        assert!(compare_component_versions(&newer, &older).is_lt());
+        for (a, b) in [("1.10.0", "1.9.0"), ("1.2.0", "1.2.0-rc.1"), ("1.2.0-rc.10", "1.2.0-rc.2")] {
+            newer.version = a.into(); older.version = b.into();
+            assert!(compare_component_versions(&newer, &older).is_lt(), "{a} > {b}");
+        }
+        newer.version = "1.2.0+new".into(); older.version = "1.2.0+old".into();
+        assert!(compare_component_versions(&newer, &older).is_gt(), "equal release uses publication dates");
+        newer.version = "legacy-new".into(); older.version = "legacy-old".into();
+        assert!(compare_component_versions(&newer, &older).is_gt());
     }
 
     #[test]

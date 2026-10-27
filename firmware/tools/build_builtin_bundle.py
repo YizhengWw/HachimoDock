@@ -13,6 +13,8 @@ import base64
 import json
 import os
 import sys
+import copy
+import zlib
 from pathlib import Path
 
 from p4_component_sprites import compile_component_sprites, sprite_pack_checksum
@@ -23,25 +25,36 @@ REPOSITORY_ROOT = RUNTIME_ROOT.parent
 COMPONENT_ROOT = REPOSITORY_ROOT / "pc" / "builtin-clawpkgs"
 BUNDLE_PATH = RUNTIME_ROOT / "main" / "pet_p4_builtin_components.json"
 DATA_SOURCE_PATH = RUNTIME_ROOT / "main" / "pet_p4_builtin_components_data.c"
-BUILTIN_IDS = (
-    "stock-watchlist",
-    "wooden-fish",
-    "music-player",
-    "upcoming-todos",
-    "computer-status",
-    "two-key-pong",
-    "bloomfrog_companion",
-    "flappy-bird",
-    "block-combo",
-    "snake-turn",
-    "tomato-clock",
-    "drink-reminder",
-    "token-usage",
-)
+# One ordered catalog for factory resources and OTA bootstrap metadata.
+BUILTIN_IDS = tuple(json.loads((RUNTIME_ROOT / "factory-config.json").read_text())["components"]["ids"])
 
 
 def read_json(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+def bootstrap_widget(widget: dict) -> tuple[dict, bool]:
+    """Artwork is delivered as a resource package, not duplicated in OTA slots.
+
+    Keep the live controls/gameplay for first boot. A factory image/PC sync
+    installs the complete package; firmware upgrades must never replace it with
+    this image-free bootstrap.
+    """
+    result = copy.deepcopy(widget)
+    surface = result.get("surface", {})
+    external = bool(surface.get("images"))
+    if external:
+        for key in ("images", "fonts", "typography", "interaction"):
+            surface.pop(key, None)
+        surface["elements"] = [node for node in surface["elements"] if node["type"] != "image"]
+        for node in surface["elements"]:
+            for key in ("key_for", "show", "tile"):
+                node.pop(key, None)
+        if "scene_view" in surface:
+            mapped={s["entity"] for s in surface["scene_view"]["sprites"]}
+            surface["scene_view"]["sprites"]=[]
+            for entity in result.get("scene",{}).get("entities",[]):
+                if entity["id"] in mapped:entity["shape"]="character"
+    return result, external
 
 
 def render_bundle() -> str:
@@ -51,12 +64,13 @@ def render_bundle() -> str:
         manifest = read_json(package / "component.json")
         if manifest.get("id") != component_id:
             raise ValueError(f"component id mismatch: {package}")
-        widget = read_json(package / "runtime" / "widget.json")
+        widget, external = bootstrap_widget(read_json(package / "runtime" / "widget.json"))
         sprites = compile_component_sprites(package, widget)
         components.append(
             {
                 "id": component_id,
                 "version": str(manifest.get("version", "")),
+                "resourcePackage": external,
                 "widget": widget,
                 "buttons": read_json(package / "buttons.json"),
                 "spritesChecksum": f"{sprite_pack_checksum(sprites):08x}",
@@ -77,23 +91,45 @@ def render_bundle() -> str:
 
 
 def render_data_source(bundle: str) -> str:
-    encoded = bundle.encode("utf-8") + b"\0"
+    raw = bundle.encode("utf-8") + b"\0"
+    encoded = zlib.compress(raw, 9)
     rows = []
     for offset in range(0, len(encoded), 16):
         chunk = encoded[offset : offset + 16]
         rows.append("  " + ", ".join(f"0x{value:02x}" for value in chunk) + ",")
+    # Identify legacy image-free bootstraps without inflating the bundle at boot
+    # or misclassifying legitimate text-only third-party components.
+    checks = []
+    for package in json.loads(bundle)["components"]:
+        if not package["resourcePackage"]:
+            continue
+        value = 2166136261
+        for byte in json.dumps(package["widget"], ensure_ascii=False, separators=(",", ":")).encode():
+            value = ((value ^ byte) * 16777619) & 0xffffffff
+        checks.append(f'  if (checksum == 0x{value:08x}U && strcmp(id, "{package["id"]}") == 0) return true;')
     return "\n".join(
         [
             "/*",
             " * [Input] Generated deterministic JSON from pc/builtin-clawpkgs.",
-            " * [Output] Null-terminated firmware-resident component bundle with P4 sprites.",
+            " * [Output] Zlib-compressed bounded bootstrap bundle; full art stays in resource packages.",
             " * [Pos] Generated data source linked into the ESP32-P4 application image.",
             " * [Sync] Regenerate with tools/build_builtin_bundle.py; do not edit manually.",
             " */",
             "",
-            "const unsigned char pet_p4_builtin_components_json[] = {",
+            "#include <stddef.h>",
+            "#include <stdint.h>",
+            "#include <stdbool.h>",
+            "#include <string.h>",
+            "const unsigned char pet_p4_builtin_components_zlib[] = {",
             *rows,
             "};",
+            f"const size_t pet_p4_builtin_components_zlib_size = {len(encoded)};",
+            f"const size_t pet_p4_builtin_components_json_size = {len(raw)};",
+            "bool pet_p4_builtin_is_bootstrap(const char *id, uint32_t checksum) {",
+            "  if (!id) return false;",
+            *checks,
+            "  return false;",
+            "}",
             "",
         ]
     )

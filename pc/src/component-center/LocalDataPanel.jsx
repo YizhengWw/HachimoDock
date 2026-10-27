@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { deadlineIso, localDateTime, todoMutation, todoDateLabel } from "./local-widget-model.js";
 import "./local-data.css";
 
-export default function LocalDataPanel({ source }) {
+export default function LocalDataPanel({ source, deviceChecklist = false }) {
   const isTodos = source === "todos.upcoming";
   const [items, setItems] = useState([]);
   const [snapshot, setSnapshot] = useState(null);
@@ -63,7 +63,7 @@ export default function LocalDataPanel({ source }) {
   }
   return <section className="local-data-panel" aria-label={isTodos ? "近期待办管理" : "电脑状态详情"}>
     <header><h4>{isTodos ? "近期待办" : "电脑状态"}</h4><span>{isTodos ? `${items.filter(i => !i.completed).length} 项未完成` : "每 2 秒更新"}</span></header>
-    <p>{isTodos ? "进入设备实时对话后，可以说“添加待办：明天下午三点交报告”“把交报告改到周五”或“完成买牛奶”。也可在这里管理；设备优先显示未完成事项，最多 20 项，蓝色未完成、绿色已完成。退出实时对话后同步设备列表。" : "本机资源状态实时同步到设备。请保持 Pet Manager 运行并连接 USB；网络速率为所有接口合计，包含虚拟接口，不等于互联网测速。"}</p>
+    <p>{isTodos ? (deviceChecklist?"与设备、实时对话共用一份待办。设备每页显示 5 项，可点选全文、确认完成和撤销；切换筛选查看已完成事项，最多保存 500 项。修改后会自动刷新设备，断线时不会冒充操作成功。":"进入设备实时对话后，可以说“添加待办：明天下午三点交报告”“把交报告改到周五”或“完成买牛奶”。也可在这里管理；设备优先显示未完成事项，最多 20 项，蓝色未完成、绿色已完成。退出实时对话后同步设备列表。") : "本机资源状态实时同步到设备。请保持 Pet Manager 运行并连接 USB；网络速率为所有接口合计，包含虚拟接口，不等于互联网测速。"}</p>
     {(error || pollError) && <p role="alert" className="local-data-error">{error || pollError}</p>}
     {loading && <p role="status">正在读取…</p>}
     {isTodos ? <>

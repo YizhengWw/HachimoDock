@@ -1,0 +1,32 @@
+[
+  {
+    "action": "primary",
+    "label": "互动或更换",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "secondary",
+    "label": "布置或完成",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "previous",
+    "label": "选择绿植",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "next",
+    "label": "选择摆件",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  },
+  {
+    "action": "finish",
+    "event": "button.encoder.short_press",
+    "label": "完成布置",
+    "control": "前方摇杆"
+  }
+]

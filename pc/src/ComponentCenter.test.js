@@ -54,7 +54,7 @@ test("ComponentCenter uses one library and removes the separate board overview",
   assert.doesNotMatch(component, /上方查看板端组件，下方浏览完整组件库/);
   assert.doesNotMatch(component, /component-library-section__header/);
   assert.doesNotMatch(component, /component-library-search/);
-  assert.doesNotMatch(component, /libraryQuery|normalizedLibraryQuery/);
+  assert.match(component, /libraryQuery/);
   assert.doesNotMatch(component, /内置与正式本地组件/);
   assert.doesNotMatch(component, /正式本地 \{localComponents\.length\}/);
   assert.match(component, /component-library-toolbar/);
@@ -78,13 +78,17 @@ test("component center exposes a first-visit guide for direct card sync", () => 
   assert.match(component, /setCreateDrawerOpen\(true\)/);
 });
 
-test("component center explains the Agent Skill generation workflow below its title", () => {
+test("component center keeps the creation workflow in its drawer and hosts community navigation", () => {
   const component = readSource("ComponentCenter.jsx");
   assert.match(component, /title="组件中心"/);
   assert.match(
     component,
-    /subtitle="点击右上方创建按钮为 Agent（如 ChatGPT 等）安装 Skill 后，可在 Agent 内使用该 Skill 生成组件（支持多轮优化调试），生成后组件会自动出现在组件中心"/,
+    /subtitle="发现、创作与分享属于你的桌面玩法"/,
   );
+  assert.match(component, /<CommunityCenter/);
+  assert.match(component, /请使用 \$petui/);
+  assert.match(component, /expectedBoardDeviceId: boardDeviceId/);
+  assert.match(component, /component-install-progress/);
 });
 
 test("each component card keeps sync/update repeatable and routes removal through delete", () => {
@@ -92,7 +96,7 @@ test("each component card keeps sync/update repeatable and routes removal throug
   assert.match(component, /invoke\("list_device_widgets"/);
   assert.match(component, /setDeviceInventory\(nextInventory\)/);
   assert.match(component, /onDeviceAction=\{\(\) => \{/);
-  assert.match(component, /onDeviceAction=\{\(\) => \{[\s\S]*if \(isInstalled\) syncSelectedComponent\(item\);[\s\S]*else setPreviewComponent\(item\)/);
+  assert.match(component, /onDeviceAction=\{\(\) => \{\s*openComponent\(item\)/);
   assert.doesNotMatch(component, /requestRemoveInventoryItem/);
   assert.match(component, /requestComponentDelete\(item, isInstalled\)/);
   assert.match(component, /onInstall=\{[\s\S]*syncSelectedComponent\(previewComponent\)/);
@@ -140,7 +144,7 @@ test("direct install retains per-component OTA progress and errors", () => {
   assert.doesNotMatch(installBody, /batchSync/);
 });
 
-test("board inventory is fetched once per App session and reused across page visits", () => {
+test("board inventory expires and reconnect revalidates", () => {
   const component = readSource("ComponentCenter.jsx");
   assert.match(component, /const SESSION_DEVICE_INVENTORY_CACHE = new Map\(\)/);
   assert.match(component, /const SESSION_DEVICE_INVENTORY_REQUESTS = new Map\(\)/);
@@ -153,13 +157,13 @@ test("board inventory is fetched once per App session and reused across page vis
   );
   assert.match(
     component,
-    /const cachedInventory = readSessionDeviceInventory\(liveInventoryTarget\);[\s\S]*?setDeviceInventory\(cachedInventory\);[\s\S]*?refreshDeviceInventory\(\);/,
+    /const cachedInventory = readSessionDeviceInventory\(liveInventoryTarget\);[\s\S]*?setDeviceInventory\(\{\.\.\.cachedInventory,freshness:'stale'\}\);[\s\S]*?refreshDeviceInventory\(\);/,
   );
   const inventoryEffect = component.slice(
     component.indexOf("const cachedInventory = readSessionDeviceInventory"),
     component.indexOf("window.localStorage.setItem", component.indexOf("const cachedInventory")),
   );
-  assert.doesNotMatch(inventoryEffect, /setInterval|30000/);
+  assert.match(inventoryEffect, /setInterval/); assert.match(component, /Date.now\(\) - cached.checkedAt < 15000/);
 });
 
 test("ComponentCenter renders the component library grid using CandidateCard", () => {
@@ -219,13 +223,13 @@ test("per-component button choices persist and the preview editor shows resolved
   assert.match(component, /useState\(loadComponentButtonOverrides\)/);
   assert.match(
     component,
-    /COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY,[\s\S]*JSON\.stringify\(bindingOverrides\)/,
+    /COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY,[\s\S]*JSON\.stringify\(savedBindingOverrides\)/,
   );
   assert.match(
     component,
     /bindings=\{resolveComponentBindings\(previewComponent\)\}/,
   );
-  assert.match(component, /onClick=\{\(\) => setPreviewComponent\(item\)\}/);
+  assert.match(component, /onClick=\{\(\) => openComponent\(item\)\}/);
 });
 
 test("component button editor only offers screen gestures to a touch-ready device", () => {
@@ -271,14 +275,14 @@ test("formal local cards use manifest descriptions instead of exposing filesyste
   assert.doesNotMatch(component, /goal:\s*`[^`]*\$\{entry\.path/);
 });
 
-test("Library exposes compact game/tool filters without search chrome", () => {
+test("Library exposes kind and name filters", () => {
   const component = readSource("ComponentCenter.jsx");
   assert.match(component, /component-library/);
   assert.match(component, /setLibraryKind/);
   assert.match(component, /小游戏/);
   assert.match(component, /工具/);
   assert.equal(component.includes('type="search"'), false);
-  assert.equal(component.includes("setLibraryQuery"), false);
+  assert.equal(component.includes("setLibraryQuery"), true);
   assert.equal(component.includes("component-library-search"), false);
 });
 
@@ -345,7 +349,7 @@ test("OTA, single-slot replacement guidance, and device-action confirmation rema
   assert.match(component, /previewReplacesSingleSlot/);
   assert.match(component, /singleSlotReplacement=\{previewReplacesSingleSlot\}/);
   assert.match(component, /role="alertdialog"/);
-  assert.match(component, /可以只删除设备上的副本/);
+  assert.match(component, /可以只移除设备副本/);
   assert.match(component, /Device removal happens first/);
   assert.doesNotMatch(component, /aria-label="生成组件 prompt"/);
   assert.doesNotMatch(component, /component-generated-prompt/);
@@ -374,9 +378,9 @@ test("component center uses PageShell and shell components", () => {
   assert.match(component, /setCreateDrawerOpen\(true\)/);
 
   // App.jsx wiring
-  assert.match(app, /import ComponentCenter from "\.\/ComponentCenter"/);
+  assert.match(app, /const ComponentCenter = lazy\(\(\) => import\("\.\/ComponentCenter"\)\)/);
   assert.match(app, /title="组件中心"/);
-  assert.match(app, /<ComponentCenter \/>/);
+  assert.match(app, /<ComponentCenter active=\{view === "components"\} \/>/);
 });
 
 test("component center preserves install, formal-library delete, and device-remove pipelines", () => {
@@ -440,7 +444,7 @@ test("library cards expose repeatable sync and consolidated device-first deletio
   assert.match(component, /onDeviceAction=\{\(\) => \{/);
   assert.doesNotMatch(component, /requestRemoveInventoryItem/);
   assert.match(component, /仅从设备删除/);
-  assert.match(component, /从电脑和设备删除/);
+  assert.match(component, /移除设备并回收本机源/);
   assert.match(component, /type: "delete-options"[\s\S]*installedOnDevice/);
   assert.match(
     component,
@@ -475,17 +479,12 @@ test("device removal clears active state only after the backend confirms success
   assert.match(clearBody, /window\.dispatchEvent\(new Event\("storage"\)\)/);
 });
 
-test("deleting a formal local component also clears stale per-component button overrides", () => {
+test("recoverable removal preserves mappings for restoration", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /function clearComponentBindingOverrides\(component\)/);
-  assert.match(component, /const keyPrefix = `\$\{componentSourceKey\(component\)\}:`/);
-  assert.match(component, /!key\.startsWith\(keyPrefix\)/);
-  assert.match(
-    component,
-    /invoke\("delete_component_from_library"[\s\S]*?clearComponentBindingOverrides\(component\)/,
-  );
-  assert.match(component, /setLocalComponents\(\(current\) => current\.filter/);
-  assert.doesNotMatch(component, /setPendingDeviceInstalls/);
+  const deletion = component.slice(component.indexOf("async function confirmComponentAction"),component.indexOf("function resolveControlOption"));
+  assert.doesNotMatch(deletion, /clearComponentBindingOverrides/);
+  assert.match(component, /RemovedComponents/);
+  assert.match(deletion, /deviceRemoved/);
 });
 
 test("component center derives installed ids from live inventory without mutable duplicate state", () => {
@@ -524,7 +523,7 @@ test("formal library refresh ignores stale overlapping responses", () => {
   assert.match(component, /libraryRefreshRequestRef/);
   assert.match(component, /requestId === libraryRefreshRequestRef\.current/);
   assert.match(component, /watch\([\s\S]*componentLibraryPath/);
-  assert.match(component, /setInterval\(refreshComponentLibrary, 30000\)/);
+  assert.match(component, /setInterval\([\s\S]*document.visibilityState!=='hidden'[\s\S]*refreshComponentLibrary\(\)/);
 });
 
 test("component library keeps user components newest-first ahead of default-order builtins", () => {
@@ -550,17 +549,22 @@ test("builtin catalog starts with stocks followed by 双键接球 and a sprite-c
 
   assert.match(fixtures, /components:\s*\[\s*\{\s*id: "stock-watchlist"/);
   assert.equal(componentManifest.id, "two-key-pong");
-  assert.equal(componentManifest.version, "1.1.5");
-  assert.equal(widget.engine, "p4-bounded-runtime-v3");
+  assert.equal(componentManifest.version, "1.2.3");
+  assert.equal(widget.engine, "p4-bounded-runtime-v4");
+  assert.equal(widget.surface.scene_view.engine, "p4-scene-surface-v1");
   assert.deepEqual(widget.scene.grid, { width: 16, height: 16 });
-  assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right"]);
+  assert.deepEqual(buttons.map((binding) => binding.action), ["start", "shift_left", "shift_right", "session.pause"]);
+  assert.equal(widget.lifecycle.record_var,"best");
+  assert.ok(widget.persist.vars.includes("best"));
 
   const frogRoot = join(srcDir, "../builtin-clawpkgs/bloomfrog_companion");
   const frogManifest = JSON.parse(readFileSync(join(frogRoot, "component.json"), "utf8"));
   const frogWidget = JSON.parse(readFileSync(join(frogRoot, "runtime/widget.json"), "utf8"));
   assert.equal(frogManifest.name, "蛙蛙养成");
-  assert.equal(frogManifest.version, "1.3.1");
-  assert.equal(frogWidget.scene.sprites[0].asset, "assets/bloomfrog.png");
+  assert.equal(frogManifest.version, "1.4.3");
+  assert.deepEqual(frogWidget.limits.bond,[0,100]);
+  const sprite=frogWidget.surface.scene_view.sprites[0];
+  assert.equal(frogWidget.surface.images.find(im=>im.id===sprite.image).asset, "assets/bloomfrog.png");
   assert.ok(readFileSync(join(frogRoot, "assets/bloomfrog.png")).length > 0);
 });
 
@@ -611,8 +615,10 @@ test("all builtin components omit exit actions, reserve SW3 globally, and use SW
       "blocks.start": "button.sw1.short_press",
       "blocks.left": "knob.rotate_ccw",
       "blocks.right": "knob.rotate_cw",
-      "blocks.rotate": "joystick.up",
-      "blocks.drop": "joystick.down",
+      "blocks.rotate": "button.sw2.short_press",
+      "blocks.drop": "joystick.up",
+      "blocks.soft_drop": "joystick.down",
+      "session.pause": "button.encoder.short_press",
     },
   );
 });
@@ -762,7 +768,7 @@ test("component center preserves CreateComponentDrawer with all 3 STEP cards", (
   assert.match(component, /skillInstallResult\.installed/);
   assert.match(component, /skillInstallResult\.skipped/);
   assert.match(component, /安装 petui/);
-  assert.match(component, /开打Agent（如codex）/);
+  assert.match(component, /打开你正在使用的 Agent/);
   assert.match(component, /复制下方示例文案到Agent界面，与Agent对话生成你想要在设备上使用的小组件或小游戏/);
 });
 
@@ -853,7 +859,7 @@ test("fixtures expose stocks first then the existing games and tools", () => {
   assert.doesNotMatch(data, /falling-catch|接住星星|catch\.left|catch\.right|catch\.start/);
   assert.doesNotMatch(data, /ten-second-tap|5秒连点|10秒连点/);
   assert.equal((data.match(/createdAt:/g) || []).length, 8);
-  assert.match(data, /mediaSource: musicWidget.media.source/);
+  assert.doesNotMatch(data, /mediaSource: musicWidget.media.source/); // retired package is not bundled
   assert.match(data, /gameType: "blocks"/);
   assert.match(data, /gameType: "snake"/);
   assert.match(data, /gameType: "flappy"/);
@@ -864,7 +870,7 @@ test("fixtures expose stocks first then the existing games and tools", () => {
   assert.doesNotMatch(data, /摸鱼倒计时/);
   assert.equal((data.match(/kind: "game"/g) || []).length, 4);
   // Two local-data tools share one catalog factory; wooden-fish is a native instrument.
-  assert.equal((data.match(/kind: "tool"/g) || []).length, 8);
+  assert.equal((data.match(/kind: "tool"/g) || []).length, 7); // music-player is retired
   assert.match(data, /instrumentSource: woodenFishWidget.instrument.source/);
   assert.match(data, /computerManifest, computerWidget, computerBindings/);
   assert.match(data, /todoManifest, todoWidget, todoBindings/);
@@ -899,16 +905,16 @@ test("Flappy Bird is shipped as a complete installable builtin template", () => 
   const share = JSON.parse(readFileSync(join(packageRoot, "share.json"), "utf8"));
 
   assert.equal(manifest.id, "flappy-bird");
-  assert.equal(manifest.name, "Flappy Bird");
+  assert.equal(manifest.name, "像素飞鸟");
   assert.equal(manifest.kind, "game");
   assert.equal(negativeScreen.dashboard.visualSprite, "flappy");
   assert.equal(runtime.game.type, "flappy");
   assert.deepEqual(runtime.game.actions, { flap: "flappy.flap" });
   assert.deepEqual(
     buttons.map((binding) => binding.action),
-    ["flappy.flap"],
+    ["flappy.flap", "session.pause"],
   );
-  assert.match(share.summary, /Flappy Bird/);
+  assert.match(share.summary, /拍翅.*穿过管道.*结束/);
 });
 
 test("tauri formal-library delete wiring is guarded by the component library module", () => {
@@ -954,7 +960,7 @@ test("component install keeps its button map package-owned without replacing dev
   assert.doesNotMatch(component, /DEVICE_BUTTON_CONFIG_STORAGE_KEY/);
   assert.match(component, /globalExitBinding\.status === "loading"/);
   assert.match(component, /globalExitBinding\.status === "error"/);
-  assert.match(component, /bindingOverrides: buildBindingOverridesForInstall\(component\)/);
+  assert.match(component, /bindingOverrides: options.bindingMap \|\| buildBindingOverridesForInstall\(component\)/);
   assert.match(firmware, /dispatch_component_binding_event/);
   assert.match(firmware, /active_global_priority_binding/);
   assert.match(firmware, /if \(component_system_action\(component_action\)\) return false/);

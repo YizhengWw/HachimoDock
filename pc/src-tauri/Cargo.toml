@@ -1,6 +1,6 @@
 [package]
 name = "pet-manager-tauri"
-version = "0.1.101"
+version = "0.1.167"
 description = "pet-manager Tauri client"
 authors = ["pet-manager contributors"]
 license-file = "../../LICENSE"
@@ -13,8 +13,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 default = []
 devtools = ["tauri/devtools"]
-# Explicit internal opt-in: approved public CA chain and keys; never a fixed proxy.
-internal-network = []
+# Development-only, user-triggered composer comparison. No USB, credentials,
+# audio, model service or background runtime is initialized in this mode.
+composer-diagnostic = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -29,11 +30,13 @@ tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+semver = "1"
+regex = "1"
 encoding_rs = "0.8"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "network"] }
 chrono = "0.4"
 chrono-tz = "0.10"
-reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-tls", "system-proxy"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-tls", "system-proxy", "gzip"] }
 uuid = { version = "1", features = ["v4"] }
 flate2 = "1"
 futures-util = "0.3"
@@ -51,6 +54,7 @@ aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
 rsa = { version = "0.9", features = ["pem"] }
 rand = "0.8"
+ring = "0.17.14"
 zip = "0.6"
 # Used by install_clawpkg_over_ssh to stage widget dirs before scp.
 tempfile = "3.27.0"
@@ -61,7 +65,6 @@ winreg = "0.52"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Devices_Communication", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Security"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3.6.3", features = ["apple-native"] }
 accessibility = "0.2"
 accessibility-sys = "0.2"
 core-foundation = "0.10"

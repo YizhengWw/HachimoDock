@@ -33,7 +33,7 @@ test("WorkBuddy voice uses its own current desktop composer and never falls back
   // Every WorkBuddy write re-verifies the bound composer identity, ownership,
   // writability and exact last text without repeating the full window lookup.
   assert.match(composer, /\$state.CurrentVisible -and \$state.Agent -eq 'workbuddy'\) \{\s*Assert-WorkBuddyComposerCurrent \$state/);
-  const recheck = composer.split("function Assert-WorkBuddyComposerCurrent(")[1].split("function Assert-TargetCurrent(")[0];
+  const recheck = composer.split("function Assert-WorkBuddyComposerCurrent(")[1].split("\nfunction ")[0];
   assert.match(recheck, /\$runtimeId -ne \$state.ComposerRuntimeId/);
   assert.match(recheck, /Test-WorkBuddyElementOwner/);
   assert.match(recheck, /Test-WorkBuddyWritablePattern/);

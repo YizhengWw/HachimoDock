@@ -7,9 +7,9 @@
     "metricValue": "—",
     "metricUnit": "TOKEN",
     "note": "缓存 —",
-    "footer": "SW1总量 · SW2输入 · 摇杆右输出 · 全局键退出",
-    "visualStyle": "pixel",
-    "visualPalette": "arcade",
+    "footer": "统计来自当前 Agent 的本地可读记录，不代表账单。",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "tool",
     "visualSprite": "gauge"
   }

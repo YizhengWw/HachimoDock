@@ -23,10 +23,12 @@ import {
 } from "lucide-react";
 import { API_CONFIGURATION_UPDATED_EVENT } from "../lib/api-configuration.js";
 import Switch from "../shell/Switch";
+import VoiceComposerCheck from "./VoiceComposerCheck.jsx";
+import { composerFailureEvidence, withoutComposerEvidence } from "./composer-failure-evidence.js";
 import UsageHelp from "../UsageHelp.jsx";
 import { useUsageHelp } from "../shell/DeviceContext.jsx";
 import { friendlyControlLabel } from "../lib/usage-help.js";
-import { deviceVoicePlatformWarning } from "../lib/agent-voice-capabilities.js";
+import { deviceVoicePlatformWarning, deviceVoiceTransportReady } from "../lib/agent-voice-capabilities.js";
 import { voiceFlowMessage } from "./useDeviceVoiceRouter.js";
 
 export function buildVoiceSummary(voiceConfig, selectedTrigger) {
@@ -37,7 +39,7 @@ export function buildVoiceSummary(voiceConfig, selectedTrigger) {
 
 export function formatVoiceUserMessage(value) {
   const message = typeof value === "string"
-    ? value.replace(/\bError:\s*/gi, "").trim()
+    ? withoutComposerEvidence(value).replace(/\bError:\s*/gi, "").trim()
     : "";
   if (!message) return "";
   if (/设备麦克风.*信令.*USB.*送达|未通过 USB 送达/i.test(message)) {
@@ -144,7 +146,7 @@ function voicePhaseLabel(phase) {
     submitting: "发送中",
     injecting: "发送中",
     waiting_reply: "等待回复",
-    submitted: "已发送",
+    submitted: "已提交",
     done: "已发送",
     cancelled: "已取消",
     error: "发送失败",
@@ -160,7 +162,6 @@ export default function VoiceAssistantPanel({
   selectedTrigger,
   onVoiceConfigChange,
   onVoiceEnabledChange,
-  onCredentialReady,
   onOpenApiSettings,
 }) {
   const usageHelp = useUsageHelp();
@@ -183,7 +184,7 @@ export default function VoiceAssistantPanel({
 
   useEffect(() => {
     let cancelled = false;
-    const loadAsrState = ({ resume = false } = {}) => {
+    const loadAsrState = () => {
       invoke("load_device_asr_settings")
         .then((status) => {
           if (cancelled) return;
@@ -200,9 +201,6 @@ export default function VoiceAssistantPanel({
             tone: status?.configured ? "success" : "muted",
             message: status?.message || "请前往 API 配置补充语音识别凭据",
           });
-          if (resume && status?.configured === true) {
-            onCredentialReady?.();
-          }
         })
         .catch((error) => {
           if (cancelled) return;
@@ -217,20 +215,20 @@ export default function VoiceAssistantPanel({
     loadAsrState();
     const handleApiConfigurationUpdated = (event) => {
       if (event?.detail?.providerId && event.detail.providerId !== "volcengine-asr") return;
-      loadAsrState({ resume: true });
+      loadAsrState();
     };
     window.addEventListener(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated);
     return () => {
       cancelled = true;
       window.removeEventListener(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated);
     };
-  }, [dispatch, onCredentialReady]);
+  }, [dispatch]);
 
   const agents = Array.isArray(state.busStatus?.agents) ? state.busStatus.agents : [];
   const selectedAgent = agents.find((agent) => agent.agentId === state.selectedAgentId) || null;
   const desktopPlatform = detectDesktopPlatform();
   const platformWarning = deviceVoicePlatformWarning(state.selectedAgentId, desktopPlatform);
-  const ready = selectedAgent?.ready === true && !platformWarning;
+  const ready = deviceVoiceTransportReady(state.selectedAgentId, desktopPlatform, selectedAgent?.ready) && !platformWarning;
   const voiceRunning = state.voiceRuntime?.running === true;
   let audioBlockingReason = null;
   if (!state.selectedAgentId) {
@@ -250,6 +248,8 @@ export default function VoiceAssistantPanel({
   const boardOffline = state.deviceOnline === false;
   const triggerLabel = friendlyControlLabel(selectedTrigger?.label || "未绑定快捷键");
   const voicePhase = state.deviceVoiceFlow?.phase || "idle";
+  const composerEvidence = voicePhase === "error" ? composerFailureEvidence(
+    state.deviceVoiceFlow?.composerError, state.deviceVoiceFlow?.message, state.audioBridgeMessage) : null;
   const showAccessibilityGuidance = needsVisibleComposerGuidance(state);
   const isMimocodeVoice = state.selectedAgentId === "mimocode"
     || state.deviceVoiceFlow?.agentId === "mimocode";
@@ -494,6 +494,9 @@ export default function VoiceAssistantPanel({
             />
           </summary>
           <div className="voice-panel__advanced-body voice-panel__diagnostics-body">
+          {desktopPlatform === "macos" && ["codex", "claude-code", "workbuddy"].includes(state.selectedAgentId) &&
+            <VoiceComposerCheck agentId={state.selectedAgentId}
+              disabled={state.mockInjectPending || ["listening", "partial", "finalizing", "draft_ready"].includes(voicePhase)} />}
           <div className="voice-panel__mock voice-panel__compose">
             <label className="ui-field voice-panel__compose-field" htmlFor="voice-mock-inject-input">
               <span className="ui-field__label">模拟文本注入</span>
@@ -596,6 +599,14 @@ export default function VoiceAssistantPanel({
             </div>
           )}
 
+          {composerEvidence && <details className="voice-panel__failure-evidence">
+            <summary>失败时的定位详情（不含正文，可复制）</summary>
+            <p className="muted small">这是本次语音首次遇到多个候选时保留的结构，不是事后重新检查。无需重新录音。</p>
+            <textarea aria-label="失败时的输入框结构" readOnly rows={12}
+              className="ui-control" style={{width:"100%",fontFamily:"monospace"}}
+              value={JSON.stringify(composerEvidence,null,2)} />
+          </details>}
+
           {state.selectedAgentId === "workbuddy" && (
             <p className="muted">
               请先在 WorkBuddy 打开目标对话，并保留一个主窗口。松开语音键后，完整识别结果会一次追加到输入框，确认后发送；写入完成前请保持该对话在前台。设备切换气泡不会自动切换 WorkBuddy 桌面对话。
@@ -695,7 +706,7 @@ export default function VoiceAssistantPanel({
                     {isMimocodeVoice ? (
                       <p>
                         无需再进入系统设置。请保持 MiMoCode 终端在前台，并把光标停在输入位置；
-                        松开设备按键后追加文字，不会自动发送。{usageHelp.confirm}
+                        识别文字写入目标输入框，不会自动发送。{usageHelp.confirm}
                       </p>
                     ) : (
                       <p>

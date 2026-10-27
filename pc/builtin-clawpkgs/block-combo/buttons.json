@@ -19,14 +19,26 @@
   },
   {
     "action": "blocks.rotate",
-    "control": "前方摇杆",
-    "event": "joystick.up",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
     "label": "旋转"
   },
   {
     "action": "blocks.drop",
     "control": "前方摇杆",
+    "event": "joystick.up",
+    "label": "直接落下（单次）"
+  },
+  {
+    "action": "session.pause",
+    "event": "button.encoder.short_press",
+    "label": "暂停/继续",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "blocks.soft_drop",
     "event": "joystick.down",
-    "label": "快速落下"
+    "label": "缓降（可长按）",
+    "control": "前方摇杆"
   }
 ]

@@ -15,13 +15,27 @@ Add-Type ([regex]::Replace($native.Replace('class CodexVoiceNative', 'class Comp
   '\bWorkBuddyUia\b', 'CompileOnlyWorkBuddyUia'))
 # Compile the real P/Invoke declarations but never invoke them on this host.
 Add-Type @'
+namespace System.Windows {
+  public struct Point {
+    public double X, Y;
+    public Point(double x, double y) { X = x; Y = y; }
+  }
+}
 namespace System.Windows.Automation {
   // A managed element would hide Chromium's native provider for the whole
   // helper process, so any WorkBuddy use of it fails these tests.
   public class AutomationElement {
+    public static object Hit;
+    public static object FromPoint(System.Windows.Point point) { return Hit; }
     public static object FocusedElement { get { throw new System.InvalidOperationException("managed UIA used"); } }
     public static object FromHandle(System.IntPtr window) { throw new System.InvalidOperationException("managed UIA used"); }
   }
+  public class TreeWalker {
+    public static TreeWalker ControlViewWalker = new TreeWalker();
+    public static System.Collections.Generic.Dictionary<object, object> Parents = new System.Collections.Generic.Dictionary<object, object>();
+    public object GetParent(object element) { return Parents.ContainsKey(element) ? Parents[element] : null; }
+  }
+  public class InvokePattern { public static object Pattern = new object(); }
   public class ValuePattern { public ValueState Current = new ValueState(); }
   public class ValueState { public bool IsReadOnly; }
   public class TextPattern {
@@ -37,9 +51,22 @@ namespace System.Windows.Automation {
     public static ControlType Group = new ControlType(50026);
     public static ControlType Custom = new ControlType(50025);
     public static ControlType Document = new ControlType(50030);
+    public static ControlType Button = new ControlType(50000);
   }
 }
 public static class CodexVoiceNative {
+  public static int Clicks;
+  public static int Enters;
+  public static int ClickX, ClickY;
+  public static bool ThrowClick;
+  public static string ReplacedText;
+  public static int Replacements;
+  public static void ReplaceFocusedText(string text) { Replacements++; ReplacedText = text; }
+  public static void ClickSubmit(System.IntPtr window, int x, int y) {
+    Clicks++; ClickX = x; ClickY = y;
+    if (ThrowClick) { throw new System.InvalidOperationException("uncertain native input"); }
+  }
+  public static void PressEnter() { Enters++; }
   public static bool Foreground = true;
   public static bool ThrowRequest;
   public static int Response = 3;
@@ -74,7 +101,9 @@ public static class WorkBuddyUia {
 $names = @('Normalize-Label', 'Normalize-ComposerText', 'Test-AllowedComposerValue',
   'Test-FiniteWindowRectangle', 'Test-WorkBuddyWritablePattern', 'Get-ComposerCandidates',
   'Get-ElementRuntimeId', 'Select-WorkBuddyComposer', 'Find-WorkBuddyFocusedComposer',
-  'Initialize-WorkBuddyAccessibility', 'Get-WorkBuddyTarget')
+  'Initialize-WorkBuddyAccessibility', 'Get-WorkBuddyTarget',
+  'Get-ComposerSubmitLabelScore', 'Test-CodexSubmitPoint', 'Invoke-CodexTaskSubmit', 'Invoke-SendButton',
+  'Get-TaskDraftSnapshot', 'Assert-TaskDraftSnapshot', 'Set-ComposerText', 'Join-VoiceDraft')
 foreach ($name in $names) {
   $function = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }.GetNewClosure(), $true)
   if (-not $function) { throw "Production function missing: $name" }
@@ -210,4 +239,157 @@ $failure = ''
 try { Get-WorkBuddyTarget $null } catch { $failure = $_.Exception.Message }
 Assert ($failure -match '输入框未就绪' -and $failure -match 'MSAA应答=2') 'activation response alone never authorizes writing into an absent editor'
 Assert ([CodexVoiceNative]::Requests.Count -eq 2) 'unavailable tree exhausts bounded lookup without repeatedly activating'
-Write-Output 'Embedded PowerShell parse, native C# compile and 30 mocked policy/orchestration cases passed. No native Windows UI tested.'
+
+# Current-task submission uses production selection and guards, with a synthetic
+# desktop tree and counted input. Never reads or sends to a real Agent window.
+function Assert-TargetCurrent($state, $checkSession) {
+  if ($script:TargetChanged) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+}
+function Find-BoundedComposerElements($root) { return $script:Buttons }
+function Reset-SubmitFixture {
+  $script:TargetChanged = $false
+  $script:Invokes = 0
+  [CodexVoiceNative]::Clicks = 0
+  [CodexVoiceNative]::Enters = 0
+  [CodexVoiceNative]::ThrowClick = $false
+  [CodexVoiceNative]::Foreground = $true
+  [System.Windows.Automation.TreeWalker]::Parents.Clear()
+  $script:SubmitRoot = Editor ([System.Windows.Automation.ControlType]::Group)
+  $script:SubmitRoot.Identity = 10
+  $script:SubmitRoot.Current.BoundingRectangle = Rect 0 0 1200 900
+  $script:SubmitEditor = Editor ([System.Windows.Automation.ControlType]::Edit)
+  $script:SubmitEditor.Value = 'exact task'
+  $script:SubmitButton = Editor ([System.Windows.Automation.ControlType]::Button) '' 'Send'
+  $script:SubmitButton.Identity = 11
+  $script:SubmitButton.Current.BoundingRectangle = Rect 880 640 40 40
+  $script:Pattern = [pscustomobject]@{}
+  $script:Pattern | Add-Member ScriptMethod Invoke { $script:Invokes++ }
+  $script:SubmitButton | Add-Member ScriptMethod TryGetCurrentPattern {
+    param($kind, $output) $output.Value = $script:Pattern; return $true
+  }
+  $script:Buttons = @($script:SubmitButton)
+  [System.Windows.Automation.AutomationElement]::Hit = $script:SubmitButton
+  [System.Windows.Automation.TreeWalker]::Parents[$script:SubmitButton] = $script:SubmitRoot
+  $script:SubmitState = [pscustomobject]@{
+    Agent='codex'; CurrentTask=$true; WindowHandle=10; Root=$script:SubmitRoot
+    Composer=$script:SubmitEditor; LastValue='exact task'
+    ProcessId=20; RootHandle=10; ComposerRuntimeId='42,1'; TaskIdentity='current-thread'
+  }
+}
+function Assert-SubmitRejected($expected, $label) {
+  $failure = ''
+  try { Invoke-SendButton $script:SubmitState $true $true } catch { $failure = $_.Exception.Message }
+  Assert ($failure.Contains($expected) -and [CodexVoiceNative]::Clicks -eq 0 -and
+    $script:Invokes -eq 0 -and [CodexVoiceNative]::Enters -eq 0) $label
+}
+Reset-SubmitFixture
+Assert ((Invoke-SendButton $SubmitState $true $true) -eq 'send') 'strict ChatGPT task reports send attempt'
+Assert ([CodexVoiceNative]::Clicks -eq 1 -and $Invokes -eq 0 -and [CodexVoiceNative]::Enters -eq 0 -and
+  [CodexVoiceNative]::ClickX -eq 900 -and [CodexVoiceNative]::ClickY -eq 660) 'one native button-center click, no Invoke or Enter replay'
+foreach ($mode in @('queue','steer')) {
+  Reset-SubmitFixture
+  $SubmitButton.Current.Name = $mode
+  Assert ((Invoke-SendButton $SubmitState $true $true) -eq $mode -and [CodexVoiceNative]::Clicks -eq 1) "$mode mode preserved"
+}
+Reset-SubmitFixture
+$SubmitButton | Add-Member ScriptMethod TryGetCurrentPattern { param($kind, $output) return $false } -Force
+Assert ((Invoke-SendButton $SubmitState $true $true) -eq 'send' -and [CodexVoiceNative]::Clicks -eq 1) 'semantic native button does not require InvokePattern'
+Reset-SubmitFixture
+$SubmitState.CurrentTask = $false
+Assert ((Invoke-SendButton $SubmitState $true $true) -eq 'send' -and $Invokes -eq 1 -and [CodexVoiceNative]::Clicks -eq 0) 'ordinary voice-confirm path unchanged'
+Reset-SubmitFixture
+$SubmitState.Agent = 'claude'
+Assert ((Invoke-SendButton $SubmitState $true $true) -eq 'send' -and $Invokes -eq 1 -and [CodexVoiceNative]::Clicks -eq 0) 'other Agent submission path unchanged'
+Reset-SubmitFixture
+$TargetChanged = $true
+Assert-SubmitRejected 'DESKTOP_TASK_TARGET_CHANGED' 'changed target fails before input'
+Reset-SubmitFixture
+[CodexVoiceNative]::Foreground = $false
+Assert-SubmitRejected 'DESKTOP_TASK_TARGET_CHANGED' 'lost foreground fails before input'
+Reset-SubmitFixture
+$SubmitEditor.Value = 'user edited draft'
+Assert-SubmitRejected 'DESKTOP_TASK_READBACK_CHANGED' 'changed draft fails before input'
+Reset-SubmitFixture
+$SubmitButton.Current.IsEnabled = $false
+Assert-SubmitRejected 'DESKTOP_TASK_SEND_UNAVAILABLE' 'disabled button does not fall back to Enter'
+Reset-SubmitFixture
+$SubmitButton.Current.Name = 'Stop'
+Assert-SubmitRejected 'DESKTOP_TASK_SEND_UNAVAILABLE' 'stop button is never clicked'
+Reset-SubmitFixture
+$Buttons = @($SubmitButton, $SubmitButton)
+Assert-SubmitRejected 'Expected one enabled send button' 'ambiguous buttons fail closed'
+Reset-SubmitFixture
+$SubmitButton.Current.BoundingRectangle = Rect 880 910 40 40
+Assert-SubmitRejected 'DESKTOP_TASK_SEND_UNAVAILABLE' 'button outside composer is refused'
+Reset-SubmitFixture
+[System.Windows.Automation.AutomationElement]::Hit = $SubmitRoot
+Assert-SubmitRejected 'DESKTOP_TASK_SEND_UNAVAILABLE' 'covered button is refused'
+Reset-SubmitFixture
+[System.Windows.Automation.TreeWalker]::Parents.Clear()
+Assert-SubmitRejected 'DESKTOP_TASK_SEND_UNAVAILABLE' 'hit without target-root ancestry is refused'
+Reset-SubmitFixture
+$icon = Editor ([System.Windows.Automation.ControlType]::Custom)
+$icon.Identity = 12
+[System.Windows.Automation.AutomationElement]::Hit = $icon
+[System.Windows.Automation.TreeWalker]::Parents[$icon] = $SubmitButton
+Assert ((Invoke-SendButton $SubmitState $true $true) -eq 'send' -and [CodexVoiceNative]::Clicks -eq 1) 'button icon hit accepts only the same button ancestry'
+Reset-SubmitFixture
+[CodexVoiceNative]::ThrowClick = $true
+$failure = ''
+try { Invoke-SendButton $SubmitState $true $true } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('uncertain native input') -and [CodexVoiceNative]::Clicks -eq 1 -and
+  $Invokes -eq 0 -and [CodexVoiceNative]::Enters -eq 0) 'uncertain click propagates without any retry'
+Reset-SubmitFixture
+$SubmitEditor.Value = 'manually revised existing draft'
+$SubmitState.LastValue = $SubmitEditor.Value
+$snapshot = Get-TaskDraftSnapshot $SubmitState
+Assert ($snapshot.text -ceq $SubmitEditor.Value) 'snapshot uses the current manually edited draft, not a cached payload'
+Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot)
+Assert ([CodexVoiceNative]::Clicks -eq 0 -and $Invokes -eq 0) 'snapshot verification is read-only'
+$SubmitEditor.Value = 'edit made during dispatch'
+$failure = ''
+try { Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot) } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('DESKTOP_TASK_READBACK_CHANGED')) 'edit after snapshot prevents stale replacement'
+$SubmitEditor.Value = $snapshot.text
+$SubmitState.TaskIdentity = 'another-thread'
+$failure = ''
+try { Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot) } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('DESKTOP_TASK_TARGET_CHANGED')) 'snapshot cannot be appended to another conversation'
+Reset-SubmitFixture
+function Focus-Composer($state) {}
+function Wait-ComposerText($state, $text, $timeoutMs) { return $true }
+$SubmitState | Add-Member NoteProperty BaseValue ''
+$SubmitState | Add-Member NoteProperty LastSessionCheck 0
+$exact = "  user indentation`n    preserved`n`nnew request"
+Set-ComposerText $SubmitState $exact $true $true
+Assert ([CodexVoiceNative]::ReplacedText -ceq $exact -and $SubmitState.LastValue -ceq $exact) 'task dispatch preserves leading indentation and line breaks exactly'
+
+Reset-SubmitFixture
+$SubmitState.Agent = 'workbuddy'
+$SubmitEditor.Value = "  manually edited WorkBuddy draft`n    keep indentation"
+$SubmitState.LastValue = $SubmitEditor.Value
+$snapshot = Get-TaskDraftSnapshot $SubmitState
+Assert ($snapshot.target.agent -ceq 'workbuddy' -and $snapshot.text -ceq $SubmitEditor.Value) 'WorkBuddy uses the same read-only snapshot protocol'
+Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot)
+$SubmitState.Agent = 'codex'
+$failure = ''
+try { Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot) } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('DESKTOP_TASK_TARGET_CHANGED')) 'a WorkBuddy draft cannot cross into the Codex adapter'
+$SubmitState.Agent = 'workbuddy'
+$SubmitEditor.Value = 'changed after snapshot'
+$failure = ''
+try { Assert-TaskDraftSnapshot $SubmitState ([pscustomobject]$snapshot) } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('DESKTOP_TASK_READBACK_CHANGED')) 'WorkBuddy edits during a transaction prevent overwrite'
+Reset-SubmitFixture
+$SubmitState.Agent = 'workbuddy'
+$SubmitState | Add-Member NoteProperty BaseValue 'existing prefix'
+$SubmitState | Add-Member NoteProperty LastSessionCheck 0
+[CodexVoiceNative]::Replacements = 0
+Set-ComposerText $SubmitState $exact $true $true
+Assert ([CodexVoiceNative]::Replacements -eq 1 -and [CodexVoiceNative]::ReplacedText -ceq $exact) 'WorkBuddy exact payload is written once without duplicating BaseValue'
+function Wait-ComposerText($state, $text, $timeoutMs) { return $false }
+[CodexVoiceNative]::Replacements = 0
+$failure = ''
+try { Set-ComposerText $SubmitState 'another request' $true $true } catch { $failure = $_.Exception.Message }
+Assert ($failure.Contains('Visible composer update failed') -and [CodexVoiceNative]::Replacements -eq 1) 'uncertain WorkBuddy writes are never retried'
+Write-Output 'Embedded PowerShell parse, native C# compile and mocked policy/orchestration cases passed. No native Windows UI tested.'

@@ -1,0 +1,26 @@
+[
+  {
+    "action": "primary",
+    "label": "开始或暂停",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "secondary",
+    "label": "五分钟后提醒",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "previous",
+    "label": "上一个动作",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "next",
+    "label": "下一个动作",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  }
+]

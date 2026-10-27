@@ -93,6 +93,7 @@ typedef enum {
   PET_P4_INPUT_GESTURE_HOLD_END,
   PET_P4_INPUT_GESTURE_ROTATE,
   PET_P4_INPUT_GESTURE_DIRECTION,
+  PET_P4_INPUT_GESTURE_REPEAT,
 } pet_p4_input_gesture_t;
 
 typedef struct {
@@ -772,6 +773,7 @@ static void queue_event(
 }
 
 static void queue_button_flags(pet_p4_input_control_t control, uint8_t flags) {
+  if (flags & PET_P4_BUTTON_EVENT_DOWN) queue_event(control, PET_P4_INPUT_GESTURE_DOWN, 0);
   if (flags & PET_P4_BUTTON_EVENT_SHORT_PRESS) queue_event(control, PET_P4_INPUT_GESTURE_SHORT_PRESS, 0);
   if (flags & PET_P4_BUTTON_EVENT_LONG_PRESS) {
     queue_event(control, PET_P4_INPUT_GESTURE_LONG_PRESS, 0);
@@ -780,6 +782,7 @@ static void queue_button_flags(pet_p4_input_control_t control, uint8_t flags) {
   if (flags & PET_P4_BUTTON_EVENT_LONG_RELEASE) {
     queue_event(control, PET_P4_INPUT_GESTURE_HOLD_END, 0);
   }
+  if (flags & PET_P4_BUTTON_EVENT_UP) queue_event(control, PET_P4_INPUT_GESTURE_UP, 0);
 }
 
 static bool read_joystick_axes(int *x, int *y) {
@@ -885,6 +888,7 @@ static void input_task(void *arg) {
       record_joystick_sample(joystick_x, joystick_y);
       // An invalid startup calibration stays disarmed until reboot. Continue
       // sampling for diagnostics, but never generate directions from floating pins.
+      pet_p4_joystick_direction_t previous_direction=joystick.direction;
       pet_p4_joystick_direction_t joystick_direction = joystick_calibrated ? pet_p4_joystick_decoder_update(
         &joystick,
         joystick_x,
@@ -894,9 +898,11 @@ static void input_task(void *arg) {
       if (joystick_direction != PET_P4_JOYSTICK_CENTER) {
         queue_event(
           PET_P4_INPUT_CONTROL_JOYSTICK,
-          PET_P4_INPUT_GESTURE_DIRECTION,
+          previous_direction==joystick_direction?PET_P4_INPUT_GESTURE_REPEAT:PET_P4_INPUT_GESTURE_DIRECTION,
           (int) joystick_direction
         );
+      }else if(previous_direction!=PET_P4_JOYSTICK_CENTER&&joystick.direction==PET_P4_JOYSTICK_CENTER){
+        queue_event(PET_P4_INPUT_CONTROL_JOYSTICK,PET_P4_INPUT_GESTURE_DIRECTION,PET_P4_JOYSTICK_CENTER);
       }
     }
     vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PET_P4_INPUT_SAMPLE_MS));
@@ -1318,6 +1324,19 @@ static void dispatch_binding_event(
     return;
   }
   const pet_p4_input_binding_t *global_exit = active_global_priority_binding(state, event_name);
+  if (state && !strcmp(state->screen_page, "touch_test")) {
+    /* Diagnostic input is isolated; configured global Back/realtime wins. */
+    if (binding && (!strcmp(binding->action, "page_back") || !strcmp(binding->action, "realtime_chat"))) {
+      copy_text(state->screen_page, sizeof(state->screen_page), "main");
+      state->touch_test.pointer_down = false;
+      send_input_event(state, send_line, ctx, event, event_name, gesture, binding, "",
+                       !strcmp(binding->action, "page_back"));
+    } else if (!strcmp(event_name, "button.sw1.short_press")) {
+      pet_p4_slice_start(&state->touch_test, event->ts_ms);
+      state->touch_test_until_ms = event->ts_ms + 120000;
+    } else send_ignored_component_event(state, send_line, ctx, event, event_name, gesture);
+    return;
+  }
   if (global_exit) {
     char miniapp_action[PET_P4_MINIAPP_ACTION_MAX] = {0};
     const bool handled_locally = apply_local_action(
@@ -1405,6 +1424,46 @@ static void process_button_event(
   char event_name[PET_P4_INPUT_EVENT_MAX];
   const char *prefix = button_event_prefix(event->control);
   if (!prefix[0]) return;
+  static bool early_sw1=false;
+  static bool held_sw1=false;
+  if(event->gesture==PET_P4_INPUT_GESTURE_DOWN){
+    if(event->control!=PET_P4_INPUT_CONTROL_SW1)return;
+    early_sw1=false;
+    held_sw1=false;
+    snprintf(event_name,sizeof(event_name),"%s.short_press",prefix);
+    char long_name[PET_P4_INPUT_EVENT_MAX],hold_name[PET_P4_INPUT_EVENT_MAX];
+    snprintf(long_name,sizeof(long_name),"%s.long_press",prefix);
+    snprintf(hold_name,sizeof(hold_name),"%s.hold",prefix);
+    const pet_p4_input_binding_t *hold=active_binding(hold_name);
+    const bool component_hold=pet_p4_miniapp_hold_input(event_name);
+    /* A declared hold owns the whole depression inside its component. Legacy
+     * PTT remains the fallback on the pet page, not a blocker for charge/release.
+     * Explicit global navigation/realtime and other hold bindings still win. */
+    const bool hold_reserved=hold&&strcmp(hold->action,"disabled")
+      &&!(component_hold&&!strcmp(hold->action,"voice_ptt"));
+    if(state&&!pet_p4_conversation_active(state)&&!strcmp(state->screen_page,"app")
+       &&(pet_p4_miniapp_input_policy(event_name,true)||component_hold)
+       &&!active_global_priority_binding(state,event_name)
+       &&!active_global_priority_binding(state,long_name)
+       &&!hold_reserved){
+      early_sw1=true;
+      if(component_hold){
+        char action[48];
+        if(pet_p4_miniapp_resolve_input(event_name,action,sizeof(action)))
+          held_sw1=pet_p4_miniapp_hold_event(action,0,1,event->ts_ms);
+      }
+      else dispatch_binding_event(state,send_line,ctx,event,event_name,"press");
+    }
+    return;
+  }
+  if(event->control==PET_P4_INPUT_CONTROL_SW1&&early_sw1){
+    if(event->gesture==PET_P4_INPUT_GESTURE_UP){
+      if(held_sw1)pet_p4_miniapp_hold_event(NULL,state&&!pet_p4_conversation_active(state)&&!strcmp(state->screen_page,"app")?1:2,1,event->ts_ms);
+      early_sw1=false;held_sw1=false;
+    }
+    /* A single physical depression produces exactly one strike/flap. */
+    return;
+  }
 
   if (event->gesture == PET_P4_INPUT_GESTURE_HOLD_START
       || event->gesture == PET_P4_INPUT_GESTURE_HOLD_END) {
@@ -1447,7 +1506,13 @@ void pet_p4_input_process(
   if (!g_event_queue) return;
   while (xQueueReceive(g_event_queue, &event, 0) == pdTRUE) {
     if (event.control == PET_P4_INPUT_CONTROL_JOYSTICK
-        && event.gesture == PET_P4_INPUT_GESTURE_DIRECTION) {
+        && (event.gesture == PET_P4_INPUT_GESTURE_DIRECTION||event.gesture==PET_P4_INPUT_GESTURE_REPEAT)) {
+      static pet_p4_input_gate_t gate;
+      unsigned page=state&&pet_p4_conversation_active(state)?4:state&&!strcmp(state->screen_page,"app")?0:state&&!strcmp(state->screen_page,"main")?1:state&&!strcmp(state->screen_page,"components")?2:3;
+      uint64_t context=pet_p4_miniapp_input_context()|((uint64_t)page<<60);
+      bool repeated=event.gesture==PET_P4_INPUT_GESTURE_REPEAT;
+      /* A context change requires actual neutral, not merely another direction. */
+      if(!pet_p4_input_gate_accept(&gate,event.delta==PET_P4_JOYSTICK_CENTER,context))continue;
       const char *event_name = "";
       const char *gesture = "";
       switch ((pet_p4_joystick_direction_t) event.delta) {
@@ -1475,6 +1540,8 @@ void pet_p4_input_process(
           break;
       }
       if (!event_name[0]) continue;
+      if(repeated&&state&&!strcmp(state->screen_page,"app")&&
+         (!pet_p4_miniapp_input_policy(event_name,false)||active_global_priority_binding(state,event_name)))continue;
       if (state && !pet_p4_conversation_active(state)
           && strcmp(state->screen_page, "app") == 0
           && !pet_p4_miniapp_has_input(event_name)

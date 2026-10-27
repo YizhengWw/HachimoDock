@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "engine": "pc-declarative-media-v1",
+  "permissions": {"networkHosts": ["all.api.radio-browser.info", "de1.api.radio-browser.info", "de2.api.radio-browser.info", "ipwho.is"], "publicAudio": true, "storage": true},
+  "discovery": {
+    "endpoints": ["https://de1.api.radio-browser.info/json/stations/search", "https://de2.api.radio-browser.info/json/stations/search", "https://all.api.radio-browser.info/json/stations/search"],
+    "locationEndpoint": "https://ipwho.is/?lang=zh-CN&fields=success,city,country_code",
+    "cityField": "/city", "countryField": "/country_code", "country": "CN",
+    "aliases": {"Beijing":"北京","Shanghai":"上海","Guangzhou":"广州","Shenzhen":"深圳","Chengdu":"成都","Hangzhou":"杭州","Nanjing":"南京","Wuhan":"武汉","Xi'an":"西安","Chongqing":"重庆","Suzhou":"苏州","Tianjin":"天津","Changsha":"长沙","Zhengzhou":"郑州","Jinan":"济南","Qingdao":"青岛","Fuzhou":"福州","Xiamen":"厦门","Kunming":"昆明","Hefei":"合肥","Nanchang":"南昌","Nanning":"南宁","Guiyang":"贵阳","Shenyang":"沈阳","Dalian":"大连","Harbin":"哈尔滨","Changchun":"长春","Taiyuan":"太原","Shijiazhuang":"石家庄","Lanzhou":"兰州","Haikou":"海口","Ningbo":"宁波","Wenzhou":"温州","Dongguan":"东莞","Foshan":"佛山","Wuxi":"无锡","Changzhou":"常州"},
+    "stationRegion": "/state", "popularity": "/clickcount", "votes": "/votes",
+    "nationalCount": 30, "localSupplement": 10, "refreshSec": 86400, "autoPlayOnEnter": true
+  },
+  "search": {
+    "endpoint": "https://all.api.radio-browser.info/json/stations/search",
+    "queryParam": "name",
+    "browseQuery": "广播",
+    "params": {"hidebroken": "true", "countrycode": "CN", "order": "clickcount", "reverse": "true"},
+    "itemsPath": "",
+    "fields": {"id": "/stationuuid", "title": "/name", "url": "/url_resolved", "fallbackUrl": "/url", "homepage": "/homepage", "codec": "/codec", "hls": "/hls", "available": "/lastcheckok"}
+  },
+  "panel": {
+    "title": "打开就听，陪你听见这座城",
+    "description": "按公网 IP 估算城市，提供目录收录的本地电台加 10 个全国热门台；无法识别或没有本地台时提供全国热门 30 台。按目录近 24 小时点击热度、投票排序，非真实收听率；同名与同源去重。定位服务可见出口 IP，本机不保存 IP，代理可能影响城市。进入设备组件自动收听，PC 预览不自动播放。保持 PC 运行并连接 USB；语音优先停止广播。不提供录制下载，目录收录不代表版权授权。",
+    "searchPlaceholder": "搜索城市或电台，如北京、上海、新闻",
+    "attribution": "Radio Browser 社区",
+    "attributionUrl": "https://www.radio-browser.info/",
+    "sections": ["volume", "sleep", "history"]
+  }
+}

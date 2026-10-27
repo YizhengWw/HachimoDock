@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "活力间歇",
+    "visualStyle": "clean",
+    "visualPalette": "candy",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "给自己半分钟",
+    "headline": "放松肩膀",
+    "metricValue": "00:30",
+    "note": "轻轻抬肩，再慢慢放下；不适就停止。",
+    "footer": "SW1 开始/暂停  SW2 稍后  左右换动作  全局键退出",
+    "metricLabel": "开始休息",
+    "metricUnit": "稍后五分钟"
+  }
+}

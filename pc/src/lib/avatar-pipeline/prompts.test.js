@@ -7,7 +7,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FAMILIES } from "./families.js";
+import { FAMILIES, CUSTOM_GENERATION_FAMILIES } from "./families.js";
 import { buildDryRunResponse, buildUserPrompt } from "./prompts.js";
 import { SYSTEM_PROMPT_ZH } from "./system-prompt.js";
 
@@ -17,7 +17,19 @@ function family(id) {
   return item;
 }
 
-test("welcome is authored as a single-clip greeting that still returns to the uploaded frame", () => {
+test("custom generation preserves original accessories through real and dry-run prompts",()=>{
+  const user=buildUserPrompt({families:CUSTOM_GENERATION_FAMILIES});
+  assert.match(user,/including idle.default, must preserve original character-associated accessories/);
+  assert.doesNotMatch(user,/Idle.default has no props|may use at most one small marker prop/);
+  const result=buildDryRunResponse({families:CUSTOM_GENERATION_FAMILIES});
+  for(const item of result.prompts){
+    assert.match(item.prompt,/retains original character-associated accessories/);
+    assert.match(item.prompt,/tennis racket/);
+    assert.doesNotMatch(item.prompt,/idle.default forbids props|Idle.default has no props|no large movement or props/);
+  }
+});
+
+test("welcome and other actions finish naturally rather than resetting to one shared frame", () => {
   const welcome = family("welcome");
 
   assert.equal(welcome.playback, "one_shot_entry");
@@ -32,12 +44,14 @@ test("welcome is authored as a single-clip greeting that still returns to the up
   }).prompts[0].prompt;
 
   assert.match(dryRunPrompt, /one-shot greeting/i);
-  assert.match(dryRunPrompt, /first and last frame reference/i);
-  assert.match(dryRunPrompt, /return to the exact uploaded pose/i);
-  assert.match(dryRunPrompt, /required small marker prop/i);
-  assert.match(dryRunPrompt, /Start from the exact uploaded pose/);
+  assert.match(dryRunPrompt, /character identity and appearance reference/i);
+  assert.match(dryRunPrompt, /natural finish/i);
+  assert.match(dryRunPrompt, /optional small marker prop/i);
+  assert.doesNotMatch(dryRunPrompt, /exact uploaded pose|first and last frame reference/i);
   assert.doesNotMatch(dryRunPrompt, /may begin off-screen|Start off-screen|from outside the frame/i);
-  assert.match(SYSTEM_PROMPT_ZH, /first_frame 和 last_frame/);
+  assert.match(SYSTEM_PROMPT_ZH, /不锁定统一首尾姿势/);
+  for(const item of buildDryRunResponse({families:CUSTOM_GENERATION_FAMILIES}).prompts)
+    assert.doesNotMatch(item.prompt,/return to the exact|both the first and last frame|return to the starting position/i);
 });
 
 test("core visible states carry different spatial paths and silhouette signatures", () => {
@@ -71,7 +85,7 @@ test("thinking prompt warns the model not to collapse different families into th
   assert.match(userPrompt, /spatial_path/);
   assert.match(userPrompt, /pose_signature/);
   assert.match(userPrompt, /prop_policy/);
-  assert.match(userPrompt, /Each prompt must include exactly one small marker prop/);
+  assert.match(userPrompt, /may use at most one small marker prop/);
   assert.match(userPrompt, /touch-screen feedback variants/);
   assert.match(SYSTEM_PROMPT_ZH, /不同 family/);
   assert.match(SYSTEM_PROMPT_ZH, /身体轮廓/);
@@ -80,10 +94,9 @@ test("thinking prompt warns the model not to collapse different families into th
   assert.match(SYSTEM_PROMPT_ZH, /touch\.lick 和 touch\.what/);
 });
 
-test("each family requires a visible marker prop instead of relying on generic motion", () => {
+test("props are optional and default idle forbids decorations", () => {
   for (const item of FAMILIES) {
-    assert.match(item.prop_policy, /required/i, `${item.family} should require a marker prop`);
-    assert.doesNotMatch(item.prop_policy, /^No prop/i, `${item.family} should not forbid marker props`);
+    assert.match(item.prop_policy, item.family === "idle.default" ? /^No props/ : /optional/i);
   }
 
   const dryRunPrompt = buildDryRunResponse({
@@ -91,7 +104,7 @@ test("each family requires a visible marker prop instead of relying on generic m
     sourceImageName: "pet.png",
   }).prompts[0].prompt;
 
-  assert.match(dryRunPrompt, /Required small marker prop policy/i);
+  assert.match(dryRunPrompt, /Optional small marker prop policy/i);
   assert.match(dryRunPrompt, /keyboard|mouse|open book|page/i);
 });
 
@@ -164,7 +177,7 @@ test("thinking prompt requires subject-adaptive anatomy and stronger middle moti
   assert.match(SYSTEM_PROMPT_ZH, /subject_type/);
   assert.match(SYSTEM_PROMPT_ZH, /人物|人类/);
   assert.match(SYSTEM_PROMPT_ZH, /猫|狗/);
-  assert.match(SYSTEM_PROMPT_ZH, /中段动作幅度/);
+  assert.match(SYSTEM_PROMPT_ZH, /动作幅度按 family 区分/);
 
   const dryRunPrompt = buildDryRunResponse({
     families: [family("waiting_user")],

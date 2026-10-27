@@ -1,0 +1,20 @@
+{
+  "generator": "imagegen",
+  "date": "2026-10-22",
+  "source": "original generated artwork",
+  "export": "640x480 RGB PNG, downsample only",
+  "prompts": [
+    [
+      "capsule",
+      "Use case: stylized-concept. Asset: original background illustration for a 640x480 landscape touch device app, 4:3 aspect ratio. Create premium tactile miniature cream-and-tangerine capsule vending machine occupying left 43% of the canvas, glass bowl with softly colored capsules, brushed warm metal handle, playful sophisticated product photography/3D illustration. Right 50% must be uncluttered warm ivory empty negative space for live text and controls. Keep upper 12% and bottom 24% mostly clear for actual native UI. Subtle peach studio lighting, crisp clean contours, refined material details, no pixel art. NO text, letters, numbers, logos, UI controls or watermark. Full bleed opaque image."
+    ],
+    [
+      "book",
+      "Use case: stylized-concept. Asset: original background illustration for a 640x480 landscape touch device app, 4:3 aspect ratio. A premium midnight indigo linen-bound closed book with a tiny abstract golden star embossing at lower left, warm ivory page edges, soft paper and gold detail, gentle magical dust at far edges only. Main center and right 65% are calm dark navy negative space to place large dynamic ivory text. Upper 12% and lower 22% clear for native UI. Contemporary editorial product composition, quietly mysterious and comforting, beautiful cinematic side light, sharp refined contours. NO text, letters, numbers, logos, baked UI or watermark. Full bleed opaque image."
+    ],
+    [
+      "train",
+      "Use case: stylized-concept. Asset: original backdrop for a 640x480 landscape touchscreen countdown app, 4:3 aspect ratio. Refined miniature countryside railway diorama: a tiny sage-green and cream passenger train with warm brass detail sits on curving railway in the lower-middle right, soft hills and a small station on right, warm late-afternoon sky. Upper and left 58% are luminous pale cream/sage empty negative space for native countdown text. Bottom 24% clear subtle ground for live controls. Premium cozy collectible-toy material quality, elegant not childish, crisp at small sizes, restrained detail. NO text, clocks, numbers, signs with writing, logos, UI buttons, watermark. Full bleed opaque image."
+    ]
+  ]
+}

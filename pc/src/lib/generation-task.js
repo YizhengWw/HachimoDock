@@ -2,7 +2,8 @@
  * [Input] Wizard hands off `{ imageFile, providerConfig, ... }`; UI subscribes to state.
  * [Output] Module-level singleton that owns the current custom avatar-generation run so it
  *   survives navigation, distinguishes reference-image moderation and skipped actions,
- *   and guards terminal-result acknowledgement by completion epoch.
+ *   replaces conversion progress with a truthful terminal summary, and guards
+ *   terminal-result acknowledgement by completion epoch.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI component subscribing
  *   via `subscribeGenerationTask` (currently App.jsx + AppearanceGallery.jsx).
@@ -11,10 +12,14 @@
 import { resolveThinkingModelName, runAvatarPipeline } from "./avatar-pipeline/run.js";
 import { CUSTOM_GENERATION_FAMILIES } from "./avatar-pipeline/families.js";
 import { getVolcanoInputImageRejection } from "./avatar-pipeline/providers/volcano.js";
-import { replaceFamilyVideo, saveAppearance } from "./appearance-store.js";
+import { getArkImageEditPolicyRejection } from "./avatar-pipeline/providers/volcano-image.js";
+import { replaceFamilyVideo, saveAppearance, prepareSavedAppearance } from "./appearance-store.js";
+import { recordDiagnostic } from "./avatar-pipeline/diagnostics.js";
+import { loadGenerationSession, saveGenerationSession, beginGenerationSession, publicGenerationConfig, generationSessionNeedsProtection, summarizeGenerationSession, canAutoResume } from "./avatar-pipeline/session.js";
+import { loadProviderConfig, loadArkImageConfig } from "./avatar-pipeline/provider-config.js";
 
 /**
- * @typedef {"idle" | "running" | "completed" | "failed"} TaskStatus
+ * @typedef {"idle" | "running" | "paused" | "completed" | "failed"} TaskStatus
  *
  * @typedef {{
  *   status: TaskStatus,
@@ -37,11 +42,83 @@ let state = {
   progress: null,
   error: "",
   startedAt: 0,
+  stageStartedAt: 0,
   completionEpoch: 0,
 };
 
 /** @type {AbortController | null} */
 let activeController = null;
+let gateResolve = null;
+let initialization = null;
+let resumeTimer = null;
+function scheduleResume(session) {
+  clearTimeout(resumeTimer);
+  if(!canAutoResume(session))return;
+  const id=session.id;
+  resumeTimer=setTimeout(async()=>{
+    try {
+      const current=await loadGenerationSession();
+      if(current?.id!==id||isGenerationRunning()||!canAutoResume(current))return;
+      current.autoResumes=(current.autoResumes||0)+1;await saveGenerationSession(current);
+      await resumeGenerationTask('current', { automaticResume: true });
+    }catch(error){console.warn('generation automatic recovery stopped',error.message);}
+  },30000*Math.pow(2,session.autoResumes||0));
+}
+
+export function confirmGenerationStage() { gateResolve?.(); }
+
+async function awaitPreview(kind, bytes, mime, message, signal) {
+  if (signal.aborted) throw new DOMException("aborted", "AbortError");
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  setState({ awaiting: { kind, url, message } });
+  try {
+    await new Promise((resolve, reject) => {
+      const aborted = () => { gateResolve = null; reject(new DOMException("aborted", "AbortError")); };
+      gateResolve = () => { signal.removeEventListener("abort", aborted); gateResolve = null; resolve(); };
+      signal.addEventListener("abort", aborted, { once: true });
+    });
+  } finally { URL.revokeObjectURL(url); setState({ awaiting: null }); }
+}
+
+export function initializeGenerationRecovery() {
+  if (!initialization) initialization = loadGenerationSession().then(session => {
+    if (session && !session.finished && !session.dismissed && state.status === "idle") {
+      const summary = summarizeGenerationSession(session);
+      setState({ status: summary.status, recoveryLabel: summary.label, resumable: true,
+        automatic: session.automatic === true,
+        appearanceName: session.appearanceName, startedAt: session.createdAt || 0,
+        appearanceId: session.appearanceId || "", error: "",
+        progress: { ...summary, stage: session.phase || "paused", message: `${summary.label}。已保存 ${summary.completed}/${summary.total} 段。恢复复用原参考图及已有结果，不会自动重发结果未知的请求。${session.skipProcessing ? "此旧任务使用原图，恢复不会重新去背景；需要清理背景请另建任务，已有视频保留。" : ""}` } });
+      scheduleResume(session);
+    }
+  }).catch(error => { console.warn("generation recovery unavailable", error.message); });
+  return initialization;
+}
+
+export async function resumeGenerationTask(key = "current", { automaticResume = false } = {}) {
+  if (isGenerationRunning()) return;
+  const session = await loadGenerationSession(key);
+  if (!session || session.finished || session.dismissed) return;
+  if (!["volcengine", "kling"].includes(session.config.provider)) throw new Error("自定义接口任务暂不支持跨重启恢复，避免将旧任务发送到不同服务；请在原服务核对结果。");
+  const provider = session.config.provider;
+  const saved = loadProviderConfig(provider);
+  const imageFile=session.original?.bytes?.byteLength
+    ? new File([session.original.bytes],session.original.filename||'reference.png',{type:session.original.mime||'image/png'})
+    : session.imageFile;
+  startGenerationTask({ imageFile, appearanceName: session.appearanceName,
+    personality: session.personality, styleDescription: session.styleDescription || '', skipProcessing: session.skipProcessing, session, restoreArchived: key !== "current",
+    manualReview: session.automatic !== true,
+    retryReview: !automaticResume,
+    providerConfig: { ...saved, ...session.config, imageEdit: loadArkImageConfig() },
+  });
+}
+
+export async function dismissGenerationSession() {
+  if (isGenerationRunning()) return;
+  const session = await loadGenerationSession();
+  if (session) { session.dismissed = true; await saveGenerationSession(session); }
+  setState({ status: "idle", resumable: false, progress: null, error: "" });
+}
 
 /** @type {Set<(s: GenerationTaskState) => void>} */
 const listeners = new Set();
@@ -58,6 +135,13 @@ function notify() {
 }
 
 function setState(patch) {
+  const now = Date.now();
+  const oldStage = state.progress?.stage;
+  const nextStage = patch.progress?.stage;
+  if (state.status === "running" && oldStage && ((nextStage && nextStage !== oldStage) || (patch.status && patch.status !== "running"))) {
+    recordDiagnostic({ timestampMs: now, stage: oldStage, phase: "stage", elapsedMs: now - state.stageStartedAt, outcome: patch.status === "failed" ? "failed" : "stage" });
+  }
+  if (nextStage && (nextStage !== oldStage || patch.status === "running")) patch = { ...patch, stageStartedAt: now };
   state = { ...state, ...patch };
   notify();
 }
@@ -87,7 +171,7 @@ export function abortGenerationTask() {
 export function acknowledgeGenerationTask(expectedCompletionEpoch = null) {
   const matchesExpectedRun =
     expectedCompletionEpoch === null || state.completionEpoch === expectedCompletionEpoch;
-  if (matchesExpectedRun && (state.status === "completed" || state.status === "failed")) {
+  if (matchesExpectedRun && ["completed", "failed", "paused"].includes(state.status)) {
     setState({
       status: "idle",
       progress: null,
@@ -110,18 +194,22 @@ export function startGenerationTask(input) {
   }
 
   activeController = new AbortController();
+  clearTimeout(resumeTimer);
   setState({
     status: "running",
     appearanceName: input.appearanceName?.trim() || "未命名形象",
     appearanceId: "",
     error: "",
+    resumable: false,
+    recoveryLabel: "",
+    automatic: input.manualReview !== true,
     startedAt: Date.now(),
     progress: {
-      stage: "thinking",
+      stage: "validating",
       completed: 0,
       total: CUSTOM_GENERATION_FAMILIES.length,
       families: Object.fromEntries(CUSTOM_GENERATION_FAMILIES.map((f) => [f.family, { status: "pending" }])),
-      message: "正在分析图片并生成 prompt…",
+      message: "正在检查模型配置…",
     },
   });
 
@@ -163,6 +251,8 @@ export function normalizeGenerationErrorMessage(error) {
   if (raw.startsWith("生成失败：所有动作都没有生成成功。")) {
     return truncateMessage(raw, 1200);
   }
+  const imageEditRejection = getArkImageEditPolicyRejection(raw);
+  if (imageEditRejection) return imageEditRejection.message;
   const imageRejection = getVolcanoInputImageRejection(raw);
   if (imageRejection) return imageRejection.message;
   const primary = extractPrimaryError(raw);
@@ -263,8 +353,19 @@ async function runTask(input) {
   // the appearance record on the first successful family, then append each
   // subsequent one. Keeps earlier successes safe even if the run is aborted
   // or the final family stalls in the provider's queue.
-  let savedId = "";
-  const onFamilyDone = async ({ persona, manifest, imagePayload, family }) => {
+  const session = input.session || {
+    id: crypto.randomUUID(), config: publicGenerationConfig(providerConfig), imageFile,
+    appearanceName, personality, styleDescription: input.styleDescription || '', skipProcessing, actions: {}, createdAt: Date.now(),
+    distinctStartFrames: !skipProcessing && providerConfig.provider==='volcengine',
+    ...(input.referencePreview?.bytes?.byteLength && !skipProcessing ? {reference:input.referencePreview} : {}),
+    automatic: input.manualReview !== true,
+  };
+  session.dismissed = false;
+  session.pausedByUser = false;
+  if (input.session && !input.restoreArchived) await saveGenerationSession(session);
+  else await beginGenerationSession(session);
+  let savedId = session.appearanceId || "";
+  const onFamilyDone = async ({ persona, manifest, imagePayload, originalImagePayload, family }) => {
     if (!savedId) {
       const initialFamilies = manifest.entries.map((entry) =>
         entry.family === family.family
@@ -279,6 +380,7 @@ async function runTask(input) {
           : { family: entry.family, ok: false, prompt: entry.prompt, error: "pending" },
       );
       const saved = await saveAppearance({
+        appearanceId: session.id,
         appearanceName,
         personality,
         provider: providerConfig.provider,
@@ -287,9 +389,13 @@ async function runTask(input) {
         thinkingModel: resolveThinkingModelName(providerConfig),
         persona,
         imagePayload,
+        originalImagePayload,
         families: initialFamilies,
+        deferPreparation: true,
       });
       savedId = saved.id;
+      session.appearanceId = savedId;
+      await saveGenerationSession(session);
       setState({ appearanceId: savedId });
     } else {
       await replaceFamilyVideo({
@@ -299,12 +405,24 @@ async function runTask(input) {
         taskId: family.taskId,
         videoUrl: family.videoUrl,
         prompt: family.prompt,
+        deferPreparation: true,
       });
     }
   };
 
   try {
+    if(['converting','conversion_failed'].includes(session.phase)&&savedId){
+      setState({progress:{...summarizeGenerationSession(session),stage:'saving',message:'复用已保存动画，正在准备设备格式…'}});
+      await prepareSavedAppearance(savedId);
+      session.phase=session.allVideosReady?'completed':'partial';session.finished=!!session.allVideosReady;
+      await saveGenerationSession(session);
+      setState({status:'completed',resumable:!session.finished,appearanceId:savedId,
+        progress:{...summarizeGenerationSession(session),stage:'completed',message:session.finished?'整套动画和设备格式已准备完成。':'已生成部分和设备格式已保存，可继续恢复剩余动作。'},
+        completionEpoch:state.completionEpoch+1});return;
+    }
     const result = await runAvatarPipeline({
+      styleDescription:session.styleDescription || '',
+      distinctStartFrames:session.distinctStartFrames === true,
       imageFile,
       appearanceName,
       personality,
@@ -313,6 +431,15 @@ async function runTask(input) {
       signal: activeController.signal,
       onProgress: (p) => setState({ progress: p }),
       onFamilyDone,
+      session,
+      checkpoint: saveGenerationSession,
+      automatic: session.automatic,
+      retryReview: input.retryReview === true,
+      confirmReference: session.automatic ? undefined : (reference) => awaitPreview("reference", reference.bytes, reference.mime,
+        skipProcessing ? "当前直接使用原图，请确认主体、背景和杂物均符合预期。确认后生成提示词和一段试片。"
+          : "请确认原人物或角色全身和随身物件完整，主体自身的手脚保留，无关背景、旁人和杂物已移除，背景为纯黑色。不符合时请取消，不继续生成视频。", activeController.signal),
+      confirmTrial: session.automatic ? undefined : (family, remaining) => awaitPreview("trial", family.videoBytes, "video/mp4",
+        `请检查角色、动作和首尾衔接。确认后才继续生成剩余 ${remaining} 段（会产生费用）。`, activeController.signal),
     });
     const successes = result.families.filter((f) => f.ok).length;
     if (successes === 0) {
@@ -331,17 +458,43 @@ async function runTask(input) {
         persona: result.persona,
         imagePayload: result.imagePayload,
         families: result.families,
+        deferPreparation: true,
       });
       savedId = saved.id;
     }
+    session.allVideosReady = result.families.every(f => f.ok);
+    session.phase='converting';await saveGenerationSession(session);
+    setState({progress:{...state.progress,stage:'saving',message:'动画已保存，正在准备设备格式…'}});
+    await prepareSavedAppearance(savedId);
+    session.finished = session.allVideosReady;
+    session.phase = session.finished ? "completed" : "partial";
+    if(Object.values(session.actions).some(a=>a.deferred))session.phase='waiting_network';
+    await saveGenerationSession(session);
     setState({
-      status: "completed",
+      status: session.phase==='waiting_network' ? "paused" : "completed",
+      recoveryLabel: session.phase==='waiting_network' ? '等待网络恢复' : '',
+      progress: {...summarizeGenerationSession(session),stage:session.phase==='waiting_network'?'waiting_network':'completed',
+        message:session.finished?'整套动画和设备格式已准备完成。':session.phase==='waiting_network'?'已有动画和设备格式已保存，等待网络恢复后继续。':'已生成部分和设备格式已保存，可继续恢复剩余动作。'},
+      resumable: !session.finished,
       appearanceId: savedId,
       completionEpoch: state.completionEpoch + 1,
     });
+    scheduleResume(session);
   } catch (err) {
-    const isAbort =
-      err?.name === "AbortError" || /aborted/i.test(String(err?.message || ""));
+    const isAbort = err?.name === "AbortError" || /aborted/i.test(String(err?.message || ""));
+    session.pausedByUser=isAbort;
+    const deferred=Object.values(session.actions||{}).some(a=>a.deferred);
+    if (!isAbort) session.phase = session.phase==='converting' ? 'conversion_failed' : deferred ? 'waiting_network' : "failed";
+    const protectedWork = generationSessionNeedsProtection(session);
+    if (err?.code === 'PROMPT_OUTPUT_INVALID') err.message += ' 点击恢复可单独重新生成提示词（会产生费用），不重复处理参考图。';
+    if (!protectedWork) {
+      session.dismissed = true;
+      session.terminalFailure = true;
+    }
+    await saveGenerationSession(session);
+    scheduleResume(session);
+    setState({ resumable: protectedWork, progress: { ...state.progress,
+      ...summarizeGenerationSession(session), message: err?.message || '生成暂停，已有成果保留' } });
     if (isAbort && savedId) {
       // Partial run that the user cancelled — surface what was persisted.
       setState({
@@ -353,13 +506,17 @@ async function runTask(input) {
     }
     if (isAbort) {
       // Cancelled before anything saved — just go back to idle.
-      setState({ status: "idle", progress: null });
+      setState({ status: "failed", progress: null, error: protectedWork
+        ? "生成已停止，已提交任务进度已保留，可恢复。"
+        : "生成已停止，尚未提交视频任务，可以直接新建。" });
       return;
     }
+    if(deferred){setState({status:'paused',recoveryLabel:'等待网络恢复',error:'',appearanceId:savedId,progress:{...state.progress,message:'暂时无法取得云端结果，稍后自动继续查询；不会重新提交已知任务。'}});return;}
     if (savedId) {
       // Pipeline failed late but earlier families landed: surface them.
       setState({
-        status: "completed",
+        status: "failed",
+        error: normalizeGenerationErrorMessage(err?.message || String(err)),
         appearanceId: savedId,
         completionEpoch: state.completionEpoch + 1,
       });

@@ -15,10 +15,11 @@ def test_global_realtime_remapping_wins_over_components(tmp_path):
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include "pet_p4_slice_core.h"
 #define PET_P4_MINIAPP_ACTION_MAX 64
 #define ESP_OK 0
 typedef struct {char event[64],action[64],value[64];} pet_p4_input_binding_t;
-typedef struct {char screen_page[24];bool session_voice_active;int session_queue_count;uint64_t last_update_ms;} pet_p4_runtime_state_t;
+typedef struct {char screen_page[24];bool session_voice_active;int session_queue_count;uint64_t last_update_ms;pet_p4_slice_t touch_test;uint64_t touch_test_until_ms;} pet_p4_runtime_state_t;
 typedef struct {uint64_t ts_ms;} pet_p4_input_event_t;
 typedef void (*pet_p4_send_line_fn)(const char*,void*);
 static pet_p4_input_binding_t configured;
@@ -57,9 +58,21 @@ int main(void){
   copy_text(configured.action,sizeof(configured.action),"realtime_chat");copy_text(state.screen_page,sizeof(state.screen_page),"components");
   assert(active_global_priority_binding(&state,configured.event)==&configured);
   assert(!active_global_priority_binding(NULL,configured.event));
+  copy_text(state.screen_page,sizeof(state.screen_page),"touch_test");
+  dispatch_binding_event(&state,NULL,NULL,&event,configured.event,"long_press");
+  assert(!strcmp(state.screen_page,"main")&&!strcmp(emitted_action,"realtime_chat"));
+  copy_text(state.screen_page,sizeof(state.screen_page),"touch_test");
+  copy_text(configured.event,sizeof(configured.event),"button.sw1.short_press");
+  copy_text(configured.action,sizeof(configured.action),"page_back");
+  dispatch_binding_event(&state,NULL,NULL,&event,configured.event,"short_press");
+  assert(!strcmp(state.screen_page,"main")&&!strcmp(emitted_action,"page_back"));
+  copy_text(state.screen_page,sizeof(state.screen_page),"touch_test");
+  copy_text(configured.action,sizeof(configured.action),"disabled");
+  dispatch_binding_event(&state,NULL,NULL,&event,configured.event,"short_press");
+  assert(state.touch_test.running && state.touch_test_until_ms==120000);
 }
 '''
     harness = tmp_path / "input.c"; harness.write_text(code)
     exe = tmp_path / "input"
-    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(harness), "-o", str(exe)], check=True)
+    subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT/'main'), str(ROOT/'main/pet_p4_slice_core.c'), str(harness), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

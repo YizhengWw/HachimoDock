@@ -47,7 +47,7 @@ test("USB widget OTA treats missing commit ack as an install failure", () => {
 test("widget commit and delete keep ACK waiters through slow P4 flash sync", () => {
   assert.match(
     usbSerialSource,
-    /const WIDGET_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs\(15\);/,
+    /const WIDGET_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs\(45\);/,
   );
   assert.match(
     usbSerialSource,
@@ -59,7 +59,7 @@ test("USB widget OTA checksum-verifies and retries every file chunk", () => {
   assert.match(usbSerialSource, /const WIDGET_CHUNK_MAX_ATTEMPTS: usize = 3/);
   assert.match(
     usbSerialSource,
-    /register_widget_ack_waiter\(&transfer_id, "chunk", Some\(rel\), Some\(0\)\)/,
+    /register_widget_ack_waiter\(&transfer_id, "chunk", Some\(rel\), Some\(chunk_index\)\)/,
   );
   assert.match(usbSerialSource, /chunk_rx\.recv_timeout\(WIDGET_CHUNK_ACK_TIMEOUT\)/);
   assert.match(usbSerialSource, /"decodedSize": decoded_size/);

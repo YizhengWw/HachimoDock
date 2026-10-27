@@ -1,13 +1,15 @@
 {
   "dashboard": {
     "title": "像素飞鸟",
-    "headline": "SW1 拍翅开始",
+    "headline": "准备好了吗",
     "metricLabel": "得分",
     "metricValue": "0",
     "footer": "SW1 拍翅 · 全局键退出",
-    "visualStyle": "pixel",
-    "visualPalette": "arcade",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "arcade",
-    "visualSprite": "flappy"
+    "visualSprite": "flappy",
+    "metricUnit": "拍翅开始",
+    "badge": "0"
   }
 }

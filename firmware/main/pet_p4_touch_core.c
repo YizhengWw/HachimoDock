@@ -6,6 +6,24 @@
 #define PET_P4_PANEL_WIDTH 480
 #define PET_P4_PANEL_HEIGHT 640
 
+bool pet_p4_ft6336_decode(const uint8_t *raw, size_t len, pet_p4_ft6336_frame_t *out) {
+  if (!raw || !out || len < 13) return false;
+  memset(out, 0, sizeof(*out));
+  unsigned count = raw[0] & 15;
+  if (count > 2) return false;
+  for (unsigned i = 0; i < count; i++) {
+    const uint8_t *p = raw + 1 + i * 6;
+    unsigned event = p[0] >> 6;
+    if (event == 1) continue;
+    if (event == 3) return false;
+    int x = ((p[0] & 15) << 8) | p[1], y = ((p[2] & 15) << 8) | p[3];
+    if (x >= PET_P4_PANEL_WIDTH || y >= PET_P4_PANEL_HEIGHT) return false;
+    out->count++;
+    out->x = x; out->y = y; out->track_id = p[2] >> 4;
+  }
+  return true;
+}
+
 static int clamp_int(int value, int min_value, int max_value) {
   if (value < min_value) return min_value;
   if (value > max_value) return max_value;
@@ -54,12 +72,15 @@ bool pet_p4_touch_decoder_update(
     if (!decoder->down) {
       decoder->down = true;
       decoder->long_press_emitted = false;
+      decoder->moved = false;
       decoder->start_x = x;
       decoder->start_y = y;
       decoder->start_ms = now_ms;
       return false;
     }
-    if (!decoder->long_press_emitted && now_ms - decoder->start_ms >= decoder->long_press_ms) {
+    if (abs(x - decoder->start_x) > 12 || abs(y - decoder->start_y) > 12) decoder->moved = true;
+    if (!decoder->moved && !decoder->long_press_emitted
+        && now_ms >= decoder->start_ms && now_ms - decoder->start_ms >= decoder->long_press_ms) {
       decoder->long_press_emitted = true;
       fill_event(decoder, event, PET_P4_TOUCH_LONG_PRESS, now_ms);
       return true;
@@ -76,11 +97,12 @@ bool pet_p4_touch_decoder_update(
   int abs_x = abs(dx);
   int abs_y = abs(dy);
   pet_p4_touch_gesture_t gesture = PET_P4_TOUCH_TAP;
-  if (abs_x >= decoder->swipe_threshold && abs_x > abs_y) {
+  if (abs_x >= decoder->swipe_threshold && abs_x >= abs_y) {
     gesture = dx > 0 ? PET_P4_TOUCH_SWIPE_RIGHT : PET_P4_TOUCH_SWIPE_LEFT;
   } else if (abs_y >= decoder->swipe_threshold && abs_y > abs_x) {
     gesture = dy > 0 ? PET_P4_TOUCH_SWIPE_DOWN : PET_P4_TOUCH_SWIPE_UP;
   }
+  if (gesture == PET_P4_TOUCH_TAP && decoder->moved) return false;
   fill_event(decoder, event, gesture, now_ms);
   return true;
 }
@@ -102,4 +124,35 @@ const char *pet_p4_touch_gesture_name(pet_p4_touch_gesture_t gesture) {
     case PET_P4_TOUCH_SWIPE_DOWN: return "swipe_down";
     default: return "";
   }
+}
+
+void pet_p4_touch_cst826_to_ui(int panel_x, int panel_y, int *ui_x, int *ui_y) {
+  int x, y;
+  pet_p4_touch_panel_to_ui(panel_x, panel_y, &x, &y);
+  if (ui_x) *ui_x = 639 - x;
+  if (ui_y) *ui_y = 479 - y;
+}
+
+bool pet_p4_pointer_update(pet_p4_pointer_decoder_t *d, bool valid,
+  bool pressed, int x, int y, uint64_t now_ms, pet_p4_pointer_event_t *e) {
+  if (!d || !e) return false;
+  if (!valid || now_ms < d->last_ms || (d->down && now_ms - d->last_ms > 150)) {
+    bool down = d->down;
+    *e = (pet_p4_pointer_event_t){PET_P4_POINTER_CANCEL, d->x, d->y, now_ms};
+    *d = (pet_p4_pointer_decoder_t){.last_ms = now_ms};
+    return down;
+  }
+  x = clamp_int(x, 0, 639); y = clamp_int(y, 0, 479);
+  d->last_ms = now_ms;
+  if (!pressed) {
+    if (!d->down) return false;
+    d->down = false;
+    *e = (pet_p4_pointer_event_t){PET_P4_POINTER_UP, d->x, d->y, now_ms};
+    return true;
+  }
+  *e = (pet_p4_pointer_event_t){d->down ? PET_P4_POINTER_MOVE : PET_P4_POINTER_DOWN, x, y, now_ms};
+  d->down = true; d->x = x; d->y = y;
+  /* Stationary samples are heartbeats too: distinguish a held finger from a
+   * stalled controller without synthesizing motion or a cut. */
+  return true;
 }

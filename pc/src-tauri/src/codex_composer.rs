@@ -7,9 +7,32 @@
 
 use serde_json::{json, Value};
 
+#[cfg(any(windows, target_os = "macos"))]
+fn task_submission_mode(reply: &Value) -> Result<String, String> {
+    match reply["submission"].as_str() {
+        Some(mode @ ("send" | "queue" | "steer" | "enter")) => Ok(mode.into()),
+        _ => Err("Codex 提交方式未确认，不会自动重试".into()),
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[path = "codex_composer_macos.rs"]
 mod macos;
+
+pub fn diagnose_current_composer(agent_id: &str) -> Result<Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let agent = match agent_id {
+            "codex" => macos::MacosAgent::Codex,
+            "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
+            _ => return Err("此 Agent 不支持 macOS 输入框定位检查".into()),
+        };
+        macos::diagnose_current_composer(agent)
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = agent_id; Err("此定位检查目前仅用于 macOS".into()) }
+}
 
 #[cfg(target_os = "macos")]
 #[derive(Clone)]
@@ -490,6 +513,57 @@ pub struct CodexComposerBridge {
 
 #[cfg(any(windows, target_os = "macos"))]
 impl CodexComposerBridge {
+    pub fn start_current_task() -> Result<Self, String> {
+        Self::start_current_task_for("codex")
+    }
+    pub fn start_current_task_for(agent_id: &str) -> Result<Self, String> {
+        if !matches!(agent_id,"codex"|"workbuddy") {return Err("Unsupported desktop task adapter".into());}
+        #[cfg(target_os = "macos")]
+        let agent = if agent_id=="workbuddy" {macos::MacosAgent::WorkBuddy} else {macos::MacosAgent::Codex};
+        #[cfg(windows)]
+        let agent = agent_id;
+        Self::start_with_purpose(agent, "", "", "", "", "current_task", |_| {})
+    }
+
+    /// Legacy empty-draft dispatch. Both desktop adapters use the
+    /// snapshot-aware path below. A lost acknowledgement never triggers a resend.
+    pub fn dispatch_task(&self, text: &str) -> Result<String, String> {
+        self.dispatch_task_command(json!({"kind":"dispatch", "text":text}))
+    }
+
+    pub fn inspect_task_draft(&self) -> Result<Value, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.sender.send(ComposerCommand {
+            payload: json!({"kind":"inspect_task_draft"}), started: None, response: Some(tx),
+        }).map_err(|_| "Codex 输入桥已关闭".to_string())?;
+        let reply = rx.recv_timeout(std::time::Duration::from_secs(10))
+            .map_err(|_| "Codex 草稿检查超时，未发送".to_string())??;
+        let snapshot = &reply["snapshot"];
+        if !snapshot["target"].is_object() || !snapshot["text"].is_string() {
+            return Err("Codex 草稿检查未确认，未发送".into());
+        }
+        Ok(snapshot.clone())
+    }
+
+    pub fn dispatch_task_from_draft(&self, text: &str, snapshot: &Value) -> Result<String, String> {
+        self.dispatch_task_command(json!({"kind":"dispatch", "text":text, "draftSnapshot":snapshot}))
+    }
+
+    fn dispatch_task_command(&self, payload: Value) -> Result<String, String> {
+        use std::sync::atomic::Ordering;
+        if self.failed.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
+            return Err("Codex 输入桥不可用".into());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.sender.send(ComposerCommand {
+            payload,
+            started: None, response: Some(tx),
+        }).map_err(|_| "Codex 输入桥已关闭".to_string())?;
+        let reply = rx.recv_timeout(std::time::Duration::from_secs(15))
+            .map_err(|_| "Codex 发送结果未确认，不会自动重试".to_string())??;
+        task_submission_mode(&reply)
+    }
+
     /// Success means the editor acknowledged this exact final revision, not just
     /// that it entered the worker queue. No automatic submission or retry.
     pub fn update_confirmed(&self, revision: u64, text: &str) -> Result<(), String> {
@@ -699,7 +773,7 @@ impl CodexComposerBridge {
         if !matches!(agent, "codex" | "claude" | "workbuddy") {
             return Err("visible composer agent is invalid".to_string());
         }
-        let current_visible = purpose == "current_voice";
+        let current_visible = matches!(purpose, "current_voice" | "current_task");
         if agent == "workbuddy" && !current_visible {
             return Err("WorkBuddy 仅向当前可见对话输入，不回退到其他 Agent".into());
         }
@@ -712,7 +786,7 @@ impl CodexComposerBridge {
         if !current_visible && session_title.is_empty() {
             return Err("visible composer requires a non-empty bound session title".to_string());
         }
-        if !matches!(purpose, "voice" | "locate" | "current_voice") {
+        if !matches!(purpose, "voice" | "locate" | "current_voice" | "current_task") {
             return Err("Visible Agent composer purpose is invalid".to_string());
         }
 
@@ -997,6 +1071,21 @@ public static class CodexVoiceNative {
       throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not position the ChatGPT (Codex) session click");
     }
     Send(new List<INPUT> { Mouse(MOUSEEVENTF_LEFTDOWN), Mouse(MOUSEEVENTF_LEFTUP) });
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  private struct ScreenPoint { public int X; public int Y; }
+
+  [DllImport("user32.dll")]
+  private static extern IntPtr WindowFromPoint(ScreenPoint point);
+
+  public static void ClickSubmit(IntPtr window, int x, int y) {
+    // Fail before any mouse input if another window covers the validated button.
+    var point = new ScreenPoint { X = x, Y = y };
+    if (GetForegroundWindow() != window || !IsOwnedWindow(window, WindowFromPoint(point))) {
+      throw new InvalidOperationException("DESKTOP_TASK_TARGET_CHANGED");
+    }
+    Click(x, y);
   }
 }
 // WorkBuddy (Electron 37) exposes its web content only through Chromium's
@@ -2796,7 +2885,37 @@ function Assert-WorkBuddyComposerCurrent($state) {
   }
 }
 
-function Assert-TargetCurrent($state, [bool]$checkSession) {
+function Get-TaskWindowIdentity($root, [string]$agent = 'codex') {
+  $rect = $root.Current.BoundingRectangle
+  $labels = @([string]$root.Current.Name)
+  $all = if ($agent -eq 'workbuddy') {
+    @([WorkBuddyUia]::FindBounded([IntPtr]$root.Current.NativeWindowHandle, $false, 1000, 1200) | Where-Object { $_.Current.ControlType.Id -eq 50020 })
+  } else { Find-DescendantsByControlTypes $root @([System.Windows.Automation.ControlType]::Text) }
+  foreach ($element in $all) {
+    $r = $element.Current.BoundingRectangle
+    if (-not $element.Current.IsOffscreen -and (Test-FiniteWindowRectangle $r) -and
+        $r.Top -ge $rect.Top -and $r.Bottom -le ($rect.Top + 100) -and
+        $r.Left -ge ($rect.Left + [Math]::Min(280, $rect.Width * 0.25))) {
+      $labels += [string]$element.Current.Name
+    }
+  }
+  return ($labels -join [char]31)
+}
+
+function Get-CurrentTaskTarget([string[]]$allowedValues, [string]$agent = 'codex') {
+  if ($agent -eq 'workbuddy') { return Get-WorkBuddyTarget $allowedValues }
+  $windows = @(Get-CodexWindows)
+  if ($windows.Count -ne 1) { throw 'Please open the target Codex conversation in one main window; nothing was sent' }
+  $root = Ensure-CodexForeground $windows[0].Root 'for current task'
+  $composer = Find-Composer $root $allowedValues
+  return [pscustomobject]@{
+    Root = $root; RootHandle = [int64]$root.Current.NativeWindowHandle
+    WindowHandle = [int64]$root.Current.NativeWindowHandle
+    ProcessId = [int]$root.Current.ProcessId; Composer = $composer
+  }
+}
+
+function Assert-TargetCurrent($state, [bool]$checkSession, [bool]$checkDraft = $true) {
   [void](Get-Process -Id $state.ProcessId -ErrorAction Stop)
   if (-not [CodexVoiceNative]::IsWindow([IntPtr]$state.WindowHandle) -or
       $state.Root.Current.NativeWindowHandle -ne $state.RootHandle) {
@@ -2804,15 +2923,20 @@ function Assert-TargetCurrent($state, [bool]$checkSession) {
   }
   if ($state.CurrentVisible -and $state.Agent -eq 'workbuddy') {
     Assert-WorkBuddyComposerCurrent $state
+    if ($state.CurrentTask -and (Get-TaskWindowIdentity $state.Root $state.Agent) -cne $state.TaskIdentity) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
   } elseif ($state.CurrentVisible) {
     if ($checkSession) {
-      $current = Get-CurrentVisibleTarget $state.Agent @($state.LastValue)
+      $allowedValues = if ($checkDraft) { @($state.LastValue) } else { @('', $state.LastValue) }
+      $current = if ($state.CurrentTask) { Get-CurrentTaskTarget $allowedValues } else { Get-CurrentVisibleTarget $state.Agent $allowedValues }
       $runtimeId = Get-ElementRuntimeId $current.Composer.Element
       if ($current.ProcessId -ne $state.ProcessId -or
           $current.WindowHandle -ne $state.WindowHandle -or
           $current.RootHandle -ne $state.RootHandle -or
           -not $runtimeId -or $runtimeId -ne $state.ComposerRuntimeId) {
         throw 'The visible Agent session or composer changed during voice input'
+      }
+      if ($state.CurrentTask -and (Get-TaskWindowIdentity $current.Root) -cne $state.TaskIdentity) {
+        throw 'DESKTOP_TASK_TARGET_CHANGED'
       }
     }
   } else {
@@ -2828,7 +2952,7 @@ function Assert-TargetCurrent($state, [bool]$checkSession) {
   }
   $currentInfo = Get-ComposerText $state.Composer
   $currentValue = [string]$currentInfo[1]
-  if ($currentValue -cne $state.LastValue) {
+  if ($checkDraft -and $currentValue -cne $state.LastValue) {
     throw 'Visible composer was edited outside voice input; voice updates were cancelled'
   }
   $state.Pattern = $currentInfo[0]
@@ -2895,8 +3019,8 @@ function Wait-ComposerText($state, [string]$expectedText, [int]$timeoutMs) {
   return $false
 }
 
-function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck) {
-  $normalizedText = Join-VoiceDraft $state.BaseValue $text
+function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck, [bool]$exactText = $false) {
+  $normalizedText = if ($exactText) { Normalize-ComposerText $text } else { Join-VoiceDraft $state.BaseValue $text }
   if ($normalizedText -ceq $state.LastValue) {
     Assert-TargetCurrent $state $forceSessionCheck
     return
@@ -2974,7 +3098,83 @@ function Get-ComposerSubmitLabelScore([string]$value) {
   return -1
 }
 
-function Invoke-SendButton($state) {
+function Get-TaskDraftSnapshot($state) {
+  if ($null -eq $state -or -not $state.CurrentTask -or @('codex','workbuddy') -notcontains $state.Agent) {
+    throw 'DESKTOP_TASK_TARGET_CHANGED'
+  }
+  # Edits made between voice requests are intentional. Pin the current value
+  # now; changes during this write transaction must still fail closed.
+  Assert-TargetCurrent $state $true
+  return @{
+    target = @{
+      agent = $state.Agent
+      processId = $state.ProcessId; windowHandle = $state.WindowHandle
+      rootHandle = $state.RootHandle; composerId = $state.ComposerRuntimeId
+      taskIdentity = $state.TaskIdentity
+    }
+    text = [string](Get-ComposerText $state.Composer)[1]
+  }
+}
+
+function Assert-TaskDraftSnapshot($state, $expected) {
+  $current = Get-TaskDraftSnapshot $state
+  foreach ($key in @('agent','processId','windowHandle','rootHandle','composerId','taskIdentity')) {
+    if ($null -eq $expected.target.$key -or
+        [string]$current.target.$key -cne [string]$expected.target.$key) {
+      throw 'DESKTOP_TASK_TARGET_CHANGED'
+    }
+  }
+  if ([string]$current.text -cne [string]$expected.text) { throw 'DESKTOP_TASK_READBACK_CHANGED' }
+}
+
+function Test-CodexSubmitPoint($state, $button, [int]$x, [int]$y) {
+  $buttonId = Get-ElementRuntimeId $button
+  $rootId = Get-ElementRuntimeId $state.Root
+  if (-not $buttonId -or -not $rootId) { return $false }
+  $element = [System.Windows.Automation.AutomationElement]::FromPoint(
+    [System.Windows.Point]::new($x, $y)
+  )
+  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $found = $false
+  for ($depth = 0; $null -ne $element -and $depth -lt 32; $depth += 1) {
+    $id = Get-ElementRuntimeId $element
+    if ($id -eq $buttonId) { $found = $true }
+    if ($id -eq $rootId) { return $found }
+    $element = $walker.GetParent($element)
+  }
+  return $false
+}
+
+function Invoke-CodexTaskSubmit($state, $candidate) {
+  # InvokePattern can acknowledge a Chromium control without submitting its
+  # composer. Use one hit-tested native click instead, never Invoke then retry.
+  Assert-TargetCurrent $state $true
+  $button = $candidate.Element
+  $rect = $button.Current.BoundingRectangle
+  $rootRect = $state.Root.Current.BoundingRectangle
+  $composerRect = $state.Composer.Current.BoundingRectangle
+  if (-not $button.Current.IsEnabled -or $button.Current.IsOffscreen -or
+      $button.Current.ControlType.Id -ne [System.Windows.Automation.ControlType]::Button.Id -or
+      [string]$button.Current.Name -cne $candidate.Label -or
+      -not (Test-FiniteWindowRectangle $rect) -or
+      -not (Test-FiniteWindowRectangle $rootRect) -or
+      -not (Test-FiniteWindowRectangle $composerRect) -or
+      $rect.Left -lt $rootRect.Left -or $rect.Right -gt $rootRect.Right -or
+      $rect.Top -lt $rootRect.Top -or $rect.Bottom -gt $rootRect.Bottom -or
+      $rect.Bottom -lt ($composerRect.Top - 12) -or $rect.Top -gt ($composerRect.Bottom + 80) -or
+      $rect.Right -lt ($composerRect.Left - 12) -or $rect.Left -gt ($composerRect.Right + 120)) {
+    throw 'DESKTOP_TASK_SEND_UNAVAILABLE'
+  }
+  $x = [int][Math]::Floor($rect.Left + $rect.Width / 2)
+  $y = [int][Math]::Floor($rect.Top + $rect.Height / 2)
+  if (-not (Test-CodexSubmitPoint $state $button $x $y)) { throw 'DESKTOP_TASK_SEND_UNAVAILABLE' }
+  if (-not [CodexVoiceNative]::IsForeground([IntPtr]$state.WindowHandle)) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  if ([string](Get-ComposerText $state.Composer)[1] -cne $state.LastValue) { throw 'DESKTOP_TASK_READBACK_CHANGED' }
+  [CodexVoiceNative]::ClickSubmit([IntPtr]$state.WindowHandle, $x, $y)
+}
+
+function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButton = $false) {
+  $nativeTaskClick = $strictButton -and $state.CurrentTask -and $state.Agent -eq 'codex'
   $composerRect = $state.Composer.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $composerRect)) {
     throw 'Visible composer geometry is unavailable for submission'
@@ -2998,14 +3198,22 @@ function Invoke-SendButton($state) {
     if (-not (Test-FiniteWindowRectangle $rect)) { continue }
     if ($rect.Bottom -lt ($composerRect.Top - 12) -or $rect.Top -gt ($composerRect.Bottom + 80)) { continue }
     if ($rect.Right -lt ($composerRect.Left - 12) -or $rect.Left -gt ($composerRect.Right + 120)) { continue }
+    if (-not $allowQueue -and $labelScore -eq 1) {
+      throw 'DESKTOP_TASK_TARGET_BUSY'
+    }
     $invoke = $null
-    if (-not $element.TryGetCurrentPattern(
+    if (-not $nativeTaskClick -and -not $element.TryGetCurrentPattern(
         [System.Windows.Automation.InvokePattern]::Pattern,
         [ref]$invoke
     )) { continue }
     $buttons += [pscustomobject]@{
+      Element = $element
+      Label = [string]$element.Current.Name
       Pattern = $invoke
       Score = [int]$labelScore
+      Submission = if ($labelScore -eq 1) {
+        if (@('steer', '引导') -contains (Normalize-Label ([string]$element.Current.Name)).ToLowerInvariant()) { 'steer' } else { 'queue' }
+      } else { 'send' }
       Left = [double]$rect.Left
     }
   }
@@ -3014,12 +3222,18 @@ function Invoke-SendButton($state) {
     @{ Expression = 'Left'; Descending = $true })
   if ($buttons.Count -eq 1 -or
       ($buttons.Count -gt 1 -and $buttons[0].Score -lt $buttons[1].Score)) {
-    $buttons[0].Pattern.Invoke()
-    return
+    if ($nativeTaskClick) {
+      Invoke-CodexTaskSubmit $state $buttons[0]
+    } else {
+      $buttons[0].Pattern.Invoke()
+    }
+    return $buttons[0].Submission
   }
   if ($buttons.Count -gt 1) {
     throw "Expected one enabled send button near the composer; found $($buttons.Count)"
   }
+
+  if ($strictButton -or -not $allowQueue) { throw 'DESKTOP_TASK_SEND_UNAVAILABLE' }
 
   Focus-Composer $state
   [CodexVoiceNative]::PressEnter()
@@ -3046,7 +3260,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $title = Normalize-Label ([string]$command.sessionTitle)
         $purpose = Normalize-Label ([string]$command.purpose)
         $workspaceLabel = Normalize-Label ([string]$command.workspaceLabel)
-        $currentVisible = $purpose -eq 'current_voice'
+        $currentVisible = $purpose -eq 'current_voice' -or $purpose -eq 'current_task'
         $locatedCodexRoot = $null
         if (-not $currentVisible) {
           if ($agent -eq 'claude') {
@@ -3063,7 +3277,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
           Write-ComposerReply @{ ok = $true; phase = 'located'; mode = 'visible' }
           break
         }
-        $target = if ($currentVisible) {
+        $target = if ($purpose -eq 'current_task') {
+          Get-CurrentTaskTarget $null $agent
+        } elseif ($currentVisible) {
           Get-CurrentVisibleTarget $agent $null
         } elseif ($agent -eq 'claude') {
           Get-ClaudeTarget $sessionId $desktopSessionId $title $null
@@ -3091,6 +3307,8 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
           DesktopSessionId = $desktopSessionId
           SessionTitle = $title
           CurrentVisible = $currentVisible
+          CurrentTask = $purpose -eq 'current_task'
+          TaskIdentity = if ($purpose -eq 'current_task') { Get-TaskWindowIdentity $root $agent } else { '' }
           Composer = $composer.Element
           ComposerRuntimeId = $composerRuntimeId
           Pattern = $composer.Pattern
@@ -3109,8 +3327,39 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
       'confirm' {
         if ($null -eq $state) { throw 'Visible composer is not ready' }
         Assert-ComposerHasText $state
-        Invoke-SendButton $state
+        $null = Invoke-SendButton $state
         Write-ComposerReply @{ ok = $true; phase = 'submitted'; revision = $command.revision; mode = 'visible' }
+        break
+      }
+      'inspect_task_draft' {
+        $snapshot = Get-TaskDraftSnapshot $state
+        Write-ComposerReply @{ ok = $true; phase = 'inspected'; snapshot = $snapshot }
+        break
+      }
+      'dispatch' {
+        if ($null -eq $state -or @('codex','workbuddy') -notcontains $state.Agent) { throw 'Desktop composer is not ready' }
+        Assert-TargetCurrent $state $true
+        if ($null -ne $command.draftSnapshot) {
+          Assert-TaskDraftSnapshot $state $command.draftSnapshot
+          # The coordinator supplies the complete current draft plus the new
+          # request. Do not prepend BaseValue a second time in Join-VoiceDraft.
+          $state.BaseValue = ''
+        } elseif (-not [string]::IsNullOrEmpty($state.BaseValue) -or
+            -not [string]::IsNullOrEmpty([string](Get-ComposerText $state.Composer)[1])) {
+          throw 'DESKTOP_TASK_DRAFT_NOT_EMPTY'
+        }
+        Set-ComposerText $state ([string]$command.text) $true ($null -ne $command.draftSnapshot)
+        Assert-TargetCurrent $state $true
+        if ([string](Get-ComposerText $state.Composer)[1] -cne [string]$command.text) {
+          throw 'DESKTOP_TASK_READBACK_CHANGED'
+        }
+        Assert-ComposerHasText $state
+        $submission = Invoke-SendButton $state $true $true
+        # Like macOS, report the native button attempt, not task acceptance.
+        # Queue/Steer can replace the editor immediately. Do not lose the queue
+        # mode or repeat the click because of a post-submit UI redraw; the
+        # coordinator requires a fresh matching user receipt from the event bus.
+        Write-ComposerReply @{ ok = $true; phase = 'submitted'; mode = 'visible'; submission = $submission }
         break
       }
       'release' {
@@ -3559,11 +3808,11 @@ impl CodexComposerBridge {
 
         let session_id = session_id.trim();
         let session_title = session_title.trim();
-        let current_visible = purpose == "current_voice";
+        let current_visible = matches!(purpose, "current_voice" | "current_task");
         if !current_visible && session_id.is_empty() && session_title.is_empty() {
             return Err("Visible composer requires a bound task ID or title".to_string());
         }
-        if !matches!(purpose, "voice" | "locate" | "current_voice") {
+        if !matches!(purpose, "voice" | "locate" | "current_voice" | "current_task") {
             return Err("Visible composer purpose is invalid".to_string());
         }
 
@@ -3611,6 +3860,11 @@ impl CodexComposerBridge {
                             &workspace_label,
                         )
                         .map(|_| json!({ "ok": true, "phase": "located", "mode": "visible" })),
+                        "begin" if purpose == "current_task" => macos::begin_current_task_for(agent)
+                            .map(|new_state| {
+                                state = Some(new_state);
+                                json!({ "ok": true, "phase": "ready", "mode": "visible" })
+                            }),
                         "begin" if purpose == "current_voice" => macos::begin_current_voice(agent)
                             .map(|new_state| {
                                 state = Some(new_state);
@@ -3640,6 +3894,19 @@ impl CodexComposerBridge {
                                     "composerValue": composer_value,
                                 })
                             }),
+                        "inspect_task_draft" => state
+                            .as_mut()
+                            .ok_or_else(|| "Codex composer is not ready".to_string())
+                            .and_then(macos::inspect_task_draft)
+                            .map(|snapshot| json!({"ok":true,"phase":"inspected","snapshot":snapshot})),
+                        "dispatch" => state
+                            .as_mut()
+                            .ok_or_else(|| "Codex composer is not ready".to_string())
+                            .and_then(|state| match command.payload.get("draftSnapshot") {
+                                Some(snapshot) => macos::dispatch_task_from_draft(state, &text, snapshot),
+                                None => macos::dispatch_voice_task(state, &text),
+                            })
+                            .map(|submission| json!({"ok":true,"phase":"submitted","mode":"visible","submission":submission})),
                         "confirm" => state
                             .as_mut()
                             .ok_or_else(|| "Visible composer is not ready".to_string())
@@ -3795,8 +4062,26 @@ pub struct CodexComposerBridge;
 
 #[cfg(not(any(windows, target_os = "macos")))]
 impl CodexComposerBridge {
+    pub fn start_current_task() -> Result<Self, String> {
+        Err("当前系统不支持桌面任务派发".into())
+    }
+    pub fn start_current_task_for(_agent_id: &str) -> Result<Self, String> {
+        Err("当前系统不支持桌面任务派发".into())
+    }
     pub fn is_agent_frontmost(_agent_id: &str) -> bool {
         false
+    }
+
+    pub fn dispatch_task(&self, _text: &str) -> Result<String, String> {
+        Err("当前系统不支持桌面任务派发".into())
+    }
+
+    pub fn inspect_task_draft(&self) -> Result<Value, String> {
+        Err("当前系统不支持桌面任务派发".into())
+    }
+
+    pub fn dispatch_task_from_draft(&self, _text: &str, _snapshot: &Value) -> Result<String, String> {
+        Err("当前系统不支持桌面任务派发".into())
     }
 
     pub fn preserve_draft(&self) -> Result<(), String> { Ok(()) }
@@ -3887,6 +4172,16 @@ fn workspace_label_from_cwd(cwd: &str) -> String {
 #[cfg(all(test, any(windows, target_os = "macos")))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_submission_accepts_native_enter_without_claiming_delivery() {
+        for mode in ["send", "queue", "steer", "enter"] {
+            assert_eq!(task_submission_mode(&json!({"submission":mode})).unwrap(), mode);
+        }
+        for reply in [json!({}), json!({"submission":""}), json!({"submission":"unknown"}), json!({"submission":true})] {
+            assert!(task_submission_mode(&reply).is_err());
+        }
+    }
 
     #[test]
     fn windows_startup_timeout_names_the_selected_agent_and_stage() {
@@ -3981,6 +4276,71 @@ mod tests {
         assert!(source.contains("Join-VoiceDraft $state.BaseValue $text"));
         assert!(source.contains("ReplaceFocusedText($state.BaseValue)"));
         assert!(source.contains("$currentValue -cne $state.LastValue"));
+    }
+
+    #[cfg(any(windows, target_os="macos"))]
+    #[test]
+    fn realtime_delegation_submits_one_exact_atomic_command_and_waits_for_ack() {
+        use std::sync::{Arc,atomic::AtomicBool,mpsc};
+        let (sender,receiver)=mpsc::channel::<ComposerCommand>();
+        let bridge=CodexComposerBridge {sender,failed:Arc::new(AtomicBool::new(false)),closed:Arc::new(AtomicBool::new(false))};
+        let text=format!("语音对话数据（JSON）：\n{}",serde_json::json!({"conversation":[{"speaker":"user","text":"然后搜索AI硬件这个关键词"},{"speaker":"pet","text":"在抖音搜索吗？"}],"current_user_request":"是的"}));
+        let expected=text.clone();
+        let worker=std::thread::spawn(move || {
+            let command=receiver.recv().unwrap();
+            assert_eq!(command.payload["kind"],"dispatch");
+            assert_eq!(command.payload["text"],expected);
+            command.response.unwrap().send(Ok(json!({"ok":true,"phase":"submitted","submission":"queue"}))).unwrap();
+            let release=receiver.recv().unwrap();assert_eq!(release.payload["kind"],"release");
+            release.response.unwrap().send(Ok(json!({"ok":true}))).unwrap();
+        });
+        assert_eq!(bridge.dispatch_task(&text).unwrap(),"queue");
+        bridge.preserve_draft().unwrap();drop(bridge);worker.join().unwrap();
+    }
+
+    #[cfg(any(windows, target_os="macos"))]
+    #[test]
+    fn task_draft_snapshot_roundtrip_preserves_exact_text_and_native_mode() {
+        use std::sync::{Arc, atomic::AtomicBool, mpsc};
+        let (sender, receiver) = mpsc::channel::<ComposerCommand>();
+        let bridge = CodexComposerBridge { sender, failed:Arc::new(AtomicBool::new(false)), closed:Arc::new(AtomicBool::new(false)) };
+        let snapshot = json!({"target":{"composerId":"pinned"},"text":"  manually edited\n    prefix"});
+        let expected = snapshot.clone();
+        let text = "  manually edited\n    prefix\n\nnew request";
+        let worker = std::thread::spawn(move || {
+            let inspect = receiver.recv().unwrap();
+            assert_eq!(inspect.payload["kind"], "inspect_task_draft");
+            inspect.response.unwrap().send(Ok(json!({"ok":true,"snapshot":expected}))).unwrap();
+            let dispatch = receiver.recv().unwrap();
+            assert_eq!(dispatch.payload["draftSnapshot"], expected);
+            assert_eq!(dispatch.payload["text"], text);
+            dispatch.response.unwrap().send(Ok(json!({"ok":true,"submission":"steer"}))).unwrap();
+            let release = receiver.recv().unwrap();
+            assert_eq!(release.payload["kind"], "release");
+            release.response.unwrap().send(Ok(json!({"ok":true}))).unwrap();
+        });
+        assert_eq!(bridge.inspect_task_draft().unwrap(), snapshot);
+        assert_eq!(bridge.dispatch_task_from_draft(text, &snapshot).unwrap(), "steer");
+        bridge.preserve_draft().unwrap();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn realtime_delegation_keeps_legacy_empty_draft_and_snapshot_readback_guards() {
+        let windows=include_str!("codex_composer.rs");
+        let dispatch=windows.split("'dispatch' {").nth(1).unwrap().split("'release' {").next().unwrap();
+        assert!(dispatch.contains("DESKTOP_TASK_DRAFT_NOT_EMPTY"));
+        assert!(dispatch.contains("DESKTOP_TASK_READBACK_CHANGED"));
+        assert!(dispatch.contains("Assert-TargetCurrent $state $true"));
+        assert!(dispatch.contains("Invoke-SendButton $state $true $true"));
+        assert!(windows.contains("if ($strictButton -or -not $allowQueue)"));
+        let mac=include_str!("codex_composer_macos.rs");
+        assert!(mac.contains("!state.draft.base.is_empty() || !target.value.is_empty()"));
+        assert!(mac.contains("confirm_voice_inner(state, Some(text))"));
+        assert!(mac.contains("expected.is_some_and(|text| target.value != text)"));
+        assert!(mac.contains("expected.get(\"text\") != current.get(\"text\")"));
+        assert!(dispatch.contains("Assert-TaskDraftSnapshot $state $command.draftSnapshot"));
+        assert!(mac.contains("if expected.is_none() {"));
     }
 
     #[cfg(windows)]

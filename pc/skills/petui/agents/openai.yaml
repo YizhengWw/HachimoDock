@@ -1,7 +1,7 @@
 interface:
   display_name: "petui"
-  short_description: "生成并校验 P4 游戏、工具与由 PC 提供实时数据的列表组件"
-  default_prompt: "Use $petui to generate, validate, test, and publish a P4 game, tool, or live-data component backed by an available PC data source."
+  short_description: "生成、实测与发布 P4 游戏、触屏切果及 PC 实时数据组件"
+  default_prompt: "Use $petui to generate, validate, test, and publish a P4 component, checking actual device capabilities for touch slicing and available PC sources for live data."
 
 policy:
   allow_implicit_invocation: true

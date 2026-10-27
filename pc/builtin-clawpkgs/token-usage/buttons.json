@@ -12,9 +12,15 @@
     "label": "输入"
   },
   {
-    "control": "前方摇杆",
+    "action": "stats.previous",
+    "event": "knob.rotate_ccw",
+    "label": "上一统计页",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "stats.next",
     "event": "knob.rotate_cw",
-    "action": "stats.show_output",
-    "label": "输出"
+    "label": "下一统计页",
+    "control": "前方摇杆"
   }
 ]

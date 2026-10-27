@@ -1,0 +1,26 @@
+[
+  {
+    "action": "primary",
+    "label": "开始或暂停",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "secondary",
+    "label": "查看花园",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "less",
+    "label": "减少五分钟",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "more",
+    "label": "增加五分钟",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  }
+]

@@ -1,5 +1,5 @@
 /**
- * [Input] A locally bundled macOS Pet Manager.app, optionally supplied as a positional argument, plus optional --verify-only.
+ * [Input] A locally bundled macOS HachimiDock.app, optionally supplied as a positional argument, plus optional --verify-only.
  * [Output] An ad-hoc signed app whose exact stable bundle-id designated requirement is verified for persistent local TCC grants.
  * [Pos] Local macOS packaging helper; production Developer ID signing remains a separate release concern.
  * [Sync] If this file changes, update `scripts/.folder.md`.
@@ -30,7 +30,7 @@ const appPath = resolve(
       "release",
       "bundle",
       "macos",
-      "Pet Manager.app",
+      "HachimiDock.app",
     ),
 );
 if (!existsSync(appPath)) {

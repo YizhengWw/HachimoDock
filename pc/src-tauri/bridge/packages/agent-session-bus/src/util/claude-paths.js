@@ -127,9 +127,8 @@ function listClaudeSessions({ cwd, limit = 100, env = process.env } = {}) {
       try { stat = fs.statSync(full); } catch { continue; }
       // Reading cwd from the directory name is unreliable because Claude's
       // encoding replaces `/` with `-` *and* leaves any literal `-` in the
-      // original path as `-` too — there's no way to round-trip
-      // `-Users-petagent-work-claw-pet-manager-ref` back to
-      // `/Users/petagent/work/claw-pet-manager/ref` from the folder name alone.
+      // original path as `-` too. An absolute project directory cannot be
+      // recovered from that ambiguous directory name alone.
       // The session jsonl, however, embeds the real cwd in a top-level
       // `cwd` field on most lines. Read the first line and trust that.
       const meta = readSessionMetaFromJsonl(full);

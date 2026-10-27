@@ -25,6 +25,14 @@ def test_platformio_firmware_version_matches_cmake_release_version():
     assert platformio == cmake
 
 
+def test_p4_v3_uses_its_validated_full_duplex_aec_not_legacy_voip():
+    v3 = SOURCE.split("#elif defined(CONFIG_ESP32P4_REV_MIN_FULL)", 1)[1].split("#else", 1)[0]
+    assert "CONFIG_ESP32P4_REV_MIN_FULL >= 300" in v3
+    assert "AEC_MODE_FD_HIGH_PERF" in v3 and "AEC_NLP_LEVEL_VERYAGGR" in v3
+    # Budget protection remains fail-closed; the fix must not hide overruns.
+    assert "elapsed > 60000" in SOURCE and "slow_frames >= 3" in SOURCE
+
+
 def test_ns_uses_two_ten_ms_blocks_per_usb_frame():
     # ESP-SR 2.5.3's linked NS asserts on 20 ms despite the header's broader docs.
     assert "#define FRAME 320" in SOURCE
@@ -47,19 +55,53 @@ def test_aec_working_memory_does_not_exhaust_usb_dma_ram():
 
 def test_frontend_failure_revokes_capabilities():
     assert "atomic_exchange(&ready, false)" in SOURCE
-    assert 'fail("reference overflow")' in SOURCE
-    assert 'fail("processed queue overflow")' in SOURCE
-    assert 'fail("DSP too slow")' in SOURCE
+    assert 'fail(AFE_REFERENCE_OVERFLOW, current)' in SOURCE
+    assert 'fail(AFE_OUTPUT_OVERFLOW, current)' in SOURCE
+    assert 'fail(AFE_TOO_SLOW, current)' in SOURCE
     assert "frame.generation != atomic_load(&generation)" in SOURCE
 
 
 def test_new_capture_timeline_resets_adaptive_filters_on_dsp_owner():
+    prepare = SOURCE.split("bool pet_p4_afe_prepare(", 1)[1].split("bool pet_p4_afe_feed(", 1)[0]
+    assert "atomic_load(&feed_generation) != current" in prepare
+    assert prepare.index("vad_destroy(vad)") < prepare.index("aec_create_from_config(&saved_config)")
+    assert "ns = ns_create(10);" in prepare
+    assert "vad = vad_create_with_param(" in prepare
+    assert 'fail(AFE_RESET_FAILED, current)' in prepare
+    assert "slow_frames = measured_frames = 0;" in prepare
     feed = SOURCE.split("bool pet_p4_afe_feed(", 1)[1].split("bool pet_p4_afe_take(", 1)[0]
-    assert "if (feed_generation != current)" in feed
-    assert "aec_destroy(aec); aec = aec_create_from_config(&config);" in feed
-    assert "ns_destroy(ns); ns = ns_create(10);" in feed
-    assert "vad_destroy(vad); vad = vad_create_with_param(" in feed
-    assert 'fail("stream DSP reset failed")' in feed
+    assert "pet_p4_afe_prepare()" in feed
+
+
+def test_reentry_keeps_the_boot_internal_memory_reserve():
+    prepare = SOURCE.split("bool pet_p4_afe_prepare(", 1)[1].split("bool pet_p4_afe_feed(", 1)[0]
+    assert prepare.count("heap_caps_malloc(8 * 1024, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)") == 2
+    assert prepare.index("dma_reserve[1])") < prepare.index("aec_create_from_config(&saved_config)")
+    assert "heap_caps_free(dma_reserve[0])" in prepare
+    assert "heap_caps_free(dma_reserve[1])" in prepare
+
+
+def test_runtime_failure_stops_capture_without_raw_echo_upload():
+    root = Path(__file__).resolve().parents[1] / "main"
+    audio = (root / "pet_p4_audio.c").read_text()
+    fallback = audio.split('pet_p4_audio_diagnostic("aec_fallback"', 1)[1].split("if (playback_gates_capture", 1)[0]
+    assert 'reason = "aec_unavailable"' in fallback
+    assert "g_capture_requested, false" in fallback and "break;" in fallback
+    control = audio.split("esp_err_t pet_p4_audio_conversation_set(", 1)[1].split("esp_err_t pet_p4_audio_stream_begin", 1)[0]
+    assert "half_duplex || !pet_p4_afe_ready()" not in control
+    assert "pet_p4_afe_prepare()" not in control  # DSP remains capture-owner-only.
+    for field in ("conversationSessionId", "audioAecPreparing", "aecReason"):
+        assert field in audio
+
+
+def test_boot_initialization_and_owner_recovery_share_a_yielding_lock():
+    lock = SOURCE.split("static void lifecycle_enter(", 1)[1].split("static void lifecycle_leave(", 1)[0]
+    assert "atomic_flag_test_and_set(&lifecycle_lock)" in lock
+    assert "vTaskDelay(1)" in lock
+    for function, following in [("bool pet_p4_afe_prepare(", "bool pet_p4_afe_feed("),
+                                ("bool pet_p4_afe_init(", "static bool initialize(void) {")]:
+        body = SOURCE.split(function, 1)[1].split(following, 1)[0]
+        assert "lifecycle_enter();" in body and "lifecycle_leave();" in body
 
 
 def test_audio_uses_origin_link_without_per_frame_tx_drain():
@@ -70,10 +112,12 @@ def test_audio_uses_origin_link_without_per_frame_tx_drain():
     main = (root / "pet_p4_main.c").read_text()
     assert "transport_send_line_impl(line, ctx, !audio)" in main
     logger = main.split("static int transport_log_vprintf(", 1)[1].split("static void transport_send_line_impl(", 1)[0]
-    assert "if (pet_p4_audio_active())" in logger
-    assert "uart_wait_tx_done" in logger
-    assert "usb_serial_jtag_wait_tx_done" in logger
-    assert "if (pending)" in logger
+    assert "pet_p4_audio_active()" not in logger
+    assert "uart_queue_all(g_transport_log_buffer, len)" in logger
+    assert "usb_queue_all(g_transport_log_buffer, len)" in logger
+    assert "uart_wait_tx_done" not in logger
+    assert "usb_serial_jtag_wait_tx_done" not in logger
+    assert "if (!g_transport_ready)" in logger
 
 
 def test_protocol_json_buffers_use_psram_without_changing_capacity():
@@ -117,3 +161,12 @@ def test_duplex_mic_headroom_preserves_ptt_gain_and_rx_scheduling():
     assert "Immediate reacquisition can starve play_chunk" in playback
     assert "vTaskDelay(1);" in playback
     assert "if (!atomic_load(&g_stream_playing) || stream_buffered() == 0)" not in playback
+
+
+def test_playback_scratch_preserves_stream_cadence_and_stack_headroom():
+    audio = (Path(__file__).resolve().parents[1] / "main/pet_p4_audio.c").read_text()
+    assert '#define PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES 2048' in audio
+    assert 'PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES >= 1920' in audio
+    assert 'atomic_load(&g_music) ? 1920 : PET_P4_AUDIO_STREAM_WRITE_BYTES' in audio
+    assert '#define PET_P4_AUDIO_STREAM_WRITE_BYTES 640' in audio
+

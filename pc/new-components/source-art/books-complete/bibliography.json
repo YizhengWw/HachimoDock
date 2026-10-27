@@ -1,0 +1,893 @@
+[
+  {
+    "id": "book-002",
+    "category": "行为认知",
+    "title": "思考，快与慢",
+    "originalTitle": "Thinking, Fast and Slow",
+    "author": "Daniel Kahneman",
+    "concepts": "直觉与审慎推理；启发式与基准率；不把双系统当两块脑区，不把所有直觉判为错误",
+    "url": "https://openlibrary.org/works/OL15992072W"
+  },
+  {
+    "id": "book-003",
+    "category": "行为认知",
+    "title": "噪声",
+    "originalTitle": "Noise",
+    "author": "Daniel Kahneman",
+    "concepts": "判断中的无谓差异与系统性偏差不同；独立判断与流程；减少噪声不等于消除合理差异",
+    "url": "https://openlibrary.org/works/OL17962180W"
+  },
+  {
+    "id": "book-004",
+    "category": "行为认知",
+    "title": "助推",
+    "originalTitle": "Nudge",
+    "author": "Richard Thaler",
+    "concepts": "选择架构、默认项、退出自由；透明且可拒绝的设计；不能以助推代替制度改革或操纵用户",
+    "url": "https://openlibrary.org/works/OL3936258W"
+  },
+  {
+    "id": "book-005",
+    "category": "行为认知",
+    "title": "错误的行为",
+    "originalTitle": "Misbehaving",
+    "author": "Richard Thaler",
+    "concepts": "行为经济学与理性模型的差距；心理账户与参照点；行为模式不是对每个人的确定预测",
+    "url": "https://openlibrary.org/works/OL17940527W"
+  },
+  {
+    "id": "book-006",
+    "category": "行为认知",
+    "title": "怪诞行为学",
+    "originalTitle": "Predictably Irrational",
+    "author": "Dan Ariely",
+    "concepts": "相对比较、锚定与价格框架；只讨论概念和原创假设，不复述未经核对的实验或统计，提示研究与复现局限",
+    "url": "https://openlibrary.org/works/OL9302660W"
+  },
+  {
+    "id": "book-007",
+    "category": "行为认知",
+    "title": "非理性的积极力量",
+    "originalTitle": "The Upside of Irrationality",
+    "author": "Dan Ariely",
+    "concepts": "动机、意义与适应；讨论假设场景，不把单项实验作普遍定律，不编数字与因果证据",
+    "url": "https://openlibrary.org/works/OL20411846W"
+  },
+  {
+    "id": "book-008",
+    "category": "行为认知",
+    "title": "风险认知",
+    "originalTitle": "Risk Savvy",
+    "author": "Gerd Gigerenzer",
+    "concepts": "自然频数和条件概率；风险与不确定性；用假设数字演示分母，不提供医学或投资判断",
+    "url": "https://openlibrary.org/works/OL20003220W"
+  },
+  {
+    "id": "book-009",
+    "category": "行为认知",
+    "title": "直觉",
+    "originalTitle": "Gut Feelings",
+    "author": "Gerd Gigerenzer",
+    "concepts": "简洁启发式与环境匹配；直觉需要领域经验；不能将直觉视作永远优于分析",
+    "url": "https://openlibrary.org/works/OL2001987W"
+  },
+  {
+    "id": "book-010",
+    "category": "行为认知",
+    "title": "智能时代的清醒思考",
+    "originalTitle": "How to Stay Smart in a Smart World",
+    "author": "Gerd Gigerenzer",
+    "concepts": "数字素养、算法预测与不确定性；不把便利当正确；中文标题为导读展示译名",
+    "url": "https://openlibrary.org/works/OL25337639W"
+  },
+  {
+    "id": "book-011",
+    "category": "行为认知",
+    "title": "超预测",
+    "originalTitle": "Superforecasting",
+    "author": "Philip Tetlock",
+    "concepts": "分解问题、基准率、概率更新；可校准判断；不承诺准确预测所有事件",
+    "url": "https://openlibrary.org/works/OL18233878W"
+  },
+  {
+    "id": "book-012",
+    "category": "判断决策",
+    "title": "对赌",
+    "originalTitle": "Thinking in Bets",
+    "author": "Annie Duke",
+    "concepts": "决策质量与结果分离；概率表达；复盘过程而非只看输赢",
+    "url": "https://openlibrary.org/works/OL19736287W"
+  },
+  {
+    "id": "book-013",
+    "category": "判断决策",
+    "title": "放弃的艺术",
+    "originalTitle": "Quit",
+    "author": "Annie Duke",
+    "concepts": "沉没成本、退出条件与机会成本；预设停止标准；退出不是遇到困难就放弃",
+    "url": "https://openlibrary.org/works/OL27030915W"
+  },
+  {
+    "id": "book-014",
+    "category": "判断决策",
+    "title": "如何做决定",
+    "originalTitle": "How to Decide",
+    "author": "Annie Duke",
+    "concepts": "可逆性、信息价值、备选方案；决策日志；流程不保证结果",
+    "url": "https://openlibrary.org/works/OL21348243W"
+  },
+  {
+    "id": "book-015",
+    "category": "判断决策",
+    "title": "侦察者心态",
+    "originalTitle": "The Scout Mindset",
+    "author": "Julia Galef",
+    "concepts": "求真与自我辩护；更新信念；开放不等于没有立场",
+    "url": "https://www.penguinrandomhouse.com/books/555240/the-scout-mindset-by-julia-galef/"
+  },
+  {
+    "id": "book-016",
+    "category": "判断决策",
+    "title": "清醒思考的艺术",
+    "originalTitle": "The Art of Thinking Clearly",
+    "author": "Rolf Dobelli",
+    "concepts": "认知偏误与情境；幸存者偏差、社会认同；标签不能代替具体证据",
+    "url": "https://openlibrary.org/works/OL17940461W"
+  },
+  {
+    "id": "book-017",
+    "category": "判断决策",
+    "title": "黑天鹅",
+    "originalTitle": "The Black Swan",
+    "author": "Nassim Nicholas Taleb",
+    "concepts": "罕见重大事件、事后解释与尾部风险；不声称可预测黑天鹅；区分不可预测和完全无法准备",
+    "url": "https://openlibrary.org/works/OL3295030W"
+  },
+  {
+    "id": "book-018",
+    "category": "判断决策",
+    "title": "随机漫步的傻瓜",
+    "originalTitle": "Fooled by Randomness",
+    "author": "Nassim Nicholas Taleb",
+    "concepts": "运气与技能、样本选择与结果偏差；原创假设；不做交易建议",
+    "url": "https://openlibrary.org/works/OL3295029W"
+  },
+  {
+    "id": "book-019",
+    "category": "判断决策",
+    "title": "反脆弱",
+    "originalTitle": "Antifragile",
+    "author": "Nassim Nicholas Taleb",
+    "concepts": "脆弱、稳健、反脆弱的区别；小规模试错和非对称损益；压力过大仍会伤害系统",
+    "url": "https://openlibrary.org/works/OL16726829W"
+  },
+  {
+    "id": "book-020",
+    "category": "判断决策",
+    "title": "非对称风险",
+    "originalTitle": "Skin in the Game",
+    "author": "Nassim Nicholas Taleb",
+    "concepts": "承担后果与激励对齐；代理关系；承担风险不自动证明观点正确",
+    "url": "https://openlibrary.org/works/OL17887158W"
+  },
+  {
+    "id": "book-021",
+    "category": "判断决策",
+    "title": "成功的公式",
+    "originalTitle": "The Success Equation",
+    "author": "Michael Mauboussin",
+    "concepts": "技能与运气连续谱；过程指标与样本规模；避免用单次结果推断能力",
+    "url": "https://openlibrary.org/works/OL16637720W"
+  },
+  {
+    "id": "book-022",
+    "category": "习惯效率",
+    "title": "掌控习惯",
+    "originalTitle": "Atomic Habits",
+    "author": "James Clear",
+    "concepts": "线索、环境与小步重复；身份和行为循环；习惯并非万能，不承诺复利数字",
+    "url": "https://openlibrary.org/works/OL17930368W"
+  },
+  {
+    "id": "book-023",
+    "category": "习惯效率",
+    "title": "福格行为模型",
+    "originalTitle": "Tiny Habits",
+    "author": "BJ Fogg",
+    "concepts": "动机、能力与提示；缩小动作门槛；不把困难归咎个人意志",
+    "url": "https://openlibrary.org/works/OL20641940W"
+  },
+  {
+    "id": "book-024",
+    "category": "习惯效率",
+    "title": "习惯的力量",
+    "originalTitle": "The Power of Habit",
+    "author": "Charles Duhigg",
+    "concepts": "线索、惯例、回报；识别循环与替换行为；书中框架不是全部神经科学",
+    "url": "https://openlibrary.org/works/OL16015154W"
+  },
+  {
+    "id": "book-025",
+    "category": "习惯效率",
+    "title": "深度工作",
+    "originalTitle": "Deep Work",
+    "author": "Cal Newport",
+    "concepts": "专注的高认知任务与浅工作；时段边界与训练；协作和响应性也有价值",
+    "url": "https://openlibrary.org/works/OL17713267W"
+  },
+  {
+    "id": "book-026",
+    "category": "习惯效率",
+    "title": "数字极简",
+    "originalTitle": "Digital Minimalism",
+    "author": "Cal Newport",
+    "concepts": "按价值选择技术；重建注意力和休闲；不是拒绝一切数字工具",
+    "url": "https://openlibrary.org/works/OL19541830W"
+  },
+  {
+    "id": "book-027",
+    "category": "习惯效率",
+    "title": "慢生产力",
+    "originalTitle": "Slow Productivity",
+    "author": "Cal Newport",
+    "concepts": "做较少的事、自然节奏、重视质量；在约束下减少并行；不是拖延许可证",
+    "url": "https://openlibrary.org/works/OL36996011W"
+  },
+  {
+    "id": "book-028",
+    "category": "习惯效率",
+    "title": "精要主义",
+    "originalTitle": "Essentialism",
+    "author": "Greg McKeown",
+    "concepts": "辨认少数重要事项、取舍与缓冲；不等于忽略他人的合理责任",
+    "url": "https://openlibrary.org/works/OL17043626W"
+  },
+  {
+    "id": "book-029",
+    "category": "习惯效率",
+    "title": "轻松主义",
+    "originalTitle": "Effortless",
+    "author": "Greg McKeown",
+    "concepts": "降低重要任务的摩擦；可持续流程；轻松不等于无需努力",
+    "url": "https://openlibrary.org/works/OL24230087W"
+  },
+  {
+    "id": "book-030",
+    "category": "习惯效率",
+    "title": "人生只有四千周",
+    "originalTitle": "Four Thousand Weeks",
+    "author": "Oliver Burkeman",
+    "concepts": "时间有限、选择意味着放弃；接受无法清空待办；不把书名当每个人寿命预测",
+    "url": "https://openlibrary.org/works/OL22355777W"
+  },
+  {
+    "id": "book-031",
+    "category": "习惯效率",
+    "title": "搞定",
+    "originalTitle": "Getting Things Done",
+    "author": "David Allen",
+    "concepts": "收集、澄清、下一步行动和回顾；可信外部系统；工具复杂度应适配任务",
+    "url": "https://openlibrary.org/works/OL271504W"
+  },
+  {
+    "id": "book-032",
+    "category": "经济基础",
+    "title": "国富论",
+    "originalTitle": "The Wealth of Nations",
+    "author": "Adam Smith",
+    "concepts": "分工、交换和市场范围；激励与制度背景；不要把作者简化为任何干预都反对",
+    "url": "https://openlibrary.org/works/OL76827W"
+  },
+  {
+    "id": "book-033",
+    "category": "经济基础",
+    "title": "道德情操论",
+    "originalTitle": "The Theory of Moral Sentiments",
+    "author": "Adam Smith",
+    "concepts": "同情、公正旁观者与社会评价；伦理不是简单逐利；不编作者原话",
+    "url": "https://openlibrary.org/works/OL76826W"
+  },
+  {
+    "id": "book-034",
+    "category": "经济基础",
+    "title": "人口原理",
+    "originalTitle": "An Essay on the Principle of Population",
+    "author": "Thomas Malthus",
+    "concepts": "人口与资源约束的历史论证；技术、制度、人口转变的局限；不将历史预测视为现代定律",
+    "url": "https://openlibrary.org/works/OL8784929W"
+  },
+  {
+    "id": "book-035",
+    "category": "经济基础",
+    "title": "政治经济学及赋税原理",
+    "originalTitle": "On the Principles of Political Economy and Taxation",
+    "author": "David Ricardo",
+    "concepts": "比较优势、机会成本与分配；严格限定假设；整体收益不代表所有群体获益",
+    "url": "https://openlibrary.org/works/OL27900305W"
+  },
+  {
+    "id": "book-036",
+    "category": "经济基础",
+    "title": "政治经济学原理",
+    "originalTitle": "Principles of Political Economy",
+    "author": "John Stuart Mill",
+    "concepts": "生产与分配、制度安排；历史理论与价值判断区分；不将现代模型强加给作者",
+    "url": "https://openlibrary.org/works/OL1068184W"
+  },
+  {
+    "id": "book-037",
+    "category": "经济基础",
+    "title": "国民经济学原理",
+    "originalTitle": "Principles of Economics",
+    "author": "Carl Menger",
+    "concepts": "主观价值、边际用途与选择；不把价格等于道德价值",
+    "url": "https://openlibrary.org/works/OL1096320W"
+  },
+  {
+    "id": "book-038",
+    "category": "经济基础",
+    "title": "经济学原理",
+    "originalTitle": "Principles of Economics",
+    "author": "Alfred Marshall",
+    "concepts": "供需、时间维度与局部均衡；其他条件不变的限制；不混同曼昆教材",
+    "url": "https://openlibrary.org/works/OL2627167W"
+  },
+  {
+    "id": "book-039",
+    "category": "经济基础",
+    "title": "就业、利息和货币通论",
+    "originalTitle": "The General Theory of Employment, Interest and Money",
+    "author": "John Maynard Keynes",
+    "concepts": "有效需求、不确定性与总体就业；个体节俭与总体结果；不简化为无限增加支出",
+    "url": "https://openlibrary.org/works/OL35951W"
+  },
+  {
+    "id": "book-040",
+    "category": "经济基础",
+    "title": "经济发展理论",
+    "originalTitle": "The Theory of Economic Development",
+    "author": "Joseph Schumpeter",
+    "concepts": "企业家、新组合、创新与信用；区分发展和重复生产；不编造原书案例",
+    "url": "https://openlibrary.org/works/OL45100812W"
+  },
+  {
+    "id": "book-041",
+    "category": "经济基础",
+    "title": "通往奴役之路",
+    "originalTitle": "The Road to Serfdom",
+    "author": "Friedrich Hayek",
+    "concepts": "集中计划、分散知识与自由的历史论证；标明作者立场和可争议边界；不是所有公共服务都会导向极权",
+    "url": "https://openlibrary.org/works/OL1165001W"
+  },
+  {
+    "id": "book-042",
+    "category": "当代经济",
+    "title": "一课经济学",
+    "originalTitle": "Economics in One Lesson",
+    "author": "Henry Hazlitt",
+    "concepts": "机会成本、可见与不可见后果；长期与不同群体；不能跳过外部性与市场失灵",
+    "url": "https://openlibrary.org/works/OL541970W"
+  },
+  {
+    "id": "book-043",
+    "category": "当代经济",
+    "title": "赤裸裸的经济学",
+    "originalTitle": "Naked Economics",
+    "author": "Charles Wheelan",
+    "concepts": "激励、信息与公共政策权衡；经济思维而非无条件市场信仰",
+    "url": "https://openlibrary.org/works/OL8061775W"
+  },
+  {
+    "id": "book-044",
+    "category": "当代经济",
+    "title": "卧底经济学",
+    "originalTitle": "The Undercover Economist",
+    "author": "Tim Harford",
+    "concepts": "稀缺租金、价格与信息；从日常价格看约束；不编现实价格",
+    "url": "https://openlibrary.org/works/OL8005105W"
+  },
+  {
+    "id": "book-045",
+    "category": "当代经济",
+    "title": "策略思维",
+    "originalTitle": "Thinking Strategically",
+    "author": "Avinash Dixit",
+    "concepts": "相互依赖、承诺与向前看向后推；博弈模型的假设；不是操控他人",
+    "url": "https://openlibrary.org/works/OL2979495W"
+  },
+  {
+    "id": "book-046",
+    "category": "当代经济",
+    "title": "策略的艺术",
+    "originalTitle": "The Art of Strategy",
+    "author": "Avinash Dixit",
+    "concepts": "可信承诺、信号和重复博弈；合作与竞争；模型不代替了解真实参与者",
+    "url": "https://openlibrary.org/works/OL2979491W"
+  },
+  {
+    "id": "book-047",
+    "category": "当代经济",
+    "title": "好的经济学",
+    "originalTitle": "Good Economics for Hard Times",
+    "author": "Abhijit Banerjee",
+    "concepts": "证据、政策情境与人的尊严；避免单一模型解释一切；不编研究结果",
+    "url": "https://openlibrary.org/works/OL20659791W"
+  },
+  {
+    "id": "book-048",
+    "category": "当代经济",
+    "title": "贫穷的本质",
+    "originalTitle": "Poor Economics",
+    "author": "Abhijit Banerjee",
+    "concepts": "具体约束、现场证据与政策设计；贫困者不是一类同质人群；局部证据外推有限",
+    "url": "https://openlibrary.org/works/OL15743097W"
+  },
+  {
+    "id": "book-049",
+    "category": "当代经济",
+    "title": "国家为什么会失败",
+    "originalTitle": "Why Nations Fail",
+    "author": "Daron Acemoglu",
+    "concepts": "包容与攫取性制度的论证；政治经济互动；制度解释不是唯一历史因果",
+    "url": "https://openlibrary.org/works/OL16568759W"
+  },
+  {
+    "id": "book-050",
+    "category": "当代经济",
+    "title": "自由的窄廊",
+    "originalTitle": "The Narrow Corridor",
+    "author": "Daron Acemoglu",
+    "concepts": "国家能力与社会制衡的动态关系；不是越强或越弱越好；避免给现实国家简单贴标签",
+    "url": "https://openlibrary.org/works/OL20220421W"
+  },
+  {
+    "id": "book-051",
+    "category": "当代经济",
+    "title": "经济学的思维方式",
+    "originalTitle": "The Economic Way of Thinking",
+    "author": "Paul Heyne",
+    "concepts": "机会成本、边际选择与相互协调；把方法用于原创日常例子；不混同其他同名著作",
+    "url": "https://openlibrary.org/works/OL467486W"
+  },
+  {
+    "id": "book-052",
+    "category": "创业产品",
+    "title": "精益创业",
+    "originalTitle": "The Lean Startup",
+    "author": "Eric Ries",
+    "concepts": "可验证学习、最小可行产品与迭代；实验要有指标；不是上线粗制滥造产品",
+    "url": "https://openlibrary.org/works/OL16086010W"
+  },
+  {
+    "id": "book-053",
+    "category": "创业产品",
+    "title": "从0到1",
+    "originalTitle": "Zero to One",
+    "author": "Peter Thiel",
+    "concepts": "差异化、独特价值与长期优势；作者的创业视角有边界；不鼓励违法垄断",
+    "url": "https://openlibrary.org/works/OL17078706W"
+  },
+  {
+    "id": "book-054",
+    "category": "创业产品",
+    "title": "妈妈测试",
+    "originalTitle": "The Mom Test",
+    "author": "Rob Fitzpatrick",
+    "concepts": "问过去的行为而非索取夸奖；具体问题和承诺；访谈不能替代成交验证",
+    "url": "https://openlibrary.org/works/OL23982116W"
+  },
+  {
+    "id": "book-055",
+    "category": "创业产品",
+    "title": "精益实战",
+    "originalTitle": "Running Lean",
+    "author": "Ash Maurya",
+    "concepts": "问题方案匹配、关键假设和验证；先识别风险；不是只画画布",
+    "url": "https://openlibrary.org/works/OL16605567W"
+  },
+  {
+    "id": "book-056",
+    "category": "创业产品",
+    "title": "创业方法论",
+    "originalTitle": "Disciplined Entrepreneurship",
+    "author": "Bill Aulet",
+    "concepts": "滩头市场、用户画像、价值与商业模式；有序验证但不迷信线性步骤",
+    "url": "https://openlibrary.org/works/OL21508040W"
+  },
+  {
+    "id": "book-057",
+    "category": "创业产品",
+    "title": "创业的神话",
+    "originalTitle": "The E-Myth Revisited",
+    "author": "Michael Gerber",
+    "concepts": "技术工作者、管理者、创业者的角色；可复现流程；流程不能消除人的判断",
+    "url": "https://openlibrary.org/works/OL1821254W"
+  },
+  {
+    "id": "book-058",
+    "category": "创业产品",
+    "title": "创业者手册",
+    "originalTitle": "The Startup Owner's Manual",
+    "author": "Steve Blank",
+    "concepts": "客户发现与客户验证；走出办公室验证假设；搜索商业模式不同于执行成熟计划",
+    "url": "https://openlibrary.org/works/OL16793860W"
+  },
+  {
+    "id": "book-059",
+    "category": "创业产品",
+    "title": "跨越鸿沟",
+    "originalTitle": "Crossing the Chasm",
+    "author": "Geoffrey Moore",
+    "concepts": "早期采用者与主流用户差异；完整产品和聚焦细分市场；不是所有市场都一模一样",
+    "url": "https://openlibrary.org/works/OL30695W"
+  },
+  {
+    "id": "book-060",
+    "category": "创业产品",
+    "title": "创新者的窘境",
+    "originalTitle": "The Innovator's Dilemma",
+    "author": "Clayton Christensen",
+    "concepts": "既有客户与资源分配；破坏性创新的特定含义；不把所有新技术叫颠覆",
+    "url": "https://openlibrary.org/works/OL1999873W"
+  },
+  {
+    "id": "book-061",
+    "category": "创业产品",
+    "title": "创新者的解答",
+    "originalTitle": "The Innovator's Solution",
+    "author": "Clayton Christensen",
+    "concepts": "增长、客户任务与组织匹配；新业务不宜机械套旧指标；不保证成功",
+    "url": "https://openlibrary.org/works/OL14873643W"
+  },
+  {
+    "id": "book-062",
+    "category": "商业战略",
+    "title": "好战略，坏战略",
+    "originalTitle": "Good Strategy Bad Strategy",
+    "author": "Richard Rumelt",
+    "concepts": "诊断、指导方针与协调行动；目标不是战略；聚焦约束",
+    "url": "https://openlibrary.org/works/OL16149072W"
+  },
+  {
+    "id": "book-063",
+    "category": "商业战略",
+    "title": "竞争战略",
+    "originalTitle": "Competitive Strategy",
+    "author": "Michael Porter",
+    "concepts": "行业结构和竞争力量；相对位置；分析框架不是静态行业结论",
+    "url": "https://openlibrary.org/works/OL1827735W"
+  },
+  {
+    "id": "book-064",
+    "category": "商业战略",
+    "title": "竞争优势",
+    "originalTitle": "Competitive Advantage",
+    "author": "Michael Porter",
+    "concepts": "价值链、成本与差异化；活动系统的配合；不是只追求单项效率",
+    "url": "https://openlibrary.org/works/OL1827734W"
+  },
+  {
+    "id": "book-065",
+    "category": "商业战略",
+    "title": "蓝海战略",
+    "originalTitle": "Blue Ocean Strategy",
+    "author": "W. Chan Kim",
+    "concepts": "价值创新、取舍与非顾客；降低成本与增加价值的组合；蓝海不会永远无竞争",
+    "url": "https://openlibrary.org/works/OL8980380W"
+  },
+  {
+    "id": "book-066",
+    "category": "商业战略",
+    "title": "赢的策略",
+    "originalTitle": "Playing to Win",
+    "author": "A. G. Lafley",
+    "concepts": "在哪里竞争、如何取胜、能力与管理系统；成套选择；不是愿景口号",
+    "url": "https://openlibrary.org/works/OL19963678W"
+  },
+  {
+    "id": "book-067",
+    "category": "商业战略",
+    "title": "七种力量",
+    "originalTitle": "7 Powers",
+    "author": "Hamilton Helmer",
+    "concepts": "持续优势的收益与壁垒；规模、转换成本等；优势须有条件，不必同时拥有七种",
+    "url": "https://openlibrary.org/works/OL20883142W"
+  },
+  {
+    "id": "book-068",
+    "category": "商业战略",
+    "title": "目标",
+    "originalTitle": "The Goal",
+    "author": "Eliyahu Goldratt",
+    "concepts": "瓶颈、吞吐与在制品；局部效率可能损害整体；不复述小说情节和人物",
+    "url": "https://openlibrary.org/works/OL2463051W"
+  },
+  {
+    "id": "book-069",
+    "category": "商业战略",
+    "title": "从优秀到卓越",
+    "originalTitle": "Good to Great",
+    "author": "Jim Collins",
+    "concepts": "纪律、聚焦与组织建设；成功样本和事后研究局限；关联不等于成功配方",
+    "url": "https://openlibrary.org/works/OL3486275W"
+  },
+  {
+    "id": "book-070",
+    "category": "商业战略",
+    "title": "基业长青",
+    "originalTitle": "Built to Last",
+    "author": "Jim Collins",
+    "concepts": "核心理念与持续改变；组织而非明星领袖；注意幸存者偏差",
+    "url": "https://openlibrary.org/works/OL3486276W"
+  },
+  {
+    "id": "book-071",
+    "category": "商业战略",
+    "title": "选择卓越",
+    "originalTitle": "Great by Choice",
+    "author": "Jim Collins",
+    "concepts": "纪律、经验验证与不确定环境；稳定节奏与小试验；不把事后案例当必然规律",
+    "url": "https://openlibrary.org/works/OL16014781W"
+  },
+  {
+    "id": "book-072",
+    "category": "营销传播",
+    "title": "影响力",
+    "originalTitle": "Influence",
+    "author": "Robert Cialdini",
+    "concepts": "社会认同、互惠与稀缺线索；防范与伦理应用；不伪造稀缺和背书",
+    "url": "https://openlibrary.org/works/OL3902892W"
+  },
+  {
+    "id": "book-073",
+    "category": "营销传播",
+    "title": "先发影响力",
+    "originalTitle": "Pre-Suasion",
+    "author": "Robert Cialdini",
+    "concepts": "注意焦点与判断情境；准备环境；效应依赖条件，不是洗脑按钮",
+    "url": "https://openlibrary.org/works/OL17592794W"
+  },
+  {
+    "id": "book-074",
+    "category": "营销传播",
+    "title": "疯传",
+    "originalTitle": "Contagious",
+    "author": "Jonah Berger",
+    "concepts": "传播动机、情绪与实用价值；传播不等于质量；不编造传播统计",
+    "url": "https://openlibrary.org/works/OL19711031W"
+  },
+  {
+    "id": "book-075",
+    "category": "营销传播",
+    "title": "让创意更有黏性",
+    "originalTitle": "Made to Stick",
+    "author": "Chip Heath",
+    "concepts": "具体性、可信度与故事；让信息易懂易记；不能牺牲真实性",
+    "url": "https://openlibrary.org/works/OL8423528W"
+  },
+  {
+    "id": "book-076",
+    "category": "营销传播",
+    "title": "定位",
+    "originalTitle": "Positioning",
+    "author": "Al Ries",
+    "concepts": "受众认知中的相对位置；聚焦与竞争参照；不把重复口号当价值创造",
+    "url": "https://openlibrary.org/works/OL1892673W"
+  },
+  {
+    "id": "book-077",
+    "category": "营销传播",
+    "title": "这就是营销",
+    "originalTitle": "This Is Marketing",
+    "author": "Seth Godin",
+    "concepts": "服务特定人群、信任与承诺；最小可行受众；不是人人都要喜欢你",
+    "url": "https://openlibrary.org/works/OL19764632W"
+  },
+  {
+    "id": "book-078",
+    "category": "营销传播",
+    "title": "紫牛",
+    "originalTitle": "Purple Cow",
+    "author": "Seth Godin",
+    "concepts": "值得谈论的产品差异；传播与真实使用价值；奇怪不等于有用",
+    "url": "https://openlibrary.org/works/OL2329258W"
+  },
+  {
+    "id": "book-079",
+    "category": "营销传播",
+    "title": "故事品牌",
+    "originalTitle": "Building a StoryBrand",
+    "author": "Donald Miller",
+    "concepts": "用户目标、阻力和清晰行动；品牌不是故事英雄；不编造产品效果",
+    "url": "https://openlibrary.org/works/OL19347277W"
+  },
+  {
+    "id": "book-080",
+    "category": "营销传播",
+    "title": "显而易见的优势",
+    "originalTitle": "Obviously Awesome",
+    "author": "April Dunford",
+    "concepts": "竞争替代、差异化与目标市场；产品定位依赖上下文；不靠自封品类逃避验证",
+    "url": "https://openlibrary.org/works/OL20873429W"
+  },
+  {
+    "id": "book-081",
+    "category": "营销传播",
+    "title": "增长黑客",
+    "originalTitle": "Hacking Growth",
+    "author": "Sean Ellis",
+    "concepts": "跨职能实验、激活留存与学习；用证据改进；不鼓励骚扰、暗黑模式或只追虚荣指标",
+    "url": "https://openlibrary.org/works/OL20054781W"
+  },
+  {
+    "id": "book-082",
+    "category": "财富常识",
+    "title": "金钱心理学",
+    "originalTitle": "The Psychology of Money",
+    "author": "Morgan Housel",
+    "concepts": "风险感受、时间与安全边际；个人经历影响金钱观；不提供资产配置比例或收益承诺",
+    "url": "https://openlibrary.org/works/OL21640039W"
+  },
+  {
+    "id": "book-083",
+    "category": "财富常识",
+    "title": "一如既往",
+    "originalTitle": "Same as Ever",
+    "author": "Morgan Housel",
+    "concepts": "不变的人性与不确定的事件；耐心和叙事吸引力；不是对未来的确定预测",
+    "url": "https://openlibrary.org/works/OL35156586W"
+  },
+  {
+    "id": "book-084",
+    "category": "财富常识",
+    "title": "聪明的投资者",
+    "originalTitle": "The Intelligent Investor",
+    "author": "Benjamin Graham",
+    "concepts": "价格与价值、安全边际和纪律；估值不确定；无买卖建议，无具体证券",
+    "url": "https://openlibrary.org/works/OL273184W"
+  },
+  {
+    "id": "book-085",
+    "category": "财富常识",
+    "title": "漫步华尔街",
+    "originalTitle": "A Random Walk Down Wall Street",
+    "author": "Burton Malkiel",
+    "concepts": "市场定价、预测困难与分散；学术观点有适用条件；不把随机游走说成市场永远正确",
+    "url": "https://openlibrary.org/works/OL2000283W"
+  },
+  {
+    "id": "book-086",
+    "category": "财富常识",
+    "title": "共同基金常识的小书",
+    "originalTitle": "The Little Book of Common Sense Investing",
+    "author": "John Bogle",
+    "concepts": "成本、分散与长期纪律；不是保证收益或适合所有人；不推荐具体基金",
+    "url": "https://openlibrary.org/works/OL3928758W"
+  },
+  {
+    "id": "book-087",
+    "category": "财富常识",
+    "title": "你的钱，你的人生",
+    "originalTitle": "Your Money or Your Life",
+    "author": "Vicki Robin",
+    "concepts": "金钱与生命时间、支出觉察和足够；价值取舍；不声称人人可提前退休",
+    "url": "https://openlibrary.org/works/OL4275330W"
+  },
+  {
+    "id": "book-088",
+    "category": "财富常识",
+    "title": "邻家的百万富翁",
+    "originalTitle": "The Millionaire Next Door",
+    "author": "Thomas Stanley",
+    "concepts": "财富与消费表象不同；储蓄习惯；样本、年代、地域和幸存者偏差",
+    "url": "https://openlibrary.org/works/OL1986060W"
+  },
+  {
+    "id": "book-089",
+    "category": "财富常识",
+    "title": "巴比伦最富有的人",
+    "originalTitle": "The Richest Man in Babylon",
+    "author": "George Clason",
+    "concepts": "储蓄、审慎和学习；寓言不是现代金融证据；不复述故事、不把固定比例作个人建议",
+    "url": "https://openlibrary.org/works/OL8165007W"
+  },
+  {
+    "id": "book-090",
+    "category": "财富常识",
+    "title": "常识的财富",
+    "originalTitle": "A Wealth of Common Sense",
+    "author": "Ben Carlson",
+    "concepts": "简单原则、行为和复杂产品风险；透明度和成本；不承诺击败市场",
+    "url": "https://openlibrary.org/works/OL20009150W"
+  },
+  {
+    "id": "book-091",
+    "category": "财富常识",
+    "title": "投资最重要的事",
+    "originalTitle": "The Most Important Thing",
+    "author": "Howard Marks",
+    "concepts": "风险、周期与第二层思维；认识不确定性；不择时荐股，不拿结果倒推过程",
+    "url": "https://openlibrary.org/works/OL16001857W"
+  },
+  {
+    "id": "book-092",
+    "category": "组织系统",
+    "title": "第五项修炼",
+    "originalTitle": "The Fifth Discipline",
+    "author": "Peter Senge",
+    "concepts": "学习型组织、系统思考与共同愿景；反馈和心智模式；不是开培训会就能改变组织",
+    "url": "https://openlibrary.org/works/OL4440692W"
+  },
+  {
+    "id": "book-093",
+    "category": "组织系统",
+    "title": "格鲁夫给经理人的第一课",
+    "originalTitle": "High Output Management",
+    "author": "Andrew Grove",
+    "concepts": "管理杠杆、产出与一对一沟通；任务成熟度；方法需适配不同组织",
+    "url": "https://openlibrary.org/works/OL2355834W"
+  },
+  {
+    "id": "book-094",
+    "category": "组织系统",
+    "title": "这就是OKR",
+    "originalTitle": "Measure What Matters",
+    "author": "John Doerr",
+    "concepts": "目标与可验证关键结果；对齐和复盘；不把指标当全部价值或机械绩效排名",
+    "url": "https://openlibrary.org/works/OL24232412W"
+  },
+  {
+    "id": "book-095",
+    "category": "组织系统",
+    "title": "绝对坦率",
+    "originalTitle": "Radical Candor",
+    "author": "Kim Scott",
+    "concepts": "真诚关心与直接挑战；反馈具体且尊重；不是以坦率为名羞辱",
+    "url": "https://openlibrary.org/works/OL17803541W"
+  },
+  {
+    "id": "book-096",
+    "category": "组织系统",
+    "title": "团队协作的五大障碍",
+    "originalTitle": "The Five Dysfunctions of a Team",
+    "author": "Patrick Lencioni",
+    "concepts": "信任、建设性冲突、承诺、责任和共同结果；不复述寓言情节；信任不是无边界暴露",
+    "url": "https://openlibrary.org/works/OL19956925W"
+  },
+  {
+    "id": "book-097",
+    "category": "组织系统",
+    "title": "赋能式领导：把船调个头",
+    "originalTitle": "Turn the Ship Around",
+    "author": "L. David Marquet",
+    "concepts": "领导者培养领导者、意图与能力；授权伴随信息和责任；不复制原书故事",
+    "url": "https://openlibrary.org/works/OL17845539W"
+  },
+  {
+    "id": "book-098",
+    "category": "组织系统",
+    "title": "驱动力",
+    "originalTitle": "Drive",
+    "author": "Daniel Pink",
+    "concepts": "自主、精进和目的；内在外在动机的条件；不声称报酬不重要",
+    "url": "https://openlibrary.org/works/OL15016965W"
+  },
+  {
+    "id": "book-099",
+    "category": "组织系统",
+    "title": "原则",
+    "originalTitle": "Principles",
+    "author": "Ray Dalio",
+    "concepts": "显式决策规则、反馈与修正；个人管理哲学而非普遍定律；不美化监控与强制透明",
+    "url": "https://openlibrary.org/works/OL18147675W"
+  },
+  {
+    "id": "book-100",
+    "category": "组织系统",
+    "title": "文化密码",
+    "originalTitle": "The Culture Code",
+    "author": "Daniel Coyle",
+    "concepts": "安全感、共同脆弱性与目的；具体互动塑造文化；避免把相关案例说成因果实验",
+    "url": "https://openlibrary.org/works/OL19670476W"
+  }
+]

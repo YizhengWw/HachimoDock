@@ -8,7 +8,7 @@
  *          speed, volume), validation, save via
  *          `savePersonaVoice`, a "restore factory persona" action for the built-in Terrier,
  *          current-key chat instructions, API navigation without discarding drafts,
- *          and a preview button that refreshes after speech configuration changes.
+ *          shared realtime volume with native persistence, and a preview button that refreshes after speech configuration changes.
  * [Pos] component node in ref/src, opened from AppearanceGallery cards and creation flows.
  * [Sync] If this file changes, update this header and `ref/src/.folder.md`.
  */
@@ -16,6 +16,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, Loader, Save, Volume2, WandSparkles, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { useDialogFocus } from "./component-center/use-dialog-focus.js";
+import { useExitProtection } from "./lib/exit-protection.js";
 import { savePersonaVoice } from "./lib/appearance-store.js";
 import UsageHelp from "./UsageHelp.jsx";
 import { API_CONFIGURATION_UPDATED_EVENT } from "./lib/api-configuration.js";
@@ -64,6 +67,8 @@ function initialFormState(appearance) {
 export default function PersonaVoiceModal({ appearance, required = false, onClose, onSaved, onOpenApiSettings, previewAvailable: previewAvailableProp, onPreview = playPersonaPreview }) {
   const isBuiltin = appearance?.type === "builtin";
   const [form, setForm] = useState(() => initialFormState(appearance));
+  const [savedForm, setSavedForm] = useState(() => initialFormState(appearance));
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [previewReady, setPreviewReady] = useState(Boolean(previewAvailableProp));
   useEffect(() => {
     if (previewAvailableProp !== undefined) {
@@ -86,6 +91,21 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [previewing, setPreviewing] = useState(false);
+  const [volumeReady, setVolumeReady] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    invoke("load_realtime_voice_volume").then((volume) => {
+      if (!Number.isFinite(volume) || volume < VOICE_VOLUME_RANGE.min || volume > VOICE_VOLUME_RANGE.max) {
+        throw new Error("全局音量读取失败，请关闭后重试");
+      }
+      if (!disposed) {
+        setForm((current) => ({ ...current, voice: { ...current.voice, volume } }));
+        setSavedForm((current) => ({ ...current, voice: { ...current.voice, volume } }));
+        setVolumeReady(true);
+      }
+    }).catch((error) => { if (!disposed) setSaveError(String(error)); });
+    return () => { disposed = true; };
+  }, []);
 
   const [speakerQuery, setSpeakerQuery] = useState("");
   const speakerOptions = useMemo(() => speakerOptionsFor(form.voice.speaker, speakerQuery), [form.voice.speaker, speakerQuery]);
@@ -125,12 +145,12 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
     const defaults = isBuiltin
       ? { persona: { ...BUILTIN_TERRIER_PERSONA_VOICE.persona }, voice: { ...BUILTIN_TERRIER_PERSONA_VOICE.voice } }
       : createDefaultPersonaVoice({ name: appearance?.name, description: appearance?.description });
-    setForm(defaults);
+    setForm((current) => ({ ...defaults, voice: { ...defaults.voice, volume: current.voice.volume } }));
     setErrors({});
   }, [appearance?.description, appearance?.name, isBuiltin]);
 
   const handleSave = useCallback(async () => {
-    if (saving) return;
+    if (saving || !volumeReady) return;
     const nextErrors = validatePersonaVoice(form);
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
@@ -138,19 +158,26 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
     }
     setSaving(true);
     setSaveError("");
+    let volumeSaved = false;
+    let personaSaved = false;
     try {
+      await invoke("save_realtime_voice_volume", { volume: form.voice.volume });
+      volumeSaved = true;
       const saved = await savePersonaVoice(appearance.id, form);
+      personaSaved = true;
+      setSavedForm(form);
       await onSaved?.(saved);
     } catch (err) {
       console.error(err);
-      setSaveError(err?.message || String(err));
+      setSaveError(`${personaSaved ? "配置已保存，但界面刷新失败，请重新打开。" : volumeSaved
+        ? "全局音量已保存，但人设与音色未完成保存，请重试。" : "保存失败："}${err?.message || String(err)}`);
     } finally {
       setSaving(false);
     }
-  }, [appearance?.id, form, onSaved, saving]);
+  }, [appearance?.id, form, onSaved, saving, volumeReady]);
 
   const handlePreview = useCallback(async () => {
-    if (!previewAvailable || previewing || !onPreview) return;
+    if (!previewAvailable || previewing || !onPreview || !volumeReady) return;
     setPreviewing(true);
     try {
       await onPreview(form);
@@ -160,13 +187,34 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
     } finally {
       setPreviewing(false);
     }
-  }, [form, onPreview, previewAvailable, previewing]);
+  }, [form, onPreview, previewAvailable, previewing, volumeReady]);
 
   const closeAllowed = !required && !saving;
+  useExitProtection(saving ? "人设与声音正在保存" : JSON.stringify(form) !== JSON.stringify(savedForm)
+    ? "人设与声音有未保存的修改" : "");
+  const requestClose = useCallback(async () => {
+    if (required || saving || confirmingClose) return;
+    if (JSON.stringify(form) !== JSON.stringify(savedForm)) {
+      setConfirmingClose(true);
+      try {
+        const discard = window.__TAURI_INTERNALS__
+          ? await ask("人设与声音有未保存的修改，确定放弃吗？", {
+            title: "未保存的修改", kind: "warning", okLabel: "放弃修改", cancelLabel: "继续编辑",
+          })
+          : window.confirm("人设与声音有未保存的修改，确定放弃吗？");
+        if (!discard) return;
+      } catch {
+        setSaveError("无法确认退出，请保存修改后再关闭。");
+        return;
+      } finally { setConfirmingClose(false); }
+    }
+    onClose?.();
+  }, [required, saving, confirmingClose, form, savedForm, onClose]);
+  const dialogRef = useDialogFocus(requestClose, !closeAllowed || confirmingClose);
 
   return (
-    <div className="modal-backdrop" onClick={closeAllowed ? onClose : undefined}>
-      <div className="modal-card modal-card--wide persona-voice-modal" onClick={(event) => event.stopPropagation()}>
+    <div className="modal-backdrop" onClick={closeAllowed ? requestClose : undefined}>
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`人设与声音 · ${appearance?.name || "宠物"}`} tabIndex={-1} className="modal-card modal-card--wide persona-voice-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <div>
             <h3 className="modal-title">人设与声音 · {appearance?.name}</h3>
@@ -177,7 +225,7 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
             </div>
           </div>
           {!required && (
-            <button className="icon-btn" type="button" onClick={onClose} disabled={saving} aria-label="关闭">
+            <button className="icon-btn" type="button" onClick={requestClose} disabled={saving || confirmingClose} aria-label="关闭">
               <X size={16} />
             </button>
           )}
@@ -340,7 +388,7 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
                   />
                 </label>
                 <label className="ui-field">
-                  <span className="ui-field__label">音量 <em className="muted">{Number(form.voice.volume).toFixed(2)}</em></span>
+                  <span className="ui-field__label">全局音量 <em className="muted">{volumeReady ? Number(form.voice.volume).toFixed(2) : "读取中"}</em></span>
                   <input
                     className="persona-voice-modal__range"
                     type="range"
@@ -349,8 +397,9 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
                     step={VOICE_VOLUME_RANGE.step}
                     value={form.voice.volume}
                     onChange={(event) => updateVoice("volume", Number(event.target.value))}
-                    disabled={saving}
+                    disabled={saving || !volumeReady}
                   />
+                  <span className="muted">所有形象共用。保存后用于实时对话，不影响提示音和组件音效。</span>
                 </label>
               </div>
               <div className="persona-voice-modal__preview">
@@ -358,7 +407,7 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
                   type="button"
                   className="btn-secondary btn-sm"
                   onClick={handlePreview}
-                  disabled={!previewAvailable || previewing || saving}
+                  disabled={!previewAvailable || previewing || saving || !volumeReady}
                   title={previewAvailable ? "用当前人设和音色生成一句问候并播放" : PREVIEW_UNAVAILABLE_HINT}
                 >
                   {previewing ? <Loader size={14} className="spin" /> : <Volume2 size={14} />} 试听
@@ -382,11 +431,11 @@ export default function PersonaVoiceModal({ appearance, required = false, onClos
           </button>
           <div className="persona-voice-modal__footer-actions">
             {!required && (
-              <button type="button" className="btn-ghost" onClick={onClose} disabled={saving}>
+              <button type="button" className="btn-ghost" onClick={requestClose} disabled={saving || confirmingClose}>
                 取消
               </button>
             )}
-            <button type="button" className="btn-primary" onClick={handleSave} disabled={saving}>
+            <button type="button" className="btn-primary" onClick={handleSave} disabled={saving || !volumeReady}>
               {saving ? <Loader size={14} className="spin" /> : <Save size={14} />} {required ? "保存并继续" : "保存"}
             </button>
           </div>

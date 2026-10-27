@@ -161,21 +161,20 @@ def test_factory_reuses_the_desktop_bundled_p4_ready_pack(tmp_path):
 def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_path):
     config = json.loads((RUNTIME / "factory-config.json").read_text(encoding="utf-8"))
     expected_ids = [
-        "stock-watchlist",
-        "wooden-fish",
-        "music-player",
-        "upcoming-todos",
-        "computer-status",
-        "two-key-pong",
-        "bloomfrog_companion",
-        "flappy-bird",
-        "block-combo",
-        "snake-turn",
-        "tomato-clock",
-        "drink-reminder",
-        "token-usage",
+        "city-radio", "cloud-hop", "stock-watchlist", "wooden-fish", "daily-news",
+        "book-pocket", "block-combo", "tomato-clock", "fresh-fruit-slice", "hachimi-sounds",
+        "snake-turn", "flappy-bird", "hachimi-learn", "hachimi-home", "hachimi-travel",
+        "hachimi-garden", "bloomfrog_companion", "two-key-pong", "hachimi-weather", "daily-almanac",
+        "upcoming-todos", "computer-status", "drink-reminder", "hachimi-break", "hachimi-notes", "token-usage",
+        "decision-capsule", "answer-book", "hope-train",
     ]
     assert config["components"]["ids"] == expected_ids
+    assert len(expected_ids) == 29
+    visible = {p.parent.name for p in (REPOSITORY / "pc/builtin-clawpkgs").glob("*/component.json")}
+    visible -= {"music-player", "hachimi-agent", "hachimi-desk"}
+    assert set(expected_ids) == visible
+    assert config["components"]["maxInstalled"] == 32
+    assert config["components"]["widgetMaxBytes"] == 8191
     assert "falling-catch" not in config["components"]["ids"]
     assert "slack-off-countdown" not in config["components"]["ids"]
     assert "ten-second-tap" not in config["components"]["ids"]
@@ -184,9 +183,10 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     spiffs_tree.mkdir()
     summary = factory.build_builtin_component_tree(RUNTIME, config, spiffs_tree)
     assert summary["count"] == len(expected_ids)
-    assert summary["defaultActiveId"] == "stock-watchlist"
-    assert summary["spriteFiles"] == 1
-    assert summary["physicalFiles"] == len(expected_ids) * 2 + 2
+    assert summary["defaultActiveId"] == "city-radio"
+    assert summary["spriteFiles"] == 78  # All 29 complete packages; no artwork stripped.
+    assert summary["payloadBytes"] < 3 * 1024 * 1024
+    assert summary["physicalFiles"] == len(expected_ids) * 2 + summary["spriteFiles"] + 1
     assert not (spiffs_tree / "p4-miniapp-id.txt").exists()
 
     catalog = json.loads(
@@ -194,7 +194,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     )
     assert catalog["version"] == 3
     assert catalog["sequence"] == 1
-    assert catalog["activeWidgetId"] == "stock-watchlist"
+    assert catalog["activeWidgetId"] == "city-radio"
     assert [item["widgetId"] for item in catalog["items"]] == expected_ids
     assert [item["slot"] for item in catalog["items"]] == list(range(len(expected_ids)))
     assert [item["packageGeneration"] for item in catalog["items"]] == [0] * len(expected_ids)
@@ -219,7 +219,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
         for slot in range(len(expected_ids))
     )
 
-    stock_widget = json.loads((spiffs_tree / "p4w00.json").read_text(encoding="utf-8"))
+    stock_widget = json.loads((spiffs_tree / f"p4w{expected_ids.index('stock-watchlist'):02d}.json").read_text(encoding="utf-8"))
     assert stock_widget["data"]["source"] == "stocks.watchlist"
     assert stock_widget["dashboard"]["headline"] == "等待数据"
     assert "hk01810" not in json.dumps(stock_widget)
@@ -229,17 +229,19 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     two_key_buttons = json.loads(
         (spiffs_tree / f"p4b{expected_ids.index('two-key-pong'):02d}.json").read_text(encoding="utf-8")
     )
-    assert two_key_widget["engine"] == "p4-bounded-runtime-v3"
+    assert two_key_widget["engine"] == "p4-bounded-runtime-v4"
     assert two_key_widget["scene"]["grid"] == {"width": 16, "height": 16}
     assert [binding["action"] for binding in two_key_buttons] == [
         "start",
         "shift_left",
         "shift_right",
+        "session.pause",
     ]
     assert [binding["event"] for binding in two_key_buttons] == [
         "button.sw1.short_press",
         "knob.rotate_ccw",
         "knob.rotate_cw",
+        "button.sw2.short_press",
     ]
 
     frog_widget = json.loads(
@@ -247,7 +249,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     )
     frog_sprite = (spiffs_tree / f"p4s{expected_ids.index('bloomfrog_companion'):02d}-0-0.bin").read_bytes()
     assert frog_widget["dashboard"]["title"] == "蛙蛙养成"
-    assert frog_sprite.startswith(b"P4S1")
+    assert frog_sprite.startswith(b"P4J1")  # Scene art uses the shared full-resolution background.
     assert catalog["items"][expected_ids.index('bloomfrog_companion')]["spritesChecksum"] != "00000000"
 
     token_widget = json.loads(

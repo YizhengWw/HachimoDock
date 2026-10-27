@@ -2,7 +2,7 @@
   "id": "tomato-clock",
   "name": "番茄钟",
   "kind": "tool",
-  "version": "1.2.4",
-  "author": "openclaw",
-  "description": "25 分钟专注与 5 分钟休息自动循环：SW1 暂停、SW2 跳过、摇杆下重置；退出跟随设备全局设置。"
+  "version": "1.3.3",
+  "author": "番茄吐司",
+  "description": "开始前选择 5–60 分钟专注时长，结束后休息 5 分钟；可暂停、跳过或确认重计时。只有完整专注结束才增加完成轮次。"
 }

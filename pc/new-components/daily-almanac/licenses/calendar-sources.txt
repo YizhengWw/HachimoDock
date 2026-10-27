@@ -1,0 +1,8 @@
+Generated data: lunar-javascript 1.7.7, pinned npm integrity in package-lock.json.
+Source: https://www.npmjs.com/package/lunar-javascript/v/1.7.7 (MIT; see bundled license).
+Independent civil-calendar anchors: https://www.hko.gov.hk/sc/gts/time/conversion.htm
+Annual tables: https://www.hko.gov.hk/tc/gts/time/calendar/pdf/files/2024.pdf
+https://www.hko.gov.hk/tc/gts/time/calendar/pdf/files/2025.pdf
+https://www.hko.gov.hk/tc/gts/time/calendar/pdf/files/2026.pdf
+Timezone: Asia/Shanghai; coverage 2020-01-01 through 2035-12-31 inclusive.
+传统宜忌为民俗文化资料，不是科学预测、医疗或投资建议。节日不等于法定休假安排。

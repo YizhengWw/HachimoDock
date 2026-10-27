@@ -21,8 +21,8 @@ HARNESS = r'''
 typedef struct {char widget_id[64],title[128];bool active;} pet_p4_miniapp_catalog_entry_t;
 static size_t count,selected,reads;
 static bool preview;
-static const char *ids[]={"stock-watchlist","music-player","upcoming-todos","computer-status"};
-static const char *titles[]={"自选股行情","随身听","近期待办","电脑状态"};
+static const char *ids[]={"city-radio","cloud-hop","stock-watchlist","wooden-fish"};
+static const char *titles[]={"城市电台","云端跳一跳","自选股行情","静心木鱼"};
 static size_t pet_p4_miniapp_catalog_count(void){return count;}
 static size_t pet_p4_miniapp_catalog_selected(void){return selected;}
 static bool pet_p4_miniapp_catalog_get(size_t i,pet_p4_miniapp_catalog_entry_t *out){
@@ -55,11 +55,20 @@ static void text(const char *t,int x,int y,int max,uint16_t c,int s,const char *
 static void draw_text_line(const char*t,int x,int y,int w,uint16_t c,int s,bool e){(void)e;bounds(x,y,w,16*s);text(t,x,y,w,c,s,"left");}
 static void draw_text_right(const char*t,int x,int y,int w,uint16_t c,int s){text(t,x,y,w,c,s,"right");}
 static void draw_text_center(const char*t,int x,int y,int w,uint16_t c,int s){text(t,x,y,w,c,s,"center");}
+static uint16_t g_framebuffer[640*480], background_pixels[640*480];
+static uint16_t *center_background=background_pixels;
+static void center_art_prepare(void){if(preview)puts("[\"background\"]");}
+static bool center_draw_thumbnail(const char *id,int x,int y){
+ for(size_t i=0;i<CENTER_ART_COUNT;i++)if(!strcmp(id,center_art_catalog[i].id)&&center_art_catalog[i].art){
+  bounds(x,y,64,48);if(preview)printf("[\"thumbnail\",\"%s\",%d,%d]\n",id,x,y);return true;
+ }
+ return false;
+}
 '''
 MAIN = r'''
 int main(int argc,char **argv){
  (void)argv;
- for(count=0;count<=16;++count){
+ for(count=0;count<=32;++count){
    for(selected=0;selected<(count?count:1);++selected){
      reads=0;render_component_center_page();
      size_t remaining=count-selected/4*4;assert(reads==(remaining<4?remaining:4));
@@ -76,15 +85,27 @@ def run_renderer(preview=False):
     source = (ROOT / "main/pet_p4_renderer.c").read_text()
     renderer = "static void draw_component_icon" + source.split(
         "static void draw_component_icon", 1)[1].split("static void draw_connection_banner", 1)[0]
+    # The diagnostic page is a separate renderer with its own state/physics.
+    start = renderer.index("/* Engineering touch/slicing diagnostic")
+    end = renderer.index("static void render_component_center_page", start)
+    renderer = renderer[:start] + renderer[end:]
     with tempfile.TemporaryDirectory() as tmp:
         code, binary = Path(tmp)/"cards.c", Path(tmp)/"cards"
-        code.write_text(HARNESS + renderer + MAIN)
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", str(code), "-o", str(binary)], check=True)
+        headers = '#include "pet_p4_center_layout.h"\n#include <stdbool.h>\n#include "../assets/component-center/catalog.h"\n'
+        code.write_text(headers + HARNESS + renderer + MAIN)
+        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "main"), str(code), "-o", str(binary)], check=True)
         return subprocess.check_output([str(binary)] + (["preview"] if preview else []), text=True)
 
 
 def test_card_renderer_bounds_empty_single_partial_full_pages():
     run_renderer()
+
+
+def test_center_hit_targets_and_partial_page_navigation(tmp_path):
+    binary=tmp_path/'center-layout'
+    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'main'),
+        str(ROOT/'tests/p4_center_layout_test.c'),'-o',str(binary)],check=True)
+    subprocess.run([str(binary)],check=True)
 
 
 def preview(path):
@@ -95,7 +116,15 @@ def preview(path):
     color = lambda n: ((n >> 11)*255//31, ((n >> 5)&63)*255//63, (n&31)*255//31)
     for line in run_renderer(True).splitlines():
         op, *a = json.loads(line)
-        if op == "rect":
+        if op == "background":
+            image.paste(Image.open(ROOT / 'assets/component-center/center_background.jpg').convert('RGB'))
+        elif op == "thumbnail":
+            ident,x,y=a
+            package=ROOT.parent/'pc/builtin-clawpkgs'/ident
+            widget=json.loads((package/'runtime/widget.json').read_text())
+            spec=next((s for s in widget['surface']['images'] if s.get('encoding')=='jpeg'),widget['surface']['images'][0])
+            image.paste(Image.open(package/spec['asset']).convert('RGB').resize((64,48)),(x,y))
+        elif op == "rect":
             x,y,w,h,r,c=a;draw.rounded_rectangle((x,y,x+w-1,y+h-1),r,fill=color(c))
         elif op == "line":
             x,y,x1,y1,c=a;draw.line((x,y,x1,y1),fill=color(c))

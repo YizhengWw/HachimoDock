@@ -571,6 +571,9 @@ def smoke_test_data_list(runtime: dict[str, Any], buttons: list[dict[str, Any]])
 def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> dict[str, Any]:
     """Exercise media navigation semantics; transport/audio tested by product tests."""
     supported = {"media.toggle", "media.queue", "media.previous", "media.next", "media.up", "media.down", "media.select", "media.lyrics"}
+    radio = runtime.get("media",{}).get("mode") == "live"
+    if radio:
+        supported.remove("media.lyrics")
     declared = {b["action"] for b in buttons}
     transitions = {t["on"] for t in runtime["transitions"]}
     errors = []
@@ -581,7 +584,7 @@ def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> 
     checks = []
     # Model the bounded native input contract using the actions actually bound.
     # Audio acknowledgements are deliberately simulated, never claimed as hardware.
-    for count in (0, 1, 5, 6, 20):
+    for count in (0, 1, 5, 6, 20, 30, 128):
         state = {"page": 0, "selected": 0, "seeking": False, "volume": 65, "position": 15000, "playing": False, "track": 0}
         visible = set()
         def press(action):
@@ -592,7 +595,9 @@ def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> 
             elif action == "media.queue": state.update(page=0 if state["page"] == 1 else 1, seeking=False)
             elif action == "media.select":
                 if state["page"] == 1 and count: state.update(track=state["selected"], playing=True)
-                elif not state["page"]: state["seeking"] = not state["seeking"]
+                elif not state["page"]:
+                    if radio: state["page"] = 1
+                    else: state["seeking"] = not state["seeking"]
             elif action in {"media.up", "media.down"}:
                 direction = -1 if action == "media.up" else 1
                 if state["page"] == 1 and count: state["selected"] = (state["selected"] + direction) % count
@@ -607,7 +612,7 @@ def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> 
         if state["page"] == 2: press("media.lyrics")
         if state["page"] == 1: press("media.queue")
         press("media.select"); press("media.next"); press("media.previous")
-        press("media.queue")
+        if state["page"] != 1: press("media.queue")
         reached = {state["selected"]}
         for _ in range(count): press("media.down"); reached.add(state["selected"])
         if count > 1 and len(reached) != count: errors.append(f"{count} 首歌曲不能逐一选择")
@@ -617,7 +622,7 @@ def smoke_test_media(runtime: dict[str, Any], buttons: list[dict[str, Any]]) -> 
                        "visibleActions": sorted(visible), "emptyIsNotPlaying": bool(count) or not state["playing"]})
     demonstrated = set().union(*(set(c["visibleActions"]) for c in checks))
     if declared - demonstrated: errors.append("部分动作在模拟可达状态中没有反馈：" + ",".join(sorted(declared-demonstrated)))
-    return {"ok": not errors, "mode": "media", "source": "audio.player", "errors": errors,
+    return {"ok": not errors, "mode": "media", "source": runtime["media"]["source"], "errors": errors,
             "visibleActions": sorted(declared), "scenarios": checks, "networkVerified": False, "deviceVerified": False}
 
 
@@ -625,6 +630,37 @@ def smoke_test_game(widget_dir: Path) -> dict[str, Any]:
     runtime = load_json(widget_dir / "runtime" / "widget.json")
     manifest = load_json(widget_dir / "component.json")
     buttons = load_json(widget_dir / "buttons.json")
+    if runtime.get('local'):
+        import subprocess,shutil
+        node=shutil.which('node')
+        if not node:return {'ok':False,'errors':['离线工具自测需要 Node.js']}
+        result=subprocess.run([node,str(Path(__file__).with_name('smoke_local.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
+        return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
+    if runtime.get('scene',{}).get('motion'):
+        import subprocess,shutil
+        node=shutil.which('node')
+        if not node:return {'ok':False,'errors':['连续运动自测需要 Node.js 同源核心']}
+        result=subprocess.run([node,str(Path(__file__).with_name('smoke_motion.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
+        return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
+    if runtime.get('surface',{}).get('game_view'):
+        import subprocess,shutil
+        node=shutil.which('node')
+        if not node:return {'ok':False,'errors':['游戏画面层需要 Node.js 运行同源游戏核心']}
+        result=subprocess.run([node,str(Path(__file__).with_name('smoke_classic.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
+        return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
+    if runtime.get('surface',{}).get('engine')=='p4-app-surface-v1' and not any(k in runtime for k in ('scene','data')):
+        from bounded_app import smoke
+        return smoke(runtime,buttons)
+    if runtime.get("scene", {}).get("engine") == "p4-touch-slice-v1":
+        import subprocess, shutil
+        node = shutil.which("node")
+        if not node:
+            return {"ok": False, "errors": ["触控切果自测需要 Node.js 执行与固件同源的受控核心"]}
+        result = subprocess.run([node, str(Path(__file__).with_name("smoke_touch_slice.mjs")),
+            str(widget_dir/"runtime/widget.json"), str(widget_dir/"buttons.json")],capture_output=True,text=True,timeout=30)
+        if result.returncode:
+            return {"ok": False, "errors": ["触控核心自测失败: " + result.stderr[-1500:]]}
+        return json.loads(result.stdout)
     if isinstance(runtime.get("instrument"), dict):
         actions = [b.get("action") for b in buttons]
         # Contract-level reachable feedback model; native DSP/codec tests live in firmware/tests.
@@ -805,6 +841,10 @@ def main() -> int:
     result = run_smoke_test(args.widget_dir, load_capabilities(args.capabilities))
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
+    elif result.get("ok") and result.get("mode") == "host-application-contract":
+        print(f"CONTRACT_OK {result['path']} actions={result.get('actions', [])} hostServicesVerified=false")
+    elif result.get("ok") and result.get("mode") == "application":
+        print(f"APP_OK {result['path']} states={result.get('reachableStates', [])} completion={result.get('completionStates', [])} deviceVerified=false")
     elif result.get("ok"):
         print(
             f"PLAYABLE {result['path']} "

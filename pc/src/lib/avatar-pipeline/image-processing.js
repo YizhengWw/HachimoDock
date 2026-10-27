@@ -1,6 +1,6 @@
 /**
- * [Input] user-uploaded image Blob plus optional Ark cloud-background configuration.
- * [Output] Ark-edited (or original fallback), alpha-normalized, black-composited, fixed 4:3 downscaled PNG as Uint8Array.
+ * [Input] user-uploaded image Blob, optional visual-style description and Ark cloud-background configuration.
+ * [Output] Ark-edited, alpha-normalized black 4:3 PNG; moderation always stops downstream work, other failures allow only explicitly selected original fallback.
  * [Pos] lib node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header, run.js, pipeline-defaults.js, providers/volcano-image.js, and pc/src/.folder.md.
  */
@@ -10,7 +10,7 @@ import {
   PIPELINE_MAX_IMAGE_DIMENSION,
   PIPELINE_OUTPUT_ASPECT_RATIO,
 } from "./pipeline-defaults.js";
-import { editImageBackgroundWithArk } from "./providers/volcano-image.js";
+import { editImageBackgroundWithArk, getArkImageEditPolicyRejection } from "./providers/volcano-image.js";
 
 function loadImage(blob) {
   return new Promise((resolve, reject) => {
@@ -84,7 +84,7 @@ export function computeFourThreeCanvasLayout({
 
 /**
  * Ask Ark to replace the background, then composite onto a black 4:3 canvas and downscale.
- * If Ark is unavailable, preserve the source image and still produce a valid reference frame.
+ * Fail closed when Ark is unavailable. Local-only resampling explicitly opts into original fallback.
  *
  * @param {Blob} imageBlob
  * @param {object} [options]
@@ -100,6 +100,8 @@ export async function processImageForPipeline(imageBlob, options = {}) {
     cloudBackground = null,
     onProgress,
     signal,
+    allowOriginalFallback = false,
+    styleDescription = '',
   } = options;
 
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
@@ -108,6 +110,7 @@ export async function processImageForPipeline(imageBlob, options = {}) {
   let backgroundMode = "original";
   let backgroundModel = "";
   let backgroundWarning = "";
+  let masterImage = null;
   if (cloudBackground?.apiKey) {
     onProgress?.("cloud_editing");
     try {
@@ -117,18 +120,26 @@ export async function processImageForPipeline(imageBlob, options = {}) {
         ...cloudBackground,
         imageDataUrl: bytesToDataUrl(inputBytes, inputMime),
         signal,
+        styleDescription,
       });
       sourceBlob = new Blob([edited.bytes], { type: edited.mime });
+      masterImage = {bytes:edited.bytes,mime:edited.mime};
       backgroundMode = "ark";
       backgroundModel = edited.model;
     } catch (error) {
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       backgroundWarning = error?.message || String(error);
+      const rejection = getArkImageEditPolicyRejection(error);
+      // Moderation is not a transport failure: never silently bypass it via
+      // the legacy original-image fallback or suggest repeating a paid call.
+      if (rejection) throw new Error(`${rejection.message}\n原始错误：${backgroundWarning}`, { cause: error });
+      if (!allowOriginalFallback) throw new Error(`参考图处理失败，已停止后续生成。可重试处理，或关闭背景处理后明确使用原图。${backgroundWarning}`);
       console.warn("[avatar-pipeline] Ark background edit failed; using original image:", error);
       onProgress?.("cloud_fallback", undefined, backgroundWarning);
     }
   } else {
     backgroundWarning = "Ark cloud background editing is unavailable for the selected provider";
+    if (!allowOriginalFallback) throw new Error("请先配置图片处理服务，或关闭背景处理后明确使用原图；尚未生成视频。");
     onProgress?.("cloud_fallback", undefined, backgroundWarning);
   }
 
@@ -174,5 +185,6 @@ export async function processImageForPipeline(imageBlob, options = {}) {
     backgroundMode,
     backgroundModel,
     backgroundWarning,
+    masterImage,
   };
 }

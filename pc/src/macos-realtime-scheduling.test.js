@@ -22,7 +22,7 @@ test("activity ends through RAII and cannot migrate to an async worker", () => {
 });
 
 test("Mac protection does not introduce busy spinning or change Windows transport", () => {
-  const source = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]")[0];
+  const source = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]\nmod tests")[0];
   assert.match(source, /#\[cfg\(windows\)\][\s\S]*spin_loop/);
   assert.match(source, /#\[cfg\(not\(windows\)\)\]\s*std::thread::sleep\(gap\)/);
   assert.match(rust("lib.rs"), /#\[cfg\(target_os = "macos"\)\]\s*mod realtime_audio_macos;/);

@@ -232,11 +232,31 @@ pub fn configure(dir: PathBuf) {
 pub fn execute(input: Input) -> Result<Vec<Todo>, String> {
     store().lock().map_err(|_| "待办状态不可用")?.apply(input)
 }
+#[cfg(test)]
+pub(crate) fn isolated_store(path: PathBuf) -> impl FnMut(Input) -> Result<Vec<Todo>, String> {
+    let mut s = Store::load(path);
+    move |input| s.apply(input)
+}
 pub fn execute_tool(input: Input) -> Result<Vec<Todo>, String> {
     store()
         .lock()
         .map_err(|_| "待办状态不可用")?
         .apply_tool(input)
+}
+/// Explicit note conversion with a stable ID: crash/retry cannot duplicate it.
+pub(crate) fn create_component_note_once(origin:&str,text:&str)->Result<String,String>{
+    use sha2::{Digest,Sha256};
+    let title=title(text)?;
+    if origin.is_empty()||origin.len()>160{return Err("笔记标识无效".into());}
+    let id=format!("{:x}",Sha256::digest(format!("petui-note-v1:{origin}")))[..20].to_string();
+    let mut s=store().lock().map_err(|_|"待办状态不可用")?;
+    if let Some(e)=&s.error{return Err(e.clone());}
+    if s.doc.items.iter().any(|i|i.id==id){return Ok(id);}
+    let mut doc=s.doc.clone();doc.items.push(Todo{id:id.clone(),title,due_at:None,completed:false,revision:1,created_at:Utc::now().to_rfc3339()});validate(&doc)?;
+    let dir=s.path.parent().ok_or("待办存储尚未就绪")?;std::fs::create_dir_all(dir).map_err(|_|"无法创建待办目录")?;
+    let mut temp=tempfile::NamedTempFile::new_in(dir).map_err(|_|"无法准备待办存储")?;
+    temp.write_all(&serde_json::to_vec(&doc).map_err(|_|"待办编码失败")?).and_then(|_|temp.as_file().sync_all()).map_err(|_|"无法写入待办")?;
+    temp.persist(&s.path).map_err(|_|"无法保存待办")?;s.doc=doc;Ok(id)
 }
 pub fn snapshot() -> DataSnapshot {
     let result = execute(Input {

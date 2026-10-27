@@ -1,0 +1,1 @@
+Original AI-assisted artwork for HachimoDock, 2026. Text, buttons and live values are native PetUI elements; no third-party logos or UI screenshots.

@@ -62,39 +62,29 @@ fn emit_build_identity() {
 }
 
 fn main() {
-    prepare_internal_ca();
+    prepare_reference_image_bridge();
     emit_build_identity();
     tauri_build::build()
 }
 
-fn prepare_internal_ca() {
-    for name in ["PET_MANAGER_INTERNAL_CA_FILE", "PET_MANAGER_INTERNAL_CA_SHA256", "PET_MANAGER_INTERNAL_CREDENTIALS_FILE"] {
-        println!("cargo:rerun-if-env-changed={name}");
+fn prepare_reference_image_bridge() {
+    println!("cargo:rerun-if-changed=src/reference_image_macos.m");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") { return; }
+    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let arch = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("aarch64") { "arm64" } else { "x86_64" };
+    let object = out.join("reference_image.o");
+    let status = Command::new("xcrun").args(["clang", "-fobjc-arc", "-fblocks", "-O2", "-arch", arch,
+        "-mmacosx-version-min=10.15", "-Werror=implicit-function-declaration", "-c", "src/reference_image_macos.m", "-o"])
+        .arg(&object).status().expect("Xcode command line tools are required for photo import");
+    assert!(status.success(), "Photo import bridge failed to compile");
+    let status = Command::new("xcrun").args(["ar", "crs"]).arg(out.join("libreference_image.a")).arg(object)
+        .status().expect("Cannot archive photo import bridge");
+    assert!(status.success());
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=reference_image");
+    println!("cargo:rustc-link-arg=-Wl,-weak_framework,UniformTypeIdentifiers");
+    for framework in ["AppKit", "PhotosUI", "ImageIO", "Foundation", "CoreGraphics"] {
+        println!("cargo:rustc-link-lib=framework={framework}");
     }
-    let input = env::var_os("PET_MANAGER_INTERNAL_CA_FILE");
-    let approved = env::var_os("PET_MANAGER_INTERNAL_CA_SHA256");
-    let credentials = env::var_os("PET_MANAGER_INTERNAL_CREDENTIALS_FILE");
-    if env::var_os("CARGO_FEATURE_INTERNAL_NETWORK").is_none() {
-        assert!(input.is_none() && approved.is_none() && credentials.is_none(), "Public builds refuse internal CA or credential inputs");
-        return;
-    }
-    let input = input.expect("Internal builds require an explicitly approved CA file");
-    assert!(approved.is_some(), "Internal builds require approved CA fingerprints");
-    println!("cargo:rerun-if-changed={}", PathBuf::from(input).display());
-    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("../scripts/prepare-internal-ca.mjs");
-    println!("cargo:rerun-if-changed={}", script.display());
-    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("approved-internal-ca.pem");
-    let status = Command::new("node").arg(script).arg(output).status()
-        .expect("Node.js is required to validate the approved CA chain");
-    assert!(status.success(), "Internal CA validation failed");
-    let credentials = credentials.expect("Internal builds require an explicit credential file");
-    println!("cargo:rerun-if-changed={}", PathBuf::from(credentials).display());
-    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("../scripts/prepare-internal-credentials.mjs");
-    println!("cargo:rerun-if-changed={}", script.display());
-    let output = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("internal-credentials.json");
-    let status = Command::new("node").arg(script).arg(output).status()
-        .expect("Node.js is required to validate internal credentials");
-    assert!(status.success(), "Internal credential validation failed");
 }
+

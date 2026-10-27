@@ -133,6 +133,7 @@ class SessionMetricsTracker {
     this.sessionEventStreamId = crypto.randomUUID();
     this.sessionEventLog = [];
     this.sessionEventSignatures = new Map();
+    this.workbuddyTurns = new Map();
   }
 
   apply(payload, nowMs = Date.now()) {
@@ -158,6 +159,40 @@ class SessionMetricsTracker {
     const display = payload.display && typeof payload.display === "object" ? payload.display : null;
     const displayTitle = typeof display?.title === "string" ? display.title.trim() : "";
     const displayContent = typeof display?.content === "string" ? display.content.trim() : "";
+    // Legacy/polling events carry no generation receipt. Never reuse metadata
+    // from an earlier hook just because they share a session record.
+    if (source === "workbuddy" && !payload.taskCorrelation) delete record.taskCorrelation;
+    if ((source === "codex" || source === "workbuddy") && payload.taskCorrelation) {
+      const { userHash, turnId, turnActive } = payload.taskCorrelation;
+      record.taskCorrelation = {
+        userHash: typeof userHash === "string" && /^[a-f0-9]{64}$/.test(userHash) ? userHash : "",
+        turnId: typeof turnId === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(turnId) ? turnId : "",
+        ...(typeof turnActive === "boolean" ? { turnActive } : {}),
+        ...(source === "codex" && payload.taskCorrelation.browserContextNormalized === true
+          ? { browserContextNormalized: true } : {}),
+      };
+      if (source === "workbuddy") {
+        const c=record.taskCorrelation;
+        const proven = payload.event === "Stop" && payload.taskCorrelation.receiptSource === "transcript_chain"
+          && c.userHash && c.turnId && Number.isSafeInteger(payload.taskCorrelation.userTimestamp)
+          && payload.taskCorrelation.userTimestamp > 0 && payload.taskCorrelation.userTimestamp <= nowMs;
+        if (proven) {
+          c.receiptSource = "transcript_chain";
+          c.userTimestamp = payload.taskCorrelation.userTimestamp;
+        }
+        const turnKey=JSON.stringify([scope,c.turnId]);
+        if (payload.event === "UserPromptSubmit" && c.turnId && c.userHash) {
+          this.workbuddyTurns.set(turnKey,{hash:c.userHash,at:nowMs});
+        } else if (payload.event !== "UserPromptSubmit" && !proven) {
+          const bound=c.turnId && this.workbuddyTurns.get(turnKey);
+          // A completion without the exact generation cannot borrow the latest
+          // prompt or complete another request. No raw text/paths are stored.
+          c.userHash=bound && nowMs-bound.at <= 15*60*1000 ? bound.hash : "";
+        }
+        for (const [k,v] of this.workbuddyTurns) if (nowMs-v.at > 15*60*1000) this.workbuddyTurns.delete(k);
+        while(this.workbuddyTurns.size>128) this.workbuddyTurns.delete(this.workbuddyTurns.keys().next().value);
+      }
+    }
     if (!preserveTerminalState) {
       record.lastSeenAt = nowMs;
       if (displayTitle) record.displayTitle = displayTitle;
@@ -361,6 +396,8 @@ class SessionMetricsTracker {
       status.title || "",
       status.cwd || "",
       status.transcriptPath || "",
+      record.taskCorrelation || null,
+      record.taskCorrelation ? payload?.event || "" : "",
     ]);
     if (this.sessionEventSignatures.get(signatureKey) === signature) return;
     this.sessionEventSignatures.set(signatureKey, signature);
@@ -371,6 +408,7 @@ class SessionMetricsTracker {
       state,
       event: typeof payload?.event === "string" ? payload.event : "",
       reason: typeof payload?.reason === "string" ? payload.reason : "",
+      ...(record.taskCorrelation ? { taskCorrelation: { ...record.taskCorrelation } } : {}),
       updatedAt: status.updatedAt,
       session: this._statusToEventSession(status),
     };

@@ -5,7 +5,7 @@
  * [Sync] If this file changes, update this header. Supports the M06.3 "custom provider" advanced settings.
  */
 
-import { downloadBinary, pipelineFetch, readJsonOrThrow, sleep, withRetry } from "../http.js";
+import { downloadBinary, pipelineFetch, readJsonOrThrow, sleep, withRetry, shouldRetryTransientHttp } from "../http.js";
 
 function joinUrl(baseUrl, path) {
   const trimmed = (baseUrl || "").replace(/\/+$/, "");
@@ -99,6 +99,7 @@ export async function runCustomFamily({ config, prompt, imageDataUrl, signal, on
   const submitJson = await withRetry(
     async () => {
       const response = await pipelineFetch(submitUrl, {
+        diagnosticStage: "video_submit",
         method: "POST",
         signal,
         headers,
@@ -106,7 +107,7 @@ export async function runCustomFamily({ config, prompt, imageDataUrl, signal, on
       });
       return readJsonOrThrow(response, "custom submit");
     },
-    { retries: 3, signal },
+    { retries: 3, signal, shouldRetry: shouldRetryTransientHttp },
   );
 
   const taskId = extractTaskId(submitJson);
@@ -132,7 +133,7 @@ export async function runCustomFamily({ config, prompt, imageDataUrl, signal, on
       const queryUrl = joinUrl(config.baseUrl, queryPath.replace("{id}", encodeURIComponent(taskId)));
       const queryJson = await withRetry(
         async () => {
-          const response = await pipelineFetch(queryUrl, { method: "GET", signal, headers });
+          const response = await pipelineFetch(queryUrl, { method: "GET", signal, headers, diagnosticStage: "video_poll" });
           return readJsonOrThrow(response, "custom query");
         },
         { retries: 3, signal },

@@ -1,11 +1,12 @@
 /**
- * [Input] Provider id, optional browser storage, and an optional compile-time internal Volcengine API key fallback.
- * [Output] Shared video provider config, persisted video parameters, independently resolved Ark image-edit config, and user-config-first persistence helpers. Ark models are discovered live.
+ * [Input] Provider id, optional browser storage, and user-provided API credentials.
+ * [Output] Shared video provider config and user-config-first persistence; failed writes throw instead of reporting a false save. Ark models are discovered live.
  * [Pos] config node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
 import { DEFAULT_THINKING_MODEL } from "./thinking-model.js";
+import { invoke } from "@tauri-apps/api/core";
 import {
   DEFAULT_VOLCANO_BASE_URL,
 } from "./providers/volcano.js";
@@ -16,12 +17,44 @@ export const DEFAULT_PROVIDER_ID = "volcengine";
 export const VOLCENGINE_BASE_URL = DEFAULT_VOLCANO_BASE_URL;
 export const VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL;
 export const VOLCENGINE_IMAGE_MODEL = DEFAULT_VOLCANO_IMAGE_MODEL;
+let nativeConfigs = {};
+let initialization = null;
+let nativeReadError = "";
+const nativeRuntime = () => typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 
-const INTERNAL_VOLCENGINE_API_KEY = (
-  typeof __PET_MANAGER_INTERNAL_CONTENT_API_KEY__ === "string"
-    ? __PET_MANAGER_INTERNAL_CONTENT_API_KEY__
-    : ""
-).trim();
+export function initializeProviderConfigs(storage = defaultStorage(), call = invoke) {
+  if (!nativeRuntime()) return Promise.resolve();
+  if (!initialization) initialization = migrateProviderConfigs(storage, call)
+    .then(() => { nativeReadError = ""; })
+    .catch(error => { nativeReadError = error?.message || String(error); throw error; })
+    .finally(() => { initialization = null; });
+  return initialization;
+}
+async function migrateProviderConfigs(storage, call) {
+  const saved = await call("load_generation_provider_configs");
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) throw Error("安全配置读取失败");
+  for (const provider of VIDEO_PROVIDERS) {
+    let legacy;
+    try {
+      const raw = storage?.getItem(`${STORAGE_KEY_PREFIX}${provider.id}`);
+      if (raw == null) continue;
+      legacy = JSON.parse(raw);
+      if (!legacy || typeof legacy !== "object" || Array.isArray(legacy)) throw Error();
+    } catch {
+      throw Error("旧版生成配置无法读取，原数据已保留；请先恢复本地存储再重试");
+    }
+    if (!legacy) continue;
+    // Native data wins on retry. Remove browser plaintext only after native commit succeeded.
+    if (!saved[provider.id]) {
+      await call("save_generation_provider_config", { providerId: provider.id, config: legacy });
+      saved[provider.id] = legacy;
+    }
+    try { storage.removeItem(`${STORAGE_KEY_PREFIX}${provider.id}`); }
+    catch { throw Error("安全配置已保存，但旧版本地配置尚未清理，请重试"); }
+  }
+  nativeConfigs = saved;
+}
+
 
 export const VIDEO_PROVIDERS = [
   {
@@ -63,7 +96,8 @@ export const DEFAULT_ADVANCED = {
 };
 
 function defaultStorage() {
-  return typeof localStorage === "undefined" ? null : localStorage;
+  try { return typeof localStorage === "undefined" ? null : localStorage; }
+  catch { return null; }
 }
 
 export function pickVideoParameters(value) {
@@ -81,13 +115,13 @@ export function providerById(providerId = DEFAULT_PROVIDER_ID) {
 export function resolveProviderApiKey(
   providerId,
   savedApiKey,
-  internalApiKey = INTERNAL_VOLCENGINE_API_KEY,
 ) {
   if (typeof savedApiKey === "string" && savedApiKey.trim()) return savedApiKey;
-  return providerId === "volcengine" ? String(internalApiKey || "").trim() : "";
+  return "";
 }
 
-function parseStoredProviderConfig(providerId, storage = defaultStorage()) {
+function parseStoredProviderConfig(providerId, storage = defaultStorage(), native = true) {
+  if (native && nativeRuntime()) return nativeConfigs[providerId] || null;
   if (!storage) return null;
   try {
     const raw = storage.getItem(`${STORAGE_KEY_PREFIX}${providerId}`);
@@ -108,6 +142,7 @@ export function loadProviderConfig(providerId = DEFAULT_PROVIDER_ID, storage = d
 
   return {
     providerId: provider.id,
+    storageError: nativeRuntime() ? nativeReadError : "",
     provider,
     apiKey: resolveProviderApiKey(provider.id, saved.apiKey),
     accessKey: typeof saved.accessKey === "string" ? saved.accessKey : "",
@@ -118,7 +153,7 @@ export function loadProviderConfig(providerId = DEFAULT_PROVIDER_ID, storage = d
         ? saved.baseUrl
         : provider.baseUrl,
     model: savedModel && hasSavedFastGeneration ? savedModel : provider.models[0] || savedModel || "",
-    thinkingModel: isVolcengine
+    thinkingModel: isVolcengine && (!saved.thinkingModel || saved.thinkingModel === "doubao-seed-2-0-pro-260215")
       ? VOLCENGINE_THINKING_MODEL
       : typeof saved.thinkingModel === "string"
         ? saved.thinkingModel
@@ -144,10 +179,16 @@ export function loadArkImageConfig(storage = defaultStorage()) {
 }
 
 export function saveProviderConfig(providerId, config, storage = defaultStorage()) {
-  if (!storage) return;
+  if (nativeRuntime()) {
+    if (nativeReadError) return Promise.reject(new Error(`原配置尚未读取，不会覆盖：${nativeReadError}`));
+    return invoke("save_generation_provider_config", { providerId, config }).then(() => {
+      nativeConfigs = { ...nativeConfigs, [providerId]: structuredClone(config) };
+    });
+  }
+  if (!storage) throw new Error("本地存储不可用，配置未保存");
   try {
     storage.setItem(`${STORAGE_KEY_PREFIX}${providerId}`, JSON.stringify(config));
   } catch {
-    /* ignore quota */
+    throw new Error("本地存储写入失败，配置未保存；请检查可用磁盘空间后重试");
   }
 }

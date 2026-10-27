@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "engine": "pc-app-news-v1",
+  "service": "news",
+  "autoRead": true,
+  "actions": {
+    "host.refresh": "refresh",
+    "host.toggle": "toggle",
+    "host.previous": "previous",
+    "host.next": "next",
+    "host.up": "up",
+    "host.down": "down"
+  },
+  "content": [
+    {
+      "id": "ai",
+      "title": "AI 与科技",
+      "query": "人工智能与科技新闻"
+    },
+    {
+      "id": "business",
+      "title": "商业与财经",
+      "query": "商业与财经新闻"
+    },
+    {
+      "id": "entertainment",
+      "title": "娱乐新鲜事",
+      "query": "娱乐行业影视音乐公开新闻"
+    }
+  ]
+}

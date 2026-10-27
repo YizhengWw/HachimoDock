@@ -5,7 +5,7 @@
  * [Sync] If this file changes, update this header. JWT signing uses Web Crypto HS256.
  */
 
-import { downloadBinary, pipelineFetch, readJsonOrThrow, sleep, withRetry } from "../http.js";
+import { downloadBinary, pipelineFetch, readJsonOrThrow, sleep, withRetry, shouldRetryTransientHttp } from "../http.js";
 import { uint8ToBase64 } from "../image.js";
 
 const DEFAULT_BASE_URL = "https://api-beijing.klingai.com";
@@ -126,6 +126,7 @@ async function submitTask({ accessKey, secretKey, baseUrl, model, mode, prompt, 
   const json = await withRetry(
     async () => {
       const response = await pipelineFetch(apiUrl, {
+        diagnosticStage: "video_submit",
         method: "POST",
         signal,
         headers: {
@@ -136,7 +137,7 @@ async function submitTask({ accessKey, secretKey, baseUrl, model, mode, prompt, 
       });
       return readJsonOrThrow(response, "kling submit");
     },
-    { retries: 3, signal },
+    { retries: 3, signal, shouldRetry: shouldRetryTransientHttp },
   );
   const taskId = extractTaskId(json);
   if (!taskId) throw new Error(`kling submit: missing task_id: ${JSON.stringify(json).slice(0, 200)}`);
@@ -149,6 +150,7 @@ async function queryTask({ accessKey, secretKey, baseUrl, taskId, signal }) {
   return withRetry(
     async () => {
       const response = await pipelineFetch(apiUrl, {
+        diagnosticStage: "video_poll",
         method: "GET",
         signal,
         headers: { Authorization: `Bearer ${token}` },

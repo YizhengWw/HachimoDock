@@ -1,6 +1,6 @@
 /**
  * [Input] Tauri USB scan/connect/status commands and persisted device bindings.
- * [Output] USB-only first-run surface that automatically discovers a verified Pet Manager device, persists its binding, starts the shared deduplicated Bridge runtime, and enters the dashboard; exposes a manual rescan when no device is present.
+ * [Output] USB setup within normal navigation; discovers verified devices and only locks completion after successful dashboard handoff, retaining retry on readback failure.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -47,8 +47,8 @@ export default function DeviceSetup({ onComplete } = {}) {
 
   const finish = useCallback(async () => {
     if (completedRef.current) return;
-    completedRef.current = true;
     await onComplete?.();
+    completedRef.current = true;
   }, [onComplete]);
 
   const persistConnectedDevice = useCallback(async (rawStatus) => {

@@ -1,0 +1,38 @@
+[
+  {
+    "action": "host.refresh",
+    "event": "button.sw1.short_press",
+    "control": "SW1",
+    "label": "更新资讯"
+  },
+  {
+    "action": "host.toggle",
+    "event": "button.sw2.short_press",
+    "control": "SW2",
+    "label": "播报或停止"
+  },
+  {
+    "action": "host.previous",
+    "event": "knob.rotate_ccw",
+    "control": "前方摇杆",
+    "label": "上一条资讯"
+  },
+  {
+    "action": "host.next",
+    "event": "knob.rotate_cw",
+    "control": "前方摇杆",
+    "label": "下一条资讯"
+  },
+  {
+    "action": "host.up",
+    "event": "joystick.up",
+    "control": "前方摇杆",
+    "label": "上一页正文"
+  },
+  {
+    "action": "host.down",
+    "event": "joystick.down",
+    "control": "前方摇杆",
+    "label": "下一页正文"
+  }
+]

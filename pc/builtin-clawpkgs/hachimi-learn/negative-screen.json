@@ -1,0 +1,17 @@
+{
+  "dashboard": {
+    "title": "每日新知",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "选择分类",
+    "headline": "每天多一点好奇",
+    "metricValue": "1000 条 · 百科节选",
+    "note": "连接 PC 后阅读完整知识库。",
+    "footer": "触屏或摇杆左右翻页，全文不会截断。",
+    "metricLabel": "换一条",
+    "metricUnit": "读本页",
+    "badge": "— / —"
+  }
+}

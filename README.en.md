@@ -8,9 +8,9 @@ Home-control capabilities are provided by [**Xiaomi MiLoCo**](https://github.com
 
 ## Source and builds
 
-- [`pc/`](pc/README.md): desktop client 0.1.101, local Agent bridge, component-generation Skill and built-in resources.
-- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.72-p4, board drivers, tests and complete factory-image tools.
-- Install Git LFS and run `git lfs pull` after cloning. Build dependencies are described in each directory.
+- [`pc/`](pc/README.md): desktop client 0.1.167, local Agent bridge, component-generation Skill and built-in resources.
+- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.103-p4-r1, board drivers, tests and complete factory-image tools. The 0.7.108 development branch is not included.
+- Current `main` includes its release resources in ordinary Git; a fresh checkout does not depend on Git LFS quota. Build dependencies are described in each directory.
 - For a ready-to-use app or a complete device flashing kit, visit [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest).
 - To use speech recognition or appearance generation, enter your service keys in Pet Manager’s API settings.
 
@@ -18,7 +18,9 @@ Choose the complete v1 or v3 flashing kit for your actual chip revision; they ar
 
 ## Device and voice use
 
-Release 0.1.101 improves the component center and device interaction. Default visible tools are Stocks, Wooden Fish, Upcoming Todos, and Computer Status. Third-party components and services retain their respective licenses and conditions.
+The current public source includes 0.1.167 improvements to dictation and task receipts, Photos import, automatic appearance generation and recovery, component resource integrity, daily-content caches and automatic playback. Generation supports human and animal characters, optional style descriptions and action-specific reference frames. Third-party components and services retain their respective licenses and conditions.
+
+This is a sanitized source export for the normal public edition, not a copy of private repository history. Embedded-key/enterprise-certificate build variants, server administration/deployment material, personal paths and local acceptance transcripts are excluded. Public service endpoints and license notices remain. Community web assets are included, but the operational backend is not. Existing release assets and tags are unchanged; use `main` for the latest source. A Windows COM-port opening issue reported on some computers with this firmware is still under investigation; this source sync does not claim to fix it.
 
 Configure speech and chat-model credentials, then long-press SW2 in the pet view to start or end real-time conversation. Compatible firmware supports listening during playback and interruption. Pair your home account on the Smart Home page for natural-language control of authorized devices. The built-in stock watchlist defaults to Xiaomi and Alibaba; manage it in component details. Quotes are refreshed by the PC every two seconds and forwarded over USB, may be delayed, and do not enable trading.
 
@@ -33,7 +35,7 @@ Component behavior and physical bindings can be adjusted in Pet Manager. Use the
 If a downloaded app will not open, after verifying its origin and checksum run:
 
 ```sh
-xattr -cr "/Applications/Pet Manager.app"
+xattr -cr "/Applications/HachimiDock.app"
 ```
 
 Enable Pet Manager in **System Settings → Privacy & Security → Accessibility** when prompted to allow Agent input and control. See each release for complete firmware flashing instructions.

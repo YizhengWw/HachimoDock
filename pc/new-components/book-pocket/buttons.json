@@ -1,0 +1,26 @@
+[
+  {
+    "action": "host.random",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "换一本 / 确认分类"
+  },
+  {
+    "action": "host.category",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "选择分类 / 返回"
+  },
+  {
+    "action": "host.previous",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw",
+    "label": "上一页或分类"
+  },
+  {
+    "action": "host.next",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw",
+    "label": "下一页或分类"
+  }
+]

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import struct
 import zlib
+import hashlib
+import json
 from pathlib import Path
 
 
@@ -149,6 +151,24 @@ def decode_png_rgba(path: Path) -> tuple[int, int, bytes]:
 
 
 def compile_component_sprites(package: Path, widget: dict) -> list[dict]:
+    if widget.get("surface",{}).get("images"):
+        # The checked-in cache is produced by the PC's canonical encoder.
+        # Firmware/factory builds remain dependency-free and reject stale art.
+        cache=Path(__file__).resolve().parents[1]/"assets/builtin-surfaces"/package.name
+        manifest=json.loads((cache/"index.json").read_text())
+        compiled=[]
+        for image in widget["surface"]["images"]:
+            ident=image["id"];source=(package/image["asset"]).read_bytes()
+            record=manifest.get(ident,{})
+            spec=hashlib.sha256(json.dumps(image,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+            data=(cache/(ident+".p4i")).read_bytes()
+            if record.get("source")!=hashlib.sha256(source).hexdigest() or record.get("spec")!=spec or record.get("encoded")!=hashlib.sha256(data).hexdigest():
+                raise ValueError(f"stale native surface cache: {package.name}/{ident}; re-encode with PC surface_image")
+            if len(data)>100000 or data[:4] not in (b"P4I1",b"P4I2",b"P4J1") or int.from_bytes(data[8:12],"little")!=len(data):
+                raise ValueError("invalid native image cache")
+            compiled.append({"id":ident,"data":data})
+        if len(compiled)>4 or sum(len(s["data"]) for s in compiled)>128*1024:raise ValueError("surface image budget")
+        return compiled
     scene = widget.get("scene") if isinstance(widget, dict) else None
     declarations = scene.get("sprites", []) if isinstance(scene, dict) else []
     if not isinstance(declarations, list) or len(declarations) > MAX_SPRITES:
@@ -217,6 +237,13 @@ def sprite_pack_checksum(sprites: list[dict]) -> int:
     for sprite in sprites:
         data = sprite["data"]
         include(sprite["id"].encode("ascii") + b"\0")
-        include(data[4:8])
-        include(data[8:])
+        if data[:4] in (b"P4I1",b"P4I2",b"P4J1"):
+            w,h=struct.unpack("<HH",data[4:8]) if data[:4] in (b"P4J1",b"P4I2") else (data[4],data[5])
+            include(bytes((w&255,h&255)))
+            if w>255 or h>255:include(bytes((w>>8,h>>8)))
+            include(bytes((1,0)))
+            include(data)
+        else:
+            include(data[4:8])
+            include(data[8:])
     return checksum

@@ -19,7 +19,11 @@ impl Confirmation {
         let previous_user = normalized(previous_user);
         if !previous_user.is_empty() && previous_user.ends_with(&text) { return false; }
         // ASR alone is not a speaker detector: reject recognized playback echo.
-        if phase == "speaking" && text.chars().count() >= 3 && normalized(reply).contains(&text) { return false; }
+        // Two-character residual echo is still echo. The previous >=3 guard
+        // let a final "你好" from the speaker satisfy the two-character user
+        // gate and cancel playback. Explicit "停" was handled above; unrelated
+        // short commands and speech outside playback remain eligible.
+        if phase == "speaking" && normalized(reply).contains(&text) { return false; }
         if self.previous.is_empty() || !text.starts_with(&self.previous) {
             self.first_ms = Some(ms); self.revisions = 1;
         } else if text != self.previous { self.revisions += 1; }
@@ -70,5 +74,17 @@ mod tests {
         assert!(c.accept("停！",false,None,Duration::ZERO,8,"thinking","",""));
         assert!(c.accept("换歌",true,None,Duration::from_millis(900),8,"speaking","股价上涨",""));
         assert!(!c.accept("嗯",true,None,Duration::from_millis(900),30,"thinking","",""));
+    }
+
+    #[test]
+    fn two_character_playback_fragments_cannot_confirm_a_barge_in() {
+        let mut c=Confirmation::default();
+        for terminal in [false,true] {
+            assert!(!c.accept("你好。",terminal,None,Duration::from_millis(1200),72,"speaking","你好，现在正在检查双向实时对话。",""));
+            assert!(!c.accept("对话",terminal,None,Duration::from_millis(1200),72,"speaking","正在检查双向实时对话",""));
+        }
+        assert!(c.accept("换歌",true,None,Duration::from_millis(900),12,"speaking","你好，现在正在检查双向实时对话",""));
+        assert!(c.accept("停",true,None,Duration::from_millis(200),8,"speaking","你可以说停来结束",""));
+        assert!(c.accept("你好",true,None,Duration::from_millis(900),12,"thinking","你好",""));
     }
 }

@@ -36,7 +36,7 @@ test("Exposes the voice controls while session switching stays in button actions
 
 test("Reads Volcengine ASR readiness and delegates credential editing to API settings", () => {
   assert.match(source, /load_device_asr_settings/);
-  assert.match(source, /onCredentialReady/);
+  assert.doesNotMatch(source, /onCredentialReady/);
   assert.match(source, /onOpenApiSettings/);
   assert.match(source, /type: "set_voice_runtime"/);
   assert.match(source, /API_CONFIGURATION_UPDATED_EVENT/);
@@ -47,11 +47,11 @@ test("Reads Volcengine ASR readiness and delegates credential editing to API set
   assert.doesNotMatch(source, /status\?\.apiKey/);
 });
 
-test("Rearms device voice only after a saved Volcengine ASR update", () => {
-  assert.match(source, /const loadAsrState = \(\{ resume = false \} = \{\}\) =>/);
-  assert.match(source, /if \(resume && status\?\.configured === true\)/);
+test("Visible panel refreshes readiness without owning background restoration", () => {
+  assert.match(source, /const loadAsrState = \(\) =>/);
+  assert.doesNotMatch(source, /onCredentialReady/);
   assert.match(source, /event\?\.detail\?\.providerId && event\.detail\.providerId !== "volcengine-asr"/);
-  assert.match(source, /loadAsrState\(\{ resume: true \}\)/);
+  assert.match(source, /loadAsrState\(\)/);
   assert.match(source, /addEventListener\(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated\)/);
   assert.match(source, /removeEventListener\(API_CONFIGURATION_UPDATED_EVENT, handleApiConfigurationUpdated\)/);
 });

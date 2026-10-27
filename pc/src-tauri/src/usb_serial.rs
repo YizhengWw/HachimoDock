@@ -606,6 +606,15 @@ impl Drop for SerialReaderPause<'_> {
     }
 }
 
+fn flush_serial_writer<W: Write + ?Sized>(writer: &mut W) -> std::io::Result<()> {
+    // Serial writes are unbuffered in user space. macOS tcdrain has no bounded
+    // timeout; use the peer's protocol ACK as the delivery barrier instead.
+    #[cfg(target_os = "macos")]
+    { let _ = writer; Ok(()) }
+    #[cfg(not(target_os = "macos"))]
+    { writer.flush() }
+}
+
 fn write_serial_bytes_paced(
     writer: &mut dyn Write,
     bytes: &[u8],
@@ -619,7 +628,10 @@ fn write_serial_bytes_paced(
         let chunk_count = chunks.len();
         for (index, chunk) in chunks.enumerate() {
             writer.write_all(chunk)?;
-            writer.flush()?;
+            // TTYPort::flush calls tcdrain on macOS. WCH drivers can block
+            // there indefinitely, ignoring the configured write timeout and
+            // wedging the port even after disconnect. Pace bounded writes;
+            // protocol acknowledgements, not a kernel drain, confirm delivery.
             if index + 1 < chunk_count && !gap.is_zero() {
                 thread::sleep(gap);
             }
@@ -848,6 +860,14 @@ fn validate_hello_message(message: &mut SerialMessage) -> Result<(), String> {
     Ok(())
 }
 
+fn hello_ack_due(last_sent: Option<Instant>, now: Instant, desktop_device_id: &str) -> bool {
+    // P4 acknowledges bind/ack with hello. Echoing every hello creates an
+    // unbounded hello -> ack -> hello loop. Linux/P4 periodic hello still lets
+    // a lost ACK retry; an empty desktop identity cannot establish a binding.
+    !desktop_device_id.trim().is_empty()
+        && last_sent.is_none_or(|last| now.saturating_duration_since(last) >= Duration::from_secs(2))
+}
+
 fn serial_probe_handshake_messages(desktop_device_id: &str) -> [serde_json::Value; 2] {
     [
         serde_json::json!({
@@ -877,8 +897,7 @@ fn send_serial_probe_handshakes(
             .write_all(line.as_bytes())
             .map_err(|error| format!("serial handshake write failed: {error}"))?;
     }
-    writer
-        .flush()
+    flush_serial_writer(writer)
         .map_err(|error| format!("serial handshake flush failed: {error}"))
 }
 
@@ -1582,6 +1601,8 @@ impl UsbSerialManager {
         thread::spawn(move || {
             let mut reader = BufReader::new(reader_port);
             let mut line_buffer = Vec::with_capacity(32 * 1024);
+            let mut read_failure=None;
+            let mut last_hello_ack = None;
             loop {
                 if cancel_reader.load(Ordering::SeqCst) {
                     break;
@@ -1592,14 +1613,16 @@ impl UsbSerialManager {
                 }
                 let line = match read_serial_line_lossy(&mut reader, &mut line_buffer) {
                     Ok(Some(line)) => line,
-                    Ok(None) => break,
-                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    Ok(None) => { read_failure=Some(("read_eof","end_of_stream",None)); break; },
+                    Err(e) if matches!(e.kind(),std::io::ErrorKind::TimedOut|std::io::ErrorKind::Interrupted|std::io::ErrorKind::WouldBlock) => {
                         if cancel_reader.load(Ordering::SeqCst) {
                             break;
                         }
+                        if e.kind()!=std::io::ErrorKind::TimedOut {thread::sleep(Duration::from_millis(2));}
                         continue;
                     }
                     Err(e) => {
+                        read_failure=Some(("read_error",live_audio_pacing::io_kind(&e),e.raw_os_error()));
                         eprintln!("[usb_serial] read error: {} (kind={:?})", e, e.kind());
                         break;
                     }
@@ -1636,17 +1659,18 @@ impl UsbSerialManager {
                         continue;
                     }
                     let desktop_id = desktop_id_ref.lock().map(|d| d.clone()).unwrap_or_default();
-                    let ack = format!(
-                        "{{\"topic\":\"ack\",\"payload\":{{\"desktopDeviceId\":\"{}\"}}}}\n",
-                        desktop_id
-                    );
+                    let ack = format!("{}\n", serde_json::json!({"topic":"ack", "payload":{"desktopDeviceId":desktop_id}}));
                     if let Ok(mut conn) = conn_ref.try_lock() {
                         if let Some(ref mut c) = *conn {
                             if c.connection_id == connection_id {
                                 apply_hello_payload_to_connection(c, &msg.payload);
                                 cache_usb_status(&status_snapshot, Some(c));
-                                let _ = c.writer.write_all(ack.as_bytes());
-                                if !capture_active.load(Ordering::Acquire) { let _ = c.writer.flush(); }
+                                let now = Instant::now();
+                                if hello_ack_due(last_hello_ack, now, &desktop_id)
+                                    && c.writer.write_all(ack.as_bytes()).is_ok() {
+                                    last_hello_ack = Some(now);
+                                    if !capture_active.load(Ordering::Acquire) { let _ = flush_serial_writer(c.writer.as_mut()); }
+                                }
                             }
                         }
                     }
@@ -1656,12 +1680,22 @@ impl UsbSerialManager {
             }
 
             // Reader thread ended -> mark disconnected
+            let mut current_connection=false;
             if let Ok(mut conn) = conn_ref.lock() {
                 if let Some(ref mut c) = *conn {
                     if c.connection_id == connection_id {
+                        current_connection=true;
                         c.connected = false;
                         cache_usb_status(&status_snapshot, Some(c));
                     }
+                }
+            }
+            if current_connection && !cancel_reader.load(Ordering::SeqCst) {
+                if let Some((reason,error_kind,os_error))=read_failure {
+                    let details=serde_json::json!({"reason":reason,"errorKind":error_kind,"osError":os_error,
+                        "generation":connection_id,"ok":false});
+                    transfer_log::record("connection","serial_read_ended",details.clone());
+                    crate::realtime_chat_log::record("","serial_read_ended",details);
                 }
             }
         });
@@ -1697,6 +1731,20 @@ impl UsbSerialManager {
             return Err("音乐正在传输，稍后更新组件数据".into());
         }
         self.send_to_board(board, "widget/data", payload)
+    }
+    pub(crate) fn send_app_snapshot(&self,board:&str,payload:&serde_json::Value)->Result<(),String>{
+        // App controls need feedback while their own audio is playing. Wait for
+        // a chunk boundary, never for an entire stream; do not replay the action.
+        // This is called only by a host worker, never by the serial reader.
+        if serde_json::to_vec(payload).map_err(|e|e.to_string())?.len()>2048{return Err("应用快照过大".into());}
+        let _guard=media_arbitration::acquire(&self.asset_transfer_guard,Duration::from_millis(250)).map_err(|_|"设备传输繁忙，等待下一次状态更新")?;
+        self.send_to_board(board,"app/snapshot",payload)
+    }
+    pub(crate) fn try_send_app_snapshot(&self,board:&str,payload:&serde_json::Value)->Result<(),String>{
+        // Reader callbacks must not wait for media ACKs delivered by that reader.
+        if serde_json::to_vec(payload).map_err(|e|e.to_string())?.len()>2048{return Err("应用快照过大".into());}
+        let _guard=self.asset_transfer_guard.try_lock().map_err(|_|"设备资源同步中")?;
+        self.send_to_board(board,"app/snapshot",payload)
     }
 
     /// Send without flush - for streaming bulk data.
@@ -1779,6 +1827,11 @@ impl UsbSerialManager {
         if topic == "widget/data" && conn.capture_active.load(Ordering::Acquire) {
             return Err("语音通道使用中，稍后更新组件数据".into());
         }
+        let mut payload = payload.clone();
+        if topic == "system/heartbeat" && conn.capabilities["widgetLocalTools"] == "p4-local-tools-v1" && payload.is_object() {
+            let now=chrono::Local::now();
+            payload["clock"]=serde_json::json!({"unixSeconds":now.timestamp(),"utcOffsetMinutes":now.offset().local_minus_utc()/60});
+        }
         let msg = serde_json::json!({
             "topic": topic,
             "payload": payload,
@@ -1806,15 +1859,33 @@ impl UsbSerialManager {
         // Replaceable widget snapshots share the audio-safe paced path. A
         // driver's blocking drain can otherwise hold the mutex indefinitely
         // even after media itself stopped using flush()/tcdrain().
-        let live_frame = audio_frame || topic == "widget/data"
+        let live_frame = audio_frame || topic == "widget/data" || topic == "app/snapshot"
             || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
         let write_result = {
             let _pause = (!live_frame).then(|| SerialReaderPause::new(&self.serial_body_write_active));
             (|| {
                 if live_frame {
-                    return write_serial_live_frame(conn.writer.as_mut(), bytes,
-                        paced_slice_bytes.unwrap_or(bytes.len()), P4_CH343_SERIAL_WRITE_GAP)
-                        .map_err(|error| format!("Live serial write failed: {error}"));
+                    let started=Instant::now();
+                    let result=write_serial_live_frame(conn.writer.as_mut(), bytes,
+                        paced_slice_bytes.unwrap_or(bytes.len()), P4_CH343_SERIAL_WRITE_GAP);
+                    let report=match &result {Ok(report)=>report,Err(error)=>&error.report};
+                    if result.is_err() || report.retries > 0 {
+                        let stage=match topic {
+                            "audio/play_chunk"=>"audio_chunk", "audio/play_begin"=>"audio_begin",
+                            "audio/play_end"=>"audio_end", "audio/play_flush"=>"audio_flush",
+                            "audio/conversation"=>"conversation", "ui/conversation"=>"conversation_ui",
+                            "widget/data"=>"widget", "app/snapshot"=>"app_snapshot", "system/heartbeat"=>"heartbeat", _=>"other_live",
+                        };
+                        let event=if result.is_ok() {"live_write_recovered"}else{"live_write_failed"};
+                        // Never log JSON bodies, PCM, board IDs or driver text.
+                        let details=serde_json::json!({"stage":stage,"ok":result.is_ok(),
+                            "bytes":bytes.len(),"writtenBytes":report.bytes_written,"retries":report.retries,
+                            "elapsedMs":started.elapsed().as_millis(),"errorKind":report.error_kind,
+                            "osError":report.os_error,"generation":conn.connection_id});
+                        transfer_log::record("connection",event,details.clone());
+                        crate::realtime_chat_log::record(payload.get("sessionId").and_then(serde_json::Value::as_str).unwrap_or(""),event,details);
+                    }
+                    return result.map(|_|()).map_err(|error| format!("Live serial write failed: {error}"));
                 }
                 if let Some(write_slice_bytes) = paced_slice_bytes {
                     write_serial_bytes_paced(
@@ -1829,8 +1900,7 @@ impl UsbSerialManager {
                         .write_all(bytes)
                         .map_err(|error| format!("Write failed: {error}"))?;
                     if flush {
-                        conn.writer
-                            .flush()
+                        flush_serial_writer(conn.writer.as_mut())
                             .map_err(|error| format!("Flush failed: {error}"))?;
                     }
                     Ok(())
@@ -1850,8 +1920,7 @@ impl UsbSerialManager {
     pub fn flush(&self) -> Result<(), String> {
         let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
         let conn = conn.as_mut().ok_or("Not connected")?;
-        conn.writer
-            .flush()
+        flush_serial_writer(conn.writer.as_mut())
             .map_err(|e| format!("Flush failed: {}", e))
     }
 
@@ -1877,6 +1946,10 @@ impl UsbSerialManager {
                 "input/config-state",
             )
         })
+    }
+
+    pub(crate) fn transfer_in_progress(&self) -> bool {
+        self.asset_transfer_guard.try_lock().is_err()
     }
 
     pub(crate) fn with_asset_transfer_guard<T>(
@@ -1997,7 +2070,14 @@ impl UsbSerialManager {
         payload["requestId"]=serde_json::json!(request_id);
         self.device_response_waiters.lock().map_err(|_|"音乐回执队列不可用")?.push(DeviceResponseWaiter{request_id:request_id.clone(),response_topic:"media/status".into(),sender});
         if let Err(e)=self.send_to_board(board,topic,&payload) {self.remove_device_response_waiter(&request_id,"media/status");return Err(e);}
+        #[cfg(test)] let write_ms=started.elapsed().as_millis();
         let result=receiver.recv_timeout(Duration::from_secs(3));
+        if started.elapsed() >= Duration::from_millis(150) || result.is_err() {
+            crate::realtime_chat_log::record("", "music_transport", serde_json::json!({
+                "stage":"response", "elapsedMs":started.elapsed().as_millis(), "ok":result.is_ok()
+            }));
+        }
+        #[cfg(test)] if started.elapsed() >= Duration::from_millis(150) || result.is_err() || topic=="media/chunk" && payload["seq"].as_u64().is_some_and(|n|n<8) {eprintln!("media timing: topic={topic}, writeMs={write_ms}, totalMs={}, ok={}",started.elapsed().as_millis(),result.is_ok());}
         self.remove_device_response_waiter(&request_id,"media/status");
         let response=result.map_err(|_|"设备音乐响应超时，请检查连接及固件")?;
         if response["ok"]!=true {return Err(response["message"].as_str().unwrap_or("设备拒绝音乐指令").into());}
@@ -2646,10 +2726,23 @@ impl UsbSerialManager {
     {
         thread::sleep(Duration::from_secs(1));
         let started = Instant::now();
-        let mut force_reconnect = true;
+        // Native USB often keeps its serial handle across an application reboot.
+        // Closing/reopening it immediately after commit toggles DTR/RTS and can
+        // interrupt the new image before its 8-second health check completes.
+        // Keep the working reader; only reopen after a real disconnect/error,
+        // with time for delayed reboot, initialization and health validation.
+        let mut force_reconnect = false;
         let mut last_observation = "waiting for the device to reboot".to_string();
 
         while started.elapsed() < P4_FIRMWARE_RECONNECT_TIMEOUT {
+            // Leave the boot self-test a quiet window, while the reader keeps
+            // draining boot output. Diagnostics are multi-kilobyte replies;
+            // polling them during validation can delay render/RX health samples.
+            if started.elapsed() < Duration::from_secs(20) {
+                on_progress(total_bytes, total_bytes, "reboot");
+                thread::sleep(Duration::from_millis(500));
+                continue;
+            }
             let status = self.status();
             if force_reconnect
                 || !status.connected
@@ -2730,6 +2823,7 @@ impl UsbSerialManager {
                         serde_json::json!({ "boardDeviceId": expected_board_device_id, "error": error.as_str() }),
                     );
                     last_observation = error;
+                    force_reconnect = true;
                 }
             }
             thread::sleep(Duration::from_millis(500));
@@ -3307,7 +3401,7 @@ impl UsbSerialManager {
                 cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset recovery delimiter failed: {error}"));
             }
-            if let Err(error) = connection.writer.flush() {
+            if let Err(error) = flush_serial_writer(connection.writer.as_mut()) {
                 connection.connected = false;
                 cache_usb_status(&self.status_snapshot, Some(connection));
                 return Err(format!("Raw asset recovery flush failed: {error}"));
@@ -3819,17 +3913,23 @@ impl UsbSerialManager {
         expected_board_device_id: &str,
         widget_id: &str,
     ) -> Result<(), String> {
+        self.remove_widget_with_save_policy(expected_board_device_id,widget_id,false)
+    }
+
+    fn remove_widget_with_save_policy(&self, expected_board_device_id:&str, widget_id:&str, preserve_save:bool)->Result<(),String>{
         let _transfer_guard = self
             .asset_transfer_guard
             .lock()
             .map_err(|error| error.to_string())?;
         let status = self.connected_board_status(expected_board_device_id)?;
         ensure_widget_delete_supported(&status)?;
+        if preserve_save&&status.capabilities["widgetDeletePreserveSave"]!=true{return Err("设备不支持保留存档卸载；未删除组件".into());}
         let transfer_id = format!("widget-delete-{}", uuid::Uuid::new_v4());
         let receiver = self.register_widget_ack_waiter(&transfer_id, "delete", None, None)?;
         let payload = serde_json::json!({
             "transferId": &transfer_id,
             "widgetId": widget_id,
+            "preserveSave": preserve_save,
         });
         if let Err(error) = self.send_to_board(expected_board_device_id, "widget/delete", &payload)
         {
@@ -3866,11 +3966,50 @@ impl UsbSerialManager {
     where
         F: Fn(u32, u32, u64),
     {
+        let target=self.status().board_device_id;
+        self.install_widget_clawpkg_on_board(&target,widget_id,widget_dir,binding_overrides,on_progress)
+    }
+
+    pub fn install_widget_clawpkg_on_board<F>(
+        &self,
+        expected_board_device_id:&str,
+        widget_id:&str,
+        widget_dir:&std::path::Path,
+        binding_overrides:&std::collections::HashMap<String,String>,
+        on_progress:F,
+    )->Result<(u32,u64),String>
+    where F:Fn(u32,u32,u64),
+    {
+        self.install_widget_clawpkg_mode(expected_board_device_id,widget_id,widget_dir,binding_overrides,on_progress,false)
+    }
+
+    pub(crate) fn repair_widget_resources(&self,board:&str,id:&str,dir:&std::path::Path)->Result<(u32,u64),String>{
+        if self.status().capabilities["widgetResourceIntegrity"]!="p4-resource-integrity-v1"{
+            return Err("设备尚不支持保留配置的资源恢复".into());
+        }
+        self.install_widget_clawpkg_mode(board,id,dir,&std::collections::HashMap::new(),|_,_,_|{},true)
+    }
+
+    fn install_widget_clawpkg_mode<F>(
+        &self,expected_board_device_id:&str,widget_id:&str,widget_dir:&std::path::Path,
+        binding_overrides:&std::collections::HashMap<String,String>,on_progress:F,repair_resources:bool,
+    )->Result<(u32,u64),String> where F:Fn(u32,u32,u64) {
         use base64::Engine;
         let _transfer_guard = self
             .asset_transfer_guard
             .lock()
             .map_err(|error| error.to_string())?;
+        let (_,connection_id)=self.connected_board_snapshot(expected_board_device_id)?;
+        let extension_path=widget_dir.join("pc/extension.json");
+        if extension_path.is_file() {
+            if extension_path.metadata().map_err(|_|"无法读取媒体扩展")?.len()>16384 {return Err("媒体扩展超过安全上限".into());}
+            let extension=crate::component_extension::parse(&std::fs::read(extension_path).map_err(|_|"无法读取媒体扩展")?)?;
+            let capabilities=self.status().capabilities;
+            if extension.discovery.is_some() && (capabilities["widgetMediaQueueMax"].as_u64().unwrap_or(20)<128 || capabilities["widgetMediaLifecycle"]!="p4-media-lifecycle-v1") {
+                return Err("自动电台需要更新设备固件的媒体队列与进入播放能力；未写入组件".into());
+            }
+        }
+        let send_bound=|topic:&str,payload:&serde_json::Value|self.send_inner(topic,payload,true,Some(expected_board_device_id),Some(connection_id),None);
         // Stay below the P4 runtime's 64-byte transaction buffer even when
         // the manifest uses the maximum 47-byte component id.
         let transfer_id = format!("widget-install-{}", uuid::Uuid::new_v4());
@@ -3888,6 +4027,7 @@ impl UsbSerialManager {
             {
                 let ent = ent.map_err(|e| e.to_string())?;
                 let p = ent.path();
+                if ent.file_type().map_err(|e|e.to_string())?.is_symlink(){return Err("组件资源不允许符号链接".into());}
                 if p.is_dir() {
                     walk(root, &p, out)?;
                 } else if p.is_file() {
@@ -3915,12 +4055,45 @@ impl UsbSerialManager {
             .ok_or_else(|| "component package is missing runtime/widget.json".to_string())?;
         let compiled_sprites = prepare_p4_widget_sprite_files(widget_dir, widget_source)?;
         let widget_definition: serde_json::Value = serde_json::from_slice(widget_source).map_err(|e| e.to_string())?;
+        if widget_definition["scene"]["engine"] == "p4-touch-slice-v1" {
+            let capabilities=self.status().capabilities;
+            if widget_definition["scene"]["revision"].as_u64().unwrap_or(1)>capabilities["widgetSliceRevision"].as_u64().unwrap_or(1) {
+                return Err("这个切果版本需要更新固件后再安装".into());
+            }
+            if capabilities["widgetPointer"]!="p4-pointer-v1" || capabilities["touchInput"]["ready"]!=true
+                || !capabilities["widgetScenes"].as_array().is_some_and(|v|v.iter().any(|e|e=="p4-touch-slice-v1")) {
+                return Err("设备尚未支持连续触控切果，请更新固件并确认触屏就绪".into());
+            }
+        }
         if widget_definition.get("instrument").is_some()
             && self.status().capabilities.get("widgetInstrument").and_then(serde_json::Value::as_str) != Some("p4-instrument-v1") {
             return Err("当前固件不支持本地木鱼音效，请先升级设备固件".into());
         }
         if widget_definition.get("media").is_some() && self.status().capabilities["widgetMedia"]!="p4-media-v1" {
             return Err("当前固件不支持随身听，请先升级设备固件".into());
+        }
+        if widget_definition["surface"]["engine"]=="p4-app-surface-v1" && self.status().capabilities["widgetAppSurface"]!="p4-app-surface-v1" {
+            return Err("需要通用应用界面能力，请先升级设备固件".into());
+        }
+        if widget_definition["surface"].get("graphics").is_some()&&self.status().capabilities["widgetAppGraphics"]!="p4-app-graphics-v1"{return Err("需要高清背景、图标和精细排版能力，请先升级设备固件".into());}
+        if widget_definition["surface"].get("typography").is_some()&&self.status().capabilities["widgetAppTypography"]!="p4-app-type-v1"{return Err("需要组件字形和动态按键提示能力，请先升级设备固件".into());}
+        if widget_definition["surface"]["fonts"].as_array().is_some_and(|fonts|fonts.iter().any(|f|f.get("cell").is_some()))&&self.status().capabilities["widgetGlyphCells"]!="p4-glyph-cells-v1"{return Err("需要高清字形格能力，请先升级设备固件".into());}
+        if widget_definition["surface"].get("interaction").is_some()&&self.status().capabilities["widgetAppInteraction"]!="p4-app-interaction-v1"{return Err("需要组件分格素材与条件显示能力，请先升级设备固件".into());}
+        if widget_definition["game"].get("vertical_speed_percent").is_some()&&self.status().capabilities["widgetFlappyTuning"]!="p4-flappy-tuning-v1"{return Err("需要飞鸟速度参数能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition["surface"].get("game_view").is_some()&&self.status().capabilities["widgetGameSurface"]!="p4-game-surface-v1"{return Err("需要精细游戏画面层，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition["surface"].get("data_view").is_some()&&self.status().capabilities["widgetDataSurface"]!="p4-data-surface-v1"{return Err("需要精细数据画面层，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition["surface"].get("scene_view").is_some()&&self.status().capabilities["widgetSceneSurface"]!="p4-scene-surface-v1"{return Err("需要精细场景画面层，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition.get("host").is_some() && self.status().capabilities["widgetAppHost"]!="p4-app-host-v1" {return Err("请升级支持 PC 应用服务的设备固件".into());}
+        if widget_definition.get("persist").is_some() && self.status().capabilities["widgetState"]!="p4-app-state-v1" {return Err("需要组件存档能力，请先升级设备固件".into());}
+        if widget_definition.get("lifecycle").is_some() && self.status().capabilities["widgetLifecycle"]!="p4-lifecycle-v1" {return Err("需要游戏暂停与成绩存档能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition.get("input").is_some() && self.status().capabilities["widgetInput"]!="p4-input-v1" {return Err("需要组件手势与安全按键能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition.get("local").is_some() && self.status().capabilities["widgetLocalTools"]!="p4-local-tools-v1" {return Err("需要离线内容池与真实日期能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition["scene"].get("motion").is_some() && self.status().capabilities["widgetMotion"]!="p4-motion-v1" {return Err("此组件需要连续运动与按住蓄力能力，请先升级固件；未安装不兼容资源".into());}
+        if widget_definition["scene"]["motion"].get("track").is_some() && self.status().capabilities["widgetPlatformTrack"]!="p4-platform-track-v1" {return Err("此组件需要连续平台与镜头能力，请先升级固件；未安装不兼容资源".into());}
+        if widget_definition["surface"].get("input").is_some() && self.status().capabilities["widgetMediaTouch"]!="p4-media-touch-v1"{return Err("需要媒体触屏控制能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition["surface"]["images"].as_array().is_some_and(|a|a.iter().any(|im|im["encoding"]!="jpeg"&&im["frame_width"].as_u64().unwrap_or(0)>240))&&self.status().capabilities["widgetSurfaceAtlas"]!="p4-wide-atlas-v1"{return Err("需要高清分格素材能力，请先升级设备固件；未安装不兼容资源".into());}
+        if widget_definition.get("surface").is_some() && widget_definition["surface"]["engine"]!="p4-app-surface-v1" && self.status().capabilities["widgetMediaSurface"]!="p4-media-surface-v1" {
+            return Err("请先更新支持城市电台的固件".into());
         }
         if widget_definition["transitions"].as_array().is_some_and(|rules| rules.iter().any(|r| r["on"] == "media.lyrics"))
             && self.status().capabilities["widgetLyrics"] != "p4-lrc-v1" {
@@ -3929,6 +4102,9 @@ impl UsbSerialManager {
         if widget_definition.get("data").is_some()
             && self.status().capabilities.get("widgetData").and_then(serde_json::Value::as_str) != Some(crate::widget_data::PROTOCOL) {
             return Err("设备固件尚不支持实时数据组件，请先升级固件".into());
+        }
+        if widget_definition["surface"].get("images").is_some()&&self.status().capabilities["widgetSurfaceImages"]!="p4-surface-images-v1" {
+            return Err("此组件需要图片与旋转能力，请先升级设备固件".into());
         }
         entries.retain(|(relative_path, _)| !relative_path.starts_with("assets/"));
         entries.extend(compiled_sprites);
@@ -3980,7 +4156,9 @@ impl UsbSerialManager {
         // 3) begin - register ack waiter BEFORE sending so we don't miss
         //    a very-fast reply on a healthy board (~50ms).
         let begin_rx = self.register_widget_ack_waiter(&transfer_id, "begin", None, None)?;
-        self.send_widget_install_begin(&transfer_id, widget_id)?;
+        if let Err(error)=send_bound("widget/begin",&serde_json::json!({"transferId":transfer_id,"widgetId":widget_id,"repairResources":repair_resources})){
+            self.remove_widget_ack_waiter(&transfer_id,"begin",None,None);return Err(error);
+        }
         match begin_rx.recv_timeout(WIDGET_BEGIN_ACK_TIMEOUT) {
             Ok(ack) => {
                 if ack.get("ok").and_then(|v| v.as_bool()) != Some(true) {
@@ -4008,22 +4186,17 @@ impl UsbSerialManager {
             if bytes.is_empty() {
                 continue;
             }
+            for (chunk_index,bytes) in bytes.chunks(if rel.starts_with("runtime/images/"){4096}else{bytes.len()}).enumerate(){
+            let chunk_index=chunk_index as u32;
             let encoded = b64.encode(bytes);
             let checksum = asset_checksum_hex(bytes);
             let mut accepted = false;
             let mut last_error = String::new();
             for attempt in 1..=WIDGET_CHUNK_MAX_ATTEMPTS {
                 let chunk_rx =
-                    self.register_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(0))?;
-                if let Err(error) = self.send_widget_install_chunk(
-                    &transfer_id,
-                    rel,
-                    &encoded,
-                    0,
-                    bytes.len(),
-                    &checksum,
-                ) {
-                    self.remove_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(0));
+                    self.register_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(chunk_index))?;
+                if let Err(error) = send_bound("widget/chunk",&build_widget_chunk_payload(&transfer_id,rel,&encoded,chunk_index,bytes.len(),&checksum)) {
+                    self.remove_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(chunk_index));
                     return Err(error);
                 }
                 match chunk_rx.recv_timeout(WIDGET_CHUNK_ACK_TIMEOUT) {
@@ -4039,7 +4212,7 @@ impl UsbSerialManager {
                             .to_string();
                     }
                     Err(_) => {
-                        self.remove_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(0));
+                        self.remove_widget_ack_waiter(&transfer_id, "chunk", Some(rel), Some(chunk_index));
                         last_error = "chunk acknowledgement timed out".to_string();
                     }
                 }
@@ -4055,6 +4228,7 @@ impl UsbSerialManager {
                 ));
             }
             sent_bytes += encoded.len() as u64;
+            }
             on_progress(i as u32 + 1, total, sent_bytes);
         }
 
@@ -4062,7 +4236,9 @@ impl UsbSerialManager {
         // caller's "success" toast lines up with the device actually showing
         // the new widget.
         let commit_rx = self.register_widget_ack_waiter(&transfer_id, "commit", None, None)?;
-        self.send_widget_install_commit(&transfer_id, widget_id)?;
+        if let Err(error)=send_bound("widget/commit",&serde_json::json!({"transferId":transfer_id,"widgetId":widget_id})){
+            self.remove_widget_ack_waiter(&transfer_id,"commit",None,None);return Err(error);
+        }
         match commit_rx.recv_timeout(WIDGET_COMMIT_ACK_TIMEOUT) {
             Ok(ack) => {
                 if ack.get("ok").and_then(|v| v.as_bool()) != Some(true) {
@@ -6403,6 +6579,28 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 
 #[cfg(test)]
 mod tests {
+    include!("usb_serial/silent_acceptance.rs");
+    include!("usb_serial/new_components_acceptance.rs");
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn paced_macos_serial_writes_do_not_drain_driver() {
+        struct Writer(Vec<u8>, Vec<usize>);
+        impl std::io::Write for Writer {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.extend_from_slice(bytes);
+                self.1.push(bytes.len());
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                panic!("macOS serial drain must not be called");
+            }
+        }
+        let mut writer = Writer(Vec::new(), Vec::new());
+        super::write_serial_bytes_paced(&mut writer, b"abcdefg", 3, std::time::Duration::ZERO).unwrap();
+        super::flush_serial_writer(&mut writer).unwrap();
+        assert_eq!(writer.0, b"abcdefg");
+        assert_eq!(writer.1, vec![3, 3, 1]);
+    }
     #[test]
     fn protected_builtin_selection_ignores_desktop_hash_but_never_uses_custom_slot() {
         use super::*;
@@ -6459,10 +6657,13 @@ mod tests {
 
     #[test]
     fn live_audio_keeps_reader_running_and_never_drains_but_bulk_is_unchanged() {
-        struct CheckedWriter { pause: Arc<AtomicBool>, expected: Arc<AtomicBool>, stats: Arc<Mutex<PacedWriterState>> }
+        struct CheckedWriter { pause: Arc<AtomicBool>, expected: Arc<AtomicBool>, stats: Arc<Mutex<PacedWriterState>>, fail_next: Arc<AtomicBool> }
         impl Write for CheckedWriter {
             fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
                 assert_eq!(self.pause.load(Ordering::Acquire), self.expected.load(Ordering::Acquire));
+                if self.fail_next.swap(false,Ordering::SeqCst) {
+                    return Err(std::io::Error::new(std::io::ErrorKind::TimedOut,"synthetic zero-byte timeout"));
+                }
                 self.stats.lock().unwrap().writes.push(bytes.to_vec()); Ok(bytes.len())
             }
             fn flush(&mut self) -> std::io::Result<()> {
@@ -6474,9 +6675,10 @@ mod tests {
         let stats = Arc::new(Mutex::new(PacedWriterState::default()));
         let expected = Arc::new(AtomicBool::new(false));
         let active = Arc::new(AtomicBool::new(false));
+        let fail_next=Arc::new(AtomicBool::new(false));
         *manager.connection.lock().unwrap() = Some(UsbConnection {
             connection_id: 1, port_name: "test".into(), baud_rate: P4_USB_UART_BAUD,
-            writer: Box::new(CheckedWriter {pause: manager.serial_body_write_active.clone(), expected: expected.clone(), stats: stats.clone()}),
+            writer: Box::new(CheckedWriter {pause: manager.serial_body_write_active.clone(), expected: expected.clone(), stats: stats.clone(), fail_next: fail_next.clone()}),
             board_device_id: "p4-test".into(), runtime: "esp-p4".into(), device_model: String::new(),
             firmware: String::new(), build_id: String::new(), git_sha: String::new(), build_dirty: false,
             protocol_schema: 7, wire_protocol: String::new(), capabilities: serde_json::Value::Null,
@@ -6484,7 +6686,13 @@ mod tests {
         });
         manager.send("audio/conversation", &serde_json::json!({"enabled":true})).unwrap();
         assert!(active.load(Ordering::Acquire));
+        fail_next.store(true,Ordering::SeqCst);
         manager.send("audio/play_chunk", &serde_json::json!({"data":"a".repeat(4000)})).unwrap();
+        assert!(manager.connection.lock().unwrap().as_ref().unwrap().connected,"recovered write must not disconnect");
+        let transmitted=stats.lock().unwrap().writes.concat();
+        let lines=std::str::from_utf8(&transmitted).unwrap().lines().map(|line|serde_json::from_str::<serde_json::Value>(line).unwrap()).collect::<Vec<_>>();
+        assert_eq!(lines.len(),2,"each frame is sent exactly once");
+        assert_eq!(lines[1]["payload"]["data"],"a".repeat(4000));
         let previous_writes=stats.lock().unwrap().writes.len();
         assert!(manager.send_widget_data("p4-test",&serde_json::json!({"source":"computer.status"})).is_err());
         assert_eq!(stats.lock().unwrap().writes.len(),previous_writes,"widget traffic must yield to audio");
@@ -6493,6 +6701,9 @@ mod tests {
         assert_eq!(stats.lock().unwrap().flushes, 0);
         expected.store(true, Ordering::Release);
         manager.send("firmware/query", &serde_json::json!({})).unwrap();
+        #[cfg(target_os = "macos")]
+        assert_eq!(stats.lock().unwrap().flushes, 0, "macOS uses peer ACKs, never unbounded tcdrain");
+        #[cfg(not(target_os = "macos"))]
         assert!(stats.lock().unwrap().flushes > 0);
         assert!(!manager.serial_body_write_active.load(Ordering::Acquire));
         observe_serial_capture(&active, "audio/end", &serde_json::json!({}));
@@ -6628,6 +6839,25 @@ mod tests {
             .recv_timeout(Duration::from_secs(1))
             .expect("control transaction should resume after the asset transfer");
         control_thread.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn app_snapshots_share_media_chunk_boundaries_without_blocking_reader() {
+        let manager=UsbSerialManager::new();
+        let _priority=media_arbitration::PendingMedia::new(&manager.media_requests_pending);
+        // A pending stream isn't a reason to suppress all control feedback.
+        assert_eq!(manager.send_app_snapshot("test",&serde_json::json!({})).unwrap_err(),"Not connected");
+        let copy=manager.clone();let (tx,rx)=mpsc::channel();
+        let writer=thread::spawn(move||{let _guard=copy.asset_transfer_guard.lock().unwrap();tx.send(()).unwrap();thread::sleep(Duration::from_millis(70));});
+        rx.recv().unwrap();let at=Instant::now();
+        assert!(manager.try_send_app_snapshot("test",&serde_json::json!({})).unwrap_err().contains("资源同步"));
+        assert!(at.elapsed()<Duration::from_millis(50));
+        assert_eq!(manager.send_app_snapshot("test",&serde_json::json!({})).unwrap_err(),"Not connected");
+        writer.join().unwrap();
+        assert!(manager.send_app_snapshot("test",&serde_json::json!({"values":"x".repeat(2049)})).unwrap_err().contains("过大"));
+        let _bulk=manager.asset_transfer_guard.lock().unwrap();let at=Instant::now();
+        assert!(manager.send_app_snapshot("test",&serde_json::json!({})).unwrap_err().contains("下一次状态更新"));
+        assert!(at.elapsed()<Duration::from_secs(1));
     }
 
     #[test]
@@ -6833,11 +7063,11 @@ mod tests {
     #[test]
     fn serial_frames_survive_every_timeout_split_and_repeated_timeouts() {
         use std::collections::VecDeque;
-        struct Fragmented(VecDeque<Option<Vec<u8>>>);
+        struct Fragmented(VecDeque<Option<Vec<u8>>>,std::io::ErrorKind);
         impl std::io::Read for Fragmented {
             fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
                 match self.0.pop_front() {
-                    Some(None) => Err(std::io::ErrorKind::TimedOut.into()),
+                    Some(None) => Err(self.1.into()),
                     Some(Some(bytes)) => {
                         out[..bytes.len()].copy_from_slice(&bytes);
                         Ok(bytes.len())
@@ -6846,7 +7076,8 @@ mod tests {
                 }
             }
         }
-        for topic in ["hello", "firmware/chunk_ack"] {
+        for (kind, topic) in [std::io::ErrorKind::TimedOut, std::io::ErrorKind::WouldBlock, std::io::ErrorKind::Interrupted]
+            .into_iter().flat_map(|kind| ["hello", "firmware/chunk_ack"].map(|topic| (kind, topic))) {
             let line = format!("{{\"topic\":\"{topic}\",\"payload\":{{\"ok\":true}}}}\r\n");
             for split in 1..line.len() - 1 {
                 let port = Fragmented(VecDeque::from([
@@ -6855,7 +7086,7 @@ mod tests {
                     None,
                     Some(line.as_bytes()[split..].to_vec()),
                     Some(b"{\"topic\":\"next\",\"payload\":{}}\n".to_vec()),
-                ]));
+                ]),kind);
                 let mut reader = BufReader::new(port);
                 let mut buffer = Vec::new();
                 for _ in 0..2 {
@@ -6863,7 +7094,7 @@ mod tests {
                         read_serial_line_lossy(&mut reader, &mut buffer)
                             .unwrap_err()
                             .kind(),
-                        std::io::ErrorKind::TimedOut
+                        kind
                     );
                 }
                 let frame = read_serial_line_lossy(&mut reader, &mut buffer)
@@ -7239,7 +7470,7 @@ mod tests {
             assert!(header_complete);
         }
         #[cfg(target_os = "macos")]
-        assert_eq!(recorded.flushes, recorded.writes.len());
+        assert_eq!(recorded.flushes, 0);
         #[cfg(windows)]
         {
             assert!(recorded.writes.len() > 2);
@@ -7305,7 +7536,7 @@ mod tests {
             Some(b"\n".as_slice())
         );
         #[cfg(target_os = "macos")]
-        assert_eq!(recorded.flushes, recorded.writes.len());
+        assert_eq!(recorded.flushes, 0);
         #[cfg(windows)]
         {
             assert!(recorded.writes.len() > 2);
@@ -8356,7 +8587,7 @@ mod tests {
             .iter()
             .all(|write| write.len() <= P4_CH343_SERIAL_WRITE_SLICE_BYTES));
         #[cfg(target_os = "macos")]
-        assert_eq!(recorded.flushes, recorded.writes.len());
+        assert_eq!(recorded.flushes, 0);
         #[cfg(windows)]
         {
             assert!(recorded.writes.len() > 1);
@@ -8678,7 +8909,7 @@ mod tests {
             .iter()
             .all(|write| write.len() <= P4_CH343_SERIAL_WRITE_SLICE_BYTES));
         #[cfg(target_os = "macos")]
-        assert_eq!(recorded.flushes, recorded.writes.len());
+        assert_eq!(recorded.flushes, 0);
         #[cfg(windows)]
         {
             assert!(recorded.writes.len() > 1);
@@ -8912,6 +9143,846 @@ mod tests {
     }
 
     #[test]
+    fn hello_ack_breaks_echo_loops_but_allows_lost_ack_retry() {
+        let now = Instant::now();
+        assert!(!hello_ack_due(None, now, ""));
+        assert!(!hello_ack_due(None, now, "  "));
+        assert!(hello_ack_due(None, now, "desktop"));
+        for ms in [0, 1, 100, 1999] {
+            assert!(!hello_ack_due(Some(now), now + Duration::from_millis(ms), "desktop"));
+        }
+        assert!(hello_ack_due(Some(now), now + Duration::from_secs(2), "desktop"));
+        assert!(hello_ack_due(Some(now), now + Duration::from_secs(3), "desktop"));
+    }
+
+    #[test]
+    #[ignore = "Requires explicit permission and exclusive USB: updates only city-radio and exercises its display"]
+    fn p4_radio_surface_hardware_sync_and_reenter() {
+        let port = std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let expected_board = std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let expected_version = std::env::var("P4_EXPECTED_VERSION").expect("explicit firmware");
+        let package = PathBuf::from(std::env::var("P4_WIDGET_DIR").expect("explicit package"));
+        let entry = crate::component_library::inspect(&package).expect("validate package");
+        assert!(entry.valid, "{:?}", entry.validation_errors);
+        assert_eq!(entry.id, "city-radio");
+        assert_eq!(entry.version, std::env::var("P4_EXPECTED_WIDGET_VERSION").expect("explicit component version"));
+        // Pass the current component-specific controls explicitly; never infer
+        // that an empty override map is safe for another user's installation.
+        let bindings: HashMap<String, String> = serde_json::from_str(
+            &std::env::var("P4_WIDGET_BINDINGS_JSON").expect("explicit preserved bindings")
+        ).unwrap();
+        let usb = UsbSerialManager::new();
+        usb.set_desktop_device_id("radio-surface-hil");
+        usb.connect(&port, |_, _| {}).expect("exclusive USB");
+        struct Close(UsbSerialManager);
+        impl Drop for Close { fn drop(&mut self) { self.0.disconnect(); } }
+        let _close = Close(usb.clone());
+        assert_eq!(usb.status().board_device_id, expected_board);
+        let command = |topic: &str, mut payload: serde_json::Value| {
+            let request_id = format!("radio-hil-{}", uuid::Uuid::new_v4());
+            payload["requestId"] = serde_json::json!(request_id);
+            let (sender, receiver) = mpsc::channel();
+            usb.device_response_waiters.lock().unwrap().push(DeviceResponseWaiter {
+                request_id: request_id.clone(), response_topic: "protocol/ack".into(), sender,
+            });
+            let sent = usb.send_to_board(&expected_board, topic, &payload);
+            let reply = receiver.recv_timeout(Duration::from_secs(3));
+            usb.remove_device_response_waiter(&request_id, "protocol/ack");
+            sent.expect("send display command");
+            let reply = reply.expect("correlated display ACK");
+            assert_eq!(reply["ok"], true, "{reply}");
+        };
+        let before = usb.query_diagnostics(&expected_board).unwrap();
+        assert_eq!(before["runtime"]["firmware"].as_str(), Some(expected_version.as_str()));
+        assert_eq!(before["runtime"]["imageState"], "valid");
+        let media = usb.media_request(&expected_board, "media/query", serde_json::json!({})).unwrap();
+        assert!(!matches!(media["state"].as_str(), Some("playing" | "buffering" | "paused")), "existing playback must remain untouched");
+        let config = usb.query_button_config(&expected_board).unwrap();
+        let inventory = usb.query_widget_inventory(&expected_board).unwrap();
+        let ids = |v: &serde_json::Value| -> HashSet<String> {
+            assert_eq!(v["ok"], true); assert_eq!(v["complete"], true);
+            v["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_owned()).collect()
+        };
+        let prior_ids = ids(&inventory);
+        assert!(prior_ids.contains("city-radio"), "only update the authorized existing component");
+        let result = usb.install_widget_clawpkg("city-radio", &package, &bindings, |file, total, bytes| {
+            eprintln!("radio sync {file}/{total}, transferred={bytes}");
+        }).expect("atomic component sync");
+        let after_inventory = usb.query_widget_inventory(&expected_board).unwrap();
+        assert_eq!(ids(&after_inventory), prior_ids);
+        assert_eq!(after_inventory["activeWidgetId"], "city-radio");
+        for cycle in 0..10 {
+            for page in ["main", "app"] {
+                command("control/screen-page", serde_json::json!({"page":page}));
+                thread::sleep(Duration::from_millis(400));
+                let d = usb.query_diagnostics(&expected_board).unwrap();
+                assert_eq!(d["runtime"]["screenPage"], page);
+                assert_eq!(d["bootCount"], before["bootCount"]);
+                assert_eq!(d["faultResetCount"], before["faultResetCount"]);
+            }
+            for _ in 0..2 {
+                command("miniapp/event", serde_json::json!({"action":"media.queue"}));
+                thread::sleep(Duration::from_millis(400));
+                usb.media_request(&expected_board, "media/query", serde_json::json!({})).unwrap();
+            }
+            eprintln!("radio render cycle {} passed", cycle + 1);
+        }
+        let final_state = usb.query_diagnostics(&expected_board).unwrap();
+        assert_eq!(final_state["bootCount"], before["bootCount"]);
+        assert_eq!(final_state["faultResetCount"], before["faultResetCount"]);
+        assert_eq!(final_state["storage"]["activeAppearanceSlot"], before["storage"]["activeAppearanceSlot"]);
+        let final_config = usb.query_button_config(&expected_board).unwrap();
+        assert_eq!(final_config["config"], config["config"]);
+        eprintln!("RADIO SURFACE PASS: files={}, catalogPreserved=true, globalButtonsPreserved=true, cycles=10, firmware={}, boot={}, faults={}, page={}", result.0, final_state["runtime"]["firmware"], final_state["bootCount"], final_state["faultResetCount"], final_state["runtime"]["screenPage"]);
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: install three classic game surfaces; no firmware/audio/microphone"]
+    fn p4_classic_games_surface_hardware() {
+        use serde_json::{json,Value};
+        use base64::Engine;
+        assert_eq!(std::env::var("PET_CLASSIC_GAMES_LIVE_TEST").as_deref(),Ok("1"));
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").unwrap());
+        let output=PathBuf::from(std::env::var("PET_CLASSIC_GAMES_REPORT_DIR").unwrap());
+        std::fs::create_dir_all(&output).unwrap();
+        let selected=std::env::var("P4_CLASSIC_GAME_IDS").unwrap_or("snake-turn,block-combo,flappy-bird".into());
+        let ids:Vec<&str>=selected.split(',').collect();
+        assert!(ids.iter().all(|id|matches!(*id,"snake-turn"|"block-combo"|"flappy-bird"|"bloomfrog_companion"|"two-key-pong"|"upcoming-todos"|"computer-status")));
+        if ids.iter().any(|id| matches!(*id,"bloomfrog_companion"|"two-key-pong"|"upcoming-todos"|"computer-status")) {
+            assert_eq!(std::env::var("PET_COMPANION_SURFACES_LIVE_TEST").as_deref(),Ok("1"));
+        }
+        for id in &ids {let e=crate::component_library::inspect(&root.join(id)).unwrap();assert!(e.valid,"{id}: {:?}",e.validation_errors);}
+        let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        usb.connect(&std::env::var("P4_SERIAL_PORT").unwrap(),move|topic,p|{
+            if topic=="miniapp/state"||topic.starts_with("debug/"){let _=tx.send((topic,p));}
+        }).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        let board=usb.status().board_device_id;
+        assert_eq!(board,std::env::var("P4_EXPECTED_BOARD_ID").unwrap());
+        assert_eq!(usb.status().capabilities["widgetGameSurface"],"p4-game-surface-v1");
+        if std::env::var("PET_COMPANION_SURFACES_LIVE_TEST").as_deref()==Ok("1") {
+            assert_eq!(usb.status().capabilities["widgetSceneSurface"],"p4-scene-surface-v1");
+            assert_eq!(usb.status().capabilities["widgetDataSurface"],"p4-data-surface-v1");
+        }
+        let before=usb.query_diagnostics(&board).unwrap();let keys=usb.query_button_config(&board).unwrap();
+        assert_eq!(before["runtime"]["firmware"],std::env::var("P4_EXPECTED_FW").unwrap_or("0.7.88-p4".into()));
+        let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let media=usb.media_request(&board,"media/query",json!({})).unwrap();
+        assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        std::fs::write(output.join("before.json"),serde_json::to_vec_pretty(&json!({"diagnostics":before,"inventory":inventory,"buttons":keys})).unwrap()).unwrap();
+        let shown=|id:&str|{
+            while rx.try_recv().is_ok(){}
+            usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();
+            let until=Instant::now()+Duration::from_secs(5);
+            while Instant::now()<until{if let Ok((topic,v))=rx.recv_timeout(Duration::from_millis(100)){
+                if topic=="miniapp/state"&&v["widgetId"]==id{return v;}
+            }}panic!("No state for {id}");
+        };
+        let capture=|id:&str|{
+            while rx.try_recv().is_ok(){}
+            usb.send_to_board(&board,"debug/screenshot",&json!({"fullResolution":true})).unwrap();
+            let until=Instant::now()+Duration::from_secs(30);
+            let mut identity=Value::Null;let mut data=Vec::new();let mut index=0;
+            while Instant::now()<until{
+                let Ok((topic,p))=rx.recv_timeout(Duration::from_millis(100))else{continue;};
+                assert_ne!(topic,"debug/screenshot_error","{p}");
+                if topic=="debug/screenshot_begin"{assert_eq!(p["width"],640);assert_eq!(p["height"],480);assert_eq!(p["format"],"rgb565le");identity=p["id"].clone();}
+                else if topic=="debug/screenshot_chunk"&&p["id"]==identity{
+                    assert_eq!(p["index"],index);index+=1;
+                    data.extend(base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap()).unwrap());
+                }else if topic=="debug/screenshot_end"&&p["id"]==identity{
+                    assert_eq!(data.len(),640*480*2);assert_eq!(p["chunks"],index);
+                    let mut hash=2166136261u32;let mut image=image::RgbImage::new(640,480);
+                    for (at,raw) in data.chunks_exact(2).enumerate(){
+                        let px=u16::from_le_bytes([raw[0],raw[1]]);hash=(hash^px as u32).wrapping_mul(16777619);
+                        let (r,g,b)=((px>>11)as u8,((px>>5)&63)as u8,(px&31)as u8);
+                        image.put_pixel(at as u32%640,at as u32/640,image::Rgb([(r<<3)|(r>>2),(g<<2)|(g>>4),(b<<3)|(b>>2)]));
+                    }
+                    assert_eq!(p["checksum"],format!("{hash:08x}"));image.save(output.join(format!("{id}.png"))).unwrap();return;
+                }
+            }panic!("Screenshot timeout");
+        };
+        for (id,start,moves) in [
+            ("snake-turn","snake.start",vec!["snake.turn_left","snake.turn_right"]),
+            ("block-combo","blocks.start",vec!["blocks.left","blocks.right","blocks.rotate","blocks.drop"]),
+            ("flappy-bird","flappy.flap",vec!["flappy.flap"]),
+            ("bloomfrog_companion","pet_pet",vec!["move_left","move_right","feed_pet"]),
+            ("two-key-pong","start",vec!["shift_left","shift_right"]),
+            ("upcoming-todos","first_page",vec!["next_page","previous_page"]),
+            ("computer-status","first_page",vec!["next_page","previous_page"]),
+        ] {
+            if !ids.contains(&id){continue;}
+            usb.install_widget_clawpkg(id,&root.join(id),&HashMap::new(),|f,n,b|eprintln!("{id}: file {f}/{n}, {b} bytes")).unwrap();
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
+            thread::sleep(Duration::from_millis(800));capture(id);
+            let event=|action|usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();
+            let classic=matches!(id,"snake-turn"|"block-combo"|"flappy-bird"|"two-key-pong");
+            if classic {assert_eq!(shown(id)["gameRunning"],false);}
+            event(start);
+            if classic {assert_eq!(shown(id)["gameRunning"],true);}
+            if id=="bloomfrog_companion" {assert!(shown(id)["headline"].as_str().unwrap().contains("舒服"));}
+            let first=shown(id);
+            for action in moves{event(action);thread::sleep(Duration::from_millis(30));}
+            thread::sleep(Duration::from_millis(400));let next=shown(id);
+            if classic||id=="bloomfrog_companion" {
+                assert!(next["gameRevision"].as_u64().unwrap()>first["gameRevision"].as_u64().unwrap());
+            } else {
+                // Exercise the actual live-data protocol using explicitly marked test
+                // rows in RAM only; never create user todos or publish dummy covers.
+                let source=if id=="upcoming-todos"{"todos.upcoming"}else{"computer.status"};
+                let rows:Vec<_>=(0..6).map(|i|json!({"id":format!("qa-{i}"),"label":format!("验收测试 {}",i+1),"value":"10-20 12:30","detail":if i%2==0{"未完成"}else{"已完成"},"meta":"","tone":if i%2==0{1}else{-1}})).collect();
+                usb.send_widget_data(&board,&json!({"schema":1,"source":source,"date":"2026-10-20","ttlMs":10000,"status":"ok","message":"验收用临时数据，不写入用户记录","rows":rows})).unwrap();
+                event("first_page");thread::sleep(Duration::from_millis(200));capture(&format!("{id}-test-rows"));
+                let page1=shown(id);event("next_page");let page2=shown(id);
+                assert_ne!(page1,page2,"data paging must change device state");
+                event("previous_page");
+                // Restore the real provider snapshot, never leave test data visible.
+                let real=if id=="upcoming-todos"{crate::todos::snapshot()}else{crate::local_widget_data::computer_status()};
+                usb.send_widget_data(&board,&serde_json::to_value(real).unwrap()).unwrap();
+            }
+            let d=usb.query_diagnostics(&board).unwrap();assert_eq!(d["bootCount"],before["bootCount"]);assert_eq!(d["faultResetCount"],before["faultResetCount"]);
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
+            assert_eq!(usb.query_diagnostics(&board).unwrap()["runtime"]["screenPage"],"main");
+            eprintln!("PASS {id}: native display screenshot, start/actions/tick, exit and no reset");
+        }
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();assert_eq!(next["complete"],true);
+        let installed=|v:&Value|v["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().to_string()).collect::<HashSet<_>>();
+        let mut expected=installed(&inventory);for id in &ids{expected.insert((*id).into());}
+        assert_eq!(installed(&next),expected);assert_eq!(keys["config"],usb.query_button_config(&board).unwrap()["config"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);
+        std::fs::write(output.join("after.json"),serde_json::to_vec_pretty(&json!({"diagnostics":after,"inventory":next})).unwrap()).unwrap();
+        eprintln!("PASS selected game surfaces {selected}; physical button/touch feel still requires manual verification.");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: refresh three classic tools only, no firmware/audio/microphone"]
+    fn p4_classic_tools_surface_hardware() {
+        use serde_json::{json,Value};
+        assert_eq!(std::env::var("PET_CLASSIC_TOOLS_LIVE_TEST").as_deref(),Ok("1"));
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").unwrap());
+        let ids=["drink-reminder","tomato-clock","token-usage"];
+        for id in ids { let e=crate::component_library::inspect(&root.join(id)).unwrap();assert!(e.valid,"{id}: {:?}",e.validation_errors);assert_eq!(e.id,id); }
+        let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        usb.connect(&std::env::var("P4_SERIAL_PORT").unwrap(),move|topic,payload|{if topic=="miniapp/state"{let _=tx.send(payload);}}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        let board=usb.status().board_device_id;assert!(!board.is_empty());
+        assert_eq!(usb.status().capabilities["widgetAppGraphics"],"p4-app-graphics-v1");
+        assert_eq!(usb.status().capabilities["widgetAppTypography"],"p4-app-type-v1");
+        let before=usb.query_diagnostics(&board).unwrap();let keys=usb.query_button_config(&board).unwrap();
+        let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let media=usb.media_request(&board,"media/query",json!({})).unwrap();
+        assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")),"Do not interrupt audio");
+        let installed=|v:&Value|v["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().to_string()).collect::<HashSet<_>>();
+        let mut expected=installed(&inventory);for id in ids {expected.insert(id.into());}
+        assert!(expected.len()<=inventory["maxInstalled"].as_u64().unwrap() as usize);
+        if let Ok(dir)=std::env::var("PET_CLASSIC_TOOLS_REPORT_DIR"){
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(Path::new(&dir).join("before.json"),serde_json::to_vec_pretty(&json!({"diagnostics":before,"inventory":inventory,"buttons":keys})).unwrap()).unwrap();
+        }
+        let shown=|id:&str|{
+            while rx.try_recv().is_ok(){}
+            usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();
+            let until=Instant::now()+Duration::from_secs(3);
+            while Instant::now()<until {
+                if let Ok(v)=rx.recv_timeout(Duration::from_millis(100)){if v["widgetId"]==id{return v;}}
+            }panic!("No current state for {id}");
+        };
+        let event=|a|usb.send_to_board(&board,"miniapp/event",&json!({"action":a})).unwrap();
+        for id in ids {
+            usb.install_widget_clawpkg(id,&root.join(id),&HashMap::new(),|f,n,b|eprintln!("{id}: file {f}/{n}, {b} bytes")).unwrap();
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
+            thread::sleep(Duration::from_millis(700));
+            assert!(!shown(id)["headline"].as_str().unwrap_or("").is_empty());
+            match id {
+                "drink-reminder"=>{
+                    event("reminder.pause_resume");assert_eq!(shown(id)["metricUnit"],"继续提醒");
+                    event("reminder.pause_resume");assert_eq!(shown(id)["metricUnit"],"暂停提醒");
+                    // Don't fabricate a drink acknowledgement in the user's counters.
+                    event("reminder.switch_view");assert_eq!(shown(id)["metricLabel"],"本次使用已记录");
+                    event("reminder.switch_view");assert_eq!(shown(id)["metricLabel"],"距离下次提醒");
+                },
+                "tomato-clock"=>{
+                    event("tomato.start_pause");assert_eq!(shown(id)["metricUnit"],"继续专注");
+                    event("tomato.skip_phase");let v=shown(id);assert_eq!(v["badge"],"0");assert_eq!(v["metricUnit"],"暂停休息");
+                    event("tomato.skip_phase");assert_eq!(shown(id)["metricUnit"],"暂停专注");
+                },
+                _=>{
+                    event("stats.show_input");assert_eq!(shown(id)["metricLabel"],"输入 Token");
+                    event("stats.show_output");assert_eq!(shown(id)["metricLabel"],"输出 Token");
+                    event("stats.show_total");assert_eq!(shown(id)["metricLabel"],"总 Token");
+                }
+            }
+            let d=usb.query_diagnostics(&board).unwrap();
+            assert_eq!(d["bootCount"],before["bootCount"]);assert_eq!(d["faultResetCount"],before["faultResetCount"]);
+            assert_eq!(d["runtime"]["screenPage"],"app");eprintln!("PASS {id}: installed/rendered/action state confirmed");
+        }
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();assert_eq!(next["complete"],true);
+        assert_eq!(installed(&next),expected);assert_eq!(keys["config"],usb.query_button_config(&board).unwrap()["config"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);
+        if let Ok(dir)=std::env::var("PET_CLASSIC_TOOLS_REPORT_DIR"){
+            std::fs::write(Path::new(&dir).join("after.json"),serde_json::to_vec_pretty(&json!({"diagnostics":after,"inventory":next})).unwrap()).unwrap();
+        }
+        eprintln!("PASS three classic tools; other inventory, appearance, global controls and boot count preserved. Physical touch and perceived image quality require user verification.");
+    }
+
+    #[test]
+    #[ignore = "Explicit device approval: sync one authored Hachimi sample, preserve other components and global controls"]
+    fn p4_app_graphics_hardware_sample() {
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let board=std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let dir=PathBuf::from(std::env::var("P4_WIDGET_DIR").expect("explicit package"));
+        let entry=crate::component_library::inspect(&dir).unwrap();assert!(entry.valid,"{:?}",entry.validation_errors);
+        assert!(matches!(entry.id.as_str(),"hachimi-home"|"hachimi-garden"));
+        let usb=UsbSerialManager::new();usb.set_desktop_device_id("app-graphics-hil");usb.connect(&port,|_,_|{}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        assert_eq!(usb.status().board_device_id,board);assert_eq!(usb.status().capabilities["widgetAppGraphics"],"p4-app-graphics-v1");
+        let before=usb.query_diagnostics(&board).unwrap();let config=usb.query_button_config(&board).unwrap();let inventory=usb.query_widget_inventory(&board).unwrap();
+        assert_eq!(inventory["complete"],true);let ids:HashSet<String>=inventory["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().into()).collect();
+        let media=usb.media_request(&board,"media/query",serde_json::json!({})).unwrap();assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        usb.install_widget_clawpkg(&entry.id,&dir,&HashMap::new(),|file,total,bytes|{eprintln!("app sync {file}/{total}: {bytes} bytes");}).unwrap();
+        usb.send_to_board(&board,"control/screen-page",&serde_json::json!({"page":"app"})).unwrap();
+        thread::sleep(Duration::from_secs(3));
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();
+        assert_eq!(next["complete"],true);let next_ids:HashSet<String>=next["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().into()).collect();
+        assert_eq!(next_ids,ids.union(&HashSet::from([entry.id.clone()])).cloned().collect());
+        assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);
+        assert_eq!(config["config"],usb.query_button_config(&board).unwrap()["config"]);
+        eprintln!("APP GRAPHICS SAMPLE PASS; original catalog/appearance/global controls preserved; no reset");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: sync weather only, real forecast, isolated city settings, no firmware/audio/microphone"]
+    fn p4_weather_resource_package_hardware(){
+        use serde_json::{json,Value};
+        assert_eq!(std::env::var("PET_WEATHER_LIVE_TEST").as_deref(),Ok("1"));
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit connected port");
+        let package=PathBuf::from(std::env::var("P4_WIDGET_DIR").expect("explicit weather package"));
+        let entry=crate::component_library::inspect(&package).unwrap();
+        assert!(entry.valid,"{:?}",entry.validation_errors);assert_eq!(entry.id,"hachimi-weather");
+        let storage=tempfile::tempdir().unwrap();let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        usb.connect(&port,move|topic,payload|{if matches!(topic.as_str(),"app/event"|"miniapp/state"|"protocol/ack"){let _=tx.send((topic,payload));}}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        let board=usb.status().board_device_id;assert!(!board.is_empty());
+        assert_eq!(usb.status().capabilities["widgetAppHost"],"p4-app-host-v1");
+        let before=usb.query_diagnostics(&board).unwrap();let buttons=usb.query_button_config(&board).unwrap();
+        let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let ids=|v:&Value|v["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().to_string()).collect::<HashSet<_>>();
+        let media=usb.media_request(&board,"media/query",json!({})).unwrap();
+        assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")),"do not interrupt active audio");
+        if std::env::var("P4_WEATHER_ALREADY_INSTALLED").as_deref()!=Ok("1"){
+            usb.install_widget_clawpkg("hachimi-weather",&package,&HashMap::new(),|file,total,bytes|eprintln!("weather sync {file}/{total}: {bytes} bytes")).unwrap();
+        }else{
+            assert!(inventory["items"].as_array().unwrap().iter().any(|i|i["id"]=="hachimi-weather"&&i["active"]==true),"reuse only the previously confirmed active weather install");
+        }
+        let request=|input|crate::component_app::test_request(&package,storage.path(),input,&usb).unwrap();
+        let mut latest=Value::Null;let mut seen=HashSet::new();
+        let mut pump=|seconds:u64|{
+            usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();
+            let until=Instant::now()+Duration::from_secs(seconds);let mut queried=Instant::now();
+            while Instant::now()<until{
+                if queried.elapsed()>Duration::from_millis(400){usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();queried=Instant::now();}
+                let Ok((topic,p))=rx.recv_timeout(Duration::from_millis(40))else{continue;};
+                if topic=="miniapp/state"&&p["widgetId"]=="hachimi-weather"{latest=p;continue;}
+                // A new input intentionally invalidates an in-flight older status
+                // reply. Assert final displayed state below, not every raced ACK.
+                if topic=="protocol/ack"&&p["requestTopic"]=="app/snapshot"&&p["ok"]==false{
+                    eprintln!("weather snapshot ACK rejected (checking converged state): {p}");
+                }
+                if topic!="app/event"||p["componentId"]!="hachimi-weather"||p["visible"]!=true{continue;}
+                assert_eq!(p["boardDeviceId"],board);
+                if !seen.insert(format!("{}:{}",p["instance"],p["sequence"])){continue;}
+                // Only this weather package's declared actions; never microphone or task dispatch.
+                let action=p["action"].as_str().unwrap_or("status");
+                assert!(matches!(action,"status"|"host.choose"|"host.previous"|"host.next"|"host.primary"|"host.secondary"|"host.details"));
+                let result=request(if action=="status"{json!({"operation":"status"})}else{json!({"operation":"action","action":action})});
+                usb.send_app_snapshot(&board,&json!({"componentId":"hachimi-weather","instance":p["instance"],"sequence":p["sequence"],"values":result["values"]})).unwrap();
+            }latest.clone()
+        };
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
+        for (city,lat,lon) in [("北京",39.904,116.407),("上海",31.230,121.474),("北京",39.904,116.407)]{
+            request(json!({"operation":"configure","city":{"city":city,"lat":lat,"lon":lon}}));
+            let state=pump(30);
+            assert!(state["eyebrow"].as_str().unwrap_or("").contains(city),"device did not receive selected city: {}",state["eyebrow"]);
+            assert!(state["metricValue"].as_str().unwrap_or("").contains("°C"),"real forecast not displayed: {}",state["headline"]);
+            eprintln!("PASS selected {city}: real forecast + correlated device snapshot");
+        }
+        for (action,headline) in [("host.choose","北京"),("host.next","上海")]{
+            usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();
+            let shown=pump(2);assert_eq!(shown["headline"],headline);
+            assert_eq!(shown["eyebrow"],"北京 · 切换");
+        }
+        usb.send_to_board(&board,"miniapp/event",&json!({"action":"host.secondary"})).unwrap();pump(2);
+        assert_eq!(request(json!({"operation":"status"}))["state"]["city"]["city"],"北京");
+        for action in ["host.choose","host.next","host.primary"]{
+            usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();pump(2);
+        }
+        assert_eq!(request(json!({"operation":"status"}))["state"]["city"]["city"],"上海");
+        assert_eq!(pump(2)["eyebrow"],"上海 · 切换");
+        request(json!({"operation":"configure","city":{"city":"北京","lat":39.904,"lon":116.407}}));pump(2);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();pump(1);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
+        assert!(pump(4)["eyebrow"].as_str().unwrap_or("").contains("北京"));
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();assert_eq!(next["complete"],true);
+        let mut expected=ids(&inventory);expected.insert("hachimi-weather".into());assert_eq!(ids(&next),expected);
+        assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);
+        assert_eq!(buttons["config"],usb.query_button_config(&board).unwrap()["config"]);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
+        eprintln!("PASS weather-only sync; Beijing/Shanghai/Beijing; device picker cancel/confirm; exit/reentry; original catalog/appearance/buttons preserved; no user city files changed; physical touch still requires user verification");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: sync knowledge only; no firmware, microphone, speech or other components"]
+    fn p4_knowledge_library_hardware(){
+        use serde_json::{json,Value};
+        assert_eq!(std::env::var("PET_KNOWLEDGE_LIVE_TEST").as_deref(),Ok("1"));
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit connected port");
+        let package=PathBuf::from(std::env::var("PET_KNOWLEDGE_PACKAGE").expect("knowledge package"));
+        let entry=crate::component_library::inspect(&package).unwrap();assert!(entry.valid,"{:?}",entry.validation_errors);assert_eq!(entry.id,"hachimi-learn");
+        let storage=tempfile::tempdir().unwrap();let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        usb.connect(&port,move|topic,payload|{if matches!(topic.as_str(),"app/event"|"miniapp/state"|"protocol/ack"){let _=tx.send((topic,payload));}}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){let b=self.0.status().board_device_id;let _=self.0.send_to_board(&b,"control/screen-page",&json!({"page":"main"}));self.0.disconnect();}}let _close=Close(usb.clone());
+        let board=usb.status().board_device_id;assert!(!board.is_empty());assert_eq!(usb.status().capabilities["widgetAppHost"],"p4-app-host-v1");
+        let before=usb.query_diagnostics(&board).unwrap();let buttons=usb.query_button_config(&board).unwrap();
+        let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let ids=|v:&Value|v["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().to_string()).collect::<HashSet<_>>();
+        let media=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")),"do not interrupt active audio");
+        usb.install_widget_clawpkg("hachimi-learn",&package,&HashMap::new(),|file,total,bytes|eprintln!("knowledge sync {file}/{total}: {bytes} bytes")).unwrap();
+        let request=|input|crate::component_app::test_request(&package,storage.path(),input,&usb).unwrap();
+        let mut latest=Value::Null;let mut seen=HashSet::new();
+        let mut pump=|seconds:u64|{
+            let until=Instant::now()+Duration::from_secs(seconds);let mut queried=Instant::now()-Duration::from_secs(1);
+            while Instant::now()<until{
+                if queried.elapsed()>Duration::from_millis(400){usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();queried=Instant::now();}
+                let Ok((topic,p))=rx.recv_timeout(Duration::from_millis(40))else{continue;};
+                if topic=="miniapp/state"&&p["widgetId"]=="hachimi-learn"{latest=p;continue;}
+                if topic!="app/event"||p["componentId"]!="hachimi-learn"||p["visible"]!=true{continue;}
+                assert_eq!(p["boardDeviceId"],board);if !seen.insert(format!("{}:{}",p["instance"],p["sequence"])){continue;}
+                let action=p["action"].as_str().unwrap_or("status");
+                // Speech is not authorized in this acceptance; never call it.
+                assert!(matches!(action,"status"|"host.primary"|"host.secondary"|"host.previous"|"host.next"|"host.favorite"),"speech excluded");
+                let result=request(if action=="status"{json!({"operation":"status"})}else{json!({"operation":"action","action":action})});
+                usb.send_app_snapshot(&board,&json!({"componentId":"hachimi-learn","instance":p["instance"],"sequence":p["sequence"],"values":result["values"]})).unwrap();
+            }latest.clone()
+        };
+        let event=|action:&str|usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();pump(4);
+        let initial=request(json!({"operation":"status"}));
+        let pages=initial["knowledge"]["pages"].as_u64().unwrap();let title=initial["values"]["headline"].clone();
+        for page in 0..pages{
+            if page>0{event("host.next");}
+            let shown=pump(2);let expected=request(json!({"operation":"status"}));
+            assert_eq!(shown["headline"],title);assert_eq!(shown["note"],expected["values"]["note"]);assert_eq!(shown["footer"],expected["values"]["footer"]);assert_eq!(shown["badge"],expected["values"]["badge"]);
+        }
+        event("host.next");pump(2);assert_eq!(request(json!({"operation":"status"}))["knowledge"]["page"],pages-1);
+        for _ in 0..10{
+            let prior=request(json!({"operation":"status"}));event("host.secondary");pump(2);event("host.next");pump(2);event("host.primary");
+            let shown=pump(2);let selected=request(json!({"operation":"status"}));
+            assert_ne!(selected["knowledge"]["category"],prior["knowledge"]["category"]);assert_eq!(selected["knowledge"]["page"],0);
+            assert_eq!(shown["eyebrow"],selected["values"]["eyebrow"]);assert_eq!(shown["headline"],selected["values"]["headline"]);
+            eprintln!("PASS device category {}, article {}, pages {}",selected["knowledge"]["category"],selected["knowledge"]["current"]["id"],selected["knowledge"]["pages"]);
+        }
+        let before_cancel=request(json!({"operation":"status"}));
+        event("host.secondary");pump(2);event("host.next");pump(2);event("host.secondary");pump(2);
+        assert_eq!(request(json!({"operation":"status"}))["knowledge"]["current"]["id"],before_cancel["knowledge"]["current"]["id"]);
+        event("host.primary");pump(2);let final_state=request(json!({"operation":"status"}));assert_ne!(final_state["knowledge"]["current"]["id"],before_cancel["knowledge"]["current"]["id"]);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();pump(1);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();let reentry=pump(3);assert_eq!(reentry["headline"],final_state["values"]["headline"]);
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();assert_eq!(next["complete"],true);
+        let mut expected=ids(&inventory);expected.insert("hachimi-learn".into());assert_eq!(ids(&next),expected);
+        assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);assert_eq!(buttons["config"],usb.query_button_config(&board).unwrap()["config"]);
+        assert!(!crate::component_audio::playing("hachimi-learn"));
+        eprintln!("PASS knowledge-only sync, ten category loop, random/confirm/cancel, complete article pages, exit/reentry; no resets, firmware, speech or user-save changes. Physical touch/visual quality still require user verification.");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: journey-only device selection; isolated progress, no audio/firmware"]
+    fn p4_journey_device_selection_hardware(){
+        use serde_json::{json,Value};
+        assert_eq!(std::env::var("PET_JOURNEY_LIVE_TEST").as_deref(),Ok("1"));
+        let package=PathBuf::from(std::env::var("PET_JOURNEY_PACKAGE").unwrap());
+        let entry=crate::component_library::inspect(&package).unwrap();assert!(entry.valid);assert_eq!(entry.id,"hachimi-travel");
+        let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        let (frame_tx,frame_rx)=mpsc::channel();
+        usb.connect(&std::env::var("P4_SERIAL_PORT").unwrap(),move|topic,payload|{
+            if topic.starts_with("debug/"){let _=frame_tx.send((topic.clone(),payload.clone()));}
+            if matches!(topic.as_str(),"app/event"|"miniapp/state"){let _=tx.send((topic,payload));}
+        }).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){let b=self.0.status().board_device_id;let _=self.0.send_to_board(&b,"control/screen-page",&json!({"page":"main"}));self.0.disconnect();}}let _close=Close(usb.clone());
+        let board=usb.status().board_device_id;let before=usb.query_diagnostics(&board).unwrap();let buttons=usb.query_button_config(&board).unwrap();let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let media=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(media["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        usb.install_widget_clawpkg("hachimi-travel",&package,&HashMap::new(),|_,_,_|{}).unwrap();
+        let storage=tempfile::tempdir().unwrap();let mut seen=HashSet::new();let mut shown=Value::Null;
+        let request=|input|crate::component_app::test_request(&package,storage.path(),input,&usb).unwrap();
+        let mut pump=||{
+            let until=Instant::now()+Duration::from_millis(1600);let mut queried=Instant::now()-Duration::from_secs(1);
+            while Instant::now()<until{
+                if queried.elapsed()>Duration::from_millis(300){usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();queried=Instant::now();}
+                let Ok((topic,p))=rx.recv_timeout(Duration::from_millis(40))else{continue;};
+                if topic=="miniapp/state"&&p["widgetId"]=="hachimi-travel"{shown=p;continue;}
+                if topic!="app/event"||p["componentId"]!="hachimi-travel"||p["visible"]!=true{continue;}
+                if !seen.insert(format!("{}:{}",p["instance"],p["sequence"])){continue;}
+                let action=p["action"].as_str().unwrap_or("status");assert!(matches!(action,"status"|"host.primary"|"host.secondary"|"host.previous"|"host.next"));
+                let result=request(if action=="status"{json!({"operation":"status"})}else{json!({"operation":"action","action":action})});
+                usb.send_app_snapshot(&board,&json!({"componentId":"hachimi-travel","instance":p["instance"],"sequence":p["sequence"],"values":result["values"]})).unwrap();
+            }shown.clone()
+        };
+        let event=|action|usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();
+        let capture=|index:usize|{
+            use base64::Engine;
+            let Ok(folder)=std::env::var("PET_JOURNEY_REPORT_DIR")else{return;};
+            std::fs::create_dir_all(&folder).unwrap();
+            while frame_rx.try_recv().is_ok(){}
+            usb.send_to_board(&board,"debug/screenshot",&json!({"fullResolution":true})).unwrap();
+            let until=Instant::now()+Duration::from_secs(30);
+            let mut identity=Value::Null;let mut bytes=Vec::new();let mut sequence=0;
+            while Instant::now()<until{
+                let Ok((topic,p))=frame_rx.recv_timeout(Duration::from_millis(100))else{continue;};
+                assert_ne!(topic,"debug/screenshot_error","{p}");
+                if topic=="debug/screenshot_begin"{
+                    assert_eq!(p["width"],640);assert_eq!(p["height"],480);
+                    assert_eq!(p["format"],"rgb565le");identity=p["id"].clone();
+                }else if topic=="debug/screenshot_chunk"&&p["id"]==identity{
+                    assert_eq!(p["index"],sequence);sequence+=1;
+                    bytes.extend(base64::engine::general_purpose::STANDARD.decode(p["data"].as_str().unwrap()).unwrap());
+                }else if topic=="debug/screenshot_end"&&p["id"]==identity{
+                    assert_eq!(bytes.len(),640*480*2);assert_eq!(p["chunks"],sequence);
+                    let mut hash=2166136261u32;let mut image=image::RgbImage::new(640,480);
+                    for(at,raw)in bytes.chunks_exact(2).enumerate(){
+                        let px=u16::from_le_bytes([raw[0],raw[1]]);hash=(hash^px as u32).wrapping_mul(16777619);
+                        let(r,g,b)=((px>>11)as u8,((px>>5)&63)as u8,(px&31)as u8);
+                        image.put_pixel(at as u32%640,at as u32/640,image::Rgb([(r<<3)|(r>>2),(g<<2)|(g>>4),(b<<3)|(b>>2)]));
+                    }
+                    assert_eq!(p["checksum"],format!("{hash:08x}"));
+                    image.save(Path::new(&folder).join(format!("postcard-{index}.png"))).unwrap();return;
+                }
+            }panic!("Travel screenshot timed out");
+        };
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();pump();
+        assert_eq!(pump()["headline"],"风铃海岸");
+        event("host.secondary");
+        for (index,title) in ["风铃海岸","苔藓森林","云朵山丘","星光小镇"].into_iter().enumerate() {
+            let card=pump();assert_eq!(card["headline"],title);
+            assert_eq!(card["eyebrow"],"默认明信片 · 目的地预览");
+            assert!(card["note"].as_str().unwrap().chars().count()>20);
+            assert_eq!(card["metricValue"],"已带回 0/4");
+            capture(index);
+            event("host.next");
+        }
+        pump();event("host.secondary");pump();
+        let empty=request(json!({"operation":"status"}));
+        assert_eq!(empty["state"]["visits"],0);assert_eq!(empty["state"]["favorites"],json!([]));
+        event("host.next");assert_eq!(pump()["headline"],"苔藓森林");
+        event("host.primary");pump();let trip=request(json!({"operation":"status"}))["state"]["trip"].clone();assert_eq!(trip["id"],"forest");
+        event("host.next");assert_eq!(pump()["headline"],"云朵山丘");
+        assert_eq!(request(json!({"operation":"status"}))["state"]["selected"],1);
+        event("host.secondary");assert_eq!(pump()["headline"],"苔藓森林");assert_eq!(request(json!({"operation":"status"}))["state"]["selected"],1);
+        event("host.next");pump();event("host.primary");let current=pump();assert_eq!(current["headline"],"苔藓森林");assert!(current["note"].as_str().unwrap().contains("云朵山丘"));
+        let saved=request(json!({"operation":"status"}));assert_eq!(saved["state"]["trip"],trip);assert_eq!(saved["state"]["selected"],2);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();pump();
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();assert_eq!(pump()["headline"],"苔藓森林");assert_eq!(request(json!({"operation":"status"}))["state"]["trip"],trip);
+        let after=usb.query_diagnostics(&board).unwrap();let next=usb.query_widget_inventory(&board).unwrap();assert_eq!(next["complete"],true);
+        let ids=|v:&Value|v["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().to_string()).collect::<HashSet<_>>();
+        let mut expected=ids(&inventory);expected.insert("hachimi-travel".into());assert_eq!(ids(&next),expected);
+        assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);assert_eq!(buttons["config"],usb.query_button_config(&board).unwrap()["config"]);
+        eprintln!("PASS device destination selection, departure, active trip candidate cancel/confirm, no timer restart, exit/reentry, other widget inventory and keys preserved; isolated progress, no firmware/audio. Physical touch still requires manual verification.");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval and prior notice: knowledge automatic speech; no microphone or firmware"]
+    fn p4_knowledge_autoread_hardware(){
+        use serde_json::{json,Value};
+        assert_eq!(std::env::var("PET_KNOWLEDGE_AUDIO_TEST").as_deref(),Ok("1"));
+        let package=PathBuf::from(std::env::var("PET_KNOWLEDGE_PACKAGE").unwrap());
+        let entry=crate::component_library::inspect(&package).unwrap();assert!(entry.valid);assert_eq!(entry.id,"hachimi-learn");
+        let config=PathBuf::from(std::env::var("P4_SERVICE_CONFIG").unwrap());
+        crate::volcengine_asr::configure_storage_dir(config.clone()).unwrap();
+        crate::voice_chat_settings::configure_storage_dir(config).unwrap();
+        let volume=(crate::voice_chat_settings::realtime_volume().unwrap().clamp(0.0,0.35)*100.0)as u32;
+        let usb=UsbSerialManager::new();let(tx,rx)=mpsc::channel();
+        usb.connect(&std::env::var("P4_SERIAL_PORT").unwrap(),move|topic,payload|{
+            crate::component_audio::observe(&topic,&payload);
+            if topic=="app/event"{if let Some(id)=payload["componentId"].as_str(){crate::component_audio::heartbeat(id,payload["visible"]==true);}let _=tx.send(payload);}
+        }).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){crate::component_audio::stop(Some("hachimi-learn"));let b=self.0.status().board_device_id;let _=self.0.send_to_board(&b,"control/screen-page",&json!({"page":"main"}));thread::sleep(Duration::from_millis(1500));self.0.disconnect();}}
+        let _close=Close(usb.clone());let board=usb.status().board_device_id;
+        let prior=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(prior["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        let before=usb.query_diagnostics(&board).unwrap();let buttons=usb.query_button_config(&board).unwrap();
+        usb.install_widget_clawpkg("hachimi-learn",&package,&HashMap::new(),|_,_,_|{}).unwrap();
+        let storage=tempfile::tempdir().unwrap();let mut narration=crate::knowledge_narration::Narration::default();
+        let mut seen=HashSet::new();let mut starts=0;let mut visible=false;let mut epoch=0;let mut article=Value::Null;
+        let mut pump=|ms:u64|{
+            let until=Instant::now()+Duration::from_millis(ms);
+            while Instant::now()<until{
+                let Ok(p)=rx.recv_timeout(Duration::from_millis(40))else{continue;};
+                if p["componentId"]!="hachimi-learn"{continue;}
+                let now=p["visible"]==true;if now!=visible{epoch+=1;visible=now;}if !visible{continue;}
+                let action=p["action"].as_str().unwrap_or("status");
+                if action!="status"&&!seen.insert(format!("{}:{}",p["instance"],p["sequence"])){continue;}
+                assert!(matches!(action,"status"|"host.primary"),"only approved test actions");
+                let result=crate::component_app::test_request(&package,storage.path(),if action=="status"{json!({"operation":"status"})}else{json!({"operation":"action","action":action})},&usb).unwrap();
+                article=result["knowledge"]["current"]["id"].clone();
+                let audio=crate::component_audio::status("hachimi-learn");assert_ne!(audio["phase"],"error","{}",audio["error"]);
+                if let Some(text)=narration.next(epoch,&result,audio["phase"].as_str().unwrap_or("idle")){
+                    crate::component_audio::start("hachimi-learn",&usb,crate::component_audio::Source::Speech(text),volume).unwrap();
+                    starts+=1;eprintln!("AUTO NARRATION segment start {starts}");
+                }
+                usb.send_app_snapshot(&board,&json!({"componentId":"hachimi-learn","instance":p["instance"],"sequence":p["sequence"],"values":result["values"]})).unwrap();
+            }
+            (starts,article.clone(),crate::component_audio::status("hachimi-learn")["phase"].clone())
+        };
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(110);
+        let first=loop{let s=pump(250);assert!(Instant::now()<deadline,"no automatic sequential playback");if s.0>=2&&s.2=="playing"{break s;}};
+        assert_eq!(first.0,2,"polling must not duplicate active speech");eprintln!("PASS automatic entry and natural completion advanced to second segment");
+        usb.send_to_board(&board,"miniapp/event",&json!({"action":"host.primary"})).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(45);
+        loop{let s=pump(250);assert!(Instant::now()<deadline,"new article did not play");if s.1!=first.1&&s.2=="playing"{assert_eq!(s.0,3);break;}}
+        pump(1500);usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
+        pump(2500);assert!(!crate::component_audio::playing("hachimi-learn"));
+        let stopped=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(stopped["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        assert_eq!(pump(3000).0,3,"exit must not restart speech");
+        let after=usb.query_diagnostics(&board).unwrap();assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+        assert_eq!(buttons["config"],usb.query_button_config(&board).unwrap()["config"]);
+        eprintln!("PASS device entry auto-read, bounded sequential speech, random changes article, exact-session exit stop without replay; no microphone/firmware/user-save changes. Uses production host requests + narration/audio modules, not desktop UI.");
+    }
+
+    #[test]
+    #[ignore = "Explicit approval: install eight retained Hachimi components without removing existing data"]
+    fn p4_hachimi_all_packages_hardware() {
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").expect("explicit package root"));
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let board=std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let ids=["hachimi-garden","hachimi-travel","hachimi-weather","hachimi-notes","hachimi-learn","hachimi-sounds","hachimi-break","hachimi-home"];
+        // Preflight every package before any write.
+        let entries:Vec<_>=ids.iter().map(|id|{let e=crate::component_library::inspect(&root.join(id)).unwrap();assert!(e.valid,"{id}: {:?}",e.validation_errors);assert_eq!(&e.id,id);e}).collect();
+        let usb=UsbSerialManager::new();usb.set_desktop_device_id("hachimi-hil");usb.connect(&port,|_,_|{}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        assert_eq!(usb.status().board_device_id,board);
+        assert_eq!(usb.status().capabilities["widgetAppInteraction"],"p4-app-interaction-v1");
+        let before=usb.query_diagnostics(&board).unwrap();let config=usb.query_button_config(&board).unwrap();
+        let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let mut expected:HashSet<String>=inventory["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().into()).collect();
+        for id in ids{expected.insert(id.into());}
+        assert!(expected.len()<=inventory["maxInstalled"].as_u64().unwrap() as usize);
+        for e in entries{
+            eprintln!("INSTALL {}",e.id);
+            usb.install_widget_clawpkg(&e.id,&root.join(&e.id),&HashMap::new(),|_,_,_|{}).unwrap();
+            usb.send_to_board(&board,"control/screen-page",&serde_json::json!({"page":"app"})).unwrap();
+            thread::sleep(Duration::from_secs(2));
+            let after=usb.query_diagnostics(&board).unwrap();assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+            assert_eq!(after["runtime"]["screenPage"],"app");
+        }
+        let after=usb.query_diagnostics(&board).unwrap();let inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["complete"],true);
+        let actual:HashSet<String>=inventory["items"].as_array().unwrap().iter().map(|i|i["id"].as_str().unwrap().into()).collect();assert_eq!(actual,expected);
+        assert_eq!(before["storage"]["activeAppearanceSlot"],after["storage"]["activeAppearanceSlot"]);
+        assert_eq!(config["config"],usb.query_button_config(&board).unwrap()["config"]);
+        eprintln!("PASS: ten packages installed/rendered without resets; {} total entries, original appearance and global buttons preserved. Host services NOT verified by this test.",actual.len());
+    }
+
+    #[test]
+    #[ignore = "Explicit device acceptance: eight retained components, short speaker test, NO microphone or external task dispatch"]
+    fn p4_hachimi_acceptance_without_microphone() {
+        use serde_json::{json,Value};
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let board=std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").expect("explicit packages"));
+        let storage=tempfile::tempdir().unwrap();let usb=UsbSerialManager::new();
+        let (tx,rx)=mpsc::channel();
+        usb.connect(&port,move|topic,payload|{
+            crate::component_audio::observe(&topic,&payload);
+            if topic=="app/event"{if let Some(id)=payload["componentId"].as_str(){crate::component_audio::heartbeat(id,payload["visible"]==true);}}
+            if matches!(topic.as_str(),"app/event"|"miniapp/state"|"protocol/ack"){let _=tx.send((topic,payload));}
+        }).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){crate::component_audio::stop(None);thread::sleep(Duration::from_millis(1500));self.0.disconnect();}}let _close=Close(usb.clone());
+        assert_eq!(usb.status().board_device_id,board);let before=usb.query_diagnostics(&board).unwrap();
+        let config=usb.query_button_config(&board).unwrap();let inventory=usb.query_widget_inventory(&board).unwrap();
+        let prior=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(prior["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        let mut latest=Value::Null;let mut seen=HashSet::new();
+        // Hardware requests pass through production declaration/authorization/storage/application logic.
+        // Only the desktop UI notification is deliberately unavailable; recording is never invoked.
+        let mut pump=|id:&str,ms:u64,respond:bool|{
+            let deadline=Instant::now()+Duration::from_millis(ms);
+            while Instant::now()<deadline{
+                let Ok((topic,p))=rx.recv_timeout(Duration::from_millis(40))else{continue;};
+                if topic=="miniapp/state"&&p["widgetId"]==id{latest=p;continue;}
+                if topic=="protocol/ack"&&p["requestTopic"]=="app/snapshot"{assert_ne!(p["ok"],false,"snapshot rejected: {p}");}
+                if topic!="app/event"||p["componentId"]!=id||p["visible"]!=true||!respond{continue;}
+                assert_eq!(p["boardDeviceId"],board);
+                let action=p["action"].as_str().unwrap();let key=format!("{}:{}",p["instance"],p["sequence"]);
+                if !seen.insert(key){continue;}
+                assert!(!(id=="hachimi-notes"&&action=="host.primary"),"recording intentionally deferred");
+                assert!(!(id=="hachimi-agent"&&action=="host.primary"),"real-time conversation intentionally deferred");
+                let input=if action=="status"{json!({"operation":"status"})}else{json!({"operation":"action","action":action})};
+                let result=crate::component_app::test_request(&root.join(id),storage.path(),input,&usb).expect("production host request");
+                usb.send_app_snapshot(&board,&json!({"componentId":id,"instance":p["instance"],"sequence":p["sequence"],"values":result["values"]})).unwrap();
+            }
+            latest.clone()
+        };
+        for id in ["hachimi-home","hachimi-garden","hachimi-break","hachimi-travel","hachimi-weather","hachimi-notes","hachimi-learn","hachimi-sounds"]{
+            let package=root.join(id);usb.install_widget_clawpkg(id,&package,&HashMap::new(),|_,_,_|{}).unwrap();
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();pump(id,2400,true);
+            usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();let initial=pump(id,300,true);assert_eq!(initial["widgetId"],id);
+            let actions:Vec<&str>=match id{
+                "hachimi-home"=>vec!["previous","primary","primary","primary","secondary","primary","primary","primary","secondary","primary","primary","primary","secondary"],
+                "hachimi-garden"=>if initial["state"]=="run"{vec!["primary","secondary","secondary"]}else{vec!["primary","primary","secondary","secondary"]},
+                "hachimi-desk"=>vec!["more","less"],
+                "hachimi-break"=>vec!["next","previous","primary","primary"],
+                "hachimi-travel"=>vec!["host.next","host.primary","host.secondary","host.previous","host.secondary"],
+                "hachimi-weather"=>vec!["host.details","host.details"],
+                "hachimi-agent"=>vec!["host.secondary","host.next","host.previous","host.secondary"],
+                "hachimi-notes"=>vec!["host.next","host.previous"],
+                "hachimi-learn"=>vec!["host.next","host.secondary","host.secondary","host.previous"],
+                _=>vec!["host.next","host.up","host.down","host.secondary","host.primary"],
+            };
+            for action in actions{usb.send_to_board(&board,"miniapp/event",&json!({"action":action})).unwrap();pump(id,350,true);}
+            if id=="hachimi-sounds"{
+                for _ in 0..30{pump(id,250,true);if crate::component_audio::status(id)["phase"]=="playing"{break;}}
+                assert_eq!(crate::component_audio::status(id)["phase"],"playing");pump(id,2500,true);
+            }
+            usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();let after=pump(id,300,true);
+            assert!(!matches!(after["headline"].as_str(),Some("正在处理"|"等待电脑连接"|"操作未完成")),"{id} host loop did not settle");
+            if id=="hachimi-garden"{assert_eq!(after["state"],"paused");}
+            if id=="hachimi-travel"{assert!(after["metricValue"].as_str().unwrap().contains("分钟"));}
+            if id=="hachimi-weather"{assert_eq!(after["headline"],"先选一座城市");}
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();pump(id,1200,true);
+            if id=="hachimi-sounds"{
+                for _ in 0..20{if crate::component_audio::status(id)["phase"]=="idle"{break;}pump(id,150,true);}
+                assert_eq!(crate::component_audio::status(id)["phase"],"idle");
+                assert!(!matches!(usb.media_request(&board,"media/query",json!({})).unwrap()["state"].as_str(),Some("playing"|"buffering"|"paused")));
+            }
+            usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();pump(id,2400,true);
+            if package.join("pc/application.json").exists(){
+                pump(id,11000,false);usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();assert_eq!(pump(id,300,false)["headline"],"等待电脑连接");
+                pump(id,2400,true);usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();assert_ne!(pump(id,300,true)["headline"],"等待电脑连接");
+            }
+            let d=usb.query_diagnostics(&board).unwrap();assert_eq!(d["bootCount"],before["bootCount"]);assert_eq!(d["faultResetCount"],before["faultResetCount"]);
+            eprintln!("ACCEPTED {id}: real device action/state + host snapshots where applicable, exit/reentry, host timeout/recovery; recording/voice excluded");
+        }
+        let after=usb.query_widget_inventory(&board).unwrap();assert_eq!(after["items"].as_array().unwrap().len(),inventory["items"].as_array().unwrap().len());
+        assert_eq!(usb.query_button_config(&board).unwrap()["config"],config["config"]);
+        assert_eq!(crate::component_notes::diagnostics("hachimi-notes"),Value::Null);assert!(!storage.path().join("hachimi-notes/notes.json").exists());
+        eprintln!("PASS: all ten device loops; private service state isolated; no microphone, no notes/todos, no external task dispatched");
+    }
+
+    #[test]
+    #[ignore = "Explicit device acceptance: preserve/reboot the paused garden; no audio or microphone"]
+    fn p4_hachimi_saved_garden_survives_reboot() {
+        use serde_json::{json,Value};
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let board=std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").expect("explicit packages"));
+        let usb=UsbSerialManager::new();let (tx,rx)=mpsc::channel();
+        let sender=tx.clone();usb.connect(&port,move|topic,payload|{if topic=="miniapp/state"{let _=sender.send(payload);}}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){self.0.disconnect();}}let _close=Close(usb.clone());
+        assert_eq!(usb.status().board_device_id,board);
+        let audio=usb.media_request(&board,"media/query",json!({})).unwrap();assert!(!matches!(audio["state"].as_str(),Some("playing"|"buffering"|"paused")));
+        let before=usb.query_diagnostics(&board).unwrap();let buttons=usb.query_button_config(&board).unwrap();
+        let inventory=usb.query_widget_inventory(&board).unwrap();
+        if inventory["activeWidgetId"]!="hachimi-garden" {
+            usb.install_widget_clawpkg("hachimi-garden",&root.join("hachimi-garden"),&HashMap::new(),|_,_,_|{}).unwrap();
+        }
+        let query=||->Value{while rx.try_recv().is_ok(){}usb.send_to_board(&board,"miniapp/query",&json!({})).unwrap();rx.recv_timeout(Duration::from_secs(5)).unwrap()};
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();thread::sleep(Duration::from_millis(500));
+        let saved=query();assert_eq!(saved["widgetId"],"hachimi-garden");assert_eq!(saved["state"],"paused","run the non-recording acceptance first; do not disturb an active timer");
+        // Save worker coalesces writes for 30s. Keep the real production policy.
+        thread::sleep(Duration::from_secs(35));
+        let ack=usb.reboot_device(&board).unwrap();assert_eq!(ack["preservedAppearanceAssets"],true);
+        thread::sleep(Duration::from_secs(3));usb.disconnect();
+        let deadline=Instant::now()+Duration::from_secs(30);
+        loop {let sender=tx.clone();if usb.connect(&port,move|topic,payload|{if topic=="miniapp/state"{let _=sender.send(payload);}}).is_ok(){break;}assert!(Instant::now()<deadline);thread::sleep(Duration::from_millis(500));}
+        assert_eq!(usb.status().board_device_id,board);
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();thread::sleep(Duration::from_millis(600));
+        let restored=query();for key in ["widgetId","state","page","metricValue","metricLabel","metricUnit","progressPercent"]{assert_eq!(restored[key],saved[key],"saved field {key}");}
+        let after=usb.query_diagnostics(&board).unwrap();assert_eq!(after["faultResetCount"],before["faultResetCount"]);
+        assert!(after["bootCount"].as_u64().unwrap()>before["bootCount"].as_u64().unwrap());
+        assert_eq!(after["storage"]["activeAppearanceSlot"],before["storage"]["activeAppearanceSlot"]);
+        assert_eq!(buttons["config"],usb.query_button_config(&board).unwrap()["config"]);
+        eprintln!("PASS: paused garden timer/page/progress restored after real reboot; appearance/global buttons preserved");
+        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
+    }
+
+    #[test]
+    #[ignore = "Explicit approval and notice required: real component microphone or speaker; never saves notes/todos"]
+    fn p4_hachimi_service_hardware() {
+        let mode=std::env::var("P4_SERVICE_TEST").expect("notes, sound, or speech");
+        assert!(matches!(mode.as_str(),"notes"|"sound"|"speech"));
+        let port=std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let board=std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
+        let root=PathBuf::from(std::env::var("P4_APP_PACKAGES").expect("explicit package root"));
+        let id=match mode.as_str(){"notes"=>"hachimi-notes","sound"=>"hachimi-sounds",_=>"hachimi-learn"};
+        let package=root.join(id);let entry=crate::component_library::inspect(&package).unwrap();assert!(entry.valid);
+        #[cfg(target_os="macos")]
+        if mode!="sound" {
+            let config=PathBuf::from(std::env::var("P4_SERVICE_CONFIG").expect("existing app config directory"));
+            crate::volcengine_asr::configure_storage_dir(config.clone()).unwrap();
+            crate::voice_chat_settings::configure_storage_dir(config).unwrap();
+        }
+        if mode=="notes"{assert!(crate::volcengine_asr::settings_status().unwrap().configured,"ASR not configured; microphone not started");}
+        let usb=UsbSerialManager::new();usb.set_desktop_device_id("hachimi-service-hil");
+        let event=std::sync::Arc::new(std::sync::Mutex::new(serde_json::Value::Null));let last_event=event.clone();
+        usb.connect(&port,move|topic,payload|{crate::component_notes::route(&topic,&payload);crate::component_audio::observe(&topic,&payload);if topic=="app/event"{if let Some(id)=payload["componentId"].as_str(){crate::component_audio::heartbeat(id,payload["visible"]==true);}*last_event.lock().unwrap()=payload;}}).unwrap();
+        struct Close(UsbSerialManager);impl Drop for Close{fn drop(&mut self){crate::component_notes::cancel(None);crate::component_audio::stop(None);thread::sleep(Duration::from_millis(1500));self.0.disconnect();}}let _close=Close(usb.clone());
+        assert_eq!(usb.status().board_device_id,board);
+        let before=usb.query_diagnostics(&board).unwrap();let prior=usb.media_request(&board,"media/query",serde_json::json!({})).unwrap();
+        assert!(!matches!(prior["state"].as_str(),Some("playing"|"buffering"|"paused")),"do not interrupt existing audio");
+        usb.install_widget_clawpkg(id,&package,&HashMap::new(),|_,_,_|{}).unwrap();
+        usb.send_to_board(&board,"control/screen-page",&serde_json::json!({"page":"app"})).unwrap();thread::sleep(Duration::from_secs(1));
+        for _ in 0..20{if event.lock().unwrap()["componentId"]==id{break;}thread::sleep(Duration::from_millis(200));}
+        assert_eq!(event.lock().unwrap()["boardDeviceId"],board,"host events must carry the real device identity");
+        if mode=="notes"{
+            let dir=tempfile::tempdir().unwrap();
+            let show=|mut values:serde_json::Value|{
+                if let Some(note)=values["note"].as_str(){values["note"]=crate::widget_data::bounded_text(note,156).into();}
+                let event=event.lock().unwrap().clone();
+                if event["componentId"]==id{usb.send_app_snapshot(&board,&serde_json::json!({"componentId":id,"instance":event["instance"],"sequence":event["sequence"],"values":values})).unwrap();}
+            };
+            eprintln!("MICROPHONE PREPARING: device countdown, then 20 seconds; nothing will be saved");
+            for seconds in (1..=3).rev(){show(serde_json::json!({"headline":"准备录音测试","metricValue":seconds.to_string(),"note":"看到正在录音后，请说：明天下午记得买水果"}));thread::sleep(Duration::from_secs(1));}
+            crate::component_notes::execute(id,"record",&serde_json::json!({}),dir.path(),&usb).unwrap();
+            let mut recording_notified=false;
+            for _ in 0..80{
+                let mut s=crate::component_notes::execute(id,"status",&serde_json::json!({}),dir.path(),&usb).unwrap();
+                if s["headline"]=="正在录音"&&!recording_notified{eprintln!("MICROPHONE RECORDING CONFIRMED: speak now");recording_notified=true;}
+                if s["headline"]=="正在录音"&&s["note"].as_str().unwrap_or("").is_empty(){s["note"]="请说：明天下午记得买水果；测试不会保存笔记".into();}
+                show(s);
+                thread::sleep(Duration::from_millis(250));
+            }
+            crate::component_notes::stop_recording(id);
+            let mut draft=false;let mut final_phase=String::new();
+            for _ in 0..80{
+                let s=crate::component_notes::execute(id,"status",&serde_json::json!({}),dir.path(),&usb).unwrap();
+                show(s.clone());
+                final_phase=s["headline"].as_str().unwrap_or("").into();
+                if s["headline"]=="转写完成 · 待确认"{assert!(!s["note"].as_str().unwrap_or("").trim().is_empty());draft=true;break;}
+                if s["headline"]=="录音未完成"{panic!("ASR failed: {}; diagnostic={}",s["note"],crate::component_notes::diagnostics(id));}
+                thread::sleep(Duration::from_millis(250));
+            }
+            eprintln!("Capture diagnostic: {}",crate::component_notes::diagnostics(id));
+            crate::component_notes::cancel(Some(id));assert!(draft,"no final nonempty draft; phase={final_phase}");assert!(!dir.path().join("notes.json").exists());
+            eprintln!("PASS: real device capture -> configured ASR -> nonempty final draft; text not logged; no note/todo saved");
+        }else{
+            let source=if mode=="sound"{crate::component_audio::Source::Sound{kind:0,minutes:1}}else{crate::component_audio::Source::Speech("这是哈基米知识卡的朗读测试，测试结束后会自动停止。".into())};
+            crate::component_audio::start(id,&usb,source,35).unwrap();let mut heard=false;
+            for _ in 0..180{
+                crate::component_audio::heartbeat(id,true);let s=crate::component_audio::status(id);
+                assert_ne!(s["phase"],"error","{}",s["error"]);
+                if s["phase"]=="playing"{heard=true;break;}thread::sleep(Duration::from_millis(250));
+            }
+            assert!(heard,"device never reported playing");
+            for _ in 0..32{crate::component_audio::heartbeat(id,true);thread::sleep(Duration::from_millis(250));}
+            crate::component_audio::heartbeat(id,false);
+            for _ in 0..40{if crate::component_audio::status(id)["phase"]=="idle"{break;}thread::sleep(Duration::from_millis(100));}
+            assert_eq!(crate::component_audio::status(id)["phase"],"idle");
+            let stopped=usb.media_request(&board,"media/query",serde_json::json!({})).unwrap();assert!(!matches!(stopped["state"].as_str(),Some("playing"|"buffering"|"paused")));
+            eprintln!("PASS: {mode} reached device playing, then exact-session stop; listening quality requires user confirmation");
+        }
+        let after=usb.query_diagnostics(&board).unwrap();assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
+    }
+
+    #[test]
     #[ignore = "requires a connected ESP32-P4 and P4_FIRMWARE_BIN"]
     fn p4_firmware_ota_hardware_reboots_into_valid_inactive_slot() {
         let port_name = std::env::var("P4_SERIAL_PORT").unwrap_or_else(|_| "COM5".to_string());
@@ -8919,6 +9990,7 @@ mod tests {
             .map(PathBuf::from)
             .expect("P4_FIRMWARE_BIN is required");
         let manager = UsbSerialManager::new();
+        manager.set_desktop_device_id("radio-ota-hil");
         manager
             .connect(&port_name, |_topic, _payload| {})
             .expect("connect P4 serial");
@@ -8938,6 +10010,9 @@ mod tests {
         }
         manager.send_to_board(&expected_board_device_id, "audio/conversation", &serde_json::json!({"enabled":false})).expect("stop test audio before OTA");
         let before = manager.query_diagnostics(&expected_board_device_id).unwrap();
+        let inventory_before = manager.query_widget_inventory(&expected_board_device_id).unwrap();
+        assert_eq!(inventory_before["complete"], true);
+        let buttons_before = manager.query_button_config(&expected_board_device_id).unwrap();
         eprintln!("[p4-firmware-hil] before chip={} firmware={} partition={}",
             before["runtime"]["chipRevision"], before["runtime"]["firmware"], before["runtime"]["runningPartition"]);
         let reconnect_manager = manager.clone();
@@ -8993,6 +10068,61 @@ mod tests {
         let after = manager.query_diagnostics(&expected_board_device_id).unwrap();
         eprintln!("[p4-firmware-hil] after chip={} firmware={} partition={} state={}",
             after["runtime"]["chipRevision"], after["runtime"]["firmware"], after["runtime"]["runningPartition"], after["runtime"]["imageState"]);
+        // SPIFFS also contains build-owned bootstrap packages and migration
+        // markers. Their legitimate update can change total usage; compare
+        // identities/configuration instead of treating byte equality as proof
+        // of user-data preservation. This does not prove every saved value.
+        let inventory_after = manager.query_widget_inventory(&expected_board_device_id).unwrap();
+        assert_eq!(inventory_after["complete"], true);
+        let ids = |v: &serde_json::Value| v["items"].as_array().unwrap().iter()
+            .map(|i| i["id"].as_str().unwrap().to_owned()).collect::<HashSet<_>>();
+        let before_ids=ids(&inventory_before);let after_ids=ids(&inventory_after);
+        assert!(before_ids.is_subset(&after_ids),"OTA must preserve every installed component");
+        let bundle:serde_json::Value=serde_json::from_str(include_str!("../../../firmware/factory-config.json")).unwrap();
+        let bundled:HashSet<String>=bundle["components"]["ids"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect();
+        assert!(after_ids.difference(&before_ids).all(|id|bundled.contains(id)),"OTA may only add declared builtins");
+        assert_eq!(buttons_before["config"], manager.query_button_config(&expected_board_device_id).unwrap()["config"]);
+        assert_eq!(before["storage"]["activeAppearanceSlot"], after["storage"]["activeAppearanceSlot"]);
+        manager.disconnect();
+    }
+
+    #[test]
+    #[ignore = "Requires explicit permission: verify a committed OTA; reboot without erasing if still on old firmware"]
+    fn p4_committed_ota_hardware_verify_or_reboot() {
+        let port = std::env::var("P4_SERIAL_PORT").expect("explicit port");
+        let expected = std::env::var("P4_EXPECTED_VERSION").expect("expected version");
+        let board = std::env::var("P4_EXPECTED_BOARD_ID").expect("expected board");
+        let manager = UsbSerialManager::new();
+        manager.connect(&port, |_, _| {}).unwrap();
+        assert_eq!(manager.status().board_device_id, board);
+        let before = manager.query_diagnostics(&board).unwrap();
+        eprintln!("OTA inspection: version={} partition={} state={} boot={}", before["runtime"]["firmware"], before["runtime"]["runningPartition"], before["runtime"]["imageState"], before["bootCount"]);
+        if before["runtime"]["firmware"].as_str() != Some(expected.as_str()) {
+            let reply = manager.reboot_device(&board).expect("preserving reboot");
+            assert_eq!(reply["ok"], true);
+            assert_eq!(reply["preservedAppearanceAssets"], true);
+            std::thread::sleep(Duration::from_secs(3));
+            manager.disconnect();
+            let until = Instant::now() + Duration::from_secs(30);
+            loop {
+                if manager.connect(&port, |_, _| {}).is_ok() { break; }
+                assert!(Instant::now() < until, "reconnect timeout");
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+        let until = Instant::now() + Duration::from_secs(40);
+        loop {
+            let after = manager.query_diagnostics(&board).unwrap();
+            assert_eq!(after["runtime"]["firmware"].as_str(), Some(expected.as_str()), "expected committed firmware after reboot");
+            if after["runtime"]["imageState"] == "valid" {
+                assert_eq!(before["storage"]["usedBytes"], after["storage"]["usedBytes"]);
+                assert_eq!(before["storage"]["activeAppearanceSlot"], after["storage"]["activeAppearanceSlot"]);
+                eprintln!("OTA verified: version={} state=valid storagePreserved=true", expected);
+                break;
+            }
+            assert!(Instant::now() < until, "validation timeout");
+            std::thread::sleep(Duration::from_millis(500));
+        }
         manager.disconnect();
     }
 
@@ -9487,6 +10617,7 @@ mod tests {
     #[test]
     fn widget_ota_skips_directory_placeholder_files() {
         assert!(widget_ota_should_skip_path("assets/.keep"));
+        assert!(widget_ota_should_skip_path("pc/extension.json"));
         assert!(widget_ota_should_skip_path("runtime/.keep"));
         assert!(!widget_ota_should_skip_path("runtime/widget.json"));
         assert!(!widget_ota_should_skip_path("assets/icon.png"));

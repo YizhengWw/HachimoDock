@@ -20,6 +20,8 @@ import DeviceScreenPreview from "./DeviceScreenPreview";
 import StockWatchlist from "./StockWatchlist.jsx";
 import LocalDataPanel from "./LocalDataPanel.jsx";
 import MusicPlayer from "./MusicPlayer.jsx";
+import ComponentMediaPanel from "./ComponentMediaPanel.jsx";
+import ComponentAppPanel from "./ComponentAppPanel.jsx";
 import { LOCAL_SOURCES } from "./local-widget-model.js";
 
 export default function ComponentPreviewModal({
@@ -44,6 +46,7 @@ export default function ComponentPreviewModal({
   onInstall,
   onDelete,
   onClose,
+  onSourceChange,
 }) {
   const isDeviceOnly = component.isDeviceOnly === true;
   const isUpdatingCurrent = !isDeviceOnly && (
@@ -69,6 +72,7 @@ export default function ComponentPreviewModal({
     const dialogElement = dialogRef.current;
     dialogRef.current?.querySelector("button")?.focus();
     const handleKeyDown = (event) => {
+      if (!dialogRef.current?.getClientRects().length) return;
       if (event.key === "Escape" && !installingRef.current) {
         event.preventDefault();
         onCloseRef.current?.();
@@ -93,7 +97,7 @@ export default function ComponentPreviewModal({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       window.setTimeout(() => {
-        if (dialogElement?.isConnected) return;
+        if (dialogElement?.isConnected || document.querySelector('[aria-modal="true"]')) return;
         const previous = returnFocusRef.current;
         if (previous?.isConnected && typeof previous.focus === "function") previous.focus();
       }, 0);
@@ -139,20 +143,24 @@ export default function ComponentPreviewModal({
           </Button>
         </div>
         <div className="modal-body">
+          {component.sourceAlternatives?.length>1&&<label className="component-source-picker">资源来源（切换会放弃未保存的按钮草稿）<select aria-label="选择组件来源" value={component.isLocal?'local':'builtin'} onChange={e=>{const selected=component.sourceAlternatives.find(c=>Boolean(c.isLocal)===(e.target.value==='local'));if(selected)onSourceChange?.({...selected,sourceAlternatives:component.sourceAlternatives});}} disabled={installing}>{component.sourceAlternatives.map(c=><option key={c.isLocal?'local':'builtin'} value={c.isLocal?'local':'builtin'}>{c.isLocal?'本地创作 / 下载':'客户端内置'} · {c.version||'版本未知'}</option>)}</select></label>}
+          <p className="component-preview-mode">{isDeviceOnly?'设备清单信息：本机没有安装源，不能试玩、修改按钮或重新同步；可以查看信息或移除设备副本。':component.pcApplication||component.pcExtension||LOCAL_SOURCES.has(component.dataSource)||component.dataSource==='stocks.watchlist'?'真实服务控制：服务设置和数据操作会立即保存；底部“取消”只放弃未同步的按钮设置，不撤销已执行的服务操作。':'试玩预览：此处操作不会修改设备存档。按钮设置仅在同步成功后保存，取消不会修改设置。'}</p>
           {(component.mediaSource === "audio.player" || component.id === "music-player") && <MusicPlayer />}
-          {LOCAL_SOURCES.has(component.dataSource) && <LocalDataPanel key={component.id} source={component.dataSource} />}
+          {component.pcExtension && <ComponentMediaPanel key={`${component.id}:${component.versionHash}`} component={component} />}
+          {component.pcApplication && <ComponentAppPanel key={`${component.id}:${component.versionHash}`} component={{...component,defaultBindings:bindings}} />}
+          {(LOCAL_SOURCES.has(component.dataSource)||component.pcApplication?.service==="todos") && <LocalDataPanel key={component.id} source={component.pcApplication?.service==="todos"?"todos.upcoming":component.dataSource} deviceChecklist={component.pcApplication?.service==="todos"} />}
           {(component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist") && (
             <StockWatchlist key={component.id} usb={usb} />
           )}
           <div className="component-preview-modal__layout">
             <aside className="component-preview-modal__overview" aria-label="组件预览与说明">
-              {component.mediaSource !== "audio.player" && component.id !== "music-player" && <div className="component-preview-modal__screen">
-                <DeviceScreenPreview component={component} className="component-preview-modal__device" />
+              {!component.pcApplication && !component.pcExtension && component.mediaSource !== "audio.player" && component.id !== "music-player" && <div className="component-preview-modal__screen">
+                <DeviceScreenPreview component={{...component,defaultBindings:bindings}} className="component-preview-modal__device" interactive />
               </div>}
               <div className="component-preview-modal__summary">
                 <div className="component-preview-modal__summary-tags">
                   <span className={`candidate-card__badge candidate-card__badge--${isLocal ? "custom" : "builtin"}`}>
-                    {component.isDeviceOnly ? "设备包" : isLocal ? "正式本地" : "内置"}
+                    {component.isDeviceOnly ? "设备包" : isLocal ? "本机" : "内置"}
                   </span>
                   <span className="component-preview-modal__kind">{componentKind}</span>
                 </div>

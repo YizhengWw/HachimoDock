@@ -6,25 +6,31 @@
  *          no-op-safe Claude focus confirmation across CLI/desktop metadata aliases, plus
  *          ID-deeplink-confirmed visible-composer recovery
  *          when a Codex build omits both the active title and sidebar row,
- *          nonempty-current-draft Confirm submission with an Enter-first and
- *          unchanged-draft Send/Queue/Steer-button fallback, and clipboard-preserving
+ *          nonempty-current-draft Confirm submission (Codex uses a unique native
+ *          Send/Queue/Steer action first, never retries an attempted submission), and clipboard-preserving
  *          current-caret insertion separated from the later Return.
  * [Pos] macOS foreground-input backend for codex_composer.rs; requests Apple's native consent alert first and routes the activated System Settings window only after the user chooses to open it.
  * [Sync] If this file changes, update pc/.folder.md.
  */
 
+#[cfg(test)]
+#[path = "codex_voice_receipt.rs"]
+mod voice_receipt;
+
+#[path = "composer_visibility.rs"]
+mod composer_visibility;
+
 use accessibility::{AXAttribute, AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     error_string, kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint,
     kAXValueTypeCGSize, kAXValueTypeCFRange, AXValueCreate, AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElementGetPid,
-    AXUIElementPostKeyboardEvent, AXUIElementRef, AXValueGetType, AXValueGetTypeID,
+    AXUIElementPostKeyboardEvent, AXUIElementCopyElementAtPosition, AXUIElementRef, AXValueGetType, AXValueGetTypeID,
     AXValueGetValue, AXValueRef,
 };
-#[cfg(debug_assertions)]
 use core_foundation::number::CFNumber;
 use core_foundation::{
     array::CFArray,
-    base::{CFType, CFRange, TCFType},
+    base::{CFHash, CFType, CFRange, TCFType},
     boolean::CFBoolean,
     dictionary::CFDictionary,
     string::CFString,
@@ -157,6 +163,8 @@ pub(super) struct MacosComposerState {
     session_title: String,
     draft: crate::voice_draft::VoiceDraft,
     current_visible_target: Option<ComposerTarget>,
+    task_identity: Option<Vec<String>>,
+    native_voice_text: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1215,6 +1223,20 @@ fn window_area(window: &AXUIElement) -> f64 {
 
 fn primary_agent_window(agent: MacosAgent) -> Result<CodexWindow, String> {
     let windows = agent_windows(agent)?;
+    if agent == MacosAgent::Codex {
+        let metadata = windows.iter().map(|target| (
+            cf_string(target.window.title())
+                .is_some_and(|title| is_agent_primary_window_title(agent, &title)),
+            ax_string_attribute(&target.window, "AXSubrole"),
+            task_window_is_blocked(&target.window),
+        )).collect::<Vec<_>>();
+        let index = codex_primary_window_index(&metadata).map_err(|reason| match reason {
+            "DESKTOP_TASK_MODAL_OPEN" => "ChatGPT（Codex）存在模态弹窗，请先处理弹窗后重试".to_string(),
+            "DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS" => "检测到多个 ChatGPT（Codex）主窗口，请保留目标主窗口后重试；尚未写入或发送文字".to_string(),
+            _ => "ChatGPT（Codex）窗口可访问，但没有可确认的对话主窗口；请打开目标对话后重试".to_string(),
+        })?;
+        return Ok(windows[index].clone());
+    }
     let preferred = windows
         .iter()
         .filter(|target| {
@@ -1240,6 +1262,35 @@ fn primary_agent_window(agent: MacosAgent) -> Result<CodexWindow, String> {
         // window instead.
         .max_by(|left, right| window_area(&left.window).total_cmp(&window_area(&right.window)))
         .ok_or_else(|| format!("未找到 {} macOS 主窗口", agent.label()))
+}
+
+// The failed 0.1.138 path reached a nonempty AX window list, then discarded
+// every window because none had an exact product-name title. A conversation
+// title is not a window identity. Prefer a unique standard window, never a pet
+// overlay, a modal, an editor in a utility dialog, or the largest arbitrary UI.
+fn codex_primary_window_index(windows: &[(bool, String, bool)]) -> Result<usize, &'static str> {
+    if windows.iter().any(|(_, _, blocked)| *blocked) {
+        return Err("DESKTOP_TASK_MODAL_OPEN");
+    }
+    let standard = windows.iter().enumerate()
+        .filter(|(_, (_, role, _))| role == "AXStandardWindow")
+        .map(|(index, _)| index).collect::<Vec<_>>();
+    match standard.as_slice() {
+        [index] => return Ok(*index),
+        [] => (),
+        _ => return Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS"),
+    }
+    // Some older AX implementations omit the subrole. Keep their exact-name
+    // compatibility only when unique; explicit AXDialog/utility roles never
+    // become conversation windows even if titled "Codex" or "ChatGPT".
+    let legacy = windows.iter().enumerate()
+        .filter(|(_, (exact, role, _))| *exact && matches!(role.as_str(), "" | "AXUnknown"))
+        .map(|(index, _)| index).collect::<Vec<_>>();
+    match legacy.as_slice() {
+        [index] => Ok(*index),
+        [] => Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"),
+        _ => Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS"),
+    }
 }
 
 fn launch_agent_application(agent: MacosAgent) -> Result<(), String> {
@@ -1276,7 +1327,10 @@ fn primary_or_launch_agent_window(agent: MacosAgent) -> Result<CodexWindow, Stri
     if let Ok(target) = primary_agent_window(agent) {
         return Ok(target);
     }
-    launch_agent_application(agent)?;
+    // A running app with an unrecognized/temporarily unavailable window is
+    // not a missing app. Never relaunch it as a window-selection fallback.
+    let launched = agent_application_pids(agent).is_empty();
+    if launched { launch_agent_application(agent)?; }
 
     let deadline = Instant::now() + AGENT_LAUNCH_WINDOW_TIMEOUT;
     loop {
@@ -1286,8 +1340,9 @@ fn primary_or_launch_agent_window(agent: MacosAgent) -> Result<CodexWindow, Stri
         };
         if Instant::now() >= deadline {
             return Err(format!(
-                "{} macOS 应用启动后没有出现可访问窗口: {error}",
+                "{} macOS {}: {error}",
                 agent.label(),
+                if launched { "应用启动后目标窗口尚未就绪" } else { "应用已运行，但目标窗口尚未就绪" },
             ));
         }
         thread::sleep(Duration::from_millis(100));
@@ -1551,14 +1606,11 @@ fn is_placeholder(value: &str) -> bool {
     )
 }
 
-fn is_composer_element(element: &AXUIElement) -> bool {
-    let role = element_role(element);
+fn released_composer_labels_match(role: &str, labels: &[String]) -> bool {
     if role != "AXTextArea" && role != "AXTextField" {
         return false;
     }
-    let labels = element_labels(element)
-        .into_iter()
-        .map(|label| label.to_lowercase())
+    let labels = labels.iter().map(|label| label.to_lowercase())
         .collect::<Vec<_>>();
     let recognized = labels.iter().any(|label| {
         [
@@ -1580,9 +1632,119 @@ fn is_composer_element(element: &AXUIElement) -> bool {
     recognized || (role == "AXTextArea" && !search_field)
 }
 
+fn is_composer_element(element: &AXUIElement) -> bool {
+    // Draft contents are not control metadata: saying "search" must not make
+    // the real composer disappear, nor may prompt words turn another field
+    // into an editor. Keep the old policy only in the comparison diagnostic.
+    let role = element_role(element);
+    if role != "AXTextArea" && role != "AXTextField" { return false; }
+    let readonly = element.attribute(&AXAttribute::new(&CFString::new("AXReadOnly")))
+        .ok().and_then(|value: CFType| value.downcast::<CFBoolean>())
+        .map(bool::from).unwrap_or(false);
+    current_composer_metadata_matches(&role, &composer_metadata(element),
+        &composer_dom_metadata(element), readonly)
+}
+
+fn composer_dom_metadata(element: &AXUIElement) -> Vec<String> {
+    let mut result = vec![ax_string_attribute(element,"AXDOMIdentifier"),
+        ax_string_attribute(element,"AXSubrole")];
+    let value: Result<CFType,_> = element.attribute(&AXAttribute::new(&CFString::new("AXDOMClassList")));
+    if let Ok(value) = value { result.extend(string_attribute_values(value)); }
+    result
+}
+
+fn string_attribute_values(value: CFType) -> Vec<String> {
+    if let Some(text) = value.downcast::<CFString>() { return vec![text.to_string()]; }
+    let mut result = Vec::new();
+    if let Some(values) = value.downcast::<CFArray>() {
+        for raw in values.get_all_values().into_iter().take(64).filter(|raw| !raw.is_null()) {
+            let value = unsafe { CFType::wrap_under_get_rule(raw) };
+            if let Some(text) = value.downcast::<CFString>() { result.push(text.to_string()); }
+        }
+    }
+    result
+}
+
+fn current_composer_metadata_matches(role: &str, labels: &[String], dom: &[String], readonly: bool) -> bool {
+    if readonly { return false; }
+    // Negative metadata wins even if a search control also says "ask anything".
+    // Never classify from draft contents. DOM tokens are bounded control hints,
+    // not a substring rule that would reject names such as "research-composer".
+    let search = labels.iter().any(|label| {
+        let label = label.to_lowercase(); label.contains("search") || label.contains("搜索")
+    }) || dom.iter().any(|hint| hint.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric()).any(|token|
+            matches!(token,"search"|"searchbox"|"searchfield"|"searchinput"|"axsearchfield")));
+    !search && released_composer_labels_match(role, labels)
+}
+
+fn composer_metadata(element: &AXUIElement) -> Vec<String> {
+    [cf_string(element.title()), cf_string(element.description()),
+        cf_string(element.help()), cf_string(element.placeholder_value())]
+        .into_iter().flatten().collect()
+}
+
+fn composer_geometry_visible(hidden: bool, bounds: Option<(i64,i64,i64,i64)>, window: Option<(i64,i64,i64,i64)>) -> bool {
+    if hidden { return false; }
+    let Some((x,y,w,h)) = bounds else { return true; };
+    if w <= 0 || h <= 0 { return false; }
+    let Some((wx,wy,ww,wh)) = window.filter(|(_,_,w,h)| *w > 0 && *h > 0) else { return true; };
+    x < wx.saturating_add(ww) && y < wy.saturating_add(wh)
+        && x.saturating_add(w) > wx && y.saturating_add(h) > wy
+}
+
+fn composer_is_visible(element: &AXUIElement, window: &CodexWindow) -> bool {
+    let hidden = element.attribute(&AXAttribute::new(&CFString::new("AXHidden")))
+        .ok().and_then(|value: CFType| value.downcast::<CFBoolean>())
+        .map(bool::from).unwrap_or(false);
+    // Unsupported visibility metadata stays unknown; never infer hidden just
+    // because an AX provider omits a property or uses negative screen origins.
+    composer_geometry_visible(hidden, rounded_bounds(element), rounded_bounds(&window.window))
+}
+
+fn focused_snapshot_eligible(agent: MacosAgent, owns_window: bool, enabled: bool, metadata_match: bool, visible: bool) -> bool {
+    agent == MacosAgent::Codex && owns_window && enabled && metadata_match && visible
+}
+
+fn focused_codex_composer(agent: MacosAgent, window: &CodexWindow) -> Option<(AXUIElement, String)> {
+    if agent != MacosAgent::Codex { return None; }
+    let focus = ax_element_attribute(&window.app, "AXFocusedUIElement")?;
+    if !focused_snapshot_eligible(agent,
+        ax_element_attribute(&focus, "AXWindow").as_ref() == Some(&window.window),
+        element_is_enabled(&focus), is_composer_element(&focus),
+        composer_is_visible(&focus, window)) { return None; }
+    let value = composer_value(&focus);
+    // Pin only an unchanged focus snapshot. A scan of thousands of nodes is
+    // not a prerequisite for honoring the user's explicitly selected editor.
+    if ax_element_attribute(&window.app, "AXFocusedUIElement").as_ref() != Some(&focus) { return None; }
+    Some((focus, value))
+}
+
 fn composer_value(element: &AXUIElement) -> String {
-    let value = element_value(element).replace("\r\n", "\n");
-    normalize_composer_value(&value)
+    normalize_element_composer_value(element, &element_value(element))
+}
+
+fn normalize_element_composer_value(element: &AXUIElement, raw: &str) -> String {
+    let placeholder = cf_string(element.placeholder_value());
+    let characters = element.attribute(&AXAttribute::new(&CFString::new("AXNumberOfCharacters")))
+        .ok().and_then(|value: CFType| value.downcast::<CFNumber>())
+        .and_then(|value| value.to_i64());
+    composer_value_with_placeholder(raw, placeholder.as_deref(), characters)
+}
+
+fn composer_value_with_placeholder(raw: &str, placeholder: Option<&str>, characters: Option<i64>) -> String {
+    let value = raw.replace("\r\n", "\n");
+    let value = value.trim_start_matches('\u{feff}');
+    // Some AX providers expose the empty editor's hint as AXValue. Only
+    // accept exact placeholder metadata, never length/suffix heuristics.
+    // A positive character count is evidence of actual user text (including
+    // text that happens to equal the hint), and must be preserved verbatim.
+    if placeholder.is_some_and(|hint| !hint.is_empty()
+        && value == hint.replace("\r\n", "\n")) && !characters.is_some_and(|n| n > 0) {
+        return String::new();
+    }
+    if characters.is_some_and(|n| n > 0) { return value.to_string(); }
+    normalize_composer_value(value)
 }
 
 fn normalize_composer_value(value: &str) -> String {
@@ -1633,7 +1795,102 @@ fn unique_composer(agent: MacosAgent, mut composers: Vec<(AXUIElement, String)>)
 }
 
 fn find_composer(agent: MacosAgent, window: &CodexWindow) -> Result<(AXUIElement, String), String> {
-    unique_composer(agent, composer_candidates(window))
+    if let Some(focused) = focused_codex_composer(agent, window) { return Ok(focused); }
+    select_window_composer(agent, window, composer_candidates(window))
+}
+
+fn focused_composer_index(agent: MacosAgent, count: usize, focused: Option<usize>, owns_window: bool) -> Option<usize> {
+    if agent == MacosAgent::Codex && count > 1 && owns_window {
+        focused.filter(|index| *index < count)
+    } else { None }
+}
+
+fn nearest_hit_text_control(window: &CodexWindow, point: (f32,f32)) -> Option<Option<AXUIElement>> {
+    let mut raw: AXUIElementRef = std::ptr::null_mut();
+    // Read-only hit test against the actually exposed screen, not a guessed
+    // coordinate click. A covering window must not expose the editor below it.
+    let status = unsafe { AXUIElementCopyElementAtPosition(
+        AXUIElement::system_wide().as_concrete_TypeRef(), point.0, point.1, &mut raw) };
+    if raw.is_null() { return None; }
+    let mut hit = unsafe { AXUIElement::wrap_under_create_rule(raw) };
+    if status != kAXErrorSuccess { return None; }
+    let mut seen = Vec::new();
+    for _ in 0..MAX_TREE_DEPTH {
+        if seen.contains(&hit) { return None; }
+        seen.push(hit.clone());
+        if matches!(element_role(&hit).as_str(), "AXTextArea" | "AXTextField" | "AXSearchField") {
+            return Some((ax_element_attribute(&hit,"AXWindow").as_ref() == Some(&window.window)).then_some(hit));
+        }
+        if hit == window.window { return Some(None); }
+        match hit.parent() { Ok(parent) => hit = parent, Err(_) => return None }
+    }
+    None
+}
+
+fn candidate_exposure(window: &CodexWindow, candidate: &AXUIElement) -> composer_visibility::Exposure {
+    let hits = composer_visibility::probe_points(rounded_bounds(candidate), rounded_bounds(&window.window))
+        .into_iter().map(|point| nearest_hit_text_control(window, point)
+            .map(|hit| hit.as_ref() == Some(candidate))).collect::<Vec<_>>();
+    composer_visibility::exposure(&hits)
+}
+
+fn select_window_composer(agent: MacosAgent, window: &CodexWindow, mut candidates: Vec<(AXUIElement, String)>) -> Result<(AXUIElement, String), String> {
+    if agent == MacosAgent::Codex {
+        candidates.retain(|(element,_)| composer_is_visible(element, window));
+    }
+    let focused = ax_element_attribute(&window.app, "AXFocusedUIElement");
+    let index = focused.as_ref().and_then(|focus| candidates.iter().position(|(element, _)| element == focus));
+    // The user's selected editor can be nested more than twenty groups deep.
+    // AXWindow gives direct ownership, without a guessed ancestor-depth limit.
+    let owns_window = focused.as_ref().is_some_and(|focus|
+        ax_element_attribute(focus, "AXWindow").as_ref() == Some(&window.window));
+    if let Some(index) = focused_composer_index(agent, candidates.len(), index, owns_window) {
+        return Ok(candidates.remove(index));
+    }
+    let mut exposures = Vec::new();
+    let focus_role = focused.as_ref().map(element_role);
+    let foreign_owner = focused.as_ref().and_then(|element| ax_element_attribute(element,"AXWindow"))
+        .is_some_and(|owner| owner != window.window);
+    let may_auto_focus = composer_visibility::may_auto_focus(
+        ax_element_attribute(&AXUIElement::system_wide(),"AXFocusedApplication").as_ref() == Some(&window.app),
+        ax_element_attribute(&window.app,"AXFocusedWindow").as_ref() == Some(&window.window),
+        foreign_owner, focus_role.as_deref());
+    if agent == MacosAgent::Codex && (2..=8).contains(&candidates.len()) && may_auto_focus
+    {
+        exposures = candidates.iter().map(|(element,_)| candidate_exposure(window, element)).collect();
+        let selected=composer_visibility::sole_exposed(&exposures).or_else(||{
+            let bounds=candidates.iter().map(|(e,_)|rounded_bounds(e)).collect::<Vec<_>>();
+            let rich=candidates.iter().map(|(e,_)|composer_dom_metadata(e).iter().any(|v|
+                v.split_whitespace().any(|token|token.eq_ignore_ascii_case("prosemirror")))).collect::<Vec<_>>();
+            let chains=candidates.iter().map(|(e,_)|ancestors(e).into_iter().take(3).collect::<Vec<_>>()).collect::<Vec<_>>();
+            let related=chains.iter().map(|left|chains.iter().map(|right|left.iter().any(|a|right.contains(a))).collect::<Vec<_>>()).collect::<Vec<_>>();
+            composer_visibility::stacked_chat_composer(&bounds,&rich,&exposures,&related,rounded_bounds(&window.window))
+        });
+        if let Some(index) = selected {
+            // Do not steal the user's focus if it changed during the probe.
+            if ax_element_attribute(&window.app,"AXFocusedUIElement") == focused
+                && ax_element_attribute(&AXUIElement::system_wide(),"AXFocusedApplication").as_ref() == Some(&window.app)
+                && ax_element_attribute(&window.app,"AXFocusedWindow").as_ref() == Some(&window.window)
+            {
+                return Ok(candidates.remove(index));
+            }
+        }
+    }
+    if agent == MacosAgent::Codex && candidates.len() > 1 && CAPTURE_AMBIGUOUS_EVIDENCE.with(|enabled| enabled.get()) {
+        AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_none() {
+                let elements = candidates.iter().map(|(element,_)| element.clone()).collect::<Vec<_>>();
+                *slot = Some(serde_json::json!({"schema":1,"stage":"firstAmbiguousSelection",
+                    "candidateCount":candidates.len(),"exposure":format!("{exposures:?}"),
+                    "structure":candidate_structure(window, &elements)}));
+            }
+        });
+    }
+    unique_composer(agent, candidates).map_err(|error| {
+        format!("{error}；定位诊断：焦点角色={}；焦点在候选中={}；焦点属于目标窗口={owns_window}；可见命中={exposures:?}",
+            focused.as_ref().map(element_role).unwrap_or_else(|| "不可读".into()), index.is_some())
+    })
 }
 
 fn find_target(
@@ -1679,17 +1936,228 @@ fn find_target(
 }
 
 fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, String> {
-    let mut target = primary_or_launch_agent_window(agent)?;
+    find_stable_current_target(agent, false)
+}
+
+fn legacy_codex_window_index(windows: &[(bool, f64)]) -> Option<usize> {
+    // Exact copy of the released 135/138 Codex window-selection policy.
+    windows.iter().enumerate().filter(|(_, (exact, _))| *exact)
+        .max_by(|(_, (_, a)), (_, (_, b))| a.total_cmp(b)).map(|(index, _)| index)
+}
+
+thread_local! {
+    // One bounded in-memory snapshot per lookup, on the same voice worker.
+    // No file, telemetry, clipboard, draft, title or identity persistence.
+    static AMBIGUOUS_COMPOSER_EVIDENCE: std::cell::RefCell<Option<serde_json::Value>> = const { std::cell::RefCell::new(None) };
+    static CAPTURE_AMBIGUOUS_EVIDENCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct ComposerEvidenceScope;
+impl ComposerEvidenceScope {
+    fn begin(enabled: bool) -> Self {
+        AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| slot.borrow_mut().take());
+        CAPTURE_AMBIGUOUS_EVIDENCE.with(|flag| flag.set(enabled));
+        Self
+    }
+}
+impl Drop for ComposerEvidenceScope {
+    fn drop(&mut self) {
+        CAPTURE_AMBIGUOUS_EVIDENCE.with(|flag| flag.set(false));
+        AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| slot.borrow_mut().take());
+    }
+}
+
+fn diagnostic_candidate_structure(window: &CodexWindow) -> serde_json::Value {
+    let candidates = composer_candidates(window).into_iter().map(|(element,_)| element).collect::<Vec<_>>();
+    candidate_structure(window, &candidates)
+}
+
+fn candidate_structure(window: &CodexWindow, all: &[AXUIElement]) -> serde_json::Value {
+    // Geometry and relationships from the failed selection's candidates, never
+    // labels, identifiers, draft values, clipboard contents or selection text.
+    let truncated = all.len() > 8;
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let candidates = all.iter().take(8).cloned().collect::<Vec<_>>();
+    let window_bounds = rounded_bounds(&window.window);
+    let chains = candidates.iter().map(|candidate| {
+        let mut chain = vec![candidate.clone()];
+        let mut current = candidate.clone();
+        for _ in 0..MAX_TREE_DEPTH {
+            if Instant::now() >= deadline { break; }
+            let Ok(parent) = current.parent() else { break; };
+            if chain.contains(&parent) { break; }
+            chain.push(parent.clone());
+            if parent == window.window { break; }
+            current = parent;
+        }
+        chain
+    }).collect::<Vec<_>>();
+    let controls = candidates.iter().enumerate().map(|(index, candidate)| {
+        let bounds = rounded_bounds(candidate);
+        let relative = bounds.zip(window_bounds).map(|((x,y,w,h),(wx,wy,_,_))|
+            (x.saturating_sub(wx), y.saturating_sub(wy), w, h));
+        let hits = composer_visibility::probe_points(bounds, window_bounds).into_iter().map(|point| {
+            if Instant::now() >= deadline { return serde_json::json!({"status":"notSampledBudget"}); }
+            match nearest_hit_text_control(window, point) {
+                None => serde_json::json!({"status":"unknown"}),
+                Some(None) => serde_json::json!({"status":"notTextControl"}),
+                Some(Some(hit)) => serde_json::json!({"status":"textControl",
+                    "candidateIndex":candidates.iter().position(|item| item == &hit)}),
+            }
+        }).collect::<Vec<_>>();
+        let dom = if Instant::now() < deadline { composer_dom_metadata(candidate).join(" ").to_lowercase() } else { String::new() };
+        let kinds = ["composer","prompt","message","lexical","prosemirror","monaco","terminal","search"]
+            .into_iter().filter(|kind| dom.contains(kind)).collect::<Vec<_>>();
+        serde_json::json!({"index":index,"relativeBounds":relative,"role":element_role(candidate),"domKindHints":kinds,
+            "ancestorCandidateIndices":candidates.iter().enumerate()
+                .filter(|(other, element)| *other != index && chains[index].contains(element))
+                .map(|(other,_)| other).collect::<Vec<_>>(),
+            "ancestorRoles":chains[index].iter().skip(1).map(element_role).collect::<Vec<_>>(),
+            "reachesWindow":chains[index].last() == Some(&window.window),
+            "hitTests":hits})
+    }).collect::<Vec<_>>();
+    serde_json::json!({"truncated":truncated,"budgetExpired":Instant::now() >= deadline,"controls":controls,
+        "windowSize":window_bounds.map(|(_,_,w,h)| (w,h)),
+        "sharedAncestorDepths":chains.iter().map(|left| chains.iter().map(|right| {
+            left.iter().enumerate().find_map(|(i,ancestor)|
+                right.iter().position(|other| other == ancestor).map(|j| (i,j)))
+        }).collect::<Vec<_>>()).collect::<Vec<_>>()})
+}
+
+fn diagnostic_composer_counts(window: &CodexWindow) -> serde_json::Value {
+    let (mut nodes, mut web, mut areas, mut fields, mut matches, mut disabled, mut metadata_matches) = (0usize,0usize,0usize,0usize,0usize,0usize,0usize);
+    let focused = ax_element_attribute(&window.app, "AXFocusedUIElement");
+    let mut focused_in_scan = false;
+    let mut text_controls = Vec::new();
+    walk_elements(&window.window, |element| {
+        nodes += 1;
+        if focused.as_ref() == Some(element) { focused_in_scan = true; }
+        let role = element_role(element);
+        match role.as_str() { "AXWebArea" => web += 1, "AXTextArea" => areas += 1, "AXTextField" => fields += 1, _ => () }
+        if matches!(role.as_str(), "AXTextArea" | "AXTextField") {
+            let enabled = element_is_enabled(element);
+            let original_match = released_composer_labels_match(&role, &element_labels(element));
+            if original_match { if enabled { matches += 1; } else { disabled += 1; } }
+            let labels = [cf_string(element.title()), cf_string(element.description()), cf_string(element.help()), cf_string(element.placeholder_value())]
+                .into_iter().flatten().collect::<Vec<_>>();
+            if enabled && is_composer_element(element) { metadata_matches += 1; }
+            // Only categorical metadata is returned. Never return labels,
+            // DOM identifiers, values, selected text or character counts.
+            let mut settable = 0u8;
+            let attribute = CFString::new("AXValue");
+            let status = unsafe { accessibility_sys::AXUIElementIsAttributeSettable(
+                element.as_concrete_TypeRef(), attribute.as_concrete_TypeRef(), &mut settable) };
+            let dom = composer_dom_metadata(element).join(" ").to_lowercase();
+            let kinds = ["composer", "prompt", "message", "lexical", "prosemirror", "monaco", "terminal", "search"]
+                .into_iter().filter(|kind| dom.contains(kind)).collect::<Vec<_>>();
+            text_controls.push(serde_json::json!({
+                "ordinal":text_controls.len(), "role":role, "enabled":enabled,
+                "releasedMatch":original_match,
+                "recognizedPromptLabel":released_composer_labels_match("AXTextField", &labels),
+                "searchMetadata":labels.iter().any(|s| { let s=s.to_lowercase(); s.contains("search") || s.contains("搜索") }),
+                "valueSettable":if status == kAXErrorSuccess { Some(settable != 0) } else { None },
+                "isFocusedElement":focused.as_ref() == Some(element),
+                "directWindowMatches":ax_element_attribute(element,"AXWindow").as_ref() == Some(&window.window),
+                "currentMetadataMatch":is_composer_element(element),
+                "currentVisibilityEligible":composer_is_visible(element, window),
+                "ancestorRoles":ancestors(element).iter().map(element_role).collect::<Vec<_>>(),
+                "domKindHints":kinds
+            }));
+        }
+        false
+    });
+    let focused_in_window = focused.as_ref().is_some_and(|e| e == &window.window || ancestors(e).iter().any(|a| a == &window.window));
+    serde_json::json!({"nodes":nodes,"webAreas":web,"textAreas":areas,"textFields":fields,
+        "releasedMatches":matches,"disabledMatches":disabled,"metadataOnlyMatches":metadata_matches,
+        "nodeLimitReached":nodes>=MAX_TREE_ELEMENTS,"focusedRole":focused.as_ref().map(element_role),"focusedInWindow":focused_in_window,
+        "focusedInScan":focused_in_scan,"textControls":text_controls,
+        "candidateStructure":diagnostic_candidate_structure(window)})
+}
+
+pub(super) fn diagnose_current_composer(agent: MacosAgent) -> Result<serde_json::Value, String> {
+    // Invoked explicitly by the user in the diagnostic UI. No text/labels,
+    // titles, paths or IDs leave this function; counts and roles only.
+    if agent != MacosAgent::Codex { return Err("此次 135/142 同环境对照仅检查 Codex".into()); }
+    if !accessibility_permission_granted() { return Err("辅助功能尚未授权；本次未请求新权限、未读取输入框".into()); }
+    let windows = agent_windows(agent)?;
+    let metadata = windows.iter().map(|w| (
+        cf_string(w.window.title()).is_some_and(|title| is_agent_primary_window_title(agent, &title)),
+        ax_string_attribute(&w.window,"AXSubrole"), task_window_is_blocked(&w.window),
+    )).collect::<Vec<_>>();
+    let legacy = legacy_codex_window_index(&windows.iter().zip(&metadata).map(|(w,(exact,_,_))| (*exact,window_area(&w.window))).collect::<Vec<_>>());
+    let current = codex_primary_window_index(&metadata);
+    let mut snapshots = Vec::new();
+    for index in [legacy, current.as_ref().ok().copied()].into_iter().flatten() {
+        if snapshots.iter().any(|value: &serde_json::Value| value["index"].as_u64() == Some(index as u64)) { continue; }
+        snapshots.push(serde_json::json!({"index":index,"beforeFocus":diagnostic_composer_counts(&windows[index])}));
+    }
+    let mut focus_error: Option<String> = None;
+    let after_focus = if let Ok(index) = current.as_ref() {
+        let target = &windows[*index];
+        match focus_window(target) {
+            Ok(()) => {
+                thread::sleep(COMPOSER_STABILITY_DELAY);
+                Some(diagnostic_composer_counts(target))
+            },
+            Err(error) => { focus_error = Some(error); None },
+        }
+    } else { None };
+    let selection = current.as_ref().ok().map(|index| {
+        // Same read-only resolver as actual voice input, not just a count of
+        // the legacy classifier's candidates. Never focuses/writes a textbox.
+        match find_composer(agent, &windows[*index]) {
+            Ok(_) => serde_json::json!({"ok":true}),
+            Err(error) => serde_json::json!({"ok":false,"error":error}),
+        }
+    });
+    Ok(serde_json::json!({"schema":4,"baseline":"135/138 released policy","current":"focused-owned-visible composer",
+        "windows":metadata.iter().enumerate().map(|(i,(exact,role,blocked))| serde_json::json!({"index":i,"exactProductTitle":exact,"subrole":role,"blocked":blocked})).collect::<Vec<_>>(),
+        "legacyWindow":legacy,"currentWindow":current.as_ref().ok(),"currentSelectionError":current.err(),
+        "snapshots":snapshots,"afterFocus":after_focus,"focusError":focus_error,"voiceSelection":selection,
+        "safety":{"draftWrites":0,"submissions":0,"microphone":false,"modelCalls":0,"forcedRecovery":false,"sessionNavigation":false}}))
+}
+
+fn find_stable_current_target(agent: MacosAgent, current_task: bool) -> Result<ComposerTarget, String> {
+    let _evidence_scope = ComposerEvidenceScope::begin(agent == MacosAgent::Codex);
+    // Tasks share voice input's cold-webview recovery, but must never launch,
+    // select another window, or bypass a modal while waiting for the editor.
+    let mut target = if current_task {
+        current_task_window_for(agent)?
+    } else {
+        primary_or_launch_agent_window(agent)?
+    };
+    let pinned_window = target.window.clone();
+    // Activation completion is not editor-focus completion. The diagnostic
+    // already waited here; voice input must use the same settling interval.
+    focus_window(&target)?;
+    thread::sleep(COMPOSER_STABILITY_DELAY);
     let deadline = Instant::now() + COMPOSER_STABILITY_TIMEOUT;
     let mut recovery_attempted = false;
     loop {
-        if let Ok(current) = primary_agent_window(agent) {
+        if current_task {
+            let current = current_task_window_for(agent)?;
+            if current.window != pinned_window {
+                return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+            }
+            target = current;
+        } else if let Ok(current) = primary_agent_window(agent) {
+            if current.window != pinned_window {
+                return Err("语音定位期间目标窗口已变化，未写入文字，请在目标对话重新长按".into());
+            }
             target = current;
         }
         let result = (|| {
             focus_window(&target)?;
-            let candidates = composer_candidates(&target);
-            if should_recover_workbuddy_tree(agent, candidates.len(), recovery_attempted) {
+            // Task handoff and push-to-talk choose the same editor: honor the
+            // owned visible focus first, otherwise resolve the exposed bottom
+            // chat composer. Task window/modal and pinned-target checks remain
+            // independent of editor selection and must not be bypassed.
+            let focused = focused_codex_composer(agent, &target);
+            let (composer, value) = if let Some(focused) = focused {
+                focused
+            } else {
+              let candidates = composer_candidates(&target);
+              if should_recover_workbuddy_tree(agent, candidates.len(), recovery_attempted) {
                 recovery_attempted = true;
                 // One foreground recovery per recording, not every scan: a
                 // cached PID does not prove a newly loaded webview is ready.
@@ -1699,8 +2167,9 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
                 eprintln!("[composer] WorkBuddy empty tree: foreground recovery accepted={enabled}");
                 thread::sleep(COMPOSER_STABILITY_DELAY);
                 return Err("WorkBuddy 输入框尚未就绪，正在恢复辅助功能树".to_string());
-            }
-            let (composer, value) = unique_composer(agent, candidates)?;
+              }
+              select_window_composer(agent, &target, candidates)?
+            };
             let candidate = ComposerTarget {
                 agent,
                 app: target.app.clone(),
@@ -1710,13 +2179,20 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
             };
             focus_composer(&candidate)?;
             thread::sleep(COMPOSER_STABILITY_DELAY);
-            let refreshed = primary_agent_window(agent)?;
+            let refreshed = if current_task {
+                current_task_window_for(agent)?
+            } else {
+                primary_agent_window(agent)?
+            };
             if refreshed.window != target.window {
                 return Err(format!("{} macOS 主窗口仍在恢复", agent.label()));
             }
             let (refreshed_composer, refreshed_value) = find_composer(agent, &refreshed)?;
             if refreshed_composer != composer {
                 return Err(format!("{} macOS 输入框仍在恢复", agent.label()));
+            }
+            if refreshed_value != candidate.value {
+                return Err(format!("{} macOS 输入框内容仍在变化", agent.label()));
             }
             Ok(ComposerTarget {
                 agent,
@@ -1727,12 +2203,18 @@ fn find_current_visible_target(agent: MacosAgent) -> Result<ComposerTarget, Stri
             })
         })();
         let last_error = match result {
-            Ok(target) => return Ok(target),
+            Ok(target) => {
+                AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| slot.borrow_mut().take());
+                return Ok(target);
+            },
             Err(error) => error,
         };
         if Instant::now() >= deadline {
+            let evidence = AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| slot.borrow_mut().take());
+            let details = evidence.map(|value| format!("\n[COMPOSER_EVIDENCE]{}[/COMPOSER_EVIDENCE]",value))
+                .unwrap_or_default();
             return Err(format!(
-                "{} macOS 应用已置前，但输入框未稳定: {last_error}；请点击目标对话输入框后重试（尚未写入或发送文字）",
+                "{} macOS 应用已置前，但输入框未稳定: {last_error}；尚未写入或发送文字。失败现场已保留时可展开定位详情。{details}",
                 agent.label()
             ));
         }
@@ -1746,6 +2228,12 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
     };
     let pinned_window = pinned.window.clone();
     let pinned_composer = pinned.composer.clone();
+    if let Some(identity) = &state.task_identity {
+        let current = current_task_window_for(state.agent)?;
+        if current.window != pinned_window || task_window_identity(&current.window) != *identity {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
+    }
     let Some(window) = agent_windows(state.agent)?
         .into_iter()
         .find(|candidate| candidate.window == pinned_window)
@@ -1764,8 +2252,14 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
     }
     let (composer, value) = find_composer(state.agent, &window)?;
     if composer != pinned_composer {
+        if state.task_identity.is_some() {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
         if state.agent == MacosAgent::WorkBuddy {
             return Err("WorkBuddy 输入框已变化，已停止写入并保留草稿，请在目标对话重新长按".into());
+        }
+        if state.agent == MacosAgent::Codex {
+            return Err("Codex 输入框已变化，已停止写入并保留草稿，请点击目标输入框后重新长按".into());
         }
         if let Some(pinned) = state.current_visible_target.as_mut() {
             pinned.app = window.app.clone();
@@ -1891,10 +2385,177 @@ fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), Stri
         }
         thread::sleep(Duration::from_millis(25));
     }
+    if target.agent == MacosAgent::Codex {
+        let actual=composer_value(&target.composer);
+        crate::realtime_chat_log::record("", "task_composer", serde_json::json!({
+            "stage":"write_readback","state":if actual.trim_end_matches('\n')==text.trim_end_matches('\n') {
+                "trailing_newline_only"
+            } else { "different" },"ok":false}));
+    }
     Err(format!(
         "{} macOS 输入框没有确认语音文本",
         target.agent.label()
     ))
+}
+
+fn voice_draft_at_target(target: &ComposerTarget) -> Result<crate::voice_draft::VoiceDraft, String> {
+    if target.agent != MacosAgent::Codex {
+        return Ok(crate::voice_draft::VoiceDraft::new(target.value.clone()));
+    }
+    let attribute = AXAttribute::new(&CFString::new("AXSelectedTextRange"));
+    let value: CFType = target.composer.attribute(&attribute)
+        .map_err(|_| "无法读取 Codex 光标位置，请点击输入框后重新长按".to_string())?;
+    if value.type_of() != unsafe { AXValueGetTypeID() } {
+        return Err("Codex 未提供有效光标位置，尚未写入".into());
+    }
+    let value = value.as_CFTypeRef() as AXValueRef;
+    let mut range = CFRange::init(0, 0);
+    if unsafe { AXValueGetType(value) } != kAXValueTypeCFRange
+        || !unsafe { AXValueGetValue(value, kAXValueTypeCFRange, &mut range as *mut CFRange as *mut c_void) }
+        || range.location < 0 || range.length != 0 {
+        return Err("请将光标放在要插入语音的位置，取消文字选中后重新长按".into());
+    }
+    let raw = element_value(&target.composer);
+    let units = raw.encode_utf16().collect::<Vec<_>>();
+    let prefix = units.get(..range.location as usize)
+        .and_then(|units| String::from_utf16(units).ok())
+        .ok_or("Codex 光标位置已变化，尚未写入")?;
+    if normalize_element_composer_value(&target.composer, &raw) != target.value {
+        return Err("输入框内容在读取光标时发生变化，已保留原文".into());
+    }
+    let offset = if target.value.is_empty() { 0 } else {
+        prefix.trim_start_matches('\u{feff}').replace("\r\n", "\n").encode_utf16().count()
+    };
+    crate::voice_draft::VoiceDraft::at_utf16_caret(target.value.clone(), offset)
+}
+
+// Verify only this recording's inserted text at the resulting caret. The
+// pre-existing editor value may be a visual hint; it is not a submission gate.
+// UTF-16 is used solely for the native caret's coordinate system, not to compare
+// expected/actual draft lengths. No full-document reconstruction or overwrite.
+fn codex_base_without_inserted_utterance(actual: &str, transcript: &str, caret: Option<usize>) -> Option<String> {
+    let text = transcript.trim();
+    if text.is_empty() { return None; }
+    let end = caret?;
+    let actual = actual.encode_utf16().collect::<Vec<_>>();
+    let inserted = text.encode_utf16().collect::<Vec<_>>();
+    let start = end.checked_sub(inserted.len())?;
+    if actual.get(start..end) != Some(inserted.as_slice()) { return None; }
+    String::from_utf16(&[&actual[..start], &actual[end..]].concat()).ok()
+}
+
+fn codex_inserted_utterance_present(actual: &str, transcript: &str, caret: Option<usize>) -> bool {
+    codex_base_without_inserted_utterance(actual, transcript, caret).is_some()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct VoiceEdit { start: usize, replace: String, insert: String }
+
+fn voice_edit(previous: &str, next: &str, origin: usize) -> VoiceEdit {
+    match next.strip_prefix(previous) {
+        Some(suffix) => VoiceEdit { start: origin + previous.encode_utf16().count(), replace: String::new(), insert: suffix.into() },
+        None => VoiceEdit { start: origin, replace: previous.into(), insert: next.into() },
+    }
+}
+
+fn voice_edit_without_ack(previous: &str, next: &str, origin: usize, actual: &str, caret: Option<usize>) -> VoiceEdit {
+    let mut edit = voice_edit(previous, next, origin);
+    if !edit.replace.is_empty() {
+        if codex_inserted_utterance_present(actual, previous, caret) {
+            edit.start = caret.unwrap() - previous.encode_utf16().count();
+        } else {
+            // Unknown earlier write: insert, never overwrite an unowned range.
+            edit.replace.clear();
+        }
+    }
+    edit
+}
+
+fn select_codex_voice_revision(target: &ComposerTarget, edit: &VoiceEdit) -> Result<(), String> {
+    if edit.replace.is_empty() { return Ok(()); }
+    // Select only text owned by this recording. Never select-all or overwrite
+    // AXValue. Verify both the exact selected text and native range before paste.
+    let raw = element_value(&target.composer);
+    let leading = raw.chars().take_while(|c| *c == '\u{feff}').count();
+    let range = CFRange::init((edit.start + leading) as isize, edit.replace.encode_utf16().count() as isize);
+    let ptr = unsafe { AXValueCreate(kAXValueTypeCFRange, &range as *const CFRange as *const c_void) };
+    if ptr.is_null() { return Err("无法定位本次语音的修订片段".into()); }
+    let value = unsafe { CFType::wrap_under_create_rule(ptr as _) };
+    target.composer.set_attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange")), value)
+        .map_err(|_| "输入框无法选择本次语音片段，已保留现有文字".to_string())?;
+    let deadline = Instant::now() + Duration::from_millis(300);
+    loop {
+        let selection: Option<CFType> = target.composer.attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange"))).ok();
+        let mut read = CFRange::init(-1, -1);
+        let range_ok = selection.as_ref().is_some_and(|value| value.type_of() == unsafe { AXValueGetTypeID() }
+            && unsafe { AXValueGetValue(value.as_CFTypeRef() as AXValueRef, kAXValueTypeCFRange, &mut read as *mut CFRange as *mut c_void) }
+            && read.location == range.location && read.length == range.length);
+        let selected = target.composer.attribute(&AXAttribute::new(&CFString::new("AXSelectedText"))).ok()
+            .and_then(|value: CFType| value.downcast::<CFString>());
+        let text_ok = selected.is_some_and(|text| text.to_string() == edit.replace);
+        if range_ok && text_ok { return Ok(()); }
+        if Instant::now() >= deadline { return Err("未确认本次语音修订选区，未替换或重复粘贴".into()); }
+        thread::sleep(Duration::from_millis(15));
+    }
+}
+
+fn post_codex_paste(app: &AXUIElement) -> Result<(), String> {
+    post_codex_command(app, MAC_KEYCODE_V)
+}
+
+fn post_codex_command(app: &AXUIElement, keycode: u16) -> Result<(), String> {
+    let mut pid = 0;
+    if unsafe { AXUIElementGetPid(app.as_concrete_TypeRef(), &mut pid) } != kAXErrorSuccess || pid <= 0 {
+        return Err("无法确认 Codex 输入进程，本次未粘贴".into());
+    }
+    let source = CGEventSource::new(CGEventSourceStateID::Private).map_err(|_| "无法创建 Codex 输入事件".to_string())?;
+    let down = CGEvent::new_keyboard_event(source.clone(), keycode, true).map_err(|_| "无法创建 Codex 输入事件".to_string())?;
+    let up = CGEvent::new_keyboard_event(source, keycode, false).map_err(|_| "无法创建 Codex 输入事件".to_string())?;
+    down.set_flags(CGEventFlags::CGEventFlagCommand); up.set_flags(CGEventFlags::CGEventFlagCommand);
+    down.post_to_pid(pid); up.post_to_pid(pid);
+    Ok(())
+}
+
+fn insert_codex_voice_once(state: &mut MacosComposerState, transcript: &str) -> Result<String, String> {
+    let transcript = transcript.trim();
+    // Track dispatched ASR text, not AX readback acknowledgements. An unchanged
+    // partial/final event is a no-op; a new hypothesis must never be locked out
+    // by an earlier editor acknowledgement that was late or unavailable.
+    if transcript.is_empty() || transcript == state.native_voice_text {
+        return Ok(state.draft.last.clone());
+    }
+    let target = find_voice_target(state)?;
+    let origin = state.draft.caret_after("").ok_or("语音插入位置不可用")?;
+    let caret = voice_draft_at_target(&target).ok().and_then(|draft| draft.caret_after(""));
+    let edit = voice_edit_without_ack(&state.native_voice_text, transcript, origin, &target.value, caret);
+    let snapshot = PasteboardSnapshot::capture()?;
+    let result = (|| {
+        if !agent_is_frontmost(MacosAgent::Codex)
+            || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer) {
+            return Err("Codex 焦点已变化，本次未粘贴".into());
+        }
+        // Only replacing an earlier hypothesis needs an ownership check. A
+        // missing/stale AX value must not prevent fresh ASR from being inserted.
+        // If ownership cannot be established, append the new hypothesis at the
+        // current caret instead of deleting any possibly user-owned text.
+        if !edit.replace.is_empty() {
+            select_codex_voice_revision(&target, &edit)?;
+        }
+        set_pasteboard_text(&edit.insert)?;
+        if !agent_is_frontmost(MacosAgent::Codex)
+            || ax_element_attribute(&target.app,"AXFocusedUIElement").as_ref()!=Some(&target.composer) {
+            return Err("语音修订期间焦点已变化，未粘贴".into());
+        }
+        post_codex_paste(&target.app)?;
+        state.native_voice_text = transcript.into();
+        state.draft.last = state.draft.desired(transcript);
+        // Let the target consume the clipboard before restoring it. This is a
+        // fixed transport delay, not a content/caret/receipt confirmation gate.
+        thread::sleep(KEYBOARD_READBACK_DELAY);
+        Ok(state.draft.last.clone())
+    })();
+    snapshot.restore();
+    result
 }
 
 pub(super) fn begin_voice(
@@ -1925,8 +2586,10 @@ pub(super) fn begin_voice(
         agent,
         session_id: session_id.to_string(),
         session_title,
-        draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
+        draft: voice_draft_at_target(&target)?,
         current_visible_target: pin_visible_target.then_some(target),
+        task_identity: None,
+        native_voice_text: String::new(),
     })
 }
 
@@ -1937,12 +2600,74 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
         agent,
         session_id: String::new(),
         session_title: String::new(),
-        draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
+        draft: voice_draft_at_target(&target)?,
         current_visible_target: Some(target),
+        task_identity: None,
+        native_voice_text: String::new(),
     })
 }
 
+fn task_window_identity(window: &AXUIElement) -> Vec<String> {
+    let mut labels = vec![cf_string(window.title()).unwrap_or_default()];
+    for element in walk_elements(window, |e| element_role(e) == "AXHeading") {
+        labels.extend(element_labels(&element));
+    }
+    labels
+}
+
+fn current_task_window_index(windows: &[(String, bool)]) -> Result<usize, &'static str> {
+    if windows.iter().any(|(_, blocked)| *blocked) {
+        return Err("DESKTOP_TASK_MODAL_OPEN");
+    }
+    // Codex also exposes nonmodal AXDialog utility windows with editable
+    // textareas. They are not conversations, even when larger than the main
+    // window. Neither editor count, title, area nor AXMain can disambiguate
+    // multiple real conversation windows safely.
+    let mut standard = windows.iter().enumerate()
+        .filter(|(_, (subrole, _))| subrole == "AXStandardWindow");
+    let index = standard.next().map(|(index, _)| index)
+        .ok_or("DESKTOP_TASK_MAIN_WINDOW_MISSING")?;
+    if standard.next().is_some() {
+        return Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS");
+    }
+    Ok(index)
+}
+
+fn task_window_is_blocked(window: &AXUIElement) -> bool {
+    let modal: Result<CFType, _> = window.attribute(&AXAttribute::new(&CFString::new("AXModal")));
+    let sheets: Result<CFType, _> = window.attribute(&AXAttribute::new(&CFString::new("AXSheets")));
+    modal.ok().and_then(|v| v.downcast::<CFBoolean>()).is_some_and(bool::from)
+        || sheets.ok().and_then(|v| v.downcast::<CFArray>()).is_some_and(|v| v.len() > 0)
+}
+
+fn current_task_window() -> Result<CodexWindow, String> {
+    current_task_window_for(MacosAgent::Codex)
+}
+fn current_task_window_for(agent: MacosAgent) -> Result<CodexWindow, String> {
+    // Never launch, navigate, or choose a most-recent thread/window here.
+    let windows = agent_windows(agent)?;
+    let metadata = windows.iter().map(|w| (
+        ax_string_attribute(&w.window, "AXSubrole"), task_window_is_blocked(&w.window),
+    )).collect::<Vec<_>>();
+    let index = current_task_window_index(&metadata).map_err(str::to_owned)?;
+    Ok(windows[index].clone())
+}
+
+pub(super) fn begin_current_task() -> Result<MacosComposerState, String> {
+    begin_current_task_for(MacosAgent::Codex)
+}
+pub(super) fn begin_current_task_for(agent: MacosAgent) -> Result<MacosComposerState, String> {
+    let target = find_stable_current_target(agent, true)?;
+    let identity = task_window_identity(&target.window);
+    Ok(MacosComposerState { agent, session_id: String::new(),
+        session_title: String::new(), draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
+        current_visible_target: Some(target), task_identity: Some(identity), native_voice_text: String::new() })
+}
+
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
+    if state.agent == MacosAgent::Codex && state.draft.caret_after(text).is_some() {
+        return insert_codex_voice_once(state, text);
+    }
     let text = state.draft.desired(text);
     let mut last_error = String::new();
     // An uncertain native paste must never be repeated: a delayed first paste
@@ -1953,13 +2678,10 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
             if !state.draft.can_update(&target.value, &text) {
                 return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
             }
-            if target.value == text {
-                Ok(())
-            } else {
-                replace_composer_text(&target, &text)
-            }
+            if target.value != text { replace_composer_text(&target, &text)?; }
+            Ok(target)
         }) {
-            Ok(()) => {
+            Ok(_target) => {
                 state.draft.last = text.clone();
                 return Ok(text);
             }
@@ -2080,7 +2802,48 @@ fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
     }
 }
 
-fn press_unique_send_button(target: &ComposerTarget) -> Result<bool, String> {
+fn press_unique_send_button(target: &ComposerTarget, allow_queue: bool) -> Result<bool, String> {
+    press_unique_submission(target, allow_queue).map(|mode| mode.is_some())
+}
+
+fn submission_kind(labels: &[String]) -> &'static str {
+    if labels.iter().any(|label| matches!(label.to_lowercase().as_str(),"steer"|"引导")) { "steer" }
+    else if send_button_label_score(labels)==Some(1) { "queue" }
+    else { "send" }
+}
+
+fn assert_submission_focus(target: &ComposerTarget) -> Result<(), String> {
+    if !agent_is_frontmost(target.agent)
+        || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer)
+    {
+        return Err("发送前焦点已变化，未执行发送".into());
+    }
+    Ok(())
+}
+
+fn assert_submission_target(target: &ComposerTarget) -> Result<(), String> {
+    assert_submission_focus(target)?;
+    if composer_value(&target.composer) != target.value {
+        return Err("发送前焦点或草稿已变化，未执行发送".into());
+    }
+    Ok(())
+}
+
+fn submit_once(
+    button: impl FnOnce() -> Result<Option<&'static str>, String>,
+    enter: impl FnOnce() -> Result<(), String>,
+) -> Result<&'static str, String> {
+    match button()? {
+        Some(mode) => Ok(mode),
+        None => { enter()?; Ok("enter") }
+    }
+}
+
+fn press_unique_submission(target: &ComposerTarget, allow_queue: bool) -> Result<Option<&'static str>, String> {
+    press_native_submission(target, allow_queue, true)
+}
+
+fn press_native_submission(target: &ComposerTarget, allow_queue: bool, check_value: bool) -> Result<Option<&'static str>, String> {
     focus_composer(target)?;
     let mut buttons = walk_elements(&target.window, |element| {
         element_role(element) == "AXButton"
@@ -2093,19 +2856,25 @@ fn press_unique_send_button(target: &ComposerTarget) -> Result<bool, String> {
     .filter_map(|button| send_button_score(&button).map(|score| (score, button)))
     .collect::<Vec<_>>();
     buttons.sort_by_key(|(score, _)| *score);
+    if !allow_queue && buttons.iter().any(|(score, _)| *score == 1) {
+        return Err("DESKTOP_TASK_TARGET_BUSY".into());
+    }
     let best_score = buttons.first().map(|(score, _)| *score);
     let best = buttons
         .iter()
         .filter(|(score, _)| Some(*score) == best_score)
         .collect::<Vec<_>>();
     if best.len() == 1 {
+        if check_value { assert_submission_target(target)?; }
+        else { assert_submission_focus(target)?; }
+        let mode=submission_kind(&element_labels(&best[0].1));
         best[0]
             .1
             .press()
             .map_err(|error| format!("{} macOS 发送按钮执行失败: {error}", target.agent.label()))?;
-        Ok(true)
+        Ok(Some(mode))
     } else if best.is_empty() {
-        Ok(false)
+        Ok(None)
     } else {
         Err(format!(
             "{} macOS 主输入框附近存在多个可用发送按钮",
@@ -2131,36 +2900,107 @@ fn submit_readback(value: &str, submitted_text: &str) -> SubmitReadback {
     }
 }
 
+fn submit_failure_diagnostic(state: &MacosComposerState, submitted_text: &str) -> String {
+    let Some(pinned) = state.current_visible_target.as_ref() else {
+        return "没有固定输入框".into();
+    };
+    let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
+    let candidates = composer_candidates(&window);
+    let focus = ax_element_attribute(&pinned.app, "AXFocusedUIElement");
+    // A missing AX value must not be mistaken for a cleared editor. This is
+    // diagnostic only; it does not rebind a target or attempt submission.
+    let raw = pinned.composer.value().ok().and_then(|value| value.downcast::<CFString>())
+        .map(|value| value.to_string());
+    let value = raw.as_ref().map(|value| normalize_element_composer_value(&pinned.composer, value));
+    format!("候选数={}；原框仍在候选={}；焦点仍在原框={}；原框可读={}；原框长度={:?}；原框为空={:?}；原框仅换行={:?}；原文仍在={:?}",
+        candidates.len(), candidates.iter().any(|(element, _)| element == &pinned.composer),
+        focus.as_ref() == Some(&pinned.composer), value.is_some(),
+        value.as_ref().map(|value| value.encode_utf16().count()),
+        value.as_ref().map(|value| value.is_empty()), value.as_ref().map(|value| value == "\n"),
+        value.as_ref().map(|value| value == submitted_text))
+}
+
+fn codex_successor_is_clear(same_identity: bool, old_still_present: bool, focused_owned: bool, value: Option<&str>) -> bool {
+    same_identity && !old_still_present && focused_owned
+        && value.is_some_and(|value| value.is_empty() || value == "\n")
+}
+
+fn cleared_codex_submit_successor(state: &MacosComposerState, identity: &[String]) -> Result<AXUIElement, String> {
+    let pinned = state.current_visible_target.as_ref().ok_or("发送前未固定输入框")?;
+    let window = agent_windows(state.agent)?.into_iter()
+        .find(|window| window.window == pinned.window).ok_or("发送后原窗口已不存在")?;
+    let same_identity = task_window_identity(&window.window) == identity;
+    let candidates = composer_candidates(&window);
+    let old_still_present = candidates.iter().any(|(element, _)| element == &pinned.composer);
+    let focused = ax_element_attribute(&window.app, "AXFocusedUIElement");
+    let (successor, _) = select_window_composer(state.agent, &window, candidates)?;
+    let focused_owned = focused.as_ref() == Some(&successor)
+        && ax_element_attribute(&successor, "AXWindow").as_ref() == Some(&window.window);
+    let value = successor.value().ok().and_then(|value| value.downcast::<CFString>())
+        .map(|value| normalize_element_composer_value(&successor, &value.to_string()));
+    if codex_successor_is_clear(same_identity, old_still_present, focused_owned, value.as_deref()) {
+        Ok(successor)
+    } else {
+        Err(format!("发送后新框尚未确认：对话标识一致={same_identity}；原框仍在={old_still_present}；新框焦点归属一致={focused_owned}；新框可读={}；新框长度={:?}",
+            value.is_some(), value.as_ref().map(|value| value.encode_utf16().count())))
+    }
+}
+
 fn wait_for_submit_readback(
     state: &mut MacosComposerState,
     submitted_text: &str,
     timeout: Duration,
+    submit_identity: &[String],
 ) -> Result<SubmitReadback, String> {
     let deadline = Instant::now() + timeout;
     let mut last_error = String::new();
+    let mut clear_successor: Option<(AXUIElement, Instant)> = None;
     loop {
         match find_voice_target(state) {
             Ok(target) => {
+                clear_successor = None;
                 let readback = submit_readback(&target.value, submitted_text);
                 if readback != SubmitReadback::DraftUnchanged || Instant::now() >= deadline {
                     return Ok(readback);
                 }
             }
             Err(error) => {
-                // Sending a first message may replace WorkBuddy's composer.
-                // Observe an empty successor only after submission; never rebind
-                // the write target or send again to that successor.
-                if state.agent == MacosAgent::WorkBuddy {
-                    if let Some(pinned) = state.current_visible_target.as_ref() {
-                        let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
-                        if let Ok((_, value)) = find_composer(state.agent, &window) {
-                            if value.is_empty() {
-                                return Ok(SubmitReadback::Confirmed);
+                if state.agent == MacosAgent::Codex {
+                    // Observation only, after the human's confirmation key.
+                    // Never rebind the write target or submit to its successor.
+                    match cleared_codex_submit_successor(state, submit_identity) {
+                        Ok(successor) => {
+                            if let Some((previous, since)) = &clear_successor {
+                                if previous == &successor && since.elapsed() >= Duration::from_millis(150) {
+                                    return Ok(SubmitReadback::Confirmed);
+                                }
+                            }
+                            if clear_successor.as_ref().is_none_or(|(previous, _)| previous != &successor) {
+                                clear_successor = Some((successor, Instant::now()));
+                            }
+                            last_error = "等待同一新输入框稳定清空".into();
+                        }
+                        Err(reason) => {
+                            clear_successor = None;
+                            last_error = format!("{error}；{reason}");
+                        }
+                    }
+                } else {
+                    // Sending a first message may replace WorkBuddy's composer.
+                    // Observe an empty successor only after submission; never rebind
+                    // the write target or send again to that successor.
+                    if state.agent == MacosAgent::WorkBuddy {
+                        if let Some(pinned) = state.current_visible_target.as_ref() {
+                            let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
+                            if let Ok((_, value)) = find_composer(state.agent, &window) {
+                                if value.is_empty() {
+                                    return Ok(SubmitReadback::Confirmed);
+                                }
                             }
                         }
                     }
+                    last_error = error;
                 }
-                last_error = error;
             }
         }
         if Instant::now() >= deadline {
@@ -2170,11 +3010,154 @@ fn wait_for_submit_readback(
     }
 }
 
+fn task_draft_snapshot(state: &MacosComposerState, target: &ComposerTarget) -> Result<serde_json::Value, String> {
+    if !matches!(state.agent, MacosAgent::Codex | MacosAgent::WorkBuddy) || state.task_identity.is_none() {
+        return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+    }
+    let mut pid = 0;
+    if unsafe { AXUIElementGetPid(target.app.as_concrete_TypeRef(), &mut pid) } != kAXErrorSuccess || pid <= 0 {
+        return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+    }
+    // AX equality is checked against the pinned native elements by
+    // find_voice_target. These CF hashes only identify the in-memory snapshot.
+    Ok(serde_json::json!({
+        "target": {
+            "agent":state.agent.label(),
+            "processId":pid,
+            "windowId":unsafe { CFHash(target.window.as_CFTypeRef()) },
+            "composerId":unsafe { CFHash(target.composer.as_CFTypeRef()) },
+            "taskIdentity":state.task_identity,
+        },
+        "text":target.value,
+    }))
+}
+
+pub(super) fn inspect_task_draft(state: &mut MacosComposerState) -> Result<serde_json::Value, String> {
+    let target = find_voice_target(state)?;
+    task_draft_snapshot(state, &target)
+}
+
+fn task_composer_error_kind(error: &str) -> &'static str {
+    if error.contains("DESKTOP_TASK_TARGET_CHANGED") { "target_changed" }
+    else if error.contains("DESKTOP_TASK_READBACK_CHANGED") || error.contains("内容在获取焦点后发生变化") { "draft_changed" }
+    else if error.contains("DESKTOP_TASK_SEND_UNAVAILABLE") { "send_unavailable" }
+    else if error.contains("没有确认语音文本") { "write_readback_unconfirmed" }
+    else if error.contains("发送前焦点或草稿已变化") { "submit_guard_changed" }
+    else if error.contains("多个可用发送按钮") { "multiple_send_buttons" }
+    else if error.contains("发送按钮执行失败") { "button_press_failed" }
+    else if error.contains("输入框写入失败") { "write_failed" }
+    else if error.contains("无法获得焦点") { "focus_failed" }
+    else if error.contains("备份剪贴板") { "clipboard_backup_failed" }
+    else if error.contains("无法准备 macOS") { "clipboard_write_failed" }
+    else if error.contains("无法创建 Codex") { "input_event_failed" }
+    else { "other" }
+}
+
+// A task replaces the snapshot with a handoff containing that original draft.
+// Unlike AXValue assignment, native paste updates the rich editor's input state.
+// Native Select All is scoped to the pinned process/editor. AX text selection
+// is not an acknowledgement: rich editors expose placeholders/structural text
+// inconsistently. Do not gate a new request on selected-text or length equality.
+// The original draft remains inside the handoff; paste and submit happen once.
+fn replace_codex_task_text(target: &ComposerTarget, text: &str) -> Result<(), String> {
+    focus_composer(target)?;
+    let assert_unchanged = || -> Result<(), String> {
+        if !agent_is_frontmost(MacosAgent::Codex)
+            || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer)
+            || composer_value(&target.composer) != target.value {
+            return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+        }
+        Ok(())
+    };
+    assert_unchanged()?;
+    let snapshot = PasteboardSnapshot::capture()?;
+    let result = (|| {
+        post_codex_command(&target.app, 0)?; // macOS A: select all in this editor only.
+        thread::sleep(KEYBOARD_READBACK_DELAY);
+        assert_unchanged()?;
+        set_pasteboard_text(text)?;
+        assert_unchanged()?;
+        post_codex_paste(&target.app)?;
+        // Same transport contract as dictation: let the editor consume the
+        // clipboard, then submit. AXValue is not a receipt for native input;
+        // it may expose a different rich-text representation indefinitely.
+        thread::sleep(KEYBOARD_READBACK_DELAY);
+        Ok(())
+    })();
+    snapshot.restore();
+    result
+}
+
+fn task_composer_stage<T>(stage: &'static str, operation: impl FnOnce() -> Result<T,String>) -> Result<T,String> {
+    crate::realtime_chat_log::record("", "task_composer", serde_json::json!({"stage":stage,"state":"started"}));
+    let started=Instant::now();
+    let result=operation();
+    crate::realtime_chat_log::record("", "task_composer", serde_json::json!({"stage":stage,"state":"finished",
+        "ok":result.is_ok(),"elapsedMs":started.elapsed().as_millis(),
+        "errorKind":result.as_ref().err().map(|e|task_composer_error_kind(e)).unwrap_or("none")}));
+    result
+}
+
+fn submit_codex_task_after_paste(state: &mut MacosComposerState) -> Result<String, String> {
+    // Revalidate the pinned window/editor, not equality with the outgoing
+    // payload or its length. Sending must not wait for AX text acknowledgement.
+    let target = find_voice_target(state)?;
+    focus_composer(&target)?;
+    let mode = task_composer_stage("submit_button", || submit_once(
+        || press_native_submission(&target, true, false),
+        || { assert_submission_focus(&target)?; press_enter(target.agent, &target.app) },
+    ))?;
+    Ok(mode.into())
+}
+
+pub(super) fn dispatch_task_from_draft(
+    state: &mut MacosComposerState,
+    text: &str,
+    expected: &serde_json::Value,
+) -> Result<String, String> {
+    let target = task_composer_stage("target_refresh", || find_voice_target(state))?;
+    let current = task_composer_stage("draft_snapshot", || task_draft_snapshot(state, &target))?;
+    if expected.get("target") != current.get("target") {
+        return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+    }
+    if expected.get("text") != current.get("text") {
+        return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+    }
+    // The coordinator has already appended the new request to the live draft.
+    // Do not run VoiceDraft::desired: it trims the complete text and adds the
+    // old prefix again. Native replacement rechecks focus and current value.
+    task_composer_stage("draft_write", || {
+        if target.agent == MacosAgent::Codex { replace_codex_task_text(&target, text) }
+        else { replace_composer_text(&target, text) }
+    }).map_err(|error| format!("DESKTOP_TASK_WRITE_NOT_CONFIRMED: {error}"))?;
+    state.draft.last = text.to_string();
+    task_composer_stage("confirm", || {
+        if state.agent == MacosAgent::Codex { submit_codex_task_after_paste(state) }
+        else { confirm_voice_inner(state, Some(text)) }
+    })
+}
+
+pub(super) fn dispatch_voice_task(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
+    let target = find_voice_target(state)?;
+    if !matches!(state.agent, MacosAgent::Codex|MacosAgent::WorkBuddy) || !state.draft.base.is_empty() || !target.value.is_empty() {
+        return Err("DESKTOP_TASK_DRAFT_NOT_EMPTY".into());
+    }
+    update_voice(state, text)?;
+    confirm_voice_inner(state, Some(text))
+}
+
 pub(super) fn confirm_voice(
     state: &mut MacosComposerState,
     _staged_text: &str,
 ) -> Result<String, String> {
+    confirm_voice_inner(state, None)
+}
+
+fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -> Result<String, String> {
     let target = find_voice_target(state)?;
+    if expected.is_some_and(|text| target.value != text) {
+        return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+    }
     if target.value.is_empty() {
         return Err(format!(
             "{} macOS 语音草稿已不在输入框中，未重复发送",
@@ -2185,9 +3168,47 @@ pub(super) fn confirm_voice(
     state.draft.last = text.clone();
     thread::sleep(Duration::from_millis(80));
     focus_composer(&target)?;
-    press_enter(target.agent, &target.app)?;
+    if let Some(expected) = expected {
+        if find_voice_target(state)?.value != expected {
+            return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+        }
+    }
+    if state.agent == MacosAgent::Codex && expected.is_none() {
+        // Plain dictation is keyboard input, not an Agent task. Trigger one
+        // native Send/Queue/Steer action and release immediately; no local bus,
+        // receipt polling, model-state gate or automatic resend.
+        submit_once(
+            || press_unique_submission(&target, true),
+            || { assert_submission_target(&target)?; press_enter(target.agent, &target.app) },
+        ).map_err(|reason| format!("CODEX_SUBMIT_UNCONFIRMED: 提交操作未确认：{reason}；不会自动重发"))?;
+        state.draft.last.clear();
+        return Ok(String::new());
+    }
+    let submit_identity = task_window_identity(&target.window);
+    if expected.is_some() {
+        // Codex tasks share dictation's one-shot submit: native button first,
+        // Enter only when no button was attempted. Never retry an uncertain
+        // press, press Stop or approve a permission prompt.
+        let mode=task_composer_stage("submit_button", || {
+            if state.agent == MacosAgent::Codex {
+                submit_once(
+                    || press_unique_submission(&target, true),
+                    || { assert_submission_target(&target)?; press_enter(target.agent, &target.app) },
+                )
+            } else {
+                press_unique_submission(&target, true)?
+                    .ok_or_else(|| "DESKTOP_TASK_SEND_UNAVAILABLE".to_string())
+            }
+        })?;
+        // The task coordinator confirms the exact user receipt on the event
+        // bus. A successful button press is only an attempt, not a delivery
+        // claim. Do not demand that a rerendered editor keep its pre-send ID.
+        return Ok(mode.into());
+    } else {
+        press_enter(target.agent, &target.app)?;
+    }
 
-    match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY) {
+    match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY, &submit_identity) {
         Ok(SubmitReadback::Confirmed) => {
             state.draft.last.clear();
             return Ok(String::new());
@@ -2205,16 +3226,20 @@ pub(super) fn confirm_voice(
             // bounded delay do we press the unique composer-adjacent button.
             // The equality guard prevents a late fallback after the composer
             // has cleared, been replaced, or received new user text.
-            if let Ok(target) = find_voice_target(state) {
-                if target.value == text {
-                    let _ = press_unique_send_button(&target);
+            // Explicit task delegation must attempt submission only once.
+            // Retain the legacy fallback solely for ordinary key confirmation.
+            if expected.is_none() {
+                if let Ok(target) = find_voice_target(state) {
+                    if target.value == text {
+                        let _ = press_unique_send_button(&target, true);
+                    }
                 }
             }
         }
         Err(_) => {}
     }
 
-    match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT) {
+    let final_readback_reason = match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT, &submit_identity) {
         Ok(SubmitReadback::Confirmed) => {
             state.draft.last.clear();
             return Ok(String::new());
@@ -2226,12 +3251,13 @@ pub(super) fn confirm_voice(
                 state.agent.label()
             ));
         }
-        Ok(SubmitReadback::DraftUnchanged) | Err(_) => {}
-    }
+        Ok(SubmitReadback::DraftUnchanged) => "原草稿仍在输入框".to_string(),
+        Err(error) => error,
+    };
 
     Err(format!(
-        "{} macOS 提交结果未确认；请检查目标对话，避免重复发送",
-        state.agent.label()
+        "{} macOS 提交结果未确认；请检查目标对话，避免重复发送。原因：{}。诊断：{}",
+        state.agent.label(), final_readback_reason, submit_failure_diagnostic(state, &text)
     ))
 }
 
@@ -2332,7 +3358,350 @@ pub(super) fn debug_dump_codex_tree() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn native_submit_attempt_never_falls_back_after_button_success_or_error() {
+        for mode in ["send", "queue", "steer"] {
+            assert_eq!(super::submit_once(|| Ok(Some(mode)), || panic!("must not double-send")).unwrap(), mode);
+        }
+        assert!(super::submit_once(|| Err("press outcome unknown".into()), || panic!("must not retry an uncertain press")).is_err());
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(super::submit_once(|| Ok(None), || { calls.set(calls.get()+1); Ok(()) }).unwrap(), "enter");
+        assert_eq!(calls.get(), 1);
+        assert!(super::submit_once(|| Ok(None), || Err("key-up failed".into())).is_err());
+    }
+
     use super::*;
+
+    #[test]
+    fn streaming_voice_edits_only_the_owned_fragment() {
+        assert_eq!(voice_edit("", "你好", 3), VoiceEdit{start:3,replace:"".into(),insert:"你好".into()});
+        assert_eq!(voice_edit("你好", "你好呀", 3), VoiceEdit{start:5,replace:"".into(),insert:"呀".into()});
+        assert_eq!(voice_edit("你好", "你好", 3), VoiceEdit{start:5,replace:"".into(),insert:"".into()});
+        assert_eq!(voice_edit("我想去北京", "我想去南京。", 2), VoiceEdit{start:2,replace:"我想去北京".into(),insert:"我想去南京。".into()});
+        assert_eq!(voice_edit("🙂", "🙂好", 3), VoiceEdit{start:5,replace:"".into(),insert:"好".into()});
+        let prefix="用户前文🙂";let suffix="原有后文\n";
+        let origin=prefix.encode_utf16().count();
+        let mut document=format!("{prefix}{suffix}");let mut previous=String::new();
+        for text in ["去北", "去北京", "去南京。", "去南京。", "去南京。谢谢"] {
+            let edit=voice_edit(&previous,text,origin);
+            let mut units=document.encode_utf16().collect::<Vec<_>>();
+            let end=edit.start+edit.replace.encode_utf16().count();
+            units.splice(edit.start..end,edit.insert.encode_utf16());
+            document=String::from_utf16(&units).unwrap();
+            assert_eq!(document,format!("{prefix}{text}{suffix}"));
+            previous=text.into();
+        }
+    }
+
+    #[test]
+    fn voice_asr_dispatch_does_not_require_previous_readback() {
+        for (actual, caret) in [("", None), ("灰色提示", Some(0)), ("其他草稿", Some(4))] {
+            let append = voice_edit_without_ack("哈喽", "哈喽你好", 0, actual, caret);
+            assert_eq!(append.insert, "你好");
+            assert!(append.replace.is_empty());
+            let revision = voice_edit_without_ack("哈罗", "哈喽", 0, actual, caret);
+            assert_eq!(revision.insert, "哈喽");
+            assert!(revision.replace.is_empty());
+        }
+        let revision = voice_edit_without_ack("哈罗", "哈喽", 0, "前哈罗后", Some(3));
+        assert_eq!(revision, VoiceEdit { start: 1, replace: "哈罗".into(), insert: "哈喽".into() });
+        let same = voice_edit_without_ack("哈喽", "哈喽", 0, "", None);
+        assert!(same.insert.is_empty() && same.replace.is_empty());
+    }
+
+    #[test]
+    fn voice_native_dispatch_has_no_acknowledgement_latch_or_poll() {
+        let source = include_str!("codex_composer_macos.rs");
+        let body = source.split("fn insert_codex_voice_once(").nth(1).unwrap()
+            .split("pub(super) fn begin_voice(").next().unwrap();
+        assert!(!body.contains("native_insert_attempted"));
+        assert!(!body.contains("while Instant::now()"));
+        assert!(!body.contains("expected_caret"));
+        assert!(!body.contains("composer_value(&target.composer)"));
+        assert!(body.contains("transcript == state.native_voice_text"));
+        assert!(body.contains("post_codex_paste(&target.app)?"));
+        assert!(body.contains("state.native_voice_text = transcript.into()"));
+    }
+
+    #[test]
+    fn plain_dictation_submit_does_not_wait_for_agent_receipts() {
+        let source=include_str!("codex_composer_macos.rs");
+        let branch=source.split("if state.agent == MacosAgent::Codex && expected.is_none() {").nth(1).unwrap().split("let submit_identity").next().unwrap();
+        assert!(branch.contains("submit_once("));
+        assert!(!branch.contains("Receipt::capture"));
+        assert!(!branch.contains("receipt.poll"));
+        assert!(!branch.contains("wait_for_submit_readback"));
+    }
+
+    #[test]
+    fn dynamic_placeholder_is_not_a_voice_draft_suffix() {
+        let hint = "这是动态灰色提示，不是用户草稿。";
+        for characters in [None, Some(0)] {
+            let base = composer_value_with_placeholder(hint, Some(hint), characters);
+            assert!(base.is_empty());
+            let draft = crate::voice_draft::VoiceDraft::at_utf16_caret(base, 0).unwrap();
+            assert_eq!(draft.desired("识别文本"), "识别文本");
+            assert_eq!(draft.caret_after("识别文本"), Some(4));
+        }
+        assert_eq!(composer_value_with_placeholder(hint, Some(hint), Some(16)), hint);
+        assert_eq!(composer_value_with_placeholder(hint, None, None), hint);
+        assert_eq!(composer_value_with_placeholder("已有草稿", Some(hint), Some(0)), "已有草稿");
+        assert_eq!(composer_value_with_placeholder("Ask anything", Some("Ask anything"), Some(12)), "Ask anything");
+        assert_eq!(composer_value_with_placeholder("真实后文\n", Some(hint), None), "真实后文\n");
+    }
+
+    #[test]
+    fn inserted_utterance_does_not_compare_old_draft_or_hint() {
+        let speech = "哈喽哈喽，可以听到我说话吗？";
+        let end = speech.encode_utf16().count();
+        assert!(codex_inserted_utterance_present(speech,speech,Some(end)));
+        assert!(codex_inserted_utterance_present(&format!("{speech}\n"),speech,Some(end)));
+        assert!(codex_inserted_utterance_present(&format!("前🙂{speech}真实后文"),speech,Some(end+3)));
+        assert!(!codex_inserted_utterance_present("哈喽",speech,Some(2)));
+        assert!(!codex_inserted_utterance_present(speech,speech,None));
+        assert!(!codex_inserted_utterance_present(speech,speech,Some(end-1)));
+        assert!(!codex_inserted_utterance_present(speech,speech,Some(usize::MAX)));
+        assert!(!codex_inserted_utterance_present("", " ",Some(0)));
+        assert!(!codex_inserted_utterance_present("🙂", "🙂",Some(1)));
+        assert!(codex_inserted_utterance_present("🙂", "🙂",Some(2)));
+        assert_eq!(codex_base_without_inserted_utterance(speech,speech,Some(end)),Some(String::new()));
+        assert_eq!(codex_base_without_inserted_utterance(&format!("前🙂{speech}真实后文"),speech,Some(end+3)),Some("前🙂真实后文".into()));
+    }
+
+    #[test]
+    fn codex_send_successor_requires_same_identity_owned_focus_and_readable_empty_value() {
+        for clear in ["", "\n"] {
+            assert!(codex_successor_is_clear(true, false, true, Some(clear)));
+            assert!(!codex_successor_is_clear(false, false, true, Some(clear)));
+            assert!(!codex_successor_is_clear(true, true, true, Some(clear)));
+            assert!(!codex_successor_is_clear(true, false, false, Some(clear)));
+        }
+        assert!(!codex_successor_is_clear(true, false, true, None));
+        for draft in ["原草稿", "新草稿", " ", "\n\n", "正文\n"] {
+            assert!(!codex_successor_is_clear(true, false, true, Some(draft)));
+        }
+    }
+
+    #[test]
+    fn repeated_utterances_are_verified_at_their_own_caret_without_document_equality() {
+        let first="第一句";let second="第二句";
+        assert!(codex_inserted_utterance_present(first, first,Some(3)));
+        assert!(codex_inserted_utterance_present("第一句第二句",second,Some(6)));
+        assert!(codex_inserted_utterance_present("前第一句第二句后",second,Some(7)));
+        assert!(!codex_inserted_utterance_present("第二句第一句",second,Some(6)));
+    }
+
+    #[test]
+    fn codex_multiple_editors_use_only_user_focus_in_same_window() {
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, Some(1), true), Some(1));
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, None, true), None);
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, Some(0), false), None);
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 0, Some(0), true), None);
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, Some(2), true), None);
+        assert_eq!(focused_composer_index(MacosAgent::WorkBuddy, 2, Some(1), true), None);
+        assert_eq!(focused_composer_index(MacosAgent::Claude, 2, Some(1), true), None);
+    }
+
+    #[test]
+    fn codex_user_diagnostic_two_editors_does_not_require_unique_candidate() {
+        // User's snapshot: two enabled text areas, no prompt labels; after
+        // activation ordinal 0 owns this window and is the focused element.
+        assert!(focused_snapshot_eligible(MacosAgent::Codex, true, true,
+            released_composer_labels_match("AXTextArea", &[]), true));
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, Some(0), true), Some(0));
+        assert_eq!(focused_composer_index(MacosAgent::Codex, 2, None, false), None);
+    }
+
+    #[test]
+    fn codex_focused_snapshot_never_crosses_window_or_agent_or_hidden_control() {
+        for facts in [(false,true,true,true),(true,false,true,true),
+            (true,true,false,true),(true,true,true,false)] {
+            assert!(!focused_snapshot_eligible(MacosAgent::Codex, facts.0,facts.1,facts.2,facts.3));
+        }
+        for agent in [MacosAgent::Claude, MacosAgent::WorkBuddy] {
+            assert!(!focused_snapshot_eligible(agent, true,true,true,true));
+        }
+    }
+
+    #[test]
+    fn composer_visibility_rejects_only_explicit_hidden_or_outside_geometry() {
+        let window = Some((-640,0,640,480));
+        assert!(composer_geometry_visible(false, Some((-600,380,300,70)), window));
+        assert!(composer_geometry_visible(false, Some((-20,380,100,70)), window));
+        assert!(composer_geometry_visible(false, None, window));
+        assert!(composer_geometry_visible(false, Some((0,0,100,70)), None));
+        assert!(!composer_geometry_visible(true, None, None));
+        assert!(!composer_geometry_visible(false, Some((0,0,0,70)), None));
+        assert!(!composer_geometry_visible(false, Some((0,0,100,70)), window));
+        assert!(!composer_geometry_visible(false, Some((-600,480,100,70)), window));
+    }
+
+    #[test]
+    fn composer_matching_never_uses_draft_as_a_control_label() {
+        let source = include_str!("codex_composer_macos.rs");
+        let matcher = source.split("fn is_composer_element(").nth(1).unwrap()
+            .split("fn composer_geometry_visible(").next().unwrap();
+        assert!(matcher.contains("composer_metadata(element)"));
+        assert!(!matcher.contains("element_value("));
+        assert!(!matcher.contains("element_labels("));
+        assert!(released_composer_labels_match("AXTextArea", &[]));
+        assert!(!released_composer_labels_match("AXTextArea", &["Search".into()]));
+    }
+
+    #[test]
+    fn composer_search_and_readonly_metadata_override_generic_textarea() {
+        assert!(current_composer_metadata_matches("AXTextArea", &[], &[], false));
+        assert!(!current_composer_metadata_matches("AXTextArea", &[], &[], true));
+        for hint in ["search", "search-input", "search_box", "AXSearchField", "SearchInput"] {
+            assert!(!current_composer_metadata_matches("AXTextArea", &[], &[hint.into()], false));
+        }
+        assert!(!current_composer_metadata_matches("AXTextArea", &["Ask anything search".into()], &[], false));
+        for hint in ["research-composer", "prompt-textarea", "message-input"] {
+            assert!(current_composer_metadata_matches("AXTextArea", &[], &[hint.into()], false));
+        }
+        // User's successful snapshot: text area accepted; search text field excluded.
+        assert!(!current_composer_metadata_matches("AXTextField", &[], &["search".into()], false));
+    }
+
+    #[test]
+    fn dom_classes_support_native_string_and_array_without_assuming_element_type() {
+        assert_eq!(string_attribute_values(CFString::new("search-input").as_CFType()), vec!["search-input"]);
+        let values = CFArray::from_CFTypes(&[CFString::new("prompt").as_CFType(),
+            CFBoolean::true_value().as_CFType(),CFString::new("search").as_CFType()]);
+        assert_eq!(string_attribute_values(values.as_CFType()),vec!["prompt","search"]);
+        assert!(string_attribute_values(CFBoolean::false_value().as_CFType()).is_empty());
+    }
+
+    #[test]
+    fn failure_evidence_is_scoped_and_cleared_on_success_or_early_exit() {
+        {
+            let _scope = ComposerEvidenceScope::begin(true);
+            assert!(CAPTURE_AMBIGUOUS_EVIDENCE.with(|enabled| enabled.get()));
+            AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| *slot.borrow_mut() = Some(serde_json::json!({"test":true})));
+        }
+        assert!(!CAPTURE_AMBIGUOUS_EVIDENCE.with(|enabled| enabled.get()));
+        assert!(AMBIGUOUS_COMPOSER_EVIDENCE.with(|slot| slot.borrow().is_none()));
+        let _scope = ComposerEvidenceScope::begin(false);
+        assert!(!CAPTURE_AMBIGUOUS_EVIDENCE.with(|enabled| enabled.get()));
+    }
+
+    #[test]
+    fn voice_and_task_share_editor_selection_and_keep_task_window_guards() {
+        let source = include_str!("codex_composer_macos.rs");
+        let finder = source.split("fn find_composer(").nth(1).unwrap()
+            .split("fn focused_composer_index(").next().unwrap();
+        assert!(finder.find("focused_codex_composer").unwrap() < finder.find("composer_candidates").unwrap());
+        let startup = source.split("fn find_stable_current_target(").nth(1).unwrap()
+            .split("fn find_voice_target(").next().unwrap();
+        assert!(startup.contains("let focused = focused_codex_composer(agent, &target);"));
+        assert!(!startup.contains("if current_task { None }"));
+        assert!(startup.find("focused_codex_composer").unwrap() < startup.find("composer_candidates").unwrap());
+        assert!(startup.find("thread::sleep(COMPOSER_STABILITY_DELAY)").unwrap() < startup.find("let deadline").unwrap());
+        assert!(startup.contains("select_window_composer(agent, &target, candidates)?"));
+        assert!(!startup.contains("unique_composer(agent, candidates)?"));
+        assert!(startup.contains("ComposerEvidenceScope::begin(agent == MacosAgent::Codex)"));
+        assert!(startup.contains("current_task_window_for(agent)?"));
+        assert!(startup.contains("current.window != pinned_window"));
+        assert!(startup.contains("refreshed_composer != composer"));
+        assert!(startup.contains("refreshed_value != candidate.value"));
+    }
+
+    #[test]
+    fn voice_window_regression_non_product_title_is_a_valid_standard_window() {
+        let windows = vec![(false, "AXStandardWindow".into(), false)];
+        // Models the old title exclusion; a fixture alone does not establish
+        // the cause of a user's live failure.
+        assert!(!windows.iter().any(|(exact, _, _)| *exact));
+        assert_eq!(codex_primary_window_index(&windows), Ok(0));
+        assert_eq!(codex_primary_window_index(&[
+            (true, "AXDialog".into(), false), windows[0].clone(),
+        ]), Ok(1));
+    }
+
+    #[test]
+    fn voice_window_selection_never_uses_utility_editors_or_guesses_between_threads() {
+        let main = (true, "AXStandardWindow".into(), false);
+        assert_eq!(codex_primary_window_index(&[main.clone(), main]), Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS"));
+        assert_eq!(codex_primary_window_index(&[(true, "AXDialog".into(), false)]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+        assert_eq!(codex_primary_window_index(&[(false, "AXStandardWindow".into(), true)]), Err("DESKTOP_TASK_MODAL_OPEN"));
+        assert_eq!(codex_primary_window_index(&[]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+        assert_eq!(codex_primary_window_index(&[(false, "AXUnknown".into(), false)]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+        assert_eq!(codex_primary_window_index(&[(true, "".into(), false)]), Ok(0));
+        assert_eq!(codex_primary_window_index(&[(true, "AXUnknown".into(), false), (true, "".into(), false)]), Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS"));
+    }
+
+    #[test]
+    fn task_stage_diagnostics_preserve_results_and_never_retry() {
+        use std::cell::Cell;
+        let calls=Cell::new(0);
+        let error="ChatGPT macOS 输入框没有确认语音文本 PRIVATE";
+        let result:Result<(),String>=task_composer_stage("draft_write",||{
+            calls.set(calls.get()+1);Err(error.into())
+        });
+        assert_eq!(calls.get(),1);
+        assert_eq!(result.unwrap_err(),error);
+        assert_eq!(task_composer_error_kind(error),"write_readback_unconfirmed");
+        assert_eq!(task_composer_error_kind("发送前焦点或草稿已变化，未执行发送"),"submit_guard_changed");
+        assert_eq!(task_composer_error_kind("PRIVATE arbitrary provider error"),"other");
+        assert_eq!(task_composer_stage("confirm",||Ok::<_,String>("send")).unwrap(),"send");
+    }
+
+    #[test]
+    fn codex_task_selects_natively_without_ax_text_acknowledgement() {
+        let source=include_str!("codex_composer_macos.rs");
+        let body=source.split("fn replace_codex_task_text(").nth(1).unwrap().split("fn task_composer_stage").next().unwrap();
+        assert!(body.contains("post_codex_command(&target.app, 0)?"));
+        assert!(body.contains("assert_unchanged()?"));
+        assert!(!body.contains("AXSelectedText"));
+        assert!(!body.contains("encode_utf16"));
+        assert_eq!(body.matches("post_codex_paste(&target.app)?").count(),1);
+        assert!(body.contains("snapshot.restore()"));
+    }
+
+    #[test]
+    fn current_task_ignores_nonmodal_utility_editors() {
+        let utility = ("AXDialog".into(), false);
+        let main = ("AXStandardWindow".into(), false);
+        assert_eq!(current_task_window_index(&[utility.clone(), main.clone()]), Ok(1));
+        assert_eq!(current_task_window_index(&[main.clone(), utility.clone()]), Ok(0));
+        assert_eq!(current_task_window_index(&[main.clone(), main]), Err("DESKTOP_TASK_MULTIPLE_MAIN_WINDOWS"));
+        assert_eq!(current_task_window_index(&[utility]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+        assert_eq!(current_task_window_index(&[]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+    }
+
+    #[test]
+    fn current_task_does_not_bypass_modal_dialogs_or_sheets() {
+        assert_eq!(current_task_window_index(&[("AXDialog".into(), true), ("AXStandardWindow".into(), false)]), Err("DESKTOP_TASK_MODAL_OPEN"));
+        assert_eq!(current_task_window_index(&[("AXStandardWindow".into(), true)]), Err("DESKTOP_TASK_MODAL_OPEN"));
+        assert_eq!(current_task_window_index(&[("AXUnknown".into(), false)]), Err("DESKTOP_TASK_MAIN_WINDOW_MISSING"));
+    }
+
+    #[test]
+    #[ignore = "Opt-in live AX lookup only; requires an already authorized running Codex with one main window"]
+    fn current_task_live_window_metadata_probe() {
+        assert!(unsafe { AXIsProcessTrusted() });
+        let target = current_task_window().expect("unique standard conversation window");
+        assert_eq!(ax_string_attribute(&target.window, "AXSubrole"), "AXStandardWindow");
+        let composers = composer_candidates(&target);
+        assert_eq!(composers.len(), 1, "one enabled composer in selected main window");
+        let again = current_task_window().expect("stable current window");
+        assert!(again.window == target.window);
+        // No focus, text write, keypress, submit, or editor contents in output.
+        println!("standard_window=1 enabled_composer=1 stable=true writes=0 sends=0");
+    }
+
+    #[test]
+    #[ignore = "Opt-in WorkBuddy focus/readiness check; never writes a draft or sends a task"]
+    fn workbuddy_current_task_live_readiness_probe() {
+        assert!(unsafe { AXIsProcessTrusted() });
+        let before = current_task_window_for(MacosAgent::WorkBuddy).expect("unique WorkBuddy window");
+        println!("before_composers={}", composer_candidates(&before).len());
+        let mut state = begin_current_task_for(MacosAgent::WorkBuddy).expect("stable WorkBuddy editor");
+        let target = find_voice_target(&mut state).expect("pinned editor still current");
+        assert!(target.window == before.window);
+        assert!(state.task_identity.is_some());
+        println!("stable=true writes=0 sends=0");
+    }
 
     #[test]
     fn workbuddy_input_never_uses_global_keyboard_delivery() {
@@ -2399,6 +3768,24 @@ mod tests {
         assert!(!should_recover_workbuddy_tree(MacosAgent::WorkBuddy, 2, false));
         assert!(!should_recover_workbuddy_tree(MacosAgent::Codex, 0, false));
         assert!(!should_recover_workbuddy_tree(MacosAgent::Claude, 0, false));
+    }
+
+    #[test]
+    fn comparison_keeps_the_released_classifier_including_its_search_word_behavior() {
+        assert!(released_composer_labels_match("AXTextArea", &[]));
+        assert!(released_composer_labels_match("AXTextField", &["Message Codex".into()]));
+        assert!(!released_composer_labels_match("AXTextArea", &["Search chats".into()]));
+        assert!(released_composer_labels_match("AXTextArea", &["Search chats".into(), "Message Codex".into()]));
+        assert!(!released_composer_labels_match("AXGroup", &["Message Codex".into()]));
+    }
+
+    #[test]
+    fn diagnostic_window_comparison_exposes_differences_without_changing_policies() {
+        assert_eq!(legacy_codex_window_index(&[(false,900.),(false,1000.)]), None);
+        assert_eq!(legacy_codex_window_index(&[(true,20.),(true,1000.),(false,2000.)]), Some(1));
+        assert_eq!(codex_primary_window_index(&[(false,"AXStandardWindow".into(),false)]), Ok(0));
+        assert_eq!(legacy_codex_window_index(&[(false,1000.)]), None);
+        assert_eq!(codex_primary_window_index(&[(true,"AXStandardWindow".into(),true)]), Err("DESKTOP_TASK_MODAL_OPEN"));
     }
 
     #[test]
@@ -2532,6 +3919,11 @@ mod tests {
 
     #[test]
     fn running_task_submit_labels_match_without_accepting_stop_controls() {
+        assert_eq!(submission_kind(&["Queue".into()]),"queue");
+        assert_eq!(submission_kind(&["加入队列".into()]),"queue");
+        assert_eq!(submission_kind(&["Steer".into()]),"steer");
+        assert_eq!(submission_kind(&["引导".into()]),"steer");
+        assert_eq!(submission_kind(&["Send".into()]),"send");
         for label in [
             "Send",
             "Submit",

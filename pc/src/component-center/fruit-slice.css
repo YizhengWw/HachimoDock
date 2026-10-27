@@ -1,0 +1,7 @@
+.fruit-slice-preview{width:100%;overflow:hidden;border-radius:20px;background:#102b26;color:#f6f5e0;position:relative}
+.fruit-slice-preview canvas{display:block;width:100%;height:auto;aspect-ratio:4/3;user-select:none}
+.fruit-slice-controls{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#102823;flex-wrap:wrap}
+.fruit-slice-controls button{border:1px solid #37604d;border-radius:9px;padding:7px 12px;background:#1d3f35;color:#f6f5e0;cursor:pointer}
+.fruit-slice-controls button:disabled{opacity:.45;cursor:default}
+.fruit-slice-controls span{font-size:11px;color:#8db19f}
+.fruit-slice-preview p{margin:10px;font-size:13px}

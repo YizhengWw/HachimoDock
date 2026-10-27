@@ -7,9 +7,6 @@ use std::{fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Mutex, OnceLock},
 
 const MAX_SETTINGS_BYTES: u64 = 256 * 1024;
 const FILE_NAME: &str = "llm-network.json";
-#[cfg(feature = "internal-network")]
-const BUNDLED_CA: &str = include_str!(concat!(env!("OUT_DIR"), "/approved-internal-ca.pem"));
-#[cfg(not(feature = "internal-network"))]
 const BUNDLED_CA: &str = "";
 static STORAGE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -340,15 +337,11 @@ mod tests {
         assert!(certificates("not a certificate").is_err());
     }
     #[test]
-    fn bundled_ca_is_internal_only_and_independent_from_user_imports() {
+    fn public_build_has_no_bundled_ca_and_preserves_user_import_behavior() {
         let status = Settings::default().status();
         assert!(!status.certificate_configured);
-        assert_eq!(status.bundled_certificate_configured, cfg!(feature = "internal-network"));
-        if cfg!(feature = "internal-network") {
-            assert!(!certificates(BUNDLED_CA).unwrap().is_empty());
-        } else {
-            assert!(BUNDLED_CA.is_empty());
-        }
+        assert!(!status.bundled_certificate_configured);
+        assert!(BUNDLED_CA.is_empty());
         let cleared = updated(Settings::default(), NetworkInput {
             mode: ProxyMode::System, proxy_url: String::new(), ca_file: None, clear_certificate: true,
         }).unwrap();

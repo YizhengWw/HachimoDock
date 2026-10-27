@@ -1,0 +1,26 @@
+[
+  {
+    "action": "host.today",
+    "control": "SW1",
+    "event": "button.sw1.short_press",
+    "label": "回到今天"
+  },
+  {
+    "action": "host.details",
+    "control": "SW2",
+    "event": "button.sw2.short_press",
+    "label": "宜忌与返回"
+  },
+  {
+    "action": "host.previous",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw",
+    "label": "上一日或页"
+  },
+  {
+    "action": "host.next",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw",
+    "label": "下一日或页"
+  }
+]

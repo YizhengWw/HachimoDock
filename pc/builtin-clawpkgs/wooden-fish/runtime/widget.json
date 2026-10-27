@@ -1,1 +1,34 @@
-{"schema_version":1,"engine":"p4-bounded-runtime-v4","vars":{},"states":["ready"],"initial_state":"ready","instrument":{"source":"percussion.wooden-fish","effect_volume":70,"ambience_volume":18},"transitions":[{"on":"instrument.strike","from":"*"}],"tick":[],"dashboard":{"title":"敲木鱼","headline":"一声木响，一刻安静","footer":"按主操作敲一下 · 全局键退出","visualStyle":"clean","visualLayout":"tool"}}
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "ready"
+  ],
+  "initial_state": "ready",
+  "instrument": {
+    "source": "percussion.wooden-fish",
+    "effect_volume": 70,
+    "ambience_volume": 18
+  },
+  "transitions": [
+    {
+      "on": "instrument.strike",
+      "from": "*"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "静心木鱼",
+    "headline": "一声木响，一刻安静",
+    "footer": "按主操作或轻点屏幕敲一下 · 全局键退出",
+    "visualStyle": "clean",
+    "visualLayout": "tool"
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "press": [
+      "instrument.strike"
+    ]
+  }
+}

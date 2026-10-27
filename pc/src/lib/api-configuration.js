@@ -5,13 +5,14 @@
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
+import { DEFAULT_LITE_MODEL } from "./text-models.js";
 export const API_CONFIGURATION_UPDATED_EVENT = "pet-manager:api-configuration-updated";
 export const DEFAULT_LLM_PROVIDER = "doubao";
 
 /** 对话大模型默认值（与 Rust `voice_chat_settings::LLM_PRESETS` 一致），模型名可修改。 */
 export const LLM_PRESETS = [
   { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-flash" },
-  { id: "doubao", label: "豆包", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-2-0-lite-260428" },
+  { id: "doubao", label: "豆包", baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: DEFAULT_LITE_MODEL },
   { id: "mimo", label: "MiMo", baseUrl: "https://api.xiaomimimo.com/v1", model: "mimo-v2.6-flash" },
 ];
 

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "engine": "pc-app-services-v1",
+  "service": "todos",
+  "actions": {
+    "host.open": "open",
+    "host.toggle": "toggle",
+    "host.filter": "filter",
+    "host.previous": "previous",
+    "host.next": "next",
+    "host.up": "up",
+    "host.down": "down",
+    "host.row_a": "row_a",
+    "host.row_b": "row_b",
+    "host.row_c": "row_c",
+    "host.row_d": "row_d",
+    "host.row_e": "row_e"
+  }
+}

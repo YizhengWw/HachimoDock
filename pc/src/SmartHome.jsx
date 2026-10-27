@@ -16,6 +16,7 @@ function ValueInput({ property, value, onChange }) {
   return <input aria-label={property.name} type={property.format === "string" ? "text" : "number"} value={value} onChange={e => onChange(e.target.value)} min={property.range?.[0]} max={property.range?.[1]} step={property.range?.[2] || "any"} placeholder={property.range ? `${property.range[0]}–${property.range[1]} ${property.unit || ""}` : property.format} />;
 }
 
+import { navigateTabs } from "./lib/tab-navigation.js";
 export default function SmartHome() {
   const [data, setData] = useState(empty), [tab, setTab] = useState("devices");
   const [busy, setBusy] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState("");
@@ -52,7 +53,7 @@ export default function SmartHome() {
       <Card title="家庭已连接" subtitle={`${data.devices.length} 个设备 · 最近同步：${data.syncedAt ? new Date(data.syncedAt * 1000).toLocaleString() : "尚未同步"}`} actions={<button className="btn" disabled={busy} onClick={() => { if (window.confirm("断开账号将清除本机家居任务和记录，并停止后续控制。确定断开？")) run(async () => { await request("disconnect"); setSelected(null); setSpec(null); setMessages([]); setSteps([]); }); }}>断开账号</button>}>
         <p className="home-availability">将设备切换到「实时对话」模式后，就可以直接通过语音让哈基米机控制本页的智能家居，例如「播放一首爵士乐」「换一首歌」「把客厅灯调暗，再拉上窗帘」。5 步以内的明确指令直接执行；超过 5 步或保存常用任务时，哈基米会说明任务，你直接说「确认」或「取消」即可，无需在本页点击。</p>
       </Card>
-      <div className="home-tabs" role="tablist" aria-label="智能家居内容">{[["devices", "设备"], ["tasks", "场景与任务"], ["records", "执行记录"]].map(([id, name]) => <button role="tab" aria-selected={tab === id} key={id} className={tab === id ? "is-active" : ""} onClick={() => setTab(id)}>{name}</button>)}</div>
+      <div className="home-tabs" role="tablist" aria-label="智能家居内容">{[["devices", "设备"], ["tasks", "场景与任务"], ["records", "执行记录"]].map(([id, name]) => <button role="tab" aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} onKeyDown={event => navigateTabs(event,["devices","tasks","records"],id,setTab)} key={id} className={tab === id ? "is-active" : ""} onClick={() => setTab(id)}>{name}</button>)}</div>
       {!!data.pending.length && <Card title={`待你确认 · ${data.pending.length}`} subtitle="请核对设备及操作。场景可能影响多个设备；涉及门锁、安防或电器启动时请特别留意。任务 5 分钟后过期。">{data.pending.map(p => <div className="home-plan" key={p.id}><strong>{p.title}</strong><ol>{p.steps.map((s, i) => <li key={i}>{label(s)}</li>)}</ol><div className="home-actions"><button className="btn btn-primary" disabled={busy} onClick={() => run(async () => { const r = await request("approve", { id: p.id }); setNotice(r.status === "completed" ? "任务步骤已处理，请在执行记录查看核验结果。" : "任务已停止，请查看执行记录。"); setTab("records"); })}>确认执行</button><button className="btn" disabled={busy} onClick={() => run(async () => { await request("save_task", { id: p.id }); setNotice("已保存为常用任务，尚未执行"); })}>保存为常用任务</button><button className="btn" disabled={busy} onClick={() => run(() => request("reject", { id: p.id }))}>取消</button></div></div>)}</Card>}
       {busy && <div className="home-message" role="status">正在处理，请稍候。<button className="btn" onClick={() => invoke("smart_home_cancel").then(() => setNotice("已请求停止后续执行；已发送的命令无法撤回。")).catch(e => setError(String(e)))}>停止后续执行</button></div>}
       {tab === "devices" && <>

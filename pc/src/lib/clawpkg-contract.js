@@ -47,7 +47,7 @@ export const COMPONENT_VISUAL_PRESETS = {
 };
 
 export const COMPONENT_RUNTIME_ENGINES = ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"];
-export const COMPONENT_SCENE_ENGINES = ["p4-grid-scene-v1", "p4-grid-scene-v2"];
+export const COMPONENT_SCENE_ENGINES = ["p4-grid-scene-v1", "p4-grid-scene-v2", "p4-touch-slice-v1"];
 export const COMPONENT_SCENE_ENGINE = COMPONENT_SCENE_ENGINES[1];
 export const COMPONENT_GAME_PRESETS = ["blocks", "snake", "flappy"];
 // Backward-compatible export for callers that still label native presets as game types.
@@ -274,7 +274,8 @@ function validateBoundedScene(widget, buttons, errors) {
   if (!COMPONENT_RUNTIME_ENGINES.includes(widget.engine)) {
     errors.push(`runtime/widget.json scene 需要受支持的 engine`);
   }
-  if (!hasOnlyKeys(scene, [
+  const slicing = scene?.engine === "p4-touch-slice-v1";
+  if (!hasOnlyKeys(scene, slicing ? ["engine", "duration_sec", "lives", "sound_volume", "sprites", "revision"] : [
     "tick_ms", "active_state", "result_state", "score_var", "auto_start",
     "grid", "sprites", "entities", "rules",
   ])) {
@@ -316,6 +317,20 @@ function validateBoundedScene(widget, buttons, errors) {
   }
   if (spritePixels > COMPONENT_SCENE_MAX_SPRITE_PIXELS) {
     errors.push(`runtime/widget.json scene.sprites 总像素超过 ${COMPONENT_SCENE_MAX_SPRITE_PIXELS}`);
+  }
+  if (slicing) {
+    if (widget.engine !== "p4-bounded-runtime-v4" || !isBoundedInt(scene.duration_sec,30,120)
+        || !isBoundedInt(scene.lives,1,5) || !isBoundedInt(scene.sound_volume,0,100)
+        || (scene.revision!==undefined && !isBoundedInt(scene.revision,1,2))
+        || !Array.isArray(sprites) || sprites.length !== 4 || sprites.some(s=>s.frames!==1)
+        || JSON.stringify(widget.vars)!=="{}" || JSON.stringify(widget.states)!=='["idle"]' || widget.initial_state!=="idle"
+        || !Array.isArray(widget.tick) || widget.tick.length || ["data","media","instrument","game","pages"].some(k=>k in widget)
+        || !Array.isArray(widget.transitions) || widget.transitions.length!==2
+        || !["slice.restart","slice.pause"].every(action=>widget.transitions.some(t=>hasOnlyKeys(t,["on","from"])&&t.on===action&&t.from==="*"))
+        || !Array.isArray(buttons) || buttons.length!==2 || !["slice.restart","slice.pause"].every(action=>buttons.some(b=>b.action===action))) {
+      errors.push("触控切果需要 v4、四张水果精灵、30–120 秒、1–5 生命和开始/暂停控制");
+    }
+    return;
   }
   if (!isBoundedInt(scene.tick_ms, COMPONENT_GAME_TICK_MIN_MS, COMPONENT_GAME_TICK_MAX_MS)) {
     errors.push(`runtime/widget.json scene.tick_ms 必须在 ${COMPONENT_GAME_TICK_MIN_MS}-${COMPONENT_GAME_TICK_MAX_MS}`);
@@ -565,6 +580,9 @@ export function validateClawpkgManifest(manifest) {
     validateComponentButtons(manifest["buttons.json"], errors);
   }
   if ("runtime/widget.json" in (manifest || {})) {
+    if (manifest["runtime/widget.json"]?.scene?.engine === "p4-touch-slice-v1" && meta?.kind !== "game") {
+      errors.push("触屏切果组件 kind 必须为 game");
+    }
     if (compactJsonBytes(manifest["runtime/widget.json"]) > P4_WIDGET_JSON_MAX_BYTES) {
       errors.push(`runtime/widget.json 压缩后超过 P4 ${P4_WIDGET_JSON_MAX_BYTES} 字节上限`);
     }

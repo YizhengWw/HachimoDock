@@ -1,0 +1,1 @@
+{"schemaVersion":1,"engine":"pc-app-services-v1","service":"notes","actions":{"host.primary":"record","host.secondary":"save","host.previous":"previous","host.next":"next","host.todo":"todo","host.delete":"delete"}}

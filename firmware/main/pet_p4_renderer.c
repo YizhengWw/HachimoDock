@@ -13,8 +13,10 @@
  */
 
 #include "pet_p4_renderer.h"
+#include "pet_p4_frame_gate.h"
 
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,15 +35,31 @@
 #include "freertos/task.h"
 #include "libs/tjpgd/tjpgd.h"
 #include "lvgl.h"
+#include "miniz.h"
 
 #include "pet_p4_lcd.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_center_layout.h"
+#include "../assets/component-center/catalog.h"
+#include "pet_p4_image.h"
+#include "pet_p4_app_glyphs.h"
+#include "esp_attr.h"
 #include "pet_p4_media.h"
 #include "pet_p4_audio.h"
 #include "pet_p4_instrument_core.h"
 #include "pet_p4_behavior.h"
 
 #define PET_P4_ASSET_WIDTH 640
+static bool g_last_native_valid;
+static uint32_t g_lcd_submitted, g_lcd_skipped;
+static portMUX_TYPE g_metrics_lock = portMUX_INITIALIZER_UNLOCKED;
+static pet_p4_render_metrics_t g_metrics;
+pet_p4_render_metrics_t pet_p4_renderer_metrics(void) {
+  portENTER_CRITICAL(&g_metrics_lock);
+  pet_p4_render_metrics_t result = g_metrics;
+  portEXIT_CRITICAL(&g_metrics_lock);
+  return result;
+}
 #define PET_P4_ASSET_HEIGHT 480
 #define PET_P4_MAX_MJPEG_FRAMES PET_P4_ASSET_CATALOG_MAX_FRAMES
 #define PET_P4_MAX_JPEG_BYTES (512 * 1024)
@@ -117,7 +135,11 @@ static bool g_logged_ppa_fallback;
 static char g_decoder_fs_path[80];
 static char g_rendered_family[PET_P4_ASSET_FAMILY_MAX];
 static pet_p4_behavior_t g_behavior;
-static pet_p4_miniapp_sprite_pack_t g_miniapp_sprites;
+static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_miniapp_sprites;
+// Only the main render task uses these snapshots. Keep large views off its
+// bounded stack; package/legacy media rendering shares one snapshot per frame.
+static EXT_RAM_BSS_ATTR pet_p4_miniapp_view_t g_miniapp_view_snapshot;
+static EXT_RAM_BSS_ATTR pet_p4_media_view_t g_media_view_snapshot;
 static bool g_logged_asset;
 static bool g_logged_missing_asset;
 static bool g_logged_asset_failure;
@@ -234,6 +256,12 @@ static void record_render_performance(
   uint32_t lcd_us
 ) {
   uint32_t total_us = elapsed_us_clamped(started_us, ended_us);
+  portENTER_CRITICAL(&g_metrics_lock);
+  g_metrics.last_us = total_us;
+  g_metrics.last_decode_us = g_last_decode_us;
+  g_metrics.submitted_frames = g_lcd_submitted;
+  g_metrics.unchanged_frames = g_lcd_skipped;
+  portEXIT_CRITICAL(&g_metrics_lock);
   if (total_us > 100000U
       && (!g_last_slow_render_log_us
           || ended_us - g_last_slow_render_log_us >= 2000000LL)) {
@@ -311,6 +339,11 @@ static void record_render_performance(
   uint32_t lcd_tenths = perf_average_tenths_ms(g_render_perf.lcd_us, g_render_perf.samples);
   uint32_t p95_tenths = sorted[94] / 100U;
   uint32_t max_tenths = sorted[PET_P4_RENDER_PERF_WINDOW - 1] / 100U;
+  portENTER_CRITICAL(&g_metrics_lock);
+  g_metrics.p95_us = sorted[94];
+  g_metrics.max_us = sorted[PET_P4_RENDER_PERF_WINDOW - 1];
+  g_metrics.window_samples = PET_P4_RENDER_PERF_WINDOW;
+  portEXIT_CRITICAL(&g_metrics_lock);
   ESP_LOGI(
     TAG,
     "P4 render perf fps=%u.%u total=%u.%ums p95=%u.%ums max=%u.%ums "
@@ -1278,12 +1311,26 @@ static void blend_ellipse(int cx, int cy, int rx, int ry, uint8_t r, uint8_t g, 
 }
 
 static void blend_round_rect(int x, int y, int w, int h, int radius, uint8_t r, uint8_t g, uint8_t b, uint8_t alpha) {
-  blend_rect(x + radius, y, w - radius * 2, h, r, g, b, alpha);
-  blend_rect(x, y + radius, w, h - radius * 2, r, g, b, alpha);
-  blend_ellipse(x + radius, y + radius, radius, radius, r, g, b, alpha);
-  blend_ellipse(x + w - radius - 1, y + radius, radius, radius, r, g, b, alpha);
-  blend_ellipse(x + radius, y + h - radius - 1, radius, radius, r, g, b, alpha);
-  blend_ellipse(x + w - radius - 1, y + h - radius - 1, radius, radius, r, g, b, alpha);
+  if (w <= 0 || h <= 0 || !alpha) return;
+  if (radius < 0) radius = 0;
+  if (radius > w / 2) radius = w / 2;
+  if (radius > h / 2) radius = h / 2;
+  if (!radius) { blend_rect(x, y, w, h, r, g, b, alpha); return; }
+  // Alpha compositing is not idempotent: overlapping rectangles/full circles
+  // produce dark seams. Cover each destination pixel exactly once. Straight
+  // edges need no square root; only the four bounded corner regions do.
+  int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+  int x1 = x + w > PET_P4_UI_WIDTH ? PET_P4_UI_WIDTH : x + w;
+  int y1 = y + h > PET_P4_UI_HEIGHT ? PET_P4_UI_HEIGHT : y + h;
+  for (int yy = y0; yy < y1; yy++) {
+    float dy = fmaxf(0, fabsf(yy + .5f - (y + h * .5f)) - (h * .5f - radius));
+    for (int xx = x0; xx < x1; xx++) {
+      float dx = fmaxf(0, fabsf(xx + .5f - (x + w * .5f)) - (w * .5f - radius));
+      float coverage = dx > 0 && dy > 0 ? fminf(1, fmaxf(0, radius + .5f - sqrtf(dx * dx + dy * dy))) : 1;
+      uint8_t a = (uint8_t) (alpha * coverage);
+      if (a) blend_px(xx, yy, r, g, b, a);
+    }
+  }
 }
 
 static void draw_home_white_panel(int x, int y, int w, int h, int radius, uint16_t outline) {
@@ -1580,6 +1627,7 @@ static void reset_h264_decoder(void) {
 }
 
 void pet_p4_renderer_reset_playback(void) {
+  g_last_native_valid = false;
   pet_p4_behavior_init(&g_behavior);
   reset_h264_decoder();
   g_decoder_fs_path[0] = '\0';
@@ -2504,6 +2552,8 @@ static void draw_component_icon(const char *id, int x, int y, uint16_t ink, uint
 }
 
 static const char *component_card_caption(const char *id) {
+  for(size_t i=0;i<CENTER_ART_COUNT;i++)
+    if(!strcmp(id,center_art_catalog[i].id))return center_art_catalog[i].caption;
   if (strcmp(id, "stock-watchlist") == 0) return "实时行情";
   if (strcmp(id, "music-player") == 0) return "音乐与歌词";
   if (strcmp(id, "upcoming-todos") == 0) return "记录与管理";
@@ -2511,26 +2561,128 @@ static const char *component_card_caption(const char *id) {
   return "打开体验";
 }
 
+/* Engineering touch/slicing diagnostic; final game assets belong to PetUI. */
+static void render_touch_test_page(const pet_p4_runtime_state_t *state) {
+  const pet_p4_slice_t *s = &state->touch_test;
+  uint16_t ink = rgb565(236, 241, 230), accent = rgb565(148, 226, 151);
+  fill_rect(0, 0, 640, 480, rgb565(17, 30, 29));
+  fill_round_rect(16, 14, 608, 64, 16, rgb565(31, 49, 44));
+  draw_text_line("触控切水果测试", 32, 30, 320, ink, 2, true);
+  char score[64];
+  snprintf(score, sizeof(score), "%u  /  MISS %u", s->score, s->misses);
+  draw_text_line(score, 430, 36, 180, accent, 1, true);
+  if (!s->finished) {
+    int x = (int)s->x, y = (int)s->y;
+    unsigned age = s->sliced && s->now_ms >= s->cut_ms ? (unsigned)(s->now_ms - s->cut_ms) : 0;
+    if (s->sliced) {
+      int gap = 5 + (int)age / 12;
+      fill_ellipse(x - gap, y + (int)age / 20, 18, 32, rgb565(244, 139, 62));
+      fill_ellipse(x + gap, y + (int)age / 15, 18, 32, rgb565(254, 184, 77));
+      fill_ellipse(x - gap + 3, y + (int)age / 20, 11, 25, rgb565(255, 211, 120));
+    } else {
+      fill_ellipse(x + 2, y + 4, 35, 34, rgb565(114, 64, 29));
+      fill_ellipse(x, y, 34, 34, rgb565(243, 147, 57));
+      fill_ellipse(x - 10, y - 10, 12, 17, rgb565(255, 182, 77));
+      fill_ellipse(x + 8, y - 35, 13, 5, accent);
+    }
+  }
+  for (unsigned i = 1; i < s->trail_count; i++) {
+    if (s->trail[i].start) continue;
+    const pet_p4_slice_point_t *a = &s->trail[i-1], *b = &s->trail[i];
+    draw_line(a->x, a->y, b->x, b->y, accent);
+    draw_line(a->x, a->y + 1, b->x, b->y + 1, ink);
+  }
+  if (s->finished) draw_text_line("本轮结束 · 按 SW1 重新开始", 110, 215, 480, ink, 2, true);
+  /* A stationary finger must remain visible too; a short line-only trail
+   * cannot distinguish coordinate mismatch from an unresponsive controller. */
+  if (s->pointer_down) {
+    fill_ellipse(s->pointer_x, s->pointer_y, 9, 9, ink);
+    fill_ellipse(s->pointer_x, s->pointer_y, 5, 5, rgb565(255, 99, 66));
+    draw_line(s->pointer_x - 18, s->pointer_y, s->pointer_x + 18, s->pointer_y, ink);
+    draw_line(s->pointer_x, s->pointer_y - 18, s->pointer_x, s->pointer_y + 18, ink);
+    char xy[48];
+    snprintf(xy, sizeof(xy), "X %d  Y %d", s->pointer_x, s->pointer_y);
+    draw_text_line(xy, 32, 90, 300, accent, 1, true);
+  }
+  draw_text_line("滑动切开水果 · SW1 重开 · 全局键退出", 48, 450, 552, accent, 1, true);
+}
+
+extern const uint8_t center_bg_jpg[] asm("_binary_center_background_jpg_start");
+extern const uint8_t center_bg_jpg_end[] asm("_binary_center_background_jpg_end");
+extern const uint8_t center_thumbs_z[] asm("_binary_center_thumbs_deflate_start");
+extern const uint8_t center_thumbs_z_end[] asm("_binary_center_thumbs_deflate_end");
+static uint16_t *center_background, *center_thumbnails;
+static bool center_art_attempted;
+static void center_art_release(void) {
+  if(center_background)heap_caps_free(center_background);
+  if(center_thumbnails)heap_caps_free(center_thumbnails);
+  center_background=center_thumbnails=NULL;
+  center_art_attempted=false;
+}
+static void center_art_prepare(void) {
+  if(center_art_attempted)return;
+  center_art_attempted=true;
+  size_t length=(size_t)(center_bg_jpg_end-center_bg_jpg);
+  if(g_jpeg_input&&g_jpeg_output&&length<=g_jpeg_input_capacity) {
+    memcpy(g_jpeg_input,center_bg_jpg,length);
+    int w=0,h=0,stride=0;esp_err_t error=ESP_OK;JRESULT fallback=JDR_OK;
+    bool ok=decode_jpeg_frame_hardware(g_jpeg_input,length,&w,&h,&stride,&error);
+    if(!ok){ok=decode_jpeg_frame_tjpgd(g_jpeg_input,length,&w,&h,&fallback);stride=w;}
+    if(ok&&w==640&&h==480) {
+      center_background=heap_caps_malloc(640*480*2,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+      if(center_background)for(int y=0;y<480;y++)memcpy(center_background+y*640,g_jpeg_output+y*stride,1280);
+    }
+  }
+  size_t expected=CENTER_ART_COUNT*64*48*2;
+  center_thumbnails=heap_caps_malloc(expected,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  tinfl_decompressor *inflater=calloc(1,sizeof(*inflater));
+  if(center_thumbnails&&inflater) {
+    tinfl_init(inflater);size_t consumed=center_thumbs_z_end-center_thumbs_z,decoded=expected;
+    tinfl_status status=tinfl_decompress(inflater,center_thumbs_z,&consumed,(uint8_t*)center_thumbnails,
+      (uint8_t*)center_thumbnails,&decoded,TINFL_FLAG_PARSE_ZLIB_HEADER|TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+    if(status!=TINFL_STATUS_DONE||decoded!=expected||consumed!=(size_t)(center_thumbs_z_end-center_thumbs_z)) {
+      heap_caps_free(center_thumbnails);center_thumbnails=NULL;
+    }
+  }else if(center_thumbnails){heap_caps_free(center_thumbnails);center_thumbnails=NULL;}
+  free(inflater);
+}
+static bool center_draw_thumbnail(const char *id,int x,int y) {
+  if(!center_thumbnails)return false;
+  for(size_t i=0;i<CENTER_ART_COUNT;i++)if(!strcmp(id,center_art_catalog[i].id)&&center_art_catalog[i].art) {
+    const uint16_t *pixels=center_thumbnails+i*64*48;
+    for(int row=0;row<48;row++)for(int col=0;col<64;col++) {
+      int dx=col<7?7-col:col>56?col-56:0;
+      int dy=row<7?7-row:row>40?row-40:0;
+      if(dx*dx+dy*dy<=49)g_framebuffer[(y+row)*640+x+col]=pixels[row*64+col];
+    }
+    return true;
+  }
+  return false;
+}
 static void render_component_center_page(void) {
-  const uint16_t background = rgb565(246, 247, 249);
-  const uint16_t panel = rgb565(255, 255, 255);
-  const uint16_t outline = rgb565(226, 229, 234);
-  const uint16_t selected_panel = rgb565(255, 246, 237);
-  const uint16_t ink = rgb565(32, 36, 43);
-  const uint16_t muted = rgb565(113, 120, 133);
-  const uint16_t orange = rgb565(255, 110, 0);
+  const uint16_t background = rgb565(224, 196, 162);
+  const uint16_t panel = rgb565(255, 247, 232);
+  const uint16_t outline = rgb565(231, 207, 174);
+  const uint16_t selected_panel = rgb565(141, 75, 49);
+  const uint16_t ink = rgb565(68, 45, 32);
+  const uint16_t muted = rgb565(115, 88, 67);
+  const uint16_t orange = rgb565(184, 97, 49);
   const size_t count = pet_p4_miniapp_catalog_count();
   const size_t requested = pet_p4_miniapp_catalog_selected();
   const size_t selected = count && requested < count ? requested : 0;
-  const size_t per_page = 4;
+  const size_t per_page = PET_CENTER_PAGE_SIZE;
   const size_t start = selected / per_page * per_page;
   const size_t pages = (count + per_page - 1) / per_page;
 
-  fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, background);
-  draw_text_line("组件中心", 26, 22, 300, ink, 2, true);
+  center_art_prepare();
+  if(center_background)memcpy(g_framebuffer,center_background,640*480*2);
+  else fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, background);
+  draw_text_line("组件中心", 26, 14, 300, ink, 2, true);
+  draw_text_line("轻点打开 · 左右滑动翻页",26,54,440,muted,1,true);
   char count_text[24];
   snprintf(count_text, sizeof(count_text), "已安装 %u 个", (unsigned int) count);
-  draw_text_right(count_text, 614, 32, 160, muted, 1);
+  fill_round_rect(474,22,142,30,15,panel);
+  draw_text_center(count_text,545,text_y_in_box(count_text,1,22,30),130,muted,1);
 
   if (count == 0) {
     fill_round_rect(24, 86, 592, 306, 20, panel);
@@ -2544,14 +2696,17 @@ static void render_component_center_page(void) {
       if (!pet_p4_miniapp_catalog_get(index, &item)) continue;
       const bool focused = index == selected;
       const int slot = (int) (index - start);
-      const int x = 24 + (slot % 2) * 304;
-      const int y = 86 + (slot / 2) * 160;
+      const int x = PET_CENTER_LEFT + (slot % PET_CENTER_COLUMNS) * PET_CENTER_STEP_X;
+      const int y = PET_CENTER_TOP + (slot / PET_CENTER_COLUMNS) * PET_CENTER_STEP_Y;
       const uint16_t surface = focused ? selected_panel : panel;
-      fill_round_rect(x, y+3, 288, 146, 18, rgb565(234, 237, 241));
+      const uint16_t card_ink=focused?rgb565(255,248,231):ink;
+      const uint16_t card_muted=focused?rgb565(244,216,184):muted;
+      fill_round_rect(x, y+4, 288, 146, 18, rgb565(187,151,114));
       fill_round_rect_outline(x, y, 288, 146, 18, surface, focused ? orange : outline);
       if (focused) fill_round_rect_outline(x+1, y+1, 286, 144, 17, surface, orange);
-      draw_component_icon(item.widget_id, x+18, y+16, focused ? orange : muted,
-        focused ? rgb565(255, 229, 206) : background);
+      if(!center_draw_thumbnail(item.widget_id,x+18,y+14))
+        draw_component_icon(item.widget_id, x+18, y+16, focused ? card_ink : orange,
+          focused ? rgb565(168,100,67) : rgb565(242,224,196));
       if (item.active) {
         fill_round_rect(x+194, y+23, 76, 24, 12, rgb565(226, 246, 237));
         draw_text_center("已打开", x+232, text_y_in_box("已打开", 1, y+23, 24), 64,
@@ -2559,24 +2714,27 @@ static void render_component_center_page(void) {
       } else {
         char number[12];
         snprintf(number, sizeof(number), "%02u", (unsigned int)index+1);
-        draw_text_right(number, x+268, y+28, 48, focused ? orange : muted, 1);
+        draw_text_right(number, x+268, y+28, 48, card_muted, 1);
       }
       draw_text_line(
-        item.title[0] ? item.title : item.widget_id, x+18, y+72, 252, ink, 2, true
+        item.title[0] ? item.title : item.widget_id, x+18, y+72, 252, card_ink, 2, true
       );
-      draw_text_line(component_card_caption(item.widget_id), x+18, y+116, 226, muted, 1, true);
+      draw_text_line(component_card_caption(item.widget_id), x+18, y+116, 226, card_muted, 1, true);
       if (focused) {
-        draw_line(x+260, y+117, x+265, y+122, orange);
-        draw_line(x+265, y+122, x+260, y+127, orange);
+        draw_line(x+260, y+117, x+265, y+122, card_ink);
+        draw_line(x+265, y+122, x+260, y+127, card_ink);
       }
     }
     for (size_t page=0; page<pages; ++page) {
-      const int dot_x = 320 - (int)(pages*18)/2 + (int)page*18;
-      fill_round_rect(dot_x, 412, page == selected/per_page ? 12 : 6, 6, 3,
-        page == selected/per_page ? orange : rgb565(206, 211, 220));
+      /* Equal-size circular markers; selection changes colour, not a pill
+       * spanning two apparent dots. Keep the entire row centred. */
+      const int dot_x = 320 - (int)((pages-1)*18)/2 + (int)page*18;
+      fill_ellipse(dot_x, 415, 3, 3,
+        page == selected/per_page ? selected_panel : rgb565(181,149,117));
     }
   }
-  draw_text_center("左右切换    确认键打开    全局键返回", 320, 446, 580, muted, 1);
+  fill_round_rect(24,435,592,34,14,panel);
+  draw_text_center("摇杆选择    确认键打开    全局键返回", 320, 444, 580, muted, 1);
 }
 
 static void draw_connection_banner(
@@ -3905,18 +4063,467 @@ static void draw_media_queue(int x,int y,uint16_t color) {
   fill_ellipse(x+20,y+20,5,3,color);
 }
 
+static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;
+#include "pet_p4_app_icons.h"
+static EXT_RAM_BSS_ATTR uint8_t g_surface_indices[98304];
+// Runtime-only cache: flash still stores the same compact P4I1 images. A static
+// full-screen background must not be resampled/alpha-blended 307200 times/frame.
+static EXT_RAM_BSS_ATTR uint16_t g_surface_background[640*480];
+static uint16_t g_surface_colors[4][256];
+static uint8_t g_surface_alpha[4][256];
+static bool g_surface_background_valid;
+static uint8_t g_surface_background_page;
+static uint32_t g_surface_revision, g_surface_offsets[4];
+static uint64_t g_surface_play_ms,g_surface_last_ms;
+static bool g_surface_was_playing;
+static void draw_surface_image(const pet_surface_node_t *n) {
+  if(n->image<0||n->image>=g_surface_images.count)return;
+  const pet_p4_miniapp_sprite_t *im=&g_surface_images.items[n->image];
+  if(im->fps!=0)return;
+  const uint8_t *packed=g_surface_images.pixels+im->data_offset;
+  if(im->data_length>=16&&packed[2]=='J'){
+    // The parser only permits this as the first full-screen static node. Decode
+    // once into the existing background cache, never on each animation frame.
+    if(!pet_image_jpeg(packed,im->data_length)||!g_jpeg_input||im->data_length-12>g_jpeg_input_capacity)return;
+    memcpy(g_jpeg_input,packed+12,im->data_length-12);
+    int w=0,h=0,stride=0;esp_err_t err;JRESULT fallback;
+    bool ok=decode_jpeg_frame_hardware(g_jpeg_input,im->data_length-12,&w,&h,&stride,&err);
+    if(!ok){ok=decode_jpeg_frame_tjpgd(g_jpeg_input,im->data_length-12,&w,&h,&fallback);stride=w;}
+    if(ok&&w==640&&h==480)for(int y=0;y<480;y++)memcpy(g_framebuffer+y*640,g_jpeg_output+y*stride,1280);
+    return;
+  }
+  const uint8_t *palette=g_surface_images.pixels+im->data_offset+12;
+  const uint8_t *indices=g_surface_indices+g_surface_offsets[n->image];
+  float angle=n->rotate_ms?(float)(g_surface_play_ms%n->rotate_ms)*6.2831853f/n->rotate_ms:0;
+  float co=cosf(angle),si=sinf(angle);
+  int iw=im->frame_width,ih=im->frame_height;
+  int stride=iw,ox=0,oy=0;
+  if(n->tile_cols){iw/=n->tile_cols;ih/=n->tile_rows;ox=n->tile_index*iw;oy=n->tile_row*ih;}
+  // Q16 affine steps: trigonometry/divisions only once per image, never per
+  // pixel. Keep the source PNG's existing nearest-neighbour sampling contract.
+  const float unit=65536.0f;
+  int32_t xx=(int32_t)lroundf(co*iw/n->w*unit),xy=(int32_t)lroundf(si*iw/n->h*unit);
+  int32_t yx=(int32_t)lroundf(-si*ih/n->w*unit),yy=(int32_t)lroundf(co*ih/n->h*unit);
+  int32_t row_x=(int32_t)lroundf((co*(.5f/n->w-.5f)+si*(.5f/n->h-.5f)+.5f)*iw*unit);
+  int32_t row_y=(int32_t)lroundf((-si*(.5f/n->w-.5f)+co*(.5f/n->h-.5f)+.5f)*ih*unit);
+  const uint16_t *colors=g_surface_colors[n->image];const uint8_t *alpha=g_surface_alpha[n->image];
+  for(int dy=0;dy<n->h;dy++,row_x+=xy,row_y+=yy){
+    int32_t sx=row_x,sy=row_y;uint16_t *out=g_framebuffer+(n->y+dy)*640+n->x;
+    for(int dx=0;dx<n->w;dx++,sx+=xx,sy+=yx){
+      if(sx<0||sy<0||sx>=(iw<<16)||sy>=(ih<<16))continue;
+      unsigned index=indices[((sy>>16)+oy)*stride+(sx>>16)+ox],a=alpha[index];
+      if(!a)continue;
+      if(a==255){out[dx]=colors[index];continue;}
+      const uint8_t *p=palette+4*index;uint16_t bg=out[dx];
+      unsigned r=((bg>>11)&31)*255/31,g=((bg>>5)&63)*255/63,b=(bg&31)*255/31;
+      out[dx]=rgb565((p[0]*a+r*(255-a))/255,(p[1]*a+g*(255-a))/255,(p[2]*a+b*(255-a))/255);
+    }
+  }
+}
+static void load_surface_images(unsigned long long now_ms) {
+  if(pet_p4_miniapp_get_surface_images(&g_surface_images,&g_surface_revision)){
+    g_surface_background_valid=false;
+    size_t used=0;
+    for(int i=0;i<g_surface_images.count;i++){
+      const pet_p4_miniapp_sprite_t *im=&g_surface_images.items[i];g_surface_offsets[i]=used;
+      if(pet_image_jpeg(g_surface_images.pixels+im->data_offset,im->data_length))continue;
+      size_t pixels=(size_t)im->frame_width*im->frame_height;
+      if(im->fps!=0||used+pixels>sizeof(g_surface_indices)||!pet_image_decode(g_surface_images.pixels+im->data_offset,im->data_length,g_surface_indices+used,sizeof(g_surface_indices)-used)){
+        g_surface_images.count=0;break;
+      }
+      const uint8_t *palette=g_surface_images.pixels+im->data_offset+12;
+      for(int color=0;color<256;color++){
+        const uint8_t *p=palette+4*color;
+        g_surface_colors[i][color]=rgb565(p[0],p[1],p[2]);g_surface_alpha[i][color]=p[3];
+      }
+      used+=pixels;
+    }
+    g_surface_play_ms=0;g_surface_last_ms=now_ms;g_surface_was_playing=false;
+  }
+}
+static void draw_app_panel(const pet_surface_node_t *n) {
+  if(!n->opacity&&!n->opacity_end&&!n->stroke_width)return;
+  if(!n->radius&&!n->stroke_width&&n->opacity==255&&n->opacity_end==255){fill_rect(n->x,n->y,n->w,n->h,n->color);return;}
+  const uint8_t r=((n->color>>11)&31)*255/31,g=((n->color>>5)&63)*255/63,b=(n->color&31)*255/31;
+  const int radius=n->radius;
+  for(int y=0;y<n->h;y++)for(int x=0;x<n->w;x++){
+    float qx=fabsf(x+.5f-n->w*.5f)-(n->w*.5f-radius),qy=fabsf(y+.5f-n->h*.5f)-(n->h*.5f-radius);
+    float dx=fmaxf(qx,0),dy=fmaxf(qy,0),d=sqrtf(dx*dx+dy*dy)+fminf(fmaxf(qx,qy),0)-radius;
+    float cover=fminf(1,fmaxf(0,.5f-d));if(cover<=0)continue;
+    int pos=n->vertical?y:x,len=n->vertical?n->h:n->w;
+    int a=n->opacity+(n->opacity_end-n->opacity)*pos/(len>1?len-1:1);
+    if(a)blend_px(n->x+x,n->y+y,r,g,b,(int)(a*cover));
+    if(n->stroke_width){float edge=fminf(1,fmaxf(0,d+n->stroke_width+.5f))*cover;uint16_t c=n->stroke;if(edge>0)blend_px(n->x+x,n->y+y,((c>>11)&31)*255/31,((c>>5)&63)*255/63,(c&31)*255/31,(int)(edge*255));}
+  }
+}
+static void draw_app_icon(int icon,int x,int y,int size,uint16_t color){
+  if(icon<0||icon>=PET_APP_ICON_COUNT)return;
+  float scale=size/48.0f;
+  for(int py=0;py<size;py++)for(int px=0;px<size;px++){
+    float best=1e6f;
+    for(int s=0;s<pet_app_icons[icon].count;s++){
+      const uint8_t *v=pet_app_icon_segments[pet_app_icons[icon].start+s];
+      float ax=v[0]*scale,ay=v[1]*scale,dx=(v[2]-v[0])*scale,dy=(v[3]-v[1])*scale;
+      float den=dx*dx+dy*dy,t=den?((px+.5f-ax)*dx+(py+.5f-ay)*dy)/den:0;t=fminf(1,fmaxf(0,t));
+      float ex=px+.5f-ax-t*dx,ey=py+.5f-ay-t*dy,dist=ex*ex+ey*ey;if(dist<best)best=dist;
+    }
+    float alpha=fminf(1,fmaxf(0,size*.9f/24+.5f-sqrtf(best)));
+    if(alpha>0)blend_px(x+px,y+py,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)(alpha*255));
+  }
+}
+static const pet_surface_t *g_app_text_surface;
+static const pet_surface_font_t *app_font_glyph(uint32_t cp,int *index){
+  if(!g_app_text_surface)return NULL;
+  for(int f=0;f<g_app_text_surface->font_count;f++){
+    const pet_surface_font_t *font=&g_app_text_surface->fonts[f];
+    if(font->image>=g_surface_images.count)continue;
+    for(int i=0;i<font->count;i++)if(font->chars[i]==cp){*index=i;return font;}
+  }return NULL;
+}
+static int app_glyph_width(uint32_t cp,uint32_t next){
+  int i;const pet_surface_font_t *f=app_font_glyph(cp,&i);if(f)return f->metrics[i][0];
+  int width=pet_app_symbol_advance(cp);return 2*(width?width:glyph_width(cp,next));
+}
+static int app_text_width(const char *s,int px){
+  int units=0;while(s&&*s){uint32_t cp=utf8_next(&s);units+=app_glyph_width(cp,utf8_peek(s));}return (units*px+16)/32;
+}
+static void app_text_bounds(const char *s,int *top,int *bottom){
+  bool found=false;
+  while(s&&*s){uint32_t cp=utf8_next(&s);int t=0,b=15;
+    int i;const pet_surface_font_t *f=app_font_glyph(cp,&i);
+    if(f){t=f->metrics[i][1];b=f->metrics[i][2];if(t==b)continue;}
+    else {if(pet_app_symbol_advance(cp))pet_app_symbol_bounds(cp,&t,&b);
+      else if(!glyph_visual_bounds(cp,utf8_peek(s),1,&t,&b))continue;t*=2;b=(b+1)*2;}
+    if(!found||t<*top)*top=t;if(!found||b>*bottom)*bottom=b;found=true;
+  }
+  if(!found){*top=0;*bottom=32;}
+}
+static float app_font_sample(const pet_surface_font_t *f,int index,int x,int y){
+  int cw=f->cell_w?f->cell_w:32,ch=f->cell_h?f->cell_h:32;
+  if(x<0||x>=cw||y<0||y>=ch)return 0;
+  const pet_p4_miniapp_sprite_t *im=&g_surface_images.items[f->image];int columns=im->frame_width/cw;
+  size_t at=g_surface_offsets[f->image]+(index/columns*ch+y)*im->frame_width+index%columns*cw+x;
+  return g_surface_alpha[f->image][g_surface_indices[at]];
+}
+static float app_glyph_sample(const uint8_t *bitmap,const lv_font_glyph_dsc_t *g,int x,int y){
+  return x<0||y<0||x>=g->box_w||y>=g->box_h?0:glyph_alpha_at(bitmap,g,x,y);
+}
+static void draw_app_glyph(uint32_t cp,uint32_t next,float x,float y,int px,uint16_t color,const pet_surface_node_t *clip){
+  if(cp==0xFE0F||cp==0x200D)return;
+  int index;const pet_surface_font_t *font=app_font_glyph(cp,&index);
+  if(font){
+    float scale=px/(float)(font->cell_h?font->cell_h:32);
+    int cw=font->cell_w?font->cell_w:32;
+    for(int yy=(int)floorf(y);yy<(int)ceilf(y+px);yy++)for(int xx=(int)floorf(x);xx<(int)ceilf(x+cw*scale);xx++){
+      if(xx<clip->x||yy<clip->y||xx>=clip->x+clip->w||yy>=clip->y+clip->h)continue;
+      float sx=(xx+.5f-x)/scale-.5f,sy=(yy+.5f-y)/scale-.5f;int ix=(int)floorf(sx),iy=(int)floorf(sy);float fx=sx-ix,fy=sy-iy;
+      float a=(app_font_sample(font,index,ix,iy)*(1-fx)+app_font_sample(font,index,ix+1,iy)*fx)*(1-fy)+(app_font_sample(font,index,ix,iy+1)*(1-fx)+app_font_sample(font,index,ix+1,iy+1)*fx)*fy;
+      if(clip->weight)a=fminf(255,a*1.15f);
+      if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
+    }return;
+  }
+  if(pet_app_symbol_advance(cp)){
+    float scale=px/16.0f;int width=cp==0x2103?8:pet_app_symbol_advance(cp);
+    for(int yy=(int)floorf(y);yy<(int)ceilf(y+px);yy++)for(int xx=(int)floorf(x);xx<(int)ceilf(x+width*scale);xx++){
+      if(xx<clip->x||yy<clip->y||xx>=clip->x+clip->w||yy>=clip->y+clip->h)continue;
+      float a=pet_app_symbol_coverage(cp,(xx+.5f-x)/scale,(yy+.5f-y)/scale,scale);
+      if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)(a*255));
+    }
+    if(cp!=0x2103)return;
+    x+=8*scale;cp='C';
+  }
+  lv_font_glyph_dsc_t g={0};
+  if(!lv_font_get_glyph_dsc(&pet_p4_font_cn_16,&g,cp,next)&&!lv_font_get_glyph_dsc(&pet_p4_font_cn_16,&g,'?',0))return;
+  g.req_raw_bitmap=1;const uint8_t *bitmap=g.resolved_font->get_glyph_bitmap(&g,NULL);
+  if(!bitmap){lv_font_glyph_release_draw_data(&g);return;}
+  float scale=px/16.0f,gx=x+g.ofs_x*scale,gy=y+(pet_p4_font_cn_16.line_height-pet_p4_font_cn_16.base_line-g.box_h-g.ofs_y)*scale;
+  int left=(int)floorf(gx)-1,top=(int)floorf(gy)-1,right=(int)ceilf(gx+g.box_w*scale)+1,bottom=(int)ceilf(gy+g.box_h*scale)+1;
+  for(int yy=top;yy<bottom;yy++)for(int xx=left;xx<right;xx++){
+    if(xx<clip->x||yy<clip->y||xx>=clip->x+clip->w||yy>=clip->y+clip->h)continue;
+    float sx=(xx+.5f-gx)/scale-.5f,sy=(yy+.5f-gy)/scale-.5f;
+    int ix=(int)floorf(sx),iy=(int)floorf(sy);float fx=sx-ix,fy=sy-iy;
+    float a=(app_glyph_sample(bitmap,&g,ix,iy)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy)*fx)*(1-fy)+(app_glyph_sample(bitmap,&g,ix,iy+1)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy+1)*fx)*fy;
+    if(clip->weight)a=fminf(255,a*1.18f);
+    if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
+  }lv_font_glyph_release_draw_data(&g);
+}
+static void draw_app_label(const pet_surface_node_t *n,const char *text,uint16_t color){
+  char rows[8][192]={{0}};int count=0,px=n->font_size,lh=n->line_height;
+  int icon_space=n->type==8&&n->icon>=0?n->icon_size+((text&&*text)?n->gap:0):0;
+  int width=n->w-2*n->padding-icon_space;if(width<1)return;
+  int max=n->type==8?1:n->h/lh;if(max<1)max=1;if(max>8)max=8;
+  const char *cursor=text?text:"";
+  do{
+    int bytes=0,units=0;
+    while(*cursor){const char *end=cursor;uint32_t cp=utf8_next(&end);int step=app_glyph_width(cp,utf8_peek(end));size_t len=end-cursor;
+      if((units+step)*px>width*32||bytes+(int)len>=188)break;
+      memcpy(rows[count]+bytes,cursor,len);bytes+=len;units+=step;cursor=end;
+    }
+    if(*cursor&&count==max-1){
+      int dots=app_text_width("...",px);
+      while(bytes>0&&app_text_width(rows[count],px)+dots>width){do{bytes--;}while(bytes>0&&((unsigned char)rows[count][bytes]&0xc0)==0x80);rows[count][bytes]=0;}
+      if(width>=dots)strcat(rows[count],"...");
+    }
+    count++;
+    if(!bytes)break;
+  }while(*cursor&&count<max);
+  int block=count*lh,y=n->y+(n->valign==1?(n->h-block)/2:n->valign==2?n->h-block:0);
+  for(int row=0;row<count;row++){
+    int tw=app_text_width(rows[row],px),total=tw+(row==0?icon_space:0);
+    int x=n->x+n->padding+(n->align==1?(n->w-2*n->padding-total)/2:n->align==2?n->w-2*n->padding-total:0);
+    if(row==0&&icon_space){draw_app_icon(n->icon,x,n->y+(n->h-n->icon_size)/2,n->icon_size,color);x+=icon_space;}
+    int ink_top=0,ink_bottom=15;app_text_bounds(rows[row],&ink_top,&ink_bottom);
+    float yy=y+row*lh+(lh-(ink_bottom-ink_top)*px/32.0f)/2-ink_top*px/32.0f;
+    float xx=x;const char *p=rows[row];while(*p){uint32_t cp=utf8_next(&p),next=utf8_peek(p);draw_app_glyph(cp,next,xx,yy,px,color,n);xx+=app_glyph_width(cp,next)*px/32.0f;}
+  }
+}
+/* Bounded game viewport: same collision grid and gameplay core, independent of
+ * its artwork. Empty cells preserve the cached package background. */
+static void draw_app_game(const pet_surface_t *s,const pet_p4_game_frame_t *g){
+  if(!s->game_view||!g->width||!g->height)return;
+  int cell=s->game_w/g->width;if(s->game_h/g->height<cell)cell=s->game_h/g->height;
+  if(cell<8)return;
+  int ox=s->game_x+(s->game_w-cell*g->width)/2,oy=s->game_y+(s->game_h-cell*g->height)/2;
+  for(int y=0;y<g->height;y++)for(int x=0;x<g->width;x++){
+    int tone=g->cells[y*g->width+x],px=ox+x*cell,py=oy+y*cell,cx=px+cell/2,cy=py+cell/2;
+    if(!tone)continue;
+    if(g->kind==PET_P4_GAME_SNAKE){
+      if(tone==2){
+        fill_ellipse(cx,cy+1,cell/3,cell/3,rgb565(221,99,74));
+        fill_ellipse(cx+cell/6,py+cell/5,cell/6,cell/12,rgb565(73,118,76));
+        fill_ellipse(cx-cell/8,cy-cell/9,cell/12,cell/12,rgb565(255,220,176));
+      }else{
+        fill_round_rect(px+1,py+2,cell-2,cell-3,cell/3,rgb565(67,123,86));
+        fill_round_rect(px+3,py+3,cell-6,cell/3,cell/7,rgb565(118,166,112));
+        if(tone==3){fill_ellipse(cx-cell/5,cy-cell/8,cell/9,cell/9,rgb565(255,249,226));fill_ellipse(cx+cell/5,cy-cell/8,cell/9,cell/9,rgb565(255,249,226));fill_ellipse(cx-cell/5,cy-cell/8,1,2,rgb565(35,60,44));fill_ellipse(cx+cell/5,cy-cell/8,1,2,rgb565(35,60,44));}
+      }
+    }else if(g->kind==PET_P4_GAME_FLAPPY){
+      if(tone==3){
+        fill_ellipse(cx,cy,cell/2-1,cell/2-2,rgb565(242,179,78));
+        fill_ellipse(cx,cy+cell/5,cell/3,cell/5,rgb565(255,231,170));
+        fill_ellipse(cx+cell/5,cy-cell/6,cell/7,cell/7,rgb565(255,254,240));
+        fill_ellipse(cx+cell/4,cy-cell/6,1,2,rgb565(63,55,50));
+        fill_round_rect(px+cell-6,cy,6,4,2,rgb565(214,115,66));
+      }else if(tone==4){
+        fill_ellipse(px+cell*3/4,cy+cell/8,cell/4,cell/5,rgb565(219,146,70));
+      }else{
+        fill_rect(px,py,cell,cell,rgb565(94,143,126));
+        fill_rect(px+2,py,cell/5,cell,rgb565(148,185,150));
+        if(tone==2){fill_round_rect(px,py,cell,cell,cell/6,rgb565(69,115,100));fill_rect(px+3,py+3,cell-6,3,rgb565(164,197,161));}
+      }
+    }else{
+      const uint16_t colors[]={0,rgb565(131,122,211),rgb565(98,184,204),rgb565(224,157,117),rgb565(173,206,144)};
+      fill_round_rect(px+1,py+1,cell-2,cell-2,cell/5,colors[tone<=4?tone:1]);
+      blend_rect(px+3,py+3,cell-6,2,255,255,255,100);
+      blend_rect(px+3,py+cell-4,cell-6,2,0,0,0,45);
+    }
+  }
+}
+static void app_data_label(const char *text,int x,int y,int w,int h,int size,uint16_t color){
+  pet_surface_node_t n={.x=x,.y=y,.w=w,.h=h,.font_size=size,.line_height=(size*5+3)/4,.icon=-1};
+  draw_app_label(&n,text,color);
+}
+/* Clip scrolling platform primitives, rather than dropping a whole platform
+ * when only one edge has crossed the viewport. No additional framebuffer. */
+static void draw_scene_capsule(int x,int y,int w,int h,uint16_t color,const pet_surface_scene_view_t *v){
+  x+=2;y+=2;w-=4;h-=4;if(w<1||h<1)return;
+  int r=(w<h?w:h)/2;
+  for(int yy=0;yy<h;yy++){
+    if(y+yy<v->y||y+yy>=v->y+v->h)continue;
+    for(int xx=0;xx<w;xx++){
+      if(x+xx<v->x||x+xx>=v->x+v->w)continue;
+      int dx=xx<r?r-xx:xx>=w-r?xx-(w-r-1):0;
+      int dy=yy<r?r-yy:yy>=h-r?yy-(h-r-1):0;
+      if(dx*dx+dy*dy<=r*r)put_px(x+xx,y+yy,color);
+    }
+  }
+}
+static void draw_app_scene(const pet_surface_t *s,const pet_p4_game_frame_t *g,unsigned long long now){
+  const pet_surface_scene_view_t *v=&s->scene_view;
+  if(!v->enabled||g->kind!=PET_P4_GAME_BOUNDED||!g->width||!g->height)return;
+  int cell=v->w/g->width;if(v->h/g->height<cell)cell=v->h/g->height;
+  if(cell<1)return;
+  int ox=v->x+(v->w-cell*g->width)/2,oy=v->y+(v->h-cell*g->height)/2;
+  miniapp_pixel_palette_t palette={.background=s->background,.surface=s->background,.ink=v->colors[0],.primary=v->colors[1],.secondary=v->colors[2],.light=v->colors[3],.shadow=v->colors[4]};
+  // Grid cells include entity occupancy, so only the entity renderer owns moving
+  // shapes here. The scene's collision geometry remains unchanged.
+  for(int i=0;i<g->entity_count;i++){
+    const pet_p4_game_entity_t *e=&g->entities[i];if(!e->active)continue;
+    const pet_surface_scene_sprite_t *sprite=NULL;
+    for(int j=0;j<v->count;j++)if(!strcmp(v->sprites[j].entity,e->id))sprite=&v->sprites[j];
+    int px=ox+(g->motion?e->x_q8*cell/256:e->x*cell),py=oy+(g->motion?e->y_q8*cell/256:e->y*cell);
+    if(g->motion&&!sprite&&e->shape==PET_P4_GAME_SHAPE_CAPSULE){
+      draw_scene_capsule(px,py,e->width*cell,e->height*cell,miniapp_game_tone_color(e->tone,&palette),v);continue;
+    }
+    if(g->motion&&(px<v->x||py<v->y||px+e->width*cell>v->x+v->w||py+e->height*cell>v->y+v->h))continue;
+    if(sprite){
+      pet_surface_node_t n={.x=px,.y=py,.w=e->width*cell,.h=e->height*cell,.image=sprite->image,.tile_cols=sprite->columns,.tile_rows=1,.tile_index=(now*sprite->fps/1000)%sprite->columns};
+      draw_surface_image(&n);
+    }else {pet_p4_game_entity_t placed=*e;placed.x=placed.y=0;draw_miniapp_game_entity(&placed,NULL,px,py,cell,true,&palette);}
+  }
+}
+static void draw_app_data(const pet_surface_t *s,const pet_p4_miniapp_view_t *app){
+  const pet_surface_data_view_t *v=&s->data_view;if(!v->enabled)return;
+  const pet_p4_data_view_t *d=&app->data;
+  const uint16_t ink=v->colors[0],muted=v->colors[1],accent=v->colors[2],done=v->colors[3],card=v->colors[4];
+  char page[32];snprintf(page,sizeof(page),"%u / %u",d->page+1,d->pages?d->pages:1);
+  app_data_label(d->date[0]?(v->todos&&strlen(d->date)==10?d->date+5:d->date):"等待连接",v->x,v->y,v->w-110,24,14,muted);
+  app_data_label(page,v->x+v->w-85,v->y,85,24,14,muted);
+  const int row_h=(v->h-58)/5;
+  for(int i=0;i<d->count&&i<5;i++){
+    const pet_p4_data_row_t *r=&d->rows[i];int y=v->y+28+i*row_h;
+    bool quotes=!strcmp(app->data_source,"stocks.watchlist");
+    uint16_t tone=d->stale?muted:v->todos?(r->tone<0?done:accent):quotes?(r->tone>0?rgb565(255,100,102):r->tone<0?rgb565(79,212,149):ink):ink;
+    fill_round_rect(v->x,y,v->w,row_h-5,10,card);
+    if(v->todos){
+      char title[sizeof(r->label)+sizeof(r->meta)];snprintf(title,sizeof(title),"%s%s",r->label,r->meta);
+      fill_round_rect(v->x+10,y+10,3,row_h-25,1,tone);
+      app_data_label(title,v->x+24,y+4,v->w-38,27,20,tone);
+      app_data_label(r->value,v->x+24,y+30,v->w-146,21,13,muted);
+      app_data_label(r->detail,v->x+v->w-112,y+30,100,21,13,tone);
+    }else{
+      app_data_label(r->label,v->x+14,y+5,v->w/2-22,23,16,muted);
+      app_data_label(r->value,v->x+v->w/2,y+3,v->w/2-14,28,22,tone);
+      app_data_label(r->meta,v->x+14,y+30,v->w/2-22,21,12,muted);
+      app_data_label(r->detail,v->x+v->w/2,y+32,v->w/2-14,19,12,quotes?tone:muted);
+    }
+  }
+  if(!d->count)app_data_label(d->received?"暂无内容":"等待 PC 数据",v->x+18,v->y+110,v->w-36,40,24,ink);
+  const char *status=!d->received?"连接 Pet Manager 后显示":d->stale?"数据已过期，请检查连接":d->message;
+  app_data_label(status,v->x,v->y+v->h-24,v->w,24,13,muted);
+}
+static bool render_package_app(unsigned long long now_ms,const pet_p4_miniapp_view_t *app) {
+  static EXT_RAM_BSS_ATTR pet_surface_t surface;
+  if(!pet_p4_miniapp_app_surface(&surface))return false;
+  load_surface_images(now_ms);
+  g_app_text_surface=&surface;
+  const char *values[]={app->title,app->eyebrow,app->headline,app->metric_label,app->metric_value,app->metric_unit,app->badge,app->note,app->footer};
+  // Cache the static prefix, including tiled artwork and its translucent shade.
+  // Theme overlays are cached per page too; do not blend a full-screen wash on
+  // every frame. Actionable/dynamic nodes always remain live.
+  int prefix=0;
+  while(prefix<surface.count){const pet_surface_node_t *n=&surface.nodes[prefix];if(n->floating||n->action[0]||n->tile_cols||n->show_var[0]||n->state_mask||n->host_mask||(n->type!=6&&n->type!=0))break;prefix++;}
+  int first=0;
+  if(prefix&&g_surface_background_valid&&g_surface_background_page==app->surface_page){memcpy(g_framebuffer,g_surface_background,sizeof(g_surface_background));first=prefix;}
+  else fill_rect(0,0,640,480,surface.background);
+  for(int i=first;i<surface.count;i++){
+    if(i==prefix&&prefix&&first==0){memcpy(g_surface_background,g_framebuffer,sizeof(g_surface_background));g_surface_background_valid=true;g_surface_background_page=app->surface_page;}
+    if(i==prefix){draw_app_game(&surface,&app->game);draw_app_scene(&surface,&app->game,now_ms);draw_app_data(&surface,app);}
+    const pet_surface_node_t *n=&surface.nodes[i];
+    if(n->hidden||(n->page!=4&&n->page!=app->surface_page))continue;
+    if(n->type==6){
+        pet_surface_node_t image=*n;
+        if(n->floating)image.y=n->y+(int)lroundf(sinf((now_ms%6000)*6.2831853f/6000)*3);
+        draw_surface_image(&image);
+    }else if(n->type==0)draw_app_panel(n);
+    else if(n->type==7)draw_app_icon(n->icon,n->x,n->y,n->w<n->h?n->w:n->h,n->color);
+    else if(n->type==1||n->type==8){
+      char progress[16];snprintf(progress,sizeof(progress),"%d%%",app->progress_percent<0?0:app->progress_percent);
+      const char *text=n->bind<9?values[n->bind]:n->bind==9?progress:n->text;
+      if(surface.graphics){
+        if(n->type==8)draw_app_panel(n);
+        draw_app_label(n,text,n->type==8?n->foreground:n->color);
+        if(n->disabled)blend_round_rect(n->x,n->y,n->w,n->h,n->radius,128,128,128,110);
+        else if(n->pressed)blend_round_rect(n->x,n->y,n->w,n->h,n->radius,0,0,0,31);
+        continue;
+      }
+      // Fixed line height and clipping area; no wrap outside the node.
+      int y=n->y;
+      while(text&&*text&&y+32*n->scale<=n->y+n->h){
+        bool last=y+64*n->scale>n->y+n->h;
+        const char *next=draw_text_line(text,n->x,y,n->w,n->color,n->scale,last);
+        if(last||!next||next==text)break;text=next;y+=32*n->scale;
+      }
+    }else if(n->type==2){int value=app->progress_percent;if(value<0)value=0;if(value>100)value=100;fill_rect(n->x,n->y,n->w*value/100,n->h,n->color);}
+  }
+  if(prefix==surface.count){draw_app_game(&surface,&app->game);draw_app_scene(&surface,&app->game,now_ms);draw_app_data(&surface,app);}
+  char prompt[121];
+  if(pet_p4_miniapp_confirmation(prompt,now_ms)){
+    blend_rect(0,0,640,480,0,0,0,115);
+    fill_round_rect(108,156,424,202,24,rgb565(255,250,242));
+    pet_surface_node_t label={.x=136,.y=180,.w=368,.h=76,.font_size=20,.line_height=28,.align=1,.icon=-1};
+    draw_app_label(&label,prompt,rgb565(77,64,53));
+    fill_round_rect(136,276,176,56,16,rgb565(238,228,216));
+    fill_round_rect(328,276,176,56,16,rgb565(163,102,69));
+    label.x=136;label.y=276;label.w=176;label.h=56;label.valign=1;
+    draw_app_label(&label,"取消",rgb565(77,64,53));
+    label.x=328;draw_app_label(&label,"确认",rgb565(255,255,255));
+  }
+  return true;
+}
+static bool render_package_media(unsigned long long now_ms, pet_p4_media_view_t *m) {
+  static EXT_RAM_BSS_ATTR pet_surface_t surface;char source[48];
+  if(!pet_p4_miniapp_media_config(source,&surface))return false;
+  if(strcmp(source,m->source))memset(m,0,sizeof(*m));
+  load_surface_images(now_ms);
+  bool playing=!strcmp(m->status,"playing");
+  if(playing&&g_surface_was_playing&&now_ms>=g_surface_last_ms&&now_ms-g_surface_last_ms<250)g_surface_play_ms+=now_ms-g_surface_last_ms;
+  g_surface_last_ms=now_ms;g_surface_was_playing=playing;
+  const pet_surface_node_t *first=&surface.nodes[0];
+  bool cached_background=surface.count&&first->type==6&&!first->rotate_ms&&first->page==2
+    &&first->x==0&&first->y==0&&first->w==640&&first->h==480&&g_surface_background_valid;
+  if(!cached_background)fill_rect(0,0,640,480,surface.background);
+  int index=0;for(int i=0;i<m->count;i++)if(!strcmp(m->queue[i],m->title))index=i;
+  for(int i=0;i<surface.count;i++) {
+    const pet_surface_node_t *n=&surface.nodes[i];
+    if(n->page!=2&&n->page!=m->page)continue;
+    int x=n->x,y=n->y,w=n->w,h=n->h;uint16_t c=n->color;
+    if(n->type==6){
+      bool static_background=i==0&&!n->rotate_ms&&n->page==2&&x==0&&y==0&&w==640&&h==480;
+      if(static_background&&g_surface_background_valid)memcpy(g_framebuffer,g_surface_background,sizeof(g_surface_background));
+      else{
+        draw_surface_image(n);
+        if(static_background){memcpy(g_surface_background,g_framebuffer,sizeof(g_surface_background));g_surface_background_valid=true;}
+      }
+    }
+    else if(n->type==0){fill_round_rect_outline(x,y,w,h,n->radius,c,c);}
+    else if(n->type==1){
+      char number[24];const char *text=n->text;
+      switch(n->bind){
+        case 0:text=m->title[0]?m->title:"选一台，听一会";break;
+        case 1:text=m->artist[0]?m->artist:"打开列表，发现好声音";break;
+        case 2:text=!strcmp(m->status,"playing")?"正在直播":!strcmp(m->status,"buffering")?"正在缓冲":!strcmp(m->status,"error")?"播放失败":m->count?"等待收听":"等待选台";break;
+        case 3:text=m->message;break;
+        case 4:snprintf(number,sizeof(number),"%u%%",m->volume);text=number;break;
+        case 5:snprintf(number,sizeof(number),"%02d",m->count?index+1:0);text=number;break;
+        case 6:snprintf(number,sizeof(number),"%02u",m->count);text=number;break;
+        case 7:snprintf(number,sizeof(number),"%u",m->level);text=number;break;
+      }
+      draw_text_line(text,x,y,w,c,n->scale,true);
+    }else if(n->type==2){int value=n->bind==4?m->volume:m->level;if(value>100)value=100;fill_rect(x,y,w*value/100,h,c);}
+    else if(n->type==3){
+      for(int j=0;j<=40;j++){int height=j%5?h/3:h/2;fill_rect(x+j*(w-2)/40,y+h-height,1,height,c);}
+      if(m->count)fill_rect(x+(m->count>1?index*(w-2)/(m->count-1):(w-2)/2),y,2,h,c);
+    }else if(n->type==4){
+      int rows=h/48,first=m->selected/rows*rows;
+      for(int row=0;row<rows&&first+row<m->count;row++){
+        int at=first+row,ry=y+row*48;
+        if(at==m->selected)fill_round_rect_outline(x,ry+2,w,44,10,c,c);
+        draw_text_line(m->queue[at],x+16,ry+8,w-32,at==m->selected?surface.background:c,1,true);
+      }
+    }else if(n->type==5){
+      int size=w<h?w:h;if(size<12)continue;int r=size/2;
+      fill_ellipse(x+r,y+r,r,r,c);
+      if(!strcmp(m->status,"playing")||!strcmp(m->status,"buffering"))fill_rect(x+size/3,y+size/3,size/3,size/3,surface.background);
+      else for(int j=0;j<size/3;j++)fill_rect(x+size/3+j,y+size/4+j/2,1,size/2-j,surface.background);
+    }
+  }
+  return true;
+}
 static void render_media_page(unsigned long long now_ms) {
-  pet_p4_media_view_t m;pet_p4_media_view(&m);
+  pet_p4_media_view_t *m = &g_media_view_snapshot;
+  pet_p4_media_view(m);
+  if(render_package_media(now_ms,m))return;
   const uint16_t bg=rgb565(22,21,24),surface=rgb565(45,36,35),ink=rgb565(255,246,237),muted=rgb565(177,160,149),accent=rgb565(255,136,62);
   fill_rect(0,0,640,480,bg);
-  if(m.page==2) {
-    if(!strcmp(m.status,"error")) {draw_text_center(m.message,320,222,580,muted,1);return;}
-    bool has_lines=false;for(int i=0;i<5;i++)if(m.lyric_lines[i][0])has_lines=true;
+  if(m->page==2) {
+    if(!strcmp(m->status,"error")) {draw_text_center(m->message,320,222,580,muted,1);return;}
+    bool has_lines=false;for(int i=0;i<5;i++)if(m->lyric_lines[i][0])has_lines=true;
     if(!has_lines) {
-      const char *empty=!m.lyrics_ready?"正在获取歌词":m.lyric_index<0?"暂无同步歌词":"音乐间奏";
+      const char *empty=!m->lyrics_ready?"正在获取歌词":m->lyric_index<0?"暂无同步歌词":"音乐间奏";
       draw_text_center(empty,320,222,580,muted,2);
     } else {
-      unsigned long long age=now_ms>=m.lyric_changed_ms?now_ms-m.lyric_changed_ms:280;
+      unsigned long long age=now_ms>=m->lyric_changed_ms?now_ms-m->lyric_changed_ms:280;
       float t=age>=280?1.0f:(float)age/280.0f;
       int shift=(int)(82*(1-t)*(1-t)*(1-t));
       for(int row=0;row<5;row++) {
@@ -3925,70 +4532,103 @@ static void render_media_page(unsigned long long now_ms) {
         if(row==2) {
           // Two bounded lines keep long Chinese lyrics readable, rather than
           // shrinking everything or drawing over the adjacent lyric rows.
-          if(utf8_text_width(m.lyric_lines[row],-1,2)<=568)draw_text_center(m.lyric_lines[row],320,y,568,color,2);
+          if(utf8_text_width(m->lyric_lines[row],-1,2)<=568)draw_text_center(m->lyric_lines[row],320,y,568,color,2);
           else {
-            const char *rest=draw_text_line(m.lyric_lines[row],36,y,568,color,2,false);
+            const char *rest=draw_text_line(m->lyric_lines[row],36,y,568,color,2,false);
             if(rest&&*rest)draw_text_line(rest,36,y+35,568,color,2,true);
           }
-        } else draw_text_center(m.lyric_lines[row],320,y+6,568,color,1);
+        } else draw_text_center(m->lyric_lines[row],320,y+6,568,color,1);
       }
     }
     return; // Immersive lyrics: no cover, transport bar, header or footer.
   }
   draw_media_note(25,27,accent);
   draw_text_line("随身听",65,23,210,ink,2,true);
-  const char *state=!strcmp(m.status,"playing")?"正在播放":!strcmp(m.status,"paused")?"已暂停":!strcmp(m.status,"buffering")?"正在缓冲":!strcmp(m.status,"ended")?"播放结束":!strcmp(m.status,"error")?"播放失败":!strcmp(m.status,"interrupted")?"语音优先":"准备播放";
-  fill_ellipse(471,37,4,4,!strcmp(m.status,"playing")?accent:muted);
+  const char *state=!strcmp(m->status,"playing")?"正在播放":!strcmp(m->status,"paused")?"已暂停":!strcmp(m->status,"buffering")?"正在缓冲":!strcmp(m->status,"ended")?"播放结束":!strcmp(m->status,"error")?"播放失败":!strcmp(m->status,"interrupted")?"语音优先":"准备播放";
+  fill_ellipse(471,37,4,4,!strcmp(m->status,"playing")?accent:muted);
   draw_text_line(state,486,29,130,muted,1,true);
-  if(m.page==1) {
+  if(m->page==1) {
     draw_text_line("播放列表",28,81,350,muted,1,true);
-    int first=m.selected/5*5;
-    for(int row=0;row<5 && first+row<m.count;row++) {
+    int first=m->selected/5*5;
+    for(int row=0;row<5 && first+row<m->count;row++) {
       int index=first+row,y=114+row*58;
-      if(index==m.selected)fill_round_rect_outline(24,y-6,592,53,12,surface,rgb565(85,58,43));
+      if(index==m->selected)fill_round_rect_outline(24,y-6,592,53,12,surface,rgb565(85,58,43));
       char number[8];snprintf(number,sizeof(number),"%02d",index+1);
-      draw_text_line(number,40,y+8,45,index==m.selected?accent:muted,1,true);
-      draw_text_line(m.queue[index],94,y+5,500,index==m.selected?ink:muted,1,true);
+      draw_text_line(number,40,y+8,45,index==m->selected?accent:muted,1,true);
+      draw_text_line(m->queue[index],94,y+5,500,index==m->selected?ink:muted,1,true);
     }
-    if(!m.count)draw_text_line("在 PC 搜索歌曲并添加到播放列表",30,179,580,ink,1,true);
+    if(!m->count)draw_text_line("在 PC 搜索歌曲并添加到播放列表",30,179,580,ink,1,true);
     draw_text_line("摇杆上下选择 · 中键播放 · 副操作返回",28,444,590,muted,1,true);return;
   }
   fill_round_rect_outline(30,104,212,212,22,rgb565(68,48,43),rgb565(88,61,49));
-  if(m.cover_ready)pet_p4_media_blit(g_framebuffer,PET_P4_UI_WIDTH,40,114);
+  if(m->cover_ready)pet_p4_media_blit(g_framebuffer,PET_P4_UI_WIDTH,40,114);
   else {
     fill_ellipse(136,210,86,86,rgb565(18,18,22));
     for(int r=80;r>34;r--)fill_ellipse(136,210,r,r,r%7==0?rgb565(46,40,42):rgb565(18,18,22));
     fill_ellipse(136,210,30,30,accent);fill_ellipse(136,210,5,5,bg);
   }
   draw_text_line("HACHIMO / MUSIC",276,105,330,rgb565(191,139,110),1,true);
-  const char *title=m.title[0]?m.title:"音乐，陪你一会儿";
+  const char *title=m->title[0]?m->title:"音乐，陪你一会儿";
   const char *rest=draw_text_line(title,276,145,332,ink,2,false);
   if(rest&&*rest)draw_text_line(rest,276,186,332,ink,2,true);
-  draw_text_line(m.artist[0]?m.artist:"搜索歌曲或语音点歌",276,242,332,muted,1,true);
+  draw_text_line(m->artist[0]?m->artist:"搜索歌曲或语音点歌",276,242,332,muted,1,true);
   fill_round_rect_outline(276,278,174,30,15,surface,rgb565(88,61,49));
   draw_text_center("哈基米扬声器",363,285,158,rgb565(226,165,121),1);
   fill_round_rect_outline(30,341,580,6,3,rgb565(67,52,47),rgb565(67,52,47));
-  int progress=m.duration_ms? (int)((uint64_t)m.position_ms*580/m.duration_ms):0;if(progress>580)progress=580;
+  int progress=m->duration_ms? (int)((uint64_t)m->position_ms*580/m->duration_ms):0;if(progress>580)progress=580;
   if(progress>0)fill_round_rect_outline(30,341,progress,6,3,accent,accent);
   char elapsed[16],duration[16],volume[20];
-  snprintf(elapsed,sizeof(elapsed),"%02lu:%02lu",(unsigned long)m.position_ms/60000,(unsigned long)m.position_ms/1000%60);
-  if(m.duration_ms)snprintf(duration,sizeof(duration),"%02lu:%02lu",(unsigned long)m.duration_ms/60000,(unsigned long)m.duration_ms/1000%60);else strcpy(duration,"--:--");
+  snprintf(elapsed,sizeof(elapsed),"%02lu:%02lu",(unsigned long)m->position_ms/60000,(unsigned long)m->position_ms/1000%60);
+  if(m->duration_ms)snprintf(duration,sizeof(duration),"%02lu:%02lu",(unsigned long)m->duration_ms/60000,(unsigned long)m->duration_ms/1000%60);else strcpy(duration,"--:--");
   draw_text_line(elapsed,30,357,90,muted,1,true);draw_text_line(duration,537,357,80,muted,1,true);
-  if(m.seeking)draw_text_center("左右调整进度 · 中键确认",320,357,370,accent,1);
+  if(m->seeking)draw_text_center("左右调整进度 · 中键确认",320,357,370,accent,1);
   fill_ellipse(320,405,29,29,accent);
-  if(!strcmp(m.status,"playing")) {fill_rect(310,392,7,26,bg);fill_rect(324,392,7,26,bg);}
+  if(!strcmp(m->status,"playing")) {fill_rect(310,392,7,26,bg);fill_rect(324,392,7,26,bg);}
   else for(int x=0;x<22;x++)fill_rect(312+x,392+x/2,1,26-x,bg);
   for(int i=0;i<18;i++) {fill_rect(230-i,395+i/2,1,21-i,ink);fill_rect(410+i,395+i/2,1,21-i,ink);}
   fill_rect(210,396,3,20,ink);fill_rect(430,396,3,20,ink);
   draw_media_volume(30,392,muted);
-  snprintf(volume,sizeof(volume),"%u%%",m.volume);draw_text_line(volume,69,398,105,muted,1,true);
+  snprintf(volume,sizeof(volume),"%u%%",m->volume);draw_text_line(volume,69,398,105,muted,1,true);
   draw_media_queue(535,395,muted);
-  char count[20];snprintf(count,sizeof(count),"%u",m.count);draw_text_line(count,575,398,45,muted,1,true);
-  draw_text_center(m.message[0]?m.message:"摇杆切歌与音量 · 全局键退出",320,449,590,muted,1);
+  char count[20];snprintf(count,sizeof(count),"%u",m->count);draw_text_line(count,575,398,45,muted,1,true);
+  draw_text_center(m->message[0]?m->message:"摇杆切歌与音量 · 全局键退出",320,449,590,muted,1);
 }
 
-extern const uint8_t wooden_body[] asm("_binary_wooden_fish_body_bin_start");
-extern const uint8_t wooden_mallet[] asm("_binary_wooden_fish_mallet_bin_start");
+/* Lossless instrument layers: decompress once per visit, never in a strike. */
+extern const uint8_t wooden_body_z[] asm("_binary_wooden_fish_body_deflate_start");
+extern const uint8_t wooden_body_z_end[] asm("_binary_wooden_fish_body_deflate_end");
+extern const uint8_t wooden_mallet_z[] asm("_binary_wooden_fish_mallet_deflate_start");
+extern const uint8_t wooden_mallet_z_end[] asm("_binary_wooden_fish_mallet_deflate_end");
+static uint8_t *wooden_body,*wooden_mallet;
+static bool wooden_failed;
+static void instrument_release(void){
+  if(wooden_body)heap_caps_free(wooden_body);
+  if(wooden_mallet)heap_caps_free(wooden_mallet);
+  wooden_body=wooden_mallet=NULL;wooden_failed=false;
+}
+static uint8_t *instrument_decode(const uint8_t *input,size_t size,unsigned width,unsigned height){
+  size_t expected=4+width*height*3;
+  uint8_t *output=heap_caps_malloc(expected,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+  tinfl_decompressor *inflater=calloc(1,sizeof(*inflater));
+  if(!output||!inflater){if(output)heap_caps_free(output);free(inflater);return NULL;}
+  tinfl_init(inflater);size_t consumed=size,decoded=expected;
+  tinfl_status status=tinfl_decompress(inflater,input,&consumed,output,output,&decoded,
+    TINFL_FLAG_PARSE_ZLIB_HEADER|TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+  free(inflater);
+  if(status!=TINFL_STATUS_DONE||consumed!=size||decoded!=expected||
+      (unsigned)(output[0]|output[1]<<8)!=width||(unsigned)(output[2]|output[3]<<8)!=height){
+    heap_caps_free(output);return NULL;
+  }
+  return output;
+}
+static bool instrument_prepare(void){
+  if(wooden_failed)return false;
+  if(wooden_body&&wooden_mallet)return true;
+  wooden_body=instrument_decode(wooden_body_z,wooden_body_z_end-wooden_body_z,320,244);
+  wooden_mallet=instrument_decode(wooden_mallet_z,wooden_mallet_z_end-wooden_mallet_z,160,163);
+  if(!wooden_body||!wooden_mallet){instrument_release();wooden_failed=true;ESP_LOGW(TAG,"Instrument artwork unavailable");return false;}
+  return true;
+}
 static void instrument_layer(const uint8_t *data,int x,int y,int height) {
   int w=data[0]|data[1]<<8,h=data[2]|data[3]<<8;
   int width=w*height/h;
@@ -4003,11 +4643,155 @@ static void instrument_layer(const uint8_t *data,int x,int y,int height) {
     g_framebuffer[py*640+px]=(r<<11)|(g<<5)|b;
   }
 }
-static void render_instrument_page(unsigned long long now_ms) {
+static pet_fruit_t g_fruit_render;
+static void fruit_sprite(unsigned kind,float x,float y,float angle,int half,unsigned age,float radius) {
+  if(kind>=g_miniapp_sprites.count)return;
+  const pet_p4_miniapp_sprite_t *sp=&g_miniapp_sprites.items[kind];
+  float c=cosf(angle*.017453293f),s=sinf(angle*.017453293f);
+  const float size=radius*2.4f;
+  int extent=(int)(size*.71f)+1;
+  for(int dy=-extent;dy<=extent;dy++)for(int dx=-extent;dx<=extent;dx++) {
+    float sx=(c*dx+s*dy)/size+.5f,sy=(-s*dx+c*dy)/size+.5f;
+    if(sx<0||sx>=1||sy<0||sy>=1||(half<0&&sx>=.5f)||(half>0&&sx<.5f))continue;
+    unsigned at=sp->data_offset+((unsigned)(sy*sp->frame_height)*sp->frame_width+(unsigned)(sx*sp->frame_width))*3;
+    if(at+2>=g_miniapp_sprites.data_length)continue;
+    uint16_t color=g_miniapp_sprites.pixels[at]|g_miniapp_sprites.pixels[at+1]<<8;
+    unsigned alpha=g_miniapp_sprites.pixels[at+2];
+    if(age>=650)alpha=0;else if(age>350)alpha=alpha*(650-age)/300;
+    if(alpha)blend_px((int)x+dx,(int)y+dy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,alpha);
+  }
+}
+static void fruit_spark(int x,int y,int r,uint16_t color) {
+  draw_line(x-r,y,x+r,y,color);draw_line(x,y-r,x,y+r,color);
+}
+static void render_fruit_page(void) {
+  if(!pet_p4_miniapp_fruit_snapshot(&g_fruit_render))return;
+  const pet_fruit_t *s=&g_fruit_render;
+  (void)pet_p4_miniapp_get_sprites(&g_miniapp_sprites);
+  uint16_t cream=rgb565(246,245,224),gold=rgb565(255,198,92),muted=rgb565(141,177,159);
+  uint16_t deep=rgb565(16,40,35),panel=rgb565(29,63,53),mint=rgb565(158,220,149),coral=rgb565(255,119,87);
+  const char *modes[]={"经典挑战","限时冲分","轻松练习"};
+  const char *rules[]={"漏三果或碰炸弹结束","漏果不扣分，炸弹 -30","没有炸弹，尽情划切"};
+  bool menu=s->phase==PET_FRUIT_IDLE||s->phase==PET_FRUIT_RESULT;
+  for(int y=0;y<480;y+=4)fill_rect(0,y,640,4,rgb565(16+y/65,43+y/30,38+y/70));
+  fill_ellipse(630,135,112,220,rgb565(27,61,48));
+  fill_ellipse(-40,470,240,100,rgb565(29,65,46));
+  for(int i=0;i<11;i++)fill_ellipse(23+i*61,115+(i*73)%287,1,1,rgb565(64,91,64));
+  char text[96];
+  if(menu) {
+    fill_round_rect(32,26,159,26,13,panel);draw_text_line("FRESH FRUIT CLUB",45,32,145,mint,1,true);
+    if(s->phase==PET_FRUIT_IDLE) {
+      draw_text_line("鲜果一刀",32,77,325,cream,3,true);
+      draw_text_line("一指划开，快乐爆汁。",36,148,306,muted,1,true);
+      fill_ellipse(456,249,109,15,deep);
+      fruit_sprite(3,449,156,-18,0,0,47);
+      fruit_sprite(0,537,107,24,0,0,32);
+      fruit_sprite(1,533,220,18,0,0,27);
+      fruit_sprite(2,354,203,-27,0,0,22);
+      fruit_spark(367,91,7,gold);fruit_spark(570,176,5,mint);fruit_spark(415,245,4,coral);
+      snprintf(text,sizeof(text),"当前模式最佳  %u",s->best);draw_text_line(text,36,222,295,gold,1,true);
+    } else {
+      draw_text_line(s->bomb_hit?"哎呀，切到炸弹了":"漂亮！本局收刀",36,73,490,cream,2,true);
+      snprintf(text,sizeof(text),"%u",s->score);draw_text_center(text,320,126,500,gold,4);
+      snprintf(text,sizeof(text),"切中 %u 果     最高连击 %u     最佳 %u",s->cut_count,s->max_combo,s->best);
+      draw_text_center(text,320,222,580,muted,1);
+    }
+    draw_text_line("选择你的节奏",34,272,260,cream,1,true);
+    for(unsigned i=0;i<3;i++) {
+      int x=32+i*192;bool selected=s->mode==i;
+      fill_round_rect(x,306,184,72,16,deep);
+      fill_round_rect(x,302,184,72,16,selected?cream:panel);
+      draw_text_line(modes[i],x+16,317,164,selected?deep:cream,1,true);
+      draw_text_line(rules[i],x+12,346,169,selected?rgb565(62,104,77):muted,1,true);
+      if(selected)fill_ellipse(x+164,319,4,4,coral);
+    }
+    fill_round_rect(185,403,270,56,27,deep);
+    fill_round_rect(185,399,270,56,27,gold);
+    draw_text_center(s->phase==PET_FRUIT_RESULT?"再来一局":"开始切果",320,415,248,deep,2);
+    draw_text_center("点击模式卡选择 · 开始键开局 · 全局键退出",320,462,610,muted,1);
+    return;
+  }
+  fill_round_rect(24,20,128,72,18,deep);
+  draw_text_line("SCORE",40,28,108,muted,1,true);
+  snprintf(text,sizeof(text),"%u",s->score);draw_text_line(text,40,50,113,cream,2,true);
+  fill_round_rect(236,24,168,34,17,panel);draw_text_center(modes[s->mode],320,33,150,mint,1);
+  snprintf(text,sizeof(text),"第 %u 阶",s->level);draw_text_center(text,320,73,130,muted,1);
+  fill_round_rect(493,20,123,72,18,deep);
+  unsigned left=s->duration_sec>s->elapsed_ms/1000?s->duration_sec-s->elapsed_ms/1000:0;
+  snprintf(text,sizeof(text),"%02u:%02u",left/60,left%60);draw_text_center(text,554,36,108,left<=10?coral:cream,2);
+  if(s->mode==PET_FRUIT_CLASSIC)for(unsigned i=0;i<s->lives;i++)fill_ellipse(47+i*20,112,5,5,i<s->misses?panel:coral);
+  else draw_text_line("尽情切，别停手",28,105,200,muted,1,true);
+  for(unsigned i=0;i<PET_FRUIT_MAX;i++) {
+    const pet_fruit_item_t *f=&s->fruit[i];if(!f->active)continue;
+    int radius=(int)f->radius;
+    if(f->bomb) {
+      fill_ellipse(f->x+3,f->y+5,radius+2,radius+2,deep);
+      fill_ellipse(f->x,f->y,radius,radius,rgb565(43,48,55));
+      fill_ellipse(f->x-8,f->y-9,8,10,rgb565(85,99,107));
+      draw_line(f->x+10,f->y-radius+3,f->x+20,f->y-radius-13,gold);
+      fruit_spark(f->x+20,f->y-radius-13,5,coral);
+      draw_line(f->x-7,f->y-5,f->x+7,f->y+9,cream);draw_line(f->x+7,f->y-5,f->x-7,f->y+9,cream);
+    } else if(f->cut) {
+      float gap=f->cut_age*.055f;
+      fruit_sprite(f->kind,f->x-gap,f->y,f->angle-gap,-1,f->cut_age,f->radius);
+      fruit_sprite(f->kind,f->x+gap,f->y+gap*.4f,f->angle+gap,1,f->cut_age,f->radius);
+    } else {
+      fill_ellipse(f->x+3,f->y+6,radius,radius,deep);
+      if(f->golden) {
+        int ring=radius+7;
+        for(int a=0;a<360;a+=20) {
+          float rad=a*.017453293f;
+          fill_ellipse(f->x+cosf(rad)*ring,f->y+sinf(rad)*ring,2,2,gold);
+        }
+        fruit_spark(f->x+radius+6,f->y-radius-6,4,gold);
+      }
+      fruit_sprite(f->kind,f->x,f->y,f->angle,0,0,f->radius);
+    }
+  }
+  uint16_t colors[]={coral,gold,mint,rgb565(255,134,161)};
+  for(unsigned i=0;i<PET_FRUIT_PARTICLES;i++) {
+    const pet_fruit_particle_t *p=&s->particles[i];if(!p->life)continue;
+    fill_ellipse(p->x,p->y,p->life>250?3:2,p->life>250?5:2,colors[p->kind%4]);
+  }
+  for(unsigned i=1;i<s->trail_count;i++)if(!s->trail[i].start) {
+    const pet_fruit_trail_t *a=&s->trail[i-1],*b=&s->trail[i];
+    unsigned age=s->now_ms>=b->at?s->now_ms-b->at:0;int width=age<60?3:age<110?2:1;
+    for(int w=-width;w<=width;w++)draw_line(a->x,a->y+w,b->x,b->y+w,gold);
+    draw_line(a->x,a->y,b->x,b->y,cream);
+  }
+  if(s->feedback_ms) {
+    int x=(int)s->feedback_x,y=(int)s->feedback_y-40-(650-s->feedback_ms)/22;
+    if(x<80)x=80;if(x>560)x=560;if(y<135)y=135;
+    snprintf(text,sizeof(text),s->feedback_kind==3?"-%u":s->feedback_kind==2?"金果 +%u":"+%u",s->feedback_points);
+    draw_text_center(text,x,y,160,s->feedback_kind==3?coral:gold,2);
+  }
+  if(s->combo_ms&&s->feedback_combo>=3){snprintf(text,sizeof(text),"连击 ×%u",s->feedback_combo);draw_text_center(text,320,119,230,gold,2);}
+  fill_round_rect(24,414,592,45,16,deep);
+  draw_text_line(s->fever_ms?"爆汁时刻 · 双倍得分":"果汁能量",40,425,250,s->fever_ms?gold:muted,1,true);
+  fill_round_rect(287,431,222,7,3,panel);
+  unsigned energy=s->fever_ms?s->fever_ms/50:s->energy;
+  if(energy)fill_round_rect(287,431,222*energy/100,7,3,s->fever_ms?gold:mint);
+  snprintf(text,sizeof(text),s->fever_ms?"%us ×2":"%u%%",s->fever_ms?(s->fever_ms+999)/1000:s->energy);
+  draw_text_line(text,530,425,79,s->fever_ms?gold:muted,1,true);
+  if(s->phase==PET_FRUIT_PLAYING){
+    fill_round_rect(528,100,88,48,16,panel);
+    draw_text_center("暂停",572,116,78,cream,1);
+  }
+  if(s->phase==PET_FRUIT_PAUSED) {
+    fill_round_rect(143,170,354,191,25,deep);
+    draw_text_center("休息一下，果汁不急",320,203,329,cream,2);
+    draw_text_center("当前进度已暂停",320,250,280,muted,1);
+    fill_round_rect(190,280,260,58,24,gold);
+    draw_text_center("继续切果",320,298,245,deep,2);
+  }
+}
+
+static void render_instrument_page(unsigned long long now_ms, const char *title) {
   uint16_t bg=rgb565(241,227,207),ink=rgb565(84,66,47),muted=rgb565(139,115,84);
   fill_rect(0,0,640,480,bg);
-  draw_text_line("敲木鱼",30,27,250,ink,2,true);
+  draw_text_line(title && title[0] ? title : "静心木鱼",30,27,250,ink,2,true);
   draw_text_line("一声木响，一刻安静",31,68,520,muted,1,true);
+  if(!instrument_prepare()){draw_text_center("画面资源暂不可用，请退出后重试",320,240,580,ink,1);return;}
   pet_instrument_motion_t m=pet_p4_audio_instrument_motion(now_ms);
   if(m.wave<1) {
     int rx=160+(int)(m.wave*110),ry=49+(int)(m.wave*37);
@@ -4024,11 +4808,13 @@ static void render_miniapp_page(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
 ) {
-  pet_p4_miniapp_view_t snapshot = {0};
-  bool available = pet_p4_miniapp_get_view(&snapshot);
-  const pet_p4_miniapp_view_t *app = available ? &snapshot : NULL;
-  if(app && app->active && app->instrument) {render_instrument_page(now_ms);return;}
+  bool available = pet_p4_miniapp_get_view(&g_miniapp_view_snapshot);
+  const pet_p4_miniapp_view_t *app = available ? &g_miniapp_view_snapshot : NULL;
+  if(!app||!app->active||!app->instrument)instrument_release();
+  if(app && app->active && app->slicing) {render_fruit_page();return;}
+  if(app && app->active && app->instrument) {render_instrument_page(now_ms,app->title);return;}
   if(app && app->active && app->media) {render_media_page(now_ms);return;}
+  if(app && app->active && app->app_surface && render_package_app(now_ms,app))return;
   if (app && app->active && app->data.enabled) { render_data_miniapp_page(app); return; }
   uint16_t background = rgb565(5, 7, 6);
   uint16_t panel = rgb565(11, 14, 13);
@@ -4426,6 +5212,9 @@ esp_err_t pet_p4_renderer_render(
   unsigned long long now_ms
 ) {
   ESP_RETURN_ON_ERROR(pet_p4_renderer_init(), TAG, "allocate render buffers");
+  const uint16_t *previous_native = g_native_framebuffer;
+  const bool previous_valid = g_last_native_valid;
+  g_last_native_valid = false; /* rotation/draw failures must force a refresh */
   g_native_framebuffer_index =
     (g_native_framebuffer_index + 1U) % PET_P4_NATIVE_OUTPUT_BUFFER_COUNT;
   g_native_framebuffer = g_native_framebuffers[g_native_framebuffer_index];
@@ -4440,6 +5229,8 @@ esp_err_t pet_p4_renderer_render(
     g_framebuffer_initialized = true;
   }
   const char *page = view && view->page ? view->page : "main";
+  if(strcmp(page,"components"))center_art_release();
+  if(strcmp(page,"app"))instrument_release();
   bool realtime_mode = view && view->realtime_conversation;
   if (realtime_mode != g_last_realtime_conversation) {
     // Even a missing/failed appearance must not leave old Agent cards beneath the chat.
@@ -4449,6 +5240,8 @@ esp_err_t pet_p4_renderer_render(
   }
   if (strcmp(page, "components") == 0) {
     render_component_center_page();
+  } else if (strcmp(page, "touch_test") == 0 && state) {
+    render_touch_test_page(state);
   } else if (strcmp(page, "app") == 0) {
     render_miniapp_page(state, now_ms);
   } else {
@@ -4475,7 +5268,8 @@ esp_err_t pet_p4_renderer_render(
   const bool media_page = strcmp(page, "app") == 0 && pet_p4_miniapp_media_active();
   const bool instrument_page = strcmp(page, "app") == 0
     && pet_p4_miniapp_instrument_config(NULL, NULL);
-  const bool dedicated_page = media_page || instrument_page || strcmp(page, "components") == 0;
+  const bool dedicated_page = media_page || instrument_page || (strcmp(page,"app")==0 && pet_p4_miniapp_slicing_active()) || strcmp(page, "components") == 0
+    || strcmp(page, "touch_test") == 0;
   if (!dedicated_page) draw_touch_feedback(state, now_ms);
   if (strcmp(page, "main") == 0) draw_page_indicator(page);
   // Native media owns its status and error UI. Generic Agent/connection banners
@@ -4488,13 +5282,18 @@ esp_err_t pet_p4_renderer_render(
   ESP_RETURN_ON_ERROR(rotate_landscape_to_panel(), TAG, "rotate logical framebuffer");
   int64_t lcd_started_us = esp_timer_get_time();
   uint32_t rotate_us = elapsed_us_clamped(rotate_started_us, lcd_started_us);
-  esp_err_t lcd_err = pet_p4_lcd_draw_rgb565(
+  bool unchanged = pet_p4_frame_unchanged(g_native_framebuffer, previous_native,
+    (size_t) BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t), previous_valid);
+  esp_err_t lcd_err = unchanged ? ESP_OK : pet_p4_lcd_draw_rgb565(
     0,
     0,
     BSP_LCD_H_RES,
     BSP_LCD_V_RES,
     g_native_framebuffer
   );
+  g_last_native_valid = lcd_err == ESP_OK;
+  if (unchanged) g_lcd_skipped++;
+  else if (lcd_err == ESP_OK) g_lcd_submitted++;
   int64_t render_ended_us = esp_timer_get_time();
   record_render_performance(
     render_started_us,
@@ -4512,6 +5311,7 @@ esp_err_t pet_p4_renderer_render_transfer_status(
   unsigned long long now_ms
 ) {
   ESP_RETURN_ON_ERROR(pet_p4_renderer_init(), TAG, "allocate transfer render buffers");
+  g_last_native_valid = false; /* transfer renders bypass normal frame gating */
   g_native_framebuffer_index =
     (g_native_framebuffer_index + 1U) % PET_P4_NATIVE_OUTPUT_BUFFER_COUNT;
   g_native_framebuffer = g_native_framebuffers[g_native_framebuffer_index];

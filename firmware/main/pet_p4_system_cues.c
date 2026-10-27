@@ -5,8 +5,8 @@ extern const uint8_t done_start[] __asm__("_binary_done_wav_start");
 extern const uint8_t done_end[] __asm__("_binary_done_wav_end");
 extern const uint8_t error_start[] __asm__("_binary_error_wav_start");
 extern const uint8_t error_end[] __asm__("_binary_error_wav_end");
-extern const uint8_t waiting_start[] __asm__("_binary_waiting_user_wav_start");
-extern const uint8_t waiting_end[] __asm__("_binary_waiting_user_wav_end");
+/* The shipped waiting/error WAVs are byte-identical. CMake verifies that
+ * invariant; share the payload without merging their lifecycle identities. */
 
 static uint32_t le32(const uint8_t *p) {
   return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
@@ -53,6 +53,6 @@ bool pet_p4_system_cue_pcm(const char *family, const uint8_t **pcm, size_t *size
   if (!pet_p4_system_cue_family(family)) return false;
   if (!strcmp(family,"done")) { start=done_start; end=done_end; }
   else if (!strcmp(family,"error")) { start=error_start; end=error_end; }
-  else { start=waiting_start; end=waiting_end; }
+  else { start=error_start; end=error_end; }
   return pet_p4_cue_parse_wav(start, (size_t)(end-start), pcm, size);
 }

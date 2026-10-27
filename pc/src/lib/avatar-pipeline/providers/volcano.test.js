@@ -17,7 +17,7 @@ import {
   getVolcanoInputImageRejection,
 } from "./volcano.js";
 
-test("Seedance 2.0 payload includes matching first and last frame references", () => {
+test("Seedance 2.0 uses identity reference without locking either endpoint", () => {
   const payload = buildVolcanoTaskPayload({
     model: "doubao-seedance-2-0-260128",
     prompt: "第一人称果茶广告",
@@ -31,15 +31,14 @@ test("Seedance 2.0 payload includes matching first and last frame references", (
   assert.equal(payload.model, "doubao-seedance-2-0-260128");
   assert.deepEqual(payload.content, [
     { type: "text", text: "第一人称果茶广告" },
-    { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "first_frame" },
-    { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "last_frame" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "reference_image" },
   ]);
   assert.equal(payload.generate_audio, true);
   assert.equal(payload.ratio, "16:9");
   assert.equal(payload.duration, 11);
   assert.equal(payload.watermark, false);
-  assert.equal(payload.content[1].role, "first_frame");
-  assert.equal(payload.content[2].role, "last_frame");
+  assert.equal(payload.content[1].role, "reference_image");
+  assert.equal(payload.content.some(item=>['first_frame','last_frame'].includes(item.role)),false);
 });
 
 test("image policy rejection does not retry or poison the model cache", async () => {
@@ -103,7 +102,7 @@ test("real provider privacy rejection offers the existing manual video upload wo
   assert.match(rejection.message, /其他动作.*上传 MP4 替换/);
 });
 
-test("Seedance 1.5 payload includes prompt flags plus matching first and last frame references", () => {
+test("Seedance 1.5 keeps its supported first-frame input without a forced ending", () => {
   const payload = buildVolcanoTaskPayload({
     model: "doubao-seedance-1-5-pro-251215",
     prompt: "无人机以极快速度穿越复杂障碍或自然奇观",
@@ -122,7 +121,6 @@ test("Seedance 1.5 payload includes prompt flags plus matching first and last fr
       text: "无人机以极快速度穿越复杂障碍或自然奇观 --duration 5 --camerafixed false --watermark false --ratio 4:3 --resolution 480p",
     },
     { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "first_frame" },
-    { type: "image_url", image_url: { url: "data:image/png;base64,abc123" }, role: "last_frame" },
   ]);
   assert.equal("duration" in payload, false);
   assert.equal("ratio" in payload, false);
@@ -142,7 +140,7 @@ test("Volcano submit diagnostics omit secrets and raw media", () => {
   });
 
   const diagnostics = buildVolcanoTaskDiagnostics(payload);
-  assert.deepEqual(diagnostics.content.map((part) => part.role || part.type), ["text", "first_frame", "last_frame"]);
+  assert.deepEqual(diagnostics.content.map((part) => part.role || part.type), ["text", "reference_image"]);
   assert.equal(diagnostics.content[1].url.kind, "data_url");
   assert.equal(diagnostics.content[1].url.mime, "image/png");
   assert.equal(JSON.stringify(diagnostics).includes("abc123"), false);
@@ -167,7 +165,8 @@ test("explicit video controls reach the Ark request", () => {
   assert.equal(payload.duration, 10);
   assert.equal(payload.resolution, "720p");
   assert.equal(payload.seed, 42);
-  assert.equal(payload.camera_fixed, true);
+  assert.equal(payload.camera_fixed, undefined);
+  assert.match(payload.content[0].text, /Fixed camera position/);
   assert.equal(payload.generate_audio, true);
   assert.equal(payload.watermark, true);
   assert.throws(() => buildVolcanoTaskPayload({ seed: 0.5 }), /整数/);

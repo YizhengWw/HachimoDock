@@ -1,0 +1,4 @@
+Weather forecast data: MET Norway (The Norwegian Meteorological Institute).
+Source: https://api.met.no/weatherapi/locationforecast/2.0/
+License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/
+The PC host selects a forecast time and translates condition names. This is a forecast, not an on-site observation. No weather data is bundled.

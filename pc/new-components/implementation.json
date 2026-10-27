@@ -1,0 +1,34 @@
+{
+  "scope": "2026-10-21: user explicitly requested continuing the three new components; older review is not silently marked complete",
+  "components": [
+    {
+      "id": "cloud-hop", "name": "云端跳一跳", "kind": "game",
+      "loop": "ready -> hold to charge -> release -> bounded ballistic flight -> land/score or fall/result -> restart",
+      "inputs": "SW1 start/restart and charge/release; SW2 pause; touch charge area; global exit retains precedence",
+      "entities": "original pet sprite, current/target platforms, shadow, charge feedback",
+      "visual": "clean airy pastel diorama, no visible grid; HUD and touch targets remain live",
+      "capabilityGap": "generic continuous scene, hold/release/cancel, landing and procedural bounded placement require coordinated runtime extension",
+      "status": "implementation"
+    },
+    {
+      "id": "daily-almanac", "name": "每日黄历", "kind": "tool",
+      "loop": "open at today in Asia/Shanghai -> browse date -> traditional-detail pages -> return to today",
+      "inputs": "SW1 today; SW2 details/back; joystick left/right date or detail page; matching touch controls",
+      "data": "versioned offline date records owned by PC resource package; lunar/solar terms checked against HKO; folk宜忌 clearly not predictions or advice; festivals not statutory holidays",
+      "visual": "ivory paper, vermilion accents, small pet vignette; real text and generous button padding",
+      "runtime": "existing app surface plus new bounded calendar host interpreter; no package scripts, no firmware-specific calendar branch",
+      "status": "implementation"
+    },
+    {
+      "id": "book-pocket", "name": "快速读懂一本书", "kind": "tool",
+      "loop": "real device entry draws a book without immediate repeat -> lossless full paging/narration -> category or another book -> exit cancels audio",
+      "inputs": "SW1 random book/confirm category; SW2 category/cancel; joystick and swipe page/category; no favorites",
+      "data": "100 economic, business and cognition books; original detailed critical guides, not unlicensed copied text or invented quotations; bibliographic provenance",
+      "visual": "warm cream and sage reading room with pet, legible live text, restrained two-button layout",
+      "runtime": "bounded library reader and pet voice/global-volume narration; need original-guide attribution and device-entry randomization",
+      "status": "implementation"
+    }
+  ],
+  "releaseGates": ["matching Rust/Python validation", "real input/state tests", "all content present and reviewed", "640x480 asset/compiled-image budget", "PC visual QA", "separately approved device upgrade and audio test"],
+  "publication": "Do not publish partial packages or report PC tests as hardware acceptance."
+}

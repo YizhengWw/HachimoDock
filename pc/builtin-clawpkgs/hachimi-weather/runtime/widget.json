@@ -1,0 +1,726 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.primary"
+    },
+    {
+      "from": "*",
+      "on": "host.secondary"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    },
+    {
+      "from": "*",
+      "on": "host.choose"
+    },
+    {
+      "from": "*",
+      "on": "host.details"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "今日气象",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "选择城市",
+    "headline": "连接后获取城市天气",
+    "metricValue": "",
+    "note": "点击右上角选城；自动估算仅在未手动选择时使用。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "更新预报",
+    "metricUnit": "近期待办"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 61343,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 96,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 61343,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 290,
+        "h": 436,
+        "color": 59294,
+        "opacity": 245,
+        "opacity_end": 200
+      },
+      {
+        "type": "panel",
+        "x": 290,
+        "y": 0,
+        "w": 350,
+        "h": 436,
+        "color": 59294,
+        "opacity": 200,
+        "opacity_end": 0
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 8682,
+        "icon": "sun"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 8682,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "button",
+        "x": 374,
+        "y": 12,
+        "w": 240,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8682,
+        "padding": 12,
+        "weight": 600,
+        "bind": "eyebrow",
+        "icon": "compass",
+        "action": "host.choose",
+        "opacity": 230
+      },
+      {
+        "type": "text",
+        "x": 26,
+        "y": 81,
+        "w": 362,
+        "h": 112,
+        "color": 8682,
+        "font_size": 88,
+        "bind": "metricValue"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 207,
+        "w": 550,
+        "h": 60,
+        "color": 8682,
+        "font_size": 26,
+        "bind": "headline"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 285,
+        "w": 22,
+        "h": 22,
+        "color": 8682,
+        "icon": "cloud"
+      },
+      {
+        "type": "text",
+        "x": 63,
+        "y": 276,
+        "w": 548,
+        "h": 70,
+        "color": 8682,
+        "font_size": 17,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 366,
+        "w": 148,
+        "h": 48,
+        "color": 19411,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "sun",
+        "action": "host.primary"
+      },
+      {
+        "type": "button",
+        "x": 184,
+        "y": 366,
+        "w": 156,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8682,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "list",
+        "action": "host.secondary",
+        "opacity": 230,
+        "stroke": 65535,
+        "stroke_width": 1
+      },
+      {
+        "type": "button",
+        "x": 398,
+        "y": 366,
+        "w": 102,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8682,
+        "padding": 10,
+        "weight": 600,
+        "text": "上一城",
+        "action": "host.previous",
+        "opacity": 230,
+        "host_mask": 8
+      },
+      {
+        "type": "button",
+        "x": 510,
+        "y": 366,
+        "w": 104,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8682,
+        "padding": 10,
+        "weight": 600,
+        "text": "下一城",
+        "action": "host.next",
+        "opacity": 230,
+        "host_mask": 8
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 61343,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 8682,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 61343,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 8682,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 8682,
+        "font_size": 15,
+        "text": "更新/确认"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 61343,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 8682,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 8682,
+        "font_size": 15,
+        "text": "待办/取消"
+      },
+      {
+        "type": "text",
+        "x": 302,
+        "y": 446,
+        "w": 208,
+        "h": 24,
+        "color": 8682,
+        "font_size": 14,
+        "text": "左右选城"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 8682,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 连接后获取城市天气更新预报近期待办今日象选择点击右上角；自动",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            8,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "估算仅在未手时使用。一下确认消左全局键退出",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "host": true,
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    }
+  }
+}

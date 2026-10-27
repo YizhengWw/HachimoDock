@@ -1,0 +1,17 @@
+{
+  "dashboard": {
+    "title": "每天一本书",
+    "eyebrow": "原创导读 · 100 本",
+    "headline": "连接后，打开一本书",
+    "metricValue": "10 类主题 · 进入随机打开一本",
+    "metricLabel": "换一本",
+    "metricUnit": "",
+    "badge": "",
+    "note": "连接 Pet Manager 后阅读。进入设备组件会自动朗读，退出停止。",
+    "footer": "音色跟随当前宠物；左右滑动或摇杆翻页。",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "timer"
+  }
+}

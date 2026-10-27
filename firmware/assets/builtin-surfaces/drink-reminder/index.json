@@ -1,0 +1,17 @@
+{
+  "background": {
+    "encoded": "9374cfefc2aee6d2aa481cfa323c145d1018b9f004f7fc72b2a083b5706be160",
+    "source": "7624bdd32c1c26d691c00df2dbae8458cb5d95e2e25ae1e774b24f88caa4188c",
+    "spec": "48e1efe7e24c3977367266eda2a638067e24da9038a963dddd34eb1f3c1ab670"
+  },
+  "type0": {
+    "encoded": "d33f64362f9ba928293587426eb3d22141738e140ca0bd07cd0c61b7714d2e95",
+    "source": "b61ac9f6a8a84615e41bdb8eda155673e897a2abf17e2b537ccac7b7d2b1daa7",
+    "spec": "ab7c14ae8350284a8f8354bdb523b3f31d7c6defb904d7bbdb67bbc8bb62ad21"
+  },
+  "type1": {
+    "encoded": "3e853c488c6d97cb585e1b4772f553623bf7f10f5f43bf69e3c77a953764a5cb",
+    "source": "ff50f488985347fc64d3f8791c7ccd39a9b55384e57a684e06a508fa270ab17f",
+    "spec": "bd247b56d9cf25cd62fb17dca9fe227f05ed33b8b9e6e0786e5339d54b2b7731"
+  }
+}

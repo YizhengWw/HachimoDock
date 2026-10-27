@@ -6,6 +6,17 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_identical_default_cues_are_embedded_only_once():
+    clips = ROOT.parent / "pc/public/terrier-clips"
+    assert (clips / "error.wav").read_bytes() == (clips / "waiting_user.wav").read_bytes()
+    cmake = (ROOT / "main/CMakeLists.txt").read_text()
+    assert "PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA" in cmake
+    assert "foreach(cue done error)" in cmake
+    assert "../pc/public/terrier-clips/waiting_user.wav" not in (ROOT / "platformio.ini").read_text()
+    source = (ROOT / "main/pet_p4_system_cues.c").read_text()
+    assert "_binary_waiting_user_wav" not in source
+
+
 def test_shared_cues_parse_and_preserve_unknown_custom_audio():
     harness = r'''
 #include "pet_p4_system_cues.h"

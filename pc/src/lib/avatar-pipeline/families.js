@@ -20,29 +20,29 @@
  */
 
 /** @type {FamilyDef[]} */
-export const FAMILIES = [
+const FAMILY_DEFINITIONS = [
   {
     family: "welcome",
     label: "warm greeting",
     playback: "one_shot_entry",
     motion_brief:
-      "A one-shot greeting: start from the uploaded pose, do a small welcoming step/peek/slide or paw lift near the center, then return to the exact uploaded pose.",
+      "A one-shot greeting: begin in a state-appropriate pose, do a small welcoming step/peek/slide or paw lift near the center, then settle naturally into a relaxed state-specific pose.",
     spatial_path:
       "Start at the uploaded center pose, make a small left/right or forward greeting motion inside the frame, then settle back to the same center pose.",
     pose_signature:
-      "Visible greeting-step-peek-slide-settle silhouette: one paw or head leads a small welcome beat, then the full body returns to the reference pose.",
+      "Visible greeting-step-peek-slide-settle silhouette: one paw or head leads a small welcome beat, then the full body settles naturally into a relaxed greeting pose.",
     prop_policy:
       "Required small marker prop: one tiny flower, sparkle sign, or welcome mark must appear near the entrance path; keep it secondary and do not cover the face.",
     avoid_motion:
       "Do not make welcome an off-screen entrance, a seated stationary idle, a tiny blink, or the same centered pose for the whole clip.",
-    variation_hint: "Vary the greeting direction: small left step, right step, forward peek, or quick paw-lift, but always return to the reference pose.",
+    variation_hint: "Vary the greeting direction: small left step, right step, forward peek, or quick paw-lift, but always finish naturally without a shared pose reset.",
   },
   {
     family: "idle.playing",
     label: "playful idle",
     playback: "loop_state",
     motion_brief:
-      "A compact playful loop: start from the uploaded pose, dash after a tiny play target across the screen, bat once with a paw, then return to the exact uploaded pose.",
+      "A compact playful loop: begin in a state-appropriate pose, dash after a tiny play target across the screen, bat once with a paw, then settle naturally into a relaxed state-specific pose.",
     spatial_path:
       "Clear left-to-right or screen-left to screen-right dash across the frame, with a visible paw reach near the far side and quick recoil back to the original pose; do not keep the pet centered for the whole clip.",
     pose_signature:
@@ -58,7 +58,7 @@ export const FAMILIES = [
     label: "wandering idle",
     playback: "loop_state",
     motion_brief:
-      "A slow wandering loop: start from the uploaded pose, follow a tiny environmental marker across the screen with one or two exploratory side steps, then return to the exact pose.",
+      "A slow wandering loop: begin in a state-appropriate pose, follow a tiny environmental marker across the screen with one or two exploratory side steps, then settle into a natural comfortable pose.",
     spatial_path:
       "Visible side travel from screen-left toward screen-right or from screen-right toward screen-left, using a shallow wandering arc inside the frame; the pet may briefly occupy a side position instead of staying centered.",
     pose_signature:
@@ -74,11 +74,11 @@ export const FAMILIES = [
     label: "working",
     playback: "loop_state",
     motion_brief:
-      "A focused in-progress work loop: compact desk-work motion such as tapping a tiny keyboard, nudging a small mouse, flipping one page of a small open book, or visible typing, then return to the same pose.",
+      "A focused in-progress work loop: compact desk-work motion such as tapping a tiny keyboard, nudging a small mouse, flipping one page of a small open book, or visible typing, then finish naturally.",
     spatial_path:
       "No travel; keep the body planted with a clear centered work beat and a loop-safe return.",
     pose_signature:
-      "Working silhouette: intent gaze, slight forward focus, one readable keyboard, mouse, page-flip, or typing action, and a rhythmic reset back to the uploaded pose.",
+      "Working silhouette: intent gaze, slight forward focus, one readable keyboard, mouse, page-flip, or typing action, and a rhythmic settle into a natural focused pose.",
     prop_policy:
       "Required small marker prop: one tiny keyboard, small mouse, or small open book/page near the working action; no readable UI text, no abstract progress/status effects, no cursor graphics.",
     avoid_motion:
@@ -91,9 +91,9 @@ export const FAMILIES = [
     label: "waiting for user",
     playback: "loop_state",
     motion_brief:
-      "A clear large waiting-for-user cue: start from the uploaded pose, lean forward, raise a subject-appropriate hand, arm, paw, wing, or whole-body gesture toward a tiny option cue, do one obvious beckon or attentive side look, then return to the exact uploaded pose.",
+      "A clear large waiting-for-user cue: begin in a state-appropriate pose, lean forward, raise a subject-appropriate hand, arm, paw, wing, or whole-body gesture toward a tiny option cue, do one obvious beckon or attentive side look, then settle naturally into a relaxed state-specific pose.",
     spatial_path:
-      "Visible forward lean plus side-to-side attention shift inside the frame; the subject may travel about 15-30% toward screen-left, screen-right, or toward the viewer in the middle, then return to the original pose.",
+      "Visible forward lean plus side-to-side attention shift inside the frame; the subject may travel about 15-30% toward screen-left, screen-right, or toward the viewer in the middle, then settle naturally.",
     pose_signature:
       "Waiting silhouette: subject-appropriate raised arm/hand, lifted paw, wing cue, torso lean, head-and-body beckon, or whole-body bounce that reads as asking the user to choose.",
     prop_policy:
@@ -108,7 +108,7 @@ export const FAMILIES = [
     label: "task done",
     playback: "loop_state",
     motion_brief:
-      "A short completion reward: proud expression, tiny celebratory lift, ring a tiny finish bell or tap a finish marker once, and gracefully return to the same pose.",
+      "A short completion reward: proud expression, tiny celebratory lift, ring a tiny finish bell or tap a finish marker once, and gracefully finish naturally.",
     spatial_path:
       "Small upward lift or proud chest rise in place, then a clean settle back to center.",
     pose_signature:
@@ -124,7 +124,7 @@ export const FAMILIES = [
     label: "soft error",
     playback: "loop_state",
     motion_brief:
-      "A cute soft-error cycle: small startled recoil, confused look, apologetic recovery, and return to the same pose.",
+      "A cute soft-error cycle: small startled recoil, confused look, apologetic recovery, and finish naturally.",
     spatial_path:
       "Tiny backward recoil and recovery in place, with no side travel.",
     pose_signature:
@@ -142,7 +142,7 @@ export const FAMILIES = [
     motion_brief:
       "A touch-screen affectionate response: after the user taps, the pet suddenly leans close so the face grows large in the foreground, softly presses nose or cheek against the screen glass, then quietly returns to the pose.",
     spatial_path:
-      "Fast forward approach toward the viewer, face close to the front glass for a beat, then backward return to the original pose.",
+      "Fast forward approach toward the viewer, face close to the front glass for a beat, then backward settle naturally.",
     pose_signature:
       "Close-up touch silhouette: enlarged face near the glass, soft eyes, nose or cheek leading the contact, body still readable behind the foreground head.",
     prop_policy:
@@ -177,7 +177,7 @@ export const FAMILIES = [
     label: "default idle",
     playback: "loop_state",
     motion_brief:
-      "A calm default idle cycle with subtle breathing or blink, no directional travel, and return to the exact pose.",
+      "A calm default idle cycle with subtle breathing or blink, no directional travel, and settle into a natural comfortable pose.",
     spatial_path:
       "No travel; only breathing, tiny head buoyancy, and blink timing.",
     pose_signature:
@@ -193,7 +193,7 @@ export const FAMILIES = [
     label: "jumping idle",
     playback: "loop_state",
     motion_brief:
-      "A short anticipation-and-hop idle: small crouch, lift, peak, descent, settle back to the exact pose.",
+      "A short anticipation-and-hop idle: small crouch, lift, peak, descent, settle naturally after landing.",
     spatial_path:
       "Vertical crouch-hop-settle path, centered and low enough to stay in frame.",
     pose_signature:
@@ -239,7 +239,26 @@ export const FAMILIES = [
 ];
 
 const CUSTOM_GENERATION_EXCLUDED_FAMILY_IDS = new Set(["touch.right", "touch.left"]);
+export const FAMILIES = FAMILY_DEFINITIONS.map(item => ({ ...item,
+  prop_policy: item.family === "idle.default" ? "No props, sparkles, dots or decorations. Only natural breathing and blinking."
+    : item.prop_policy.replace(/Required/g, "Optional").replace(/must/g, "may"),
+}));
 
+const CLEAN_MOTIONS = {
+  welcome:'A small greeting lean and subject-appropriate limb or head wave, then settle naturally.',
+  'idle.playing':'Playfully crouch, make a short side hop, then settle naturally; keep any original character-associated accessory, never introduce an object.',
+  'idle.wandering':'Take two slow exploratory side steps and look around, then settle naturally.',
+  working:'Focus the gaze, lean attentively and make two small rhythmic head or own-limb movements, then settle naturally.',
+  waiting_user:'Look toward the viewer, tilt the head and beckon using the subject’s own anatomy, then settle naturally.',
+  done:'Raise the head, make one cheerful body bounce and settle back.',
+  error:'Pause, make a small surprised recoil and concerned head tilt, then settle naturally.',
+  'touch.lick':'Lean toward the viewer with a friendly facial expression and gently retreat; stay entirely in frame.',
+  'touch.what':'Make a curious forward lean and head tilt, then settle naturally; stay entirely in frame.',
+  'idle.default':'Subtle natural breathing and blinking only, with the complete body staying still.',
+  'idle.jumping':'One low crouch-hop-soft-landing cycle, entire body in frame, then settle naturally.',
+};
 export const CUSTOM_GENERATION_FAMILIES = FAMILIES.filter(
   (item) => !CUSTOM_GENERATION_EXCLUDED_FAMILY_IDS.has(item.family),
-);
+).map(item=>({...item,preserve_reference_accessories:true,motion_brief:CLEAN_MOTIONS[item.family],spatial_path:'Keep the complete subject within the frame with safe margins; use state-specific starting and ending poses without a shared pose reset.',
+  pose_signature:CLEAN_MOTIONS[item.family],prop_policy:'Preserve original character-associated accessories already held or worn in the reference, such as a tennis racket, musical instrument, glasses or hat. No newly invented props, hands from other people, unrelated furniture, symbols, effects or decorations. Preserve the subject\'s own hands, arms and legs. Keep the complete subject and retained accessories within frame on pure black.',
+  variation_hint:'Vary only the subject’s own pose, gaze and rhythm. Never add objects.'}));

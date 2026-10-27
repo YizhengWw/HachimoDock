@@ -1,89 +1,211 @@
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
+  "engine": "p4-bounded-runtime-v4",
   "vars": {
-    "remaining_s": { "type": "int", "init": 1500 },
-    "phase_total_s": { "type": "int", "init": 1500 },
-    "completed_sessions": { "type": "int", "init": 0 }
+    "remaining_s": {
+      "type": "int",
+      "init": 1500
+    },
+    "phase_total_s": {
+      "type": "int",
+      "init": 1500
+    },
+    "completed_sessions": {
+      "type": "int",
+      "init": 0
+    },
+    "focus_s": {
+      "type": "int",
+      "init": 1500
+    }
   },
-  "states": ["focus", "focus_paused", "rest", "rest_paused"],
-  "initial_state": "focus",
+  "states": [
+    "focus",
+    "focus_paused",
+    "rest",
+    "rest_paused",
+    "ready"
+  ],
+  "initial_state": "ready",
   "transitions": [
-    { "from": "focus", "on": "tomato.start_pause", "to": "focus_paused" },
-    { "from": "focus_paused", "on": "tomato.start_pause", "to": "focus" },
-    { "from": "rest", "on": "tomato.start_pause", "to": "rest_paused" },
-    { "from": "rest_paused", "on": "tomato.start_pause", "to": "rest" },
+    {
+      "from": "focus",
+      "on": "tomato.start_pause",
+      "to": "focus_paused"
+    },
+    {
+      "from": "focus_paused",
+      "on": "tomato.start_pause",
+      "to": "focus"
+    },
+    {
+      "from": "rest",
+      "on": "tomato.start_pause",
+      "to": "rest_paused"
+    },
+    {
+      "from": "rest_paused",
+      "on": "tomato.start_pause",
+      "to": "rest"
+    },
     {
       "from": "focus",
       "on": "tomato.skip_phase",
       "to": "rest",
-      "set": { "remaining_s": 300, "phase_total_s": 300 },
-      "inc": { "completed_sessions": 1 }
+      "set": {
+        "remaining_s": 300,
+        "phase_total_s": 300
+      }
     },
     {
       "from": "focus_paused",
       "on": "tomato.skip_phase",
-      "to": "rest",
-      "set": { "remaining_s": 300, "phase_total_s": 300 },
-      "inc": { "completed_sessions": 1 }
+      "to": "rest_paused",
+      "set": {
+        "remaining_s": 300,
+        "phase_total_s": 300
+      }
     },
     {
       "from": "rest",
       "on": "tomato.skip_phase",
       "to": "focus",
-      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+      "set": {
+        "remaining_s": {
+          "var": "focus_s"
+        },
+        "phase_total_s": {
+          "var": "focus_s"
+        }
+      }
     },
     {
       "from": "rest_paused",
       "on": "tomato.skip_phase",
-      "to": "focus",
-      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+      "to": "focus_paused",
+      "set": {
+        "remaining_s": {
+          "var": "focus_s"
+        },
+        "phase_total_s": {
+          "var": "focus_s"
+        }
+      }
     },
     {
       "from": "focus",
       "on": "tomato.reset_phase",
       "to": "focus",
-      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+      "set": {
+        "remaining_s": {
+          "var": "focus_s"
+        },
+        "phase_total_s": {
+          "var": "focus_s"
+        }
+      }
     },
     {
       "from": "focus_paused",
       "on": "tomato.reset_phase",
-      "to": "focus",
-      "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+      "to": "focus_paused",
+      "set": {
+        "remaining_s": {
+          "var": "focus_s"
+        },
+        "phase_total_s": {
+          "var": "focus_s"
+        }
+      }
     },
     {
       "from": "rest",
       "on": "tomato.reset_phase",
       "to": "rest",
-      "set": { "remaining_s": 300, "phase_total_s": 300 }
+      "set": {
+        "remaining_s": 300,
+        "phase_total_s": 300
+      }
     },
     {
       "from": "rest_paused",
       "on": "tomato.reset_phase",
-      "to": "rest",
-      "set": { "remaining_s": 300, "phase_total_s": 300 }
+      "to": "rest_paused",
+      "set": {
+        "remaining_s": 300,
+        "phase_total_s": 300
+      }
+    },
+    {
+      "from": "ready",
+      "on": "tomato.start_pause",
+      "to": "focus",
+      "set": {
+        "remaining_s": {
+          "var": "focus_s"
+        },
+        "phase_total_s": {
+          "var": "focus_s"
+        }
+      }
+    },
+    {
+      "from": "ready",
+      "on": "tomato.shorter",
+      "inc": {
+        "focus_s": -300
+      }
+    },
+    {
+      "from": "ready",
+      "on": "tomato.longer",
+      "inc": {
+        "focus_s": 300
+      }
     }
   ],
   "tick": [
     {
       "every_ms": 1000,
       "while_state": "focus",
-      "inc": { "remaining_s": -1 },
-      "when": { "var": "remaining_s", "lte": 0 },
+      "inc": {
+        "remaining_s": -1
+      },
+      "when": {
+        "var": "remaining_s",
+        "lte": 0
+      },
       "then": {
         "to": "rest",
-        "set": { "remaining_s": 300, "phase_total_s": 300 },
-        "inc": { "completed_sessions": 1 }
+        "set": {
+          "remaining_s": 300,
+          "phase_total_s": 300
+        },
+        "inc": {
+          "completed_sessions": 1
+        }
       }
     },
     {
       "every_ms": 1000,
       "while_state": "rest",
-      "inc": { "remaining_s": -1 },
-      "when": { "var": "remaining_s", "lte": 0 },
+      "inc": {
+        "remaining_s": -1
+      },
+      "when": {
+        "var": "remaining_s",
+        "lte": 0
+      },
       "then": {
         "to": "focus",
-        "set": { "remaining_s": 1500, "phase_total_s": 1500 }
+        "set": {
+          "remaining_s": {
+            "var": "focus_s"
+          },
+          "phase_total_s": {
+            "var": "focus_s"
+          }
+        }
       }
     }
   ],
@@ -94,59 +216,676 @@
         "focus": "专注阶段",
         "focus_paused": "专注已暂停",
         "rest": "休息阶段",
-        "rest_paused": "休息已暂停"
+        "rest_paused": "休息已暂停",
+        "ready": "准备开始"
       }
     },
     "headline": {
       "switch_state": {
-        "focus": "专注中",
-        "focus_paused": "暂停中",
-        "rest": "放松一下",
-        "rest_paused": "暂停中"
+        "focus": "把这一刻，留给专注。",
+        "focus_paused": "歇一歇，稍后继续。",
+        "rest": "做完一轮，放松一下。",
+        "rest_paused": "休息计时已暂停。",
+        "ready": "选好时长，再开始。"
       }
     },
     "metricLabel": "剩余时间",
-    "metricValue": { "fmt_mmss": "remaining_s" },
-    "metricUnit": "",
-    "badge": { "var": "completed_sessions" },
-    "note": {
+    "metricValue": {
       "switch_state": {
-        "focus": "右上显示完成轮次",
-        "focus_paused": "计时已暂停",
-        "rest": "完成休息后继续专注",
-        "rest_paused": "休息计时已暂停"
+        "focus": {
+          "fmt_mmss": "remaining_s"
+        },
+        "focus_paused": {
+          "fmt_mmss": "remaining_s"
+        },
+        "rest": {
+          "fmt_mmss": "remaining_s"
+        },
+        "rest_paused": {
+          "fmt_mmss": "remaining_s"
+        },
+        "ready": {
+          "fmt_mmss": "focus_s"
+        }
       }
     },
-    "footer": {
+    "metricUnit": {
       "switch_state": {
-        "focus": "SW1暂停 · SW2跳过 · 摇杆下重置 · 全局键退出",
-        "focus_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · 全局键退出",
-        "rest": "SW1暂停 · SW2跳过 · 摇杆下重置 · 全局键退出",
-        "rest_paused": "SW1继续 · SW2跳过 · 摇杆下重置 · 全局键退出"
+        "focus": "暂停专注",
+        "focus_paused": "继续专注",
+        "rest": "暂停休息",
+        "rest_paused": "继续休息",
+        "ready": "开始专注"
       }
     },
+    "badge": {
+      "var": "completed_sessions"
+    },
+    "note": "开始前可调 5–60 分钟 · 休息 5 分钟",
+    "footer": "主键开始/暂停  副键跳过  全局键退出",
     "progress": {
       "pct_of": "remaining_s",
       "of_max": "phase_total_s",
       "label": "本轮剩余"
     },
-    "visualStyle": "pixel",
-    "visualPalette": {
-      "switch_state": {
-        "focus": "sunset",
-        "focus_paused": "arcade",
-        "rest": "mint",
-        "rest_paused": "arcade"
-      }
-    },
+    "visualStyle": "clean",
+    "visualPalette": "sunset",
     "visualLayout": "tool",
-    "visualSprite": {
-      "switch_state": {
-        "focus": "timer",
-        "focus_paused": "star",
-        "rest": "coffee",
-        "rest_paused": "star"
+    "visualSprite": "timer"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 65468,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 128,
+        "frame_height": 144,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 160,
+        "frames": 1,
+        "fps": 1
       }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 65468,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 396,
+        "h": 436,
+        "color": 65468,
+        "opacity": 160,
+        "opacity_end": 0,
+        "gradient": "horizontal"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 24,
+        "w": 21,
+        "h": 21,
+        "color": 25062,
+        "icon": "clock"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 20,
+        "w": 230,
+        "h": 28,
+        "color": 25062,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 470,
+        "y": 22,
+        "w": 88,
+        "h": 24,
+        "color": 25062,
+        "font_size": 15,
+        "text": "完成轮次"
+      },
+      {
+        "type": "text",
+        "x": 558,
+        "y": 19,
+        "w": 52,
+        "h": 30,
+        "color": 25062,
+        "font_size": 20,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 94,
+        "w": 340,
+        "h": 25,
+        "color": 41899,
+        "font_size": 16,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 139,
+        "w": 362,
+        "h": 84,
+        "color": 25062,
+        "font_size": 30,
+        "bind": "headline",
+        "weight": 600,
+        "line_height": 39
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 232,
+        "w": 280,
+        "h": 78,
+        "color": 25062,
+        "font_size": 48,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "panel",
+        "x": 30,
+        "y": 330,
+        "w": 192,
+        "h": 5,
+        "color": 58999,
+        "radius": 2
+      },
+      {
+        "type": "meter",
+        "x": 30,
+        "y": 330,
+        "w": 192,
+        "h": 5,
+        "color": 45799,
+        "bind": "progress"
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 343,
+        "w": 578,
+        "h": 24,
+        "color": 37706,
+        "font_size": 14,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 378,
+        "w": 156,
+        "h": 48,
+        "color": 45799,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "clock",
+        "action": "tomato.start_pause"
+      },
+      {
+        "type": "button",
+        "x": 198,
+        "y": 378,
+        "w": 156,
+        "h": 48,
+        "color": 65468,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 25062,
+        "padding": 18,
+        "weight": 600,
+        "text": "跳过本轮",
+        "icon": "arrow",
+        "action": "tomato.skip_phase",
+        "opacity": 240,
+        "state_mask": 15
+      },
+      {
+        "type": "button",
+        "x": 370,
+        "y": 378,
+        "w": 132,
+        "h": 48,
+        "color": 65468,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 25062,
+        "padding": 18,
+        "weight": 600,
+        "text": "重计时",
+        "action": "tomato.reset_phase",
+        "opacity": 235,
+        "state_mask": 15
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 65468,
+        "opacity": 240
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 65468,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 37706,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "tomato.start_pause"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 37706,
+        "font_size": 15,
+        "bind": "metricUnit"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 65468,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 37706,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "tomato.skip_phase",
+        "state_mask": 15
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 34,
+        "h": 24,
+        "color": 37706,
+        "font_size": 15,
+        "text": "跳过",
+        "state_mask": 15
+      },
+      {
+        "type": "text",
+        "x": 257,
+        "y": 446,
+        "w": 253,
+        "h": 24,
+        "color": 37706,
+        "font_size": 12,
+        "text": "开始前上下调时长"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 37706,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 198,
+        "y": 378,
+        "w": 156,
+        "h": 48,
+        "color": 63454,
+        "foreground": 16970,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "−5 分钟",
+        "action": "tomato.shorter",
+        "state_mask": 16
+      },
+      {
+        "type": "button",
+        "x": 370,
+        "y": 378,
+        "w": 156,
+        "h": 48,
+        "color": 63454,
+        "foreground": 16970,
+        "font_size": 16,
+        "radius": 14,
+        "padding": 10,
+        "text": "+5 分钟",
+        "action": "tomato.longer",
+        "state_mask": 16
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:",
+        "metrics": [
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            28
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            17,
+            4,
+            29
+          ],
+          [
+            9,
+            11,
+            29
+          ]
+        ],
+        "cell": [
+          32,
+          48
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "番茄钟专注阶段已暂停休息准备开始把这一刻，留给。歇稍后继续做完轮放松下",
+        "metrics": [
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            29
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "remaining_s",
+      "phase_total_s",
+      "completed_sessions",
+      "focus_s"
+    ],
+    "states": {
+      "focus": "focus_paused",
+      "focus_paused": "focus_paused",
+      "rest": "rest_paused",
+      "rest_paused": "rest_paused",
+      "ready": "ready"
+    }
+  },
+  "limits": {
+    "remaining_s": [
+      0,
+      3600
+    ],
+    "phase_total_s": [
+      300,
+      3600
+    ],
+    "completed_sessions": [
+      0,
+      1000000000
+    ],
+    "focus_s": [
+      300,
+      3600
+    ]
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "confirm": {
+      "tomato.reset_phase": "重置本轮计时？已完成的轮数会保留。",
+      "tomato.skip_phase": "跳过本轮，进入下一阶段？"
     }
   }
 }

@@ -6,7 +6,7 @@ import { listVideoModels, selectDefaultVideoModel } from "./lib/avatar-pipeline/
 import { resolveGenerationSpeedConfig } from "./lib/avatar-pipeline/pipeline-defaults.js";
 import { VIDEO_MODEL_ACCESS_CHANGED, clearVolcanoModelRejections } from "./lib/avatar-pipeline/providers/volcano.js";
 
-export function VideoModelSelect({ apiKey, baseUrl, model, onModel, onReady }) {
+export function VideoModelSelect({ apiKey, baseUrl, model, onModel, onReady, autoSelectDefault = true }) {
   const [revision, setRevision] = useState(0);
   const [manual, setManual] = useState(false);
   const [state, setState] = useState({ models: [], loading: true, error: "" });
@@ -29,21 +29,24 @@ export function VideoModelSelect({ apiKey, baseUrl, model, onModel, onReady }) {
       if (!controller.signal.aborted) setState({ models: [], loading: false, error: error.message });
     });
     return () => controller.abort();
-  }, [apiKey, baseUrl, revision, onReady]);
+  }, [apiKey, baseUrl, revision]);
   useEffect(() => {
-    if (state.loading || state.error || state.apiKey !== apiKey || state.baseUrl !== baseUrl) return;
+    if (!autoSelectDefault || state.loading || state.error || state.apiKey !== apiKey || state.baseUrl !== baseUrl) return;
     const next = selectDefaultVideoModel(state.models, model, manual);
     if (next && next !== model) onModel(next);
-  }, [state, apiKey, baseUrl, model, manual, onModel]);
+  }, [state, apiKey, baseUrl, model, manual, onModel, autoSelectDefault]);
   const valid = manual ? Boolean(apiKey?.trim() && model?.trim())
     : state.apiKey === apiKey && state.baseUrl === baseUrl
       && !state.loading && state.models.some((item) => item.id === model);
-  useEffect(() => { onReady(valid); }, [valid, onReady]);
+  useEffect(() => { onReady?.(valid); }, [valid, onReady]);
   return <>
     <div className="video-model-row">
-      <select aria-label="视频生成模型" className="field-input" value={!manual && valid ? model : ""}
+      <select aria-label="视频生成模型" className="field-input" value={!manual && (valid || (!autoSelectDefault && model)) ? model : ""}
         disabled={state.loading} onChange={(event) => onModel(event.target.value)}>
-        <option value="" disabled>{state.loading ? "正在获取模型…" : "请选择可用模型"}</option>
+        <option value="" disabled={autoSelectDefault}>{state.loading ? "正在获取模型…"
+          : autoSelectDefault ? "请选择可用模型" : "自动 · 生成时使用最新 Fast 模型"}</option>
+        {!autoSelectDefault && model && !state.models.some(item => item.id === model)
+          && <option value={model}>{model} · 未在列表确认</option>}
         {state.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
       </select>
       <button type="button" className="btn-ghost" title="刷新可用模型" aria-label="刷新可用模型"
@@ -56,13 +59,16 @@ export function VideoModelSelect({ apiKey, baseUrl, model, onModel, onReady }) {
       onChange={(event) => setManual(event.target.checked)} /> 手动填写模型 / 接入点 ID</label>
     {manual && <input aria-label="模型或接入点 ID" className="field-input" value={model}
       placeholder="填写模型 ID 或 ep- 接入点 ID" onChange={(event) => onModel(event.target.value)} />}
-    <div className="field-helper">首次默认选择列表中最新的 Fast 模型，也可自行更换。实际调用权限以平台响应为准；列表不可用时可手动填写。</div>
+    <div className="field-helper">{autoSelectDefault ? "首次默认选择列表中最新的 Fast 模型，也可自行更换。"
+      : "默认自动选择，无需另行保存；主动指定模型后才需要保存。"}实际调用权限以平台响应为准；列表不可用时可手动填写。</div>
     {state.error && <div role="alert" className="field-helper">{state.error}</div>}
     {!manual && !state.loading && !state.error && model && !valid && <div role="alert" className="field-helper">列表中没有之前选择的模型，请重新选择或手动确认模型 ID。</div>}
   </>;
 }
 
-export function VideoGenerationSettings({ value = {}, onChange, fastGeneration }) {
+export function VideoGenerationSettings({ value = {}, onChange, fastGeneration, model = "" }) {
+  const modern = /doubao-seedance-2-/i.test(model);
+  const limitedResolution = /doubao-seedance-2-0-(fast|mini)/i.test(model);
   const effective = resolveGenerationSpeedConfig({ provider: "volcengine", fastGeneration, ...value }).providerConfig;
   const update = (key, next) => onChange({ ...value, [key]: next });
   return <details className="video-generation-settings">
@@ -72,7 +78,7 @@ export function VideoGenerationSettings({ value = {}, onChange, fastGeneration }
         <option value="auto">模型默认</option>{[5, 10].map((n) => <option key={n} value={n}>{n} 秒</option>)}
       </select></label>
       <label>分辨率<select aria-label="分辨率" className="field-input" value={effective.resolution ?? "auto"} onChange={(e) => update("resolution", e.target.value)}>
-        <option value="auto">模型默认</option>{["480p", "720p", "1080p"].map((r) => <option key={r}>{r}</option>)}
+        <option value="auto">模型默认</option>{["480p", "720p", "1080p"].map((r) => <option key={r} disabled={limitedResolution && r === "1080p"}>{r}</option>)}
       </select></label>
       <label>随机种子<input aria-label="随机种子" className="field-input" type="number" min={-1} max={4294967295} step={1}
         value={value.seed ?? -1} onChange={(e) => update("seed", e.target.value === "" ? -1 : Number(e.target.value))} /></label>
@@ -80,7 +86,8 @@ export function VideoGenerationSettings({ value = {}, onChange, fastGeneration }
     </div>
     <div className="video-parameter-toggles">
       {[["cameraFixed", "固定镜头"], ["generateAudio", "生成音频"], ["watermark", "水印"]].map(([key, label]) =>
-        <label key={key}><input type="checkbox" checked={value[key] ?? false} onChange={(e) => update(key, e.target.checked)} />{label}</label>)}
+        <label key={key}><input type="checkbox" disabled={modern && key === "cameraFixed"} checked={value[key] ?? false} onChange={(e) => update(key, e.target.checked)} />{label}</label>)}
+      {modern && <span className="muted small">此模型由提示词约束镜头，不发送固定镜头参数。</span>}
     </div>
     <button className="btn-ghost" type="button" onClick={() => onChange({})}>恢复默认参数</button>
   </details>;

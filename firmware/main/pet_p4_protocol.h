@@ -13,6 +13,7 @@
 
 #include "pet_p4_stats.h"
 #include "pet_p4_assets.h"
+#include "pet_p4_slice_core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,6 +86,9 @@ typedef struct {
   bool session_voice_active;
   unsigned long long session_snapshot_last_seen_ms;
   char screen_page[PET_P4_PAGE_MAX];
+  /* Ephemeral native touch diagnostic; never persisted or advertised as PetUI. */
+  pet_p4_slice_t touch_test;
+  unsigned long long touch_test_until_ms;
   /* 实时对话（2026-09-18）：PC 经 ui/conversation 驱动的 HUD 与动画覆盖；
    * state 为空或 "ended" 时不生效。 */
   char conversation_state[PET_P4_STATE_MAX];

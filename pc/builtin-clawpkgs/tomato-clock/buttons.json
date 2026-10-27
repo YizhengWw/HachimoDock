@@ -12,9 +12,15 @@
     "label": "跳过阶段"
   },
   {
-    "control": "前方摇杆",
+    "action": "tomato.shorter",
     "event": "joystick.down",
-    "action": "tomato.reset_phase",
-    "label": "重置本轮"
+    "label": "开始前减少 5 分钟",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "tomato.longer",
+    "event": "joystick.up",
+    "label": "开始前增加 5 分钟",
+    "control": "前方摇杆"
   }
 ]

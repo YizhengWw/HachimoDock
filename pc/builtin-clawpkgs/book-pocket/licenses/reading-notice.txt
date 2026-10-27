@@ -1,0 +1,103 @@
+本包包含 100 本书的原创阅读导引与评论，不是原书全文、逐章浓缩或作者授权摘要，不替代阅读原书。原书版权归各自权利人。示例为原创假设，不冒称原书案例。部分中文标题为导读展示译名，作品身份以原书名、作者和书目链接为准。内容经过模型辅助审校及针对性修订，不声称专业审定或核对过所有版本全文。财富主题为概念教育，不提供买卖、仓位或收益建议。
+
+书目索引：
+思考，快与慢 | Thinking, Fast and Slow | Daniel Kahneman | https://openlibrary.org/works/OL15992072W
+噪声 | Noise | Daniel Kahneman | https://openlibrary.org/works/OL17962180W
+助推 | Nudge | Richard Thaler | https://openlibrary.org/works/OL3936258W
+错误的行为 | Misbehaving | Richard Thaler | https://openlibrary.org/works/OL17940527W
+怪诞行为学 | Predictably Irrational | Dan Ariely | https://openlibrary.org/works/OL9302660W
+非理性的积极力量 | The Upside of Irrationality | Dan Ariely | https://openlibrary.org/works/OL20411846W
+风险认知 | Risk Savvy | Gerd Gigerenzer | https://openlibrary.org/works/OL20003220W
+直觉 | Gut Feelings | Gerd Gigerenzer | https://openlibrary.org/works/OL2001987W
+智能时代的清醒思考 | How to Stay Smart in a Smart World | Gerd Gigerenzer | https://openlibrary.org/works/OL25337639W
+超预测 | Superforecasting | Philip Tetlock | https://openlibrary.org/works/OL18233878W
+对赌 | Thinking in Bets | Annie Duke | https://openlibrary.org/works/OL19736287W
+放弃的艺术 | Quit | Annie Duke | https://openlibrary.org/works/OL27030915W
+如何做决定 | How to Decide | Annie Duke | https://openlibrary.org/works/OL21348243W
+侦察者心态 | The Scout Mindset | Julia Galef | https://www.penguinrandomhouse.com/books/555240/the-scout-mindset-by-julia-galef/
+清醒思考的艺术 | The Art of Thinking Clearly | Rolf Dobelli | https://openlibrary.org/works/OL17940461W
+黑天鹅 | The Black Swan | Nassim Nicholas Taleb | https://openlibrary.org/works/OL3295030W
+随机漫步的傻瓜 | Fooled by Randomness | Nassim Nicholas Taleb | https://openlibrary.org/works/OL3295029W
+反脆弱 | Antifragile | Nassim Nicholas Taleb | https://openlibrary.org/works/OL16726829W
+非对称风险 | Skin in the Game | Nassim Nicholas Taleb | https://openlibrary.org/works/OL17887158W
+成功的公式 | The Success Equation | Michael Mauboussin | https://openlibrary.org/works/OL16637720W
+掌控习惯 | Atomic Habits | James Clear | https://openlibrary.org/works/OL17930368W
+福格行为模型 | Tiny Habits | BJ Fogg | https://openlibrary.org/works/OL20641940W
+习惯的力量 | The Power of Habit | Charles Duhigg | https://openlibrary.org/works/OL16015154W
+深度工作 | Deep Work | Cal Newport | https://openlibrary.org/works/OL17713267W
+数字极简 | Digital Minimalism | Cal Newport | https://openlibrary.org/works/OL19541830W
+慢生产力 | Slow Productivity | Cal Newport | https://openlibrary.org/works/OL36996011W
+精要主义 | Essentialism | Greg McKeown | https://openlibrary.org/works/OL17043626W
+轻松主义 | Effortless | Greg McKeown | https://openlibrary.org/works/OL24230087W
+人生只有四千周 | Four Thousand Weeks | Oliver Burkeman | https://openlibrary.org/works/OL22355777W
+搞定 | Getting Things Done | David Allen | https://openlibrary.org/works/OL271504W
+国富论 | The Wealth of Nations | Adam Smith | https://openlibrary.org/works/OL76827W
+道德情操论 | The Theory of Moral Sentiments | Adam Smith | https://openlibrary.org/works/OL76826W
+人口原理 | An Essay on the Principle of Population | Thomas Malthus | https://openlibrary.org/works/OL8784929W
+政治经济学及赋税原理 | On the Principles of Political Economy and Taxation | David Ricardo | https://openlibrary.org/works/OL27900305W
+政治经济学原理 | Principles of Political Economy | John Stuart Mill | https://openlibrary.org/works/OL1068184W
+国民经济学原理 | Principles of Economics | Carl Menger | https://openlibrary.org/works/OL1096320W
+经济学原理 | Principles of Economics | Alfred Marshall | https://openlibrary.org/works/OL2627167W
+就业、利息和货币通论 | The General Theory of Employment, Interest and Money | John Maynard Keynes | https://openlibrary.org/works/OL35951W
+经济发展理论 | The Theory of Economic Development | Joseph Schumpeter | https://openlibrary.org/works/OL45100812W
+通往奴役之路 | The Road to Serfdom | Friedrich Hayek | https://openlibrary.org/works/OL1165001W
+一课经济学 | Economics in One Lesson | Henry Hazlitt | https://openlibrary.org/works/OL541970W
+赤裸裸的经济学 | Naked Economics | Charles Wheelan | https://openlibrary.org/works/OL8061775W
+卧底经济学 | The Undercover Economist | Tim Harford | https://openlibrary.org/works/OL8005105W
+策略思维 | Thinking Strategically | Avinash Dixit | https://openlibrary.org/works/OL2979495W
+策略的艺术 | The Art of Strategy | Avinash Dixit | https://openlibrary.org/works/OL2979491W
+好的经济学 | Good Economics for Hard Times | Abhijit Banerjee | https://openlibrary.org/works/OL20659791W
+贫穷的本质 | Poor Economics | Abhijit Banerjee | https://openlibrary.org/works/OL15743097W
+国家为什么会失败 | Why Nations Fail | Daron Acemoglu | https://openlibrary.org/works/OL16568759W
+自由的窄廊 | The Narrow Corridor | Daron Acemoglu | https://openlibrary.org/works/OL20220421W
+经济学的思维方式 | The Economic Way of Thinking | Paul Heyne | https://openlibrary.org/works/OL467486W
+精益创业 | The Lean Startup | Eric Ries | https://openlibrary.org/works/OL16086010W
+从0到1 | Zero to One | Peter Thiel | https://openlibrary.org/works/OL17078706W
+妈妈测试 | The Mom Test | Rob Fitzpatrick | https://openlibrary.org/works/OL23982116W
+精益实战 | Running Lean | Ash Maurya | https://openlibrary.org/works/OL16605567W
+创业方法论 | Disciplined Entrepreneurship | Bill Aulet | https://openlibrary.org/works/OL21508040W
+创业的神话 | The E-Myth Revisited | Michael Gerber | https://openlibrary.org/works/OL1821254W
+创业者手册 | The Startup Owner's Manual | Steve Blank | https://openlibrary.org/works/OL16793860W
+跨越鸿沟 | Crossing the Chasm | Geoffrey Moore | https://openlibrary.org/works/OL30695W
+创新者的窘境 | The Innovator's Dilemma | Clayton Christensen | https://openlibrary.org/works/OL1999873W
+创新者的解答 | The Innovator's Solution | Clayton Christensen | https://openlibrary.org/works/OL14873643W
+好战略，坏战略 | Good Strategy Bad Strategy | Richard Rumelt | https://openlibrary.org/works/OL16149072W
+竞争战略 | Competitive Strategy | Michael Porter | https://openlibrary.org/works/OL1827735W
+竞争优势 | Competitive Advantage | Michael Porter | https://openlibrary.org/works/OL1827734W
+蓝海战略 | Blue Ocean Strategy | W. Chan Kim | https://openlibrary.org/works/OL8980380W
+赢的策略 | Playing to Win | A. G. Lafley | https://openlibrary.org/works/OL19963678W
+七种力量 | 7 Powers | Hamilton Helmer | https://openlibrary.org/works/OL20883142W
+目标 | The Goal | Eliyahu Goldratt | https://openlibrary.org/works/OL2463051W
+从优秀到卓越 | Good to Great | Jim Collins | https://openlibrary.org/works/OL3486275W
+基业长青 | Built to Last | Jim Collins | https://openlibrary.org/works/OL3486276W
+选择卓越 | Great by Choice | Jim Collins | https://openlibrary.org/works/OL16014781W
+影响力 | Influence | Robert Cialdini | https://openlibrary.org/works/OL3902892W
+先发影响力 | Pre-Suasion | Robert Cialdini | https://openlibrary.org/works/OL17592794W
+疯传 | Contagious | Jonah Berger | https://openlibrary.org/works/OL19711031W
+让创意更有黏性 | Made to Stick | Chip Heath | https://openlibrary.org/works/OL8423528W
+定位 | Positioning | Al Ries | https://openlibrary.org/works/OL1892673W
+这就是营销 | This Is Marketing | Seth Godin | https://openlibrary.org/works/OL19764632W
+紫牛 | Purple Cow | Seth Godin | https://openlibrary.org/works/OL2329258W
+故事品牌 | Building a StoryBrand | Donald Miller | https://openlibrary.org/works/OL19347277W
+显而易见的优势 | Obviously Awesome | April Dunford | https://openlibrary.org/works/OL20873429W
+增长黑客 | Hacking Growth | Sean Ellis | https://openlibrary.org/works/OL20054781W
+金钱心理学 | The Psychology of Money | Morgan Housel | https://openlibrary.org/works/OL21640039W
+一如既往 | Same as Ever | Morgan Housel | https://openlibrary.org/works/OL35156586W
+聪明的投资者 | The Intelligent Investor | Benjamin Graham | https://openlibrary.org/works/OL273184W
+漫步华尔街 | A Random Walk Down Wall Street | Burton Malkiel | https://openlibrary.org/works/OL2000283W
+共同基金常识的小书 | The Little Book of Common Sense Investing | John Bogle | https://openlibrary.org/works/OL3928758W
+你的钱，你的人生 | Your Money or Your Life | Vicki Robin | https://openlibrary.org/works/OL4275330W
+邻家的百万富翁 | The Millionaire Next Door | Thomas Stanley | https://openlibrary.org/works/OL1986060W
+巴比伦最富有的人 | The Richest Man in Babylon | George Clason | https://openlibrary.org/works/OL8165007W
+常识的财富 | A Wealth of Common Sense | Ben Carlson | https://openlibrary.org/works/OL20009150W
+投资最重要的事 | The Most Important Thing | Howard Marks | https://openlibrary.org/works/OL16001857W
+第五项修炼 | The Fifth Discipline | Peter Senge | https://openlibrary.org/works/OL4440692W
+格鲁夫给经理人的第一课 | High Output Management | Andrew Grove | https://openlibrary.org/works/OL2355834W
+这就是OKR | Measure What Matters | John Doerr | https://openlibrary.org/works/OL24232412W
+绝对坦率 | Radical Candor | Kim Scott | https://openlibrary.org/works/OL17803541W
+团队协作的五大障碍 | The Five Dysfunctions of a Team | Patrick Lencioni | https://openlibrary.org/works/OL19956925W
+赋能式领导：把船调个头 | Turn the Ship Around | L. David Marquet | https://openlibrary.org/works/OL17845539W
+驱动力 | Drive | Daniel Pink | https://openlibrary.org/works/OL15016965W
+原则 | Principles | Ray Dalio | https://openlibrary.org/works/OL18147675W
+文化密码 | The Culture Code | Daniel Coyle | https://openlibrary.org/works/OL19670476W
+系统之美 | Thinking in Systems: A Primer | Donella H. Meadows（Diana Wright 编辑） | https://donellameadows.org/systems-thinking-resources/

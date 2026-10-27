@@ -4,5 +4,11 @@
     "control": "SW1",
     "event": "button.sw1.short_press",
     "label": "拍翅"
+  },
+  {
+    "action": "session.pause",
+    "event": "button.sw2.short_press",
+    "label": "暂停/继续",
+    "control": "SW2"
   }
 ]

@@ -1,0 +1,493 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "host": true,
+  "vars": {},
+  "states": [
+    "ready"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+    {
+      "on": "host.refresh",
+      "from": "*"
+    },
+    {
+      "on": "host.toggle",
+      "from": "*"
+    },
+    {
+      "on": "host.previous",
+      "from": "*"
+    },
+    {
+      "on": "host.next",
+      "from": "*"
+    },
+    {
+      "on": "host.up",
+      "from": "*"
+    },
+    {
+      "on": "host.down",
+      "from": "*"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "每日新鲜事",
+    "eyebrow": "AI 科技 · 商业财经 · 娱乐",
+    "headline": "听听世界的新鲜事",
+    "note": "进入设备组件后自动整理九条资讯；需连接 PC。",
+    "footer": "核对来源与发布时间，不用旧闻凑数。",
+    "metricValue": "",
+    "metricLabel": "更新资讯",
+    "metricUnit": "播报",
+    "badge": "",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star"
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous",
+      "up": "host.down",
+      "down": "host.up"
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 65535,
+        "image": "background"
+      },
+      {
+        "type": "icon",
+        "x": 24,
+        "y": 22,
+        "w": 22,
+        "h": 22,
+        "color": 13035,
+        "icon": "spark"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 280,
+        "h": 34,
+        "color": 8679,
+        "font_size": 22,
+        "line_height": 29,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 24,
+        "y": 70,
+        "w": 450,
+        "h": 30,
+        "color": 31693,
+        "font_size": 18,
+        "line_height": 23,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 24,
+        "y": 110,
+        "w": 470,
+        "h": 72,
+        "color": 8679,
+        "font_size": 27,
+        "line_height": 35,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "panel",
+        "x": 16,
+        "y": 190,
+        "w": 608,
+        "h": 182,
+        "color": 65501,
+        "opacity": 220,
+        "radius": 18
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 201,
+        "w": 578,
+        "h": 58,
+        "color": 8679,
+        "font_size": 22,
+        "line_height": 29,
+        "bind": "note"
+      },
+      {
+        "type": "text",
+        "x": 30,
+        "y": 259,
+        "w": 578,
+        "h": 58,
+        "color": 8679,
+        "font_size": 22,
+        "line_height": 29,
+        "bind": "footer"
+      },
+      {
+        "type": "text",
+        "x": 528,
+        "y": 348,
+        "w": 82,
+        "h": 24,
+        "color": 31693,
+        "font_size": 14,
+        "line_height": 18,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 20,
+        "y": 384,
+        "w": 144,
+        "h": 48,
+        "color": 13035,
+        "foreground": 65501,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.refresh",
+        "bind": "metricLabel"
+      },
+      {
+        "type": "button",
+        "x": 174,
+        "y": 384,
+        "w": 110,
+        "h": 48,
+        "color": 65501,
+        "foreground": 8679,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.toggle",
+        "bind": "metricUnit"
+      },
+      {
+        "type": "button",
+        "x": 300,
+        "y": 384,
+        "w": 66,
+        "h": 48,
+        "color": 65501,
+        "foreground": 8679,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.previous",
+        "text": "上条"
+      },
+      {
+        "type": "button",
+        "x": 374,
+        "y": 384,
+        "w": 66,
+        "h": 48,
+        "color": 65501,
+        "foreground": 8679,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.next",
+        "text": "下条"
+      },
+      {
+        "type": "button",
+        "x": 456,
+        "y": 384,
+        "w": 76,
+        "h": 48,
+        "color": 65501,
+        "foreground": 8679,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.up",
+        "text": "上页"
+      },
+      {
+        "type": "button",
+        "x": 540,
+        "y": 384,
+        "w": 76,
+        "h": 48,
+        "color": 65501,
+        "foreground": 8679,
+        "radius": 14,
+        "padding": 8,
+        "font_size": 18,
+        "action": "host.down",
+        "text": "下页"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 445,
+        "w": 640,
+        "h": 35,
+        "color": 65501,
+        "opacity": 230
+      },
+      {
+        "type": "button",
+        "x": 20,
+        "y": 451,
+        "w": 33,
+        "h": 22,
+        "color": 65501,
+        "foreground": 31693,
+        "radius": 4,
+        "padding": 0,
+        "font_size": 11,
+        "text": "SW1",
+        "key_for": "host.refresh"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 451,
+        "w": 65,
+        "h": 22,
+        "color": 31693,
+        "font_size": 14,
+        "line_height": 18,
+        "text": "刷新"
+      },
+      {
+        "type": "button",
+        "x": 125,
+        "y": 451,
+        "w": 33,
+        "h": 22,
+        "color": 65501,
+        "foreground": 31693,
+        "radius": 4,
+        "padding": 0,
+        "font_size": 11,
+        "text": "SW2",
+        "key_for": "host.toggle"
+      },
+      {
+        "type": "text",
+        "x": 164,
+        "y": 451,
+        "w": 110,
+        "h": 22,
+        "color": 31693,
+        "font_size": 14,
+        "line_height": 18,
+        "text": "播报 / 停止"
+      },
+      {
+        "type": "text",
+        "x": 290,
+        "y": 451,
+        "w": 190,
+        "h": 22,
+        "color": 31693,
+        "font_size": 14,
+        "line_height": 18,
+        "text": "左右换条 · 上下翻页"
+      },
+      {
+        "type": "text",
+        "x": 511,
+        "y": 451,
+        "w": 109,
+        "h": 22,
+        "color": 31693,
+        "font_size": 14,
+        "line_height": 18,
+        "text": "全局键退出"
+      }
+    ],
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "labels",
+        "asset": "assets/labels.png",
+        "frame_width": 224,
+        "frame_height": 128,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "background": 65501,
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "labels",
+        "chars": "每日新鲜事听世界的更资讯播报停止上下一条页刷全局键退出",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            29
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  }
+}

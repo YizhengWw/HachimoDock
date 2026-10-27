@@ -1,1 +1,8 @@
-{"id":"token-usage","name":"Token 仪表盘","kind":"tool","version":"2.2.6","author":"openclaw","description":"展示当前跟随 Agent 当天的 Token 消耗，总量/输入/输出分别由 SW1、SW2、摇杆右切换；退出跟随设备全局设置"}
+{
+  "id": "token-usage",
+  "name": "Token 仪表盘",
+  "kind": "tool",
+  "version": "2.3.3",
+  "author": "代码泡面",
+  "description": "展示当前 Agent 提供的真实 Token 统计，可切换总量、输入和输出；没有统计时显示等待，不生成模拟消耗。支持触屏与实体按键。"
+}

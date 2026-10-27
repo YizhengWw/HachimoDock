@@ -1,0 +1,804 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.primary"
+    },
+    {
+      "from": "*",
+      "on": "host.secondary"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "每日新知",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "选择分类",
+    "headline": "每天多一点好奇",
+    "metricValue": "1000 条 · 百科节选",
+    "note": "连接 PC 后阅读完整知识库。",
+    "footer": "触屏或摇杆左右翻页，全文不会截断。",
+    "metricLabel": "换一条",
+    "metricUnit": "读本页",
+    "badge": "— / —"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 6374,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 6374,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 390,
+        "h": 436,
+        "color": 8456,
+        "opacity": 210,
+        "opacity_end": 120
+      },
+      {
+        "type": "panel",
+        "x": 390,
+        "y": 0,
+        "w": 250,
+        "h": 436,
+        "color": 8456,
+        "opacity": 120,
+        "opacity_end": 0
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 63359,
+        "icon": "book"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 63359,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "button",
+        "x": 430,
+        "y": 12,
+        "w": 184,
+        "h": 48,
+        "color": 14762,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 63359,
+        "padding": 12,
+        "weight": 600,
+        "bind": "eyebrow",
+        "icon": "list",
+        "action": "host.secondary"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 80,
+        "w": 352,
+        "h": 62,
+        "color": 63359,
+        "font_size": 26,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 151,
+        "w": 352,
+        "h": 84,
+        "color": 59166,
+        "font_size": 21,
+        "bind": "note",
+        "line_height": 28
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 239,
+        "w": 352,
+        "h": 84,
+        "color": 59166,
+        "font_size": 21,
+        "bind": "footer",
+        "line_height": 28
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 337,
+        "w": 352,
+        "h": 24,
+        "color": 46459,
+        "font_size": 13,
+        "bind": "metricValue"
+      },
+      {
+        "type": "text",
+        "x": 492,
+        "y": 335,
+        "w": 120,
+        "h": 28,
+        "color": 54943,
+        "font_size": 16,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 374,
+        "w": 142,
+        "h": 48,
+        "color": 54943,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 8487,
+        "padding": 16,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "spark",
+        "action": "host.primary"
+      },
+      {
+        "type": "icon",
+        "x": 190,
+        "y": 388,
+        "w": 19,
+        "h": 19,
+        "color": 48569,
+        "icon": "sound"
+      },
+      {
+        "type": "text",
+        "x": 218,
+        "y": 385,
+        "w": 150,
+        "h": 28,
+        "color": 48569,
+        "font_size": 15,
+        "text": "进入自动朗读"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 6374,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 48569,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 6374,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 48569,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 48569,
+        "font_size": 15,
+        "text": "换条/确认"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 6374,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 48569,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 48569,
+        "font_size": 15,
+        "text": "分类/返回"
+      },
+      {
+        "type": "text",
+        "x": 302,
+        "y": 446,
+        "w": 208,
+        "h": 24,
+        "color": 48569,
+        "font_size": 14,
+        "text": "左右翻页"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 48569,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 每日新知选择分类换一条确认读本页停止朗收藏上项下返回物理化学",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "生历史人文经济心健康天地百科节轮不重复多点好奇·连接P后阅完整识库。进入自动左右翻全",
+        "metrics": [
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ]
+        ]
+      }
+    ]
+  },
+  "host": true,
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    }
+  }
+}

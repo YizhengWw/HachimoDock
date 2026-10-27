@@ -1,6 +1,6 @@
 /**
  * [Input] per-family prompt + image payload + Volcengine Ark API-key/model-name config.
- * [Output] submitted task id, model-specific Ark v3 first/last-frame payload,
+ * [Output] submitted task id, identity-reference payload (legacy 1.5: first frame only),
  *          stage-specific reference-image moderation/portrait and manual MP4 upload guidance, plus expiring/resettable model rejections,
  *          explicit video parameters, polled status, and downloaded MP4 bytes.
  * [Pos] provider node in pc/src/lib/avatar-pipeline/providers
@@ -99,6 +99,7 @@ export function buildVolcanoTaskPayload({
   watermark = false,
   cameraFixed = false,
   seed,
+  firstFrameOnly = false,
 }) {
   if (seed != null && (!Number.isInteger(Number(seed)) || Number(seed) < -1 || Number(seed) > 4294967295)) {
     throw new Error("随机种子必须是 -1 到 4294967295 之间的整数。");
@@ -109,7 +110,6 @@ export function buildVolcanoTaskPayload({
       content: [
         { type: "text", text: buildSeedance15Prompt(prompt, { duration, watermark, ratio, resolution, cameraFixed, seed }) },
         normalizeMediaEntry("image_url", imageDataUrl, "first_frame"),
-        normalizeMediaEntry("image_url", imageDataUrl, "last_frame"),
       ].filter(Boolean),
       generate_audio: Boolean(generateAudio),
     };
@@ -119,8 +119,7 @@ export function buildVolcanoTaskPayload({
     ? [...contentItems]
     : [
         { type: "text", text: prompt },
-        normalizeMediaEntry("image_url", imageDataUrl, "first_frame"),
-        normalizeMediaEntry("image_url", imageDataUrl, "last_frame"),
+        normalizeMediaEntry("image_url", imageDataUrl, !firstFrameOnly && /doubao-seedance-2-/i.test(model || "") ? "reference_image" : "first_frame"),
         ...referenceImages.map((item) => normalizeMediaEntry("image_url", item, "reference_image")),
         ...referenceVideos.map((item) => normalizeMediaEntry("video_url", item, "reference_video")),
         ...referenceAudios.map((item) => normalizeMediaEntry("audio_url", item, "reference_audio")),
@@ -131,14 +130,21 @@ export function buildVolcanoTaskPayload({
     content,
     generate_audio: Boolean(generateAudio),
     watermark: Boolean(watermark),
-    camera_fixed: Boolean(cameraFixed),
   };
+  if (/doubao-seedance-2-/i.test(model || "") && cameraFixed) {
+    for (const item of content) {
+      if (item.type === "text") item.text += " Fixed camera position, no camera movement.";
+    }
+  }
+  // Ark rejects camera_fixed for Seedance 2.x, even when false.
+  // Keep the fixed-camera instruction in prose; only 1.x supports this field.
+  if (!/doubao-seedance-2-/i.test(model || "")) payload.camera_fixed = Boolean(cameraFixed);
   if (seed != null) payload.seed = Number(seed);
   if (duration !== undefined && duration !== null && String(duration).toLowerCase() !== "auto") {
     const num = Number(duration);
     payload.duration = Number.isFinite(num) ? num : duration;
   }
-  if (ratio) payload.ratio = ratio;
+  if (ratio) payload.ratio = /doubao-seedance-2-5/i.test(model || "") && imageDataUrl ? "adaptive" : ratio;
   if (resolution && resolution !== "auto") payload.resolution = resolution;
   return payload;
 }
@@ -248,7 +254,7 @@ export function normalizeVolcanoSubmitErrorMessage(message, model) {
 function shouldRetryVolcanoHttp(err) {
   const message = String(err?.cause?.message || err?.message || err || "");
   const match = /HTTP\s+(\d{3})/.exec(message);
-  if (!match) return true;
+  if (!match) return false; // Unknown POST outcome: do not resubmit billable jobs.
   const status = Number(match[1]);
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
@@ -312,6 +318,7 @@ async function submitTask({
   cameraFixed,
   seed,
   signal,
+  firstFrameOnly,
 }) {
   const apiUrl = joinUrl(baseUrl, VOLCANO_TASK_PATH);
   const payload = buildVolcanoTaskPayload({
@@ -325,10 +332,12 @@ async function submitTask({
     watermark,
     cameraFixed,
     seed,
+    firstFrameOnly,
   });
   const json = await withRetry(
     async () => {
       const response = await pipelineFetch(apiUrl, {
+        diagnosticStage: "video_submit",
         method: "POST",
         signal,
         headers: {
@@ -349,7 +358,7 @@ async function submitTask({
         });
       }
     },
-    { retries: 3, signal, shouldRetry: shouldRetryVolcanoHttp },
+    { retries: 0, signal, shouldRetry: shouldRetryVolcanoHttp },
   );
   const taskId = extractTaskId(json);
   if (!taskId) throw new Error(`volcano submit: missing task_id in response: ${JSON.stringify(json).slice(0, 200)}`);
@@ -361,6 +370,7 @@ async function queryTask({ apiKey, baseUrl, taskId, signal }) {
   return withRetry(
     async () => {
       const response = await pipelineFetch(apiUrl, {
+        diagnosticStage: "video_poll",
         method: "GET",
         signal,
         headers: {
@@ -436,11 +446,11 @@ async function downloadVideo({ videoUrl, signal }) {
  * @param {(event: { stage: 'submitting'|'polling'|'downloading'|'done', detail?: any }) => void} [args.onStage]
  * @returns {Promise<{ taskId: string, videoBytes: Uint8Array, videoUrl: string, raw: object }>}
  */
-export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, onStage }) {
+export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, onStage, resumeTaskId, onSubmitted }) {
   if (!config?.apiKey) throw new Error("Volcano API key is required");
-  if (isVolcanoModelRejected(config.apiKey, config.model)) throw new Error("当前 API Key 无法调用此模型，请重新选择可用模型。");
-  onStage?.({ stage: "submitting" });
-  const { taskId, raw: submitRaw } = await submitTask({
+  if (!resumeTaskId && isVolcanoModelRejected(config.apiKey, config.model)) throw new Error("当前 API Key 无法调用此模型，请重新选择可用模型。");
+  if (!resumeTaskId) onStage?.({ stage: "submitting" });
+  const { taskId, raw: submitRaw } = resumeTaskId ? { taskId: resumeTaskId, raw: null } : await submitTask({
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
@@ -453,8 +463,11 @@ export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, o
     watermark: config.watermark,
     cameraFixed: config.cameraFixed,
     seed: config.seed,
+    firstFrameOnly: config.firstFrameOnly,
     signal,
   });
+  // Commit ID before polling. Failure here must never cause a second POST.
+  if (!resumeTaskId) await onSubmitted?.(taskId);
   onStage?.({ stage: "polling", detail: { taskId } });
   const { videoUrl, raw: pollRaw } = await pollUntilTerminal({
     apiKey: config.apiKey,

@@ -1,5 +1,7 @@
 * text=auto eol=lf
-pc/public/terrier-clips/p4-ready/**/*.h264 filter=lfs diff=lfs merge=lfs -text
-pc/public/terrier-clips/p4-ready/**/*.mjpg filter=lfs diff=lfs merge=lfs -text
-pc/public/terrier-clips/p4-ready/**/*.wav filter=lfs diff=lfs merge=lfs -text
-pc/src-tauri/firmware/**/*.bin filter=lfs diff=lfs merge=lfs -text
+# Public release resources are kept in ordinary Git so a fresh checkout does
+# not depend on the repository owner's separate LFS bandwidth/storage budget.
+*.h264 binary
+*.mjpg binary
+*.wav binary
+*.bin binary

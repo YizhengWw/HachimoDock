@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "今日气象",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "选择城市",
+    "headline": "连接后获取城市天气",
+    "metricValue": "",
+    "note": "点击右上角选城；自动估算仅在未手动选择时使用。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "更新预报",
+    "metricUnit": "近期待办"
+  }
+}

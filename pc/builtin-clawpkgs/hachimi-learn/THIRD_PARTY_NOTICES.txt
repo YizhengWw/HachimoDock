@@ -1,0 +1,5 @@
+Knowledge article text: Chinese Wikipedia contributors, licensed under Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+License: https://creativecommons.org/licenses/by-sa/4.0/
+Legal code: https://creativecommons.org/licenses/by-sa/4.0/legalcode
+Each item in pc/application.json retains a source revision URL, attribution, and license. Follow the source page history for individual contributors. Modifications: source excerpts, whitespace normalization, omitted headings and formula-only paragraphs. No generated padding. Share adaptations of this article text under CC BY-SA 4.0; preserve attribution and indicate changes. No institutional logos or endorsement included. Articles are educational excerpts, not medical, psychological, legal, or investment advice.
+本文为中文维基百科节选，来源版本与署名随每条内容保留。知识文本适用 CC BY-SA 4.0，不适用本包配置和美术的 MIT 许可。

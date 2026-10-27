@@ -9,17 +9,106 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { recordDiagnostic } from "./avatar-pipeline/diagnostics.js";
+import { publicGenerationConfig, generationSessionNeedsProtection, summarizeGenerationSession, canAutoResume } from "./avatar-pipeline/session.js";
 import {
   buildAllFamiliesFailedMessage,
   normalizeGenerationErrorMessage,
 } from "./generation-task.js";
+
+test('automatic task saves every clip, converts once, and conversion-only recovery makes no model calls',async()=>{
+  const source=readFileSync(new URL('./generation-task.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
+  let stored, runs=0, saves=0, replacements=0, conversions=0, failConversion=true;
+  const entries=Array.from({length:11},(_,i)=>({family:`fixture-${i}`,prompt:'fixture'}));
+  const context=vm.createContext({recordDiagnostic,publicGenerationConfig,generationSessionNeedsProtection,summarizeGenerationSession,canAutoResume,clearTimeout,setTimeout,
+    crypto:{randomUUID:()=> 'auto-fixture'},AbortController,resolveThinkingModelName:()=> 'fixture',
+    beginGenerationSession:async s=>{stored=structuredClone(s);},saveGenerationSession:async s=>{stored=structuredClone(s);},
+    saveAppearance:async data=>{assert.equal(data.deferPreparation,true);saves++;return {id:'saved'};},
+    replaceFamilyVideo:async data=>{assert.equal(data.deferPreparation,true);replacements++;},
+    prepareSavedAppearance:async()=>{conversions++;if(failConversion)throw Error('fixture conversion failed');},
+    getVolcanoInputImageRejection:()=>null,getArkImageEditPolicyRejection:()=>null,
+    runAvatarPipeline:async options=>{
+      runs++;assert.equal(options.automatic,true);assert.equal(options.confirmReference,undefined);assert.equal(options.confirmTrial,undefined);
+      assert.equal(options.styleDescription,'水彩风格');assert.equal(options.session.reference.dataUrl,'data:image/png;base64,AQ==');
+      assert.equal(options.distinctStartFrames,true);
+      const families=entries.map(e=>({...e,ok:true,videoBytes:new Uint8Array([1]),taskId:e.family}));
+      options.session.manifest={entries};
+      for(const family of families){options.session.actions[family.family]=family;await options.onFamilyDone({persona:{},manifest:{entries},imagePayload:{},family});}
+      return {families};
+    },
+  });
+  vm.runInContext(source+'\nthis.api={run:async(input)=>{activeController=new AbortController();return runTask(input);},getGenerationTask};',context);
+  const input={providerConfig:{provider:'volcengine'},appearanceName:'fixture',styleDescription:'水彩风格',referencePreview:{bytes:new Uint8Array([1]),dataUrl:'data:image/png;base64,AQ=='}};
+  await context.api.run(input);
+  assert.equal(runs,1);assert.equal(saves,1);assert.equal(replacements,10);assert.equal(conversions,1);
+  assert.equal(stored.phase,'conversion_failed');assert.equal(stored.finished,undefined);
+  failConversion=false;
+  await context.api.run({...input,session:stored});
+  assert.equal(runs,1);assert.equal(saves,1);assert.equal(replacements,10);assert.equal(conversions,2);
+  assert.equal(stored.finished,true);assert.equal(context.api.getGenerationTask().status,'completed');
+  assert.equal(context.api.getGenerationTask().progress.stage,'completed');
+  assert.match(context.api.getGenerationTask().progress.message,/整套动画和设备格式已准备完成/);
+  assert.doesNotMatch(context.api.getGenerationTask().progress.message,/正在准备/);
+  await context.api.run(input);
+  assert.equal(runs,2);assert.equal(context.api.getGenerationTask().status,'completed');
+  assert.equal(context.api.getGenerationTask().progress.completed,11);
+  assert.match(context.api.getGenerationTask().progress.message,/整套动画和设备格式已准备完成/);
+});
+
+test("failed preprocessing releases durable task lock and a fresh request reaches the pipeline", async () => {
+  const source=readFileSync(new URL('./generation-task.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
+  let stored={id:'legacy',imageIntent:true,actions:{}}; let runs=0; const archived=[];
+  const context=vm.createContext({recordDiagnostic,publicGenerationConfig,generationSessionNeedsProtection,summarizeGenerationSession,canAutoResume,clearTimeout,setTimeout,
+    crypto:{randomUUID:()=>`fresh-${runs}`},AbortController,
+    loadGenerationSession:async()=>stored,saveGenerationSession:async s=>{stored=structuredClone(s);},
+    beginGenerationSession:async s=>{archived.push(structuredClone(stored));stored=structuredClone(s);},
+    runAvatarPipeline:async()=>{runs++;throw Error('fixture preprocessing failure');},
+    getVolcanoInputImageRejection:()=>null,getArkImageEditPolicyRejection:()=>null,
+  });
+  vm.runInContext(source+'\nthis.api={run:async(input)=>{activeController=new AbortController();return runTask(input);},getGenerationTask};',context);
+  const input={appearanceName:'new',providerConfig:{provider:'volcengine'},skipProcessing:true};
+  await context.api.run(input);
+  assert.equal(runs,1);assert.equal(stored.dismissed,true);assert.equal(stored.terminalFailure,true);
+  assert.equal(context.api.getGenerationTask().resumable,false);
+  await context.api.run(input);assert.equal(runs,2);
+  stored={actions:{welcome:{intent:true,taskId:'accepted'}}};
+  await context.api.run(input);
+  assert.equal(runs,3);assert.equal(archived.at(-1).actions.welcome.taskId,'accepted');
+  stored={id:'legacy-http-400-or-unknown',actions:{welcome:{intent:true}}};
+  await context.api.run(input);
+  assert.equal(runs,4);assert.equal(archived.at(-1).actions.welcome.intent,true);
+});
+
+test("wizard defaults to full subject cleaning and warns before explicit original-image mode",()=>{
+  const source=readFileSync(new URL('../CustomAvatarWizard.jsx',import.meta.url),'utf8');
+  assert.match(source,/\[removeBg, setRemoveBg\] = useState\(true\)/);
+  assert.match(source,/skipProcessing: !removeBg/);
+  assert.match(source,/图片处理费用/);
+  assert.match(source,/原图中的手、桌面、人物和杂物可能进入视频/);
+  assert.doesNotMatch(source,/云端不可用时会保留原图继续生成/);
+});
+
+test("restart restores saved trial progress without fabricating failure or paid work",async()=>{
+  const source=readFileSync(new URL('./generation-task.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/^export /gm,'');
+  const stored={appearanceName:'2',appearanceId:'saved',skipProcessing:true,createdAt:123,
+    actions:{welcome:{videoBytes:new Uint8Array([1,2])}}};
+  const context=vm.createContext({recordDiagnostic,summarizeGenerationSession,canAutoResume,clearTimeout,setTimeout,loadGenerationSession:async()=>stored});
+  vm.runInContext(source+'\nthis.api={initializeGenerationRecovery,getGenerationTask,acknowledgeGenerationTask};',context);
+  await context.api.initializeGenerationRecovery();
+  const state=context.api.getGenerationTask();
+  assert.equal(state.status,'paused');assert.equal(state.appearanceId,'saved');
+  assert.equal(state.progress.completed,1);assert.equal(state.progress.total,11);
+  assert.match(state.progress.message,/等待确认/);assert.match(state.progress.message,/恢复不会重新去背景/);
+  assert.equal(state.completionEpoch,0);
+  context.api.acknowledgeGenerationTask();assert.equal(context.api.getGenerationTask().status,'idle');
+});
 
 test("terminal acknowledgement ignores older toasts and running tasks", () => {
   // Exercise the real state machine in isolation; no provider calls or user data.
   const source = readFileSync(new URL("./generation-task.js", import.meta.url), "utf8")
     .replace(/^import .*;\n/gm, "")
     .replace(/^export /gm, "");
-  const context = vm.createContext({});
+  const context = vm.createContext({ recordDiagnostic });
   vm.runInContext(source + "\nthis.api = { setState, getGenerationTask, acknowledgeGenerationTask };", context);
   const { setState, getGenerationTask, acknowledgeGenerationTask } = context.api;
   setState({ status: "failed", completionEpoch: 2, error: "test" });
@@ -109,4 +198,17 @@ test("image copyright rejection is not misreported as bad parameters or credenti
   assert.match(summary, /停止提交剩余 1 个动作/);
   assert.match(summary, /已完成的结果保留/);
   assert.match(normalizeGenerationErrorMessage('volcano submit HTTP 400: {"error":{"code":"InvalidParameter","message":"unsupported ratio"}}'), /请求参数不被当前模型接受/);
+});
+
+test("Seedream output copyright rejection stays at image editing, including truncated bodies", () => {
+  const raw = '参考图处理失败。Ark image edit (doubao-seedream-5-0-flash-260915) HTTP 400: {"error":{"code":"OutputImageSensitiveContentDetected.PolicyViolation","message":"The output image may be related to copyright restrictions. Request id: req-output-test","type":"BadRequest"}}';
+  for (const value of [raw, raw.slice(0, -10)]) {
+    const message = normalizeGenerationErrorMessage(value);
+    assert.match(message, /^参考图处理未通过版权审核/);
+    assert.match(message, /处理后的生成结果/);
+    assert.match(message, /尚未提交视频任务/);
+    assert.match(message, /req-output-test/);
+    assert.doesNotMatch(message, /请求参数不被|图生视频失败|输入参考图可能|可重试处理|关闭背景处理/);
+    assert.equal(normalizeGenerationErrorMessage(message), message);
+  }
 });

@@ -1,6 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { listVideoModels, normalizeVideoModels, requireAvailableVideoModel, selectDefaultVideoModel } from "./video-models.js";
+import { discoverDefaultVideoModel, listVideoModels, normalizeVideoModels, requireAvailableVideoModel, selectDefaultVideoModel } from "./video-models.js";
+import { initializeProviderConfigs, loadProviderConfig } from "./provider-config.js";
+
+test("user-configured public install discovers a Fast model without advanced settings or paid calls", async () => {
+  const previous = globalThis.window;
+  try {
+    globalThis.window = { __TAURI_INTERNALS__: {} };
+    await initializeProviderConfigs({ getItem: () => null }, async () => ({ volcengine: { apiKey: "fixture-user-owned-key" } }));
+    const config = loadProviderConfig("volcengine");
+    assert.equal(config.model, "");
+    assert.equal(config.apiKey, "fixture-user-owned-key");
+    let calls = 0;
+    const selected = await discoverDefaultVideoModel(config, async (url, init) => {
+      calls++;
+      assert.match(url, /\/models$/);
+      assert.equal(init.method, "GET");
+      assert.equal(init.body, undefined);
+      return Response.json({ data: [{ id: "doubao-seedance-2-0-fast-260128" }] });
+    });
+    assert.equal(selected, "doubao-seedance-2-0-fast-260128");
+    assert.equal(calls, 1);
+  } finally { if (previous === undefined) delete globalThis.window; else globalThis.window = previous; }
+});
+
+test("automatic discovery distinguishes missing Fast, auth failures, retry and cancellation", async () => {
+  const config = { apiKey: "fixture" };
+  await assert.rejects(discoverDefaultVideoModel(config, async () => Response.json({ data: [] })), /Fast/);
+  await assert.rejects(discoverDefaultVideoModel(config, async () => new Response("", { status: 401 })), /鉴权/);
+  assert.equal(await discoverDefaultVideoModel(config, async () => Response.json({ data: [{ id: "doubao-seedance-2-0-fast" }] })), "doubao-seedance-2-0-fast");
+  const controller = new AbortController();
+  await assert.rejects(discoverDefaultVideoModel({ ...config, signal: controller.signal }, async () => {
+    controller.abort(); return Response.json({ data: [{ id: "doubao-seedance-2-0-fast" }] });
+  }), { name: "AbortError" });
+});
 
 test("empty selection defaults to the latest Fast version, then newest revision", () => {
   const models = normalizeVideoModels([

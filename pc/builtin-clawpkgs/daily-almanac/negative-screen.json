@@ -1,0 +1,17 @@
+{
+  "dashboard": {
+    "title": "每日黄历",
+    "eyebrow": "按北京时间 · PC 连接后可用",
+    "headline": "今天，慢慢过",
+    "metricValue": "—",
+    "metricLabel": "回到今天",
+    "metricUnit": "宜忌详情",
+    "badge": "",
+    "note": "连接 Pet Manager，读取本地黄历。",
+    "footer": "民俗参考 · 节日不等于法定休假",
+    "visualStyle": "clean",
+    "visualPalette": "ember",
+    "visualLayout": "tool",
+    "visualSprite": "timer"
+  }
+}

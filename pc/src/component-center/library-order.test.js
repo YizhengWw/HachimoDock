@@ -12,8 +12,23 @@ import {
   sortComponentsByCreatedAt,
   mergeComponentCatalog,
   isComponentVisible,
+  DEFAULT_COMPONENT_ORDER,
+  sortComponentsByDefaultOrder,
 } from "./library-order.js";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
+
+test('promoted local-delights revisions use builtin placement, not recent-install placement',()=>{
+  const center=readFileSync(new URL('../ComponentCenter.jsx',import.meta.url),'utf8');
+  for(const id of ['decision-capsule','answer-book','hope-train']) {
+    const root=new URL(`../../builtin-clawpkgs/${id}/`,import.meta.url);
+    const list=(dir,prefix='')=>readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?list(new URL(`${e.name}/`,dir),`${prefix}${e.name}/`):[`${prefix}${e.name}`]);
+    const hash=createHash('sha256');
+    for(const file of list(root).sort()) hash.update(file).update('\0').update(readFileSync(new URL(file,root))).update('\0');
+    assert.ok(center.includes(`"${hash.digest('hex').slice(0,16)}"`),`${id}: update the exact promoted revision when changing the builtin`);
+  }
+});
 
 test("release hides builtin and already-installed music without deleting records", () => {
   const source = [{id:"stock-watchlist"}, {id:"music-player"}, {id:"wooden-fish"}];
@@ -27,15 +42,19 @@ test("release hides builtin and already-installed music without deleting records
   assert.ok(center.includes("isComponentVisible(item) && !catalogIds.has(item.id)"));
 });
 
-test("default builtin tools put wooden fish second on PC and firmware", () => {
+test("PC and firmware share the curated default component order", () => {
   const factory = JSON.parse(readFileSync(new URL("../../../firmware/factory-config.json", import.meta.url)));
-  assert.deepEqual(factory.components.ids.slice(0, 5), ["stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status"]);
-  const fixtures = readFileSync(new URL("../fixtures.js", import.meta.url), "utf8");
-  const catalog = fixtures.slice(fixtures.indexOf("export const BUILTIN_COMPONENT_CENTER"));
-  assert.ok(catalog.indexOf('id: "stock-watchlist"') < catalog.indexOf("id: woodenFishManifest.id"));
-  assert.ok(catalog.indexOf("id: woodenFishManifest.id") < catalog.indexOf("id: musicManifest.id"));
-  assert.ok(catalog.indexOf("id: musicManifest.id") < catalog.indexOf("...localDataComponents[1]"));
-  assert.ok(catalog.indexOf("...localDataComponents[1]") < catalog.indexOf("...localDataComponents[0]"));
+  const firstTen=['city-radio','cloud-hop','stock-watchlist','wooden-fish','daily-news','book-pocket','block-combo','tomato-clock','fresh-fruit-slice','hachimi-sounds','snake-turn'];
+  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(0,11),firstTen);
+  assert.deepEqual(factory.components.ids,DEFAULT_COMPONENT_ORDER);
+  assert.equal(new Set(DEFAULT_COMPONENT_ORDER).size,29);
+  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(-3), ['decision-capsule','answer-book','hope-train']);
+  assert.equal(factory.components.defaultActiveId,'city-radio');
+  assert.ok(!factory.components.ids.includes('music-player'));
+  const items=[{id:'custom-b'},...firstTen.toReversed().map(id=>({id})),{id:'custom-a'}];
+  const snapshot=[...items];
+  assert.deepEqual(sortComponentsByDefaultOrder(items).map(x=>x.id),[...firstTen,'custom-b','custom-a']);
+  assert.deepEqual(items,snapshot);
 });
 
 test("component library sorts mixed records by creation time newest first", () => {
@@ -52,15 +71,36 @@ test("component library sorts mixed records by creation time newest first", () =
   ]);
 });
 
-test("stocks lead default builtins but are not pinned above newly published components", () => {
+test("factory copies keep curated order after loading; actual user revisions stay recent",()=>{
+  const builtins=[{id:"city-radio",version:"1.0"},{id:"cloud-hop",version:"1.0"},{id:"wooden-fish",version:"1.0"}];
+  const locals=[{...builtins[2],isBundledCopy:true},{...builtins[0],isBundledCopy:true},{...builtins[1],isBundledCopy:true}];
+  assert.deepEqual(mergeComponentCatalog(locals,builtins).map(v=>v.id),mergeComponentCatalog([],builtins).map(v=>v.id));
+  const custom={id:"wooden-fish",version:"2.0",isBundledCopy:false};
+  const out=mergeComponentCatalog([custom,...locals.slice(1)],builtins);
+  assert.equal(out[0].id,"wooden-fish");assert.equal(out[0].version,"2.0");assert.equal(out[0].sourceAlternatives[0],custom);
+});
+
+test("recent installs precede curated defaults without losing custom source revisions", () => {
   const stock = { id: "stock-watchlist", version: "1.1.0" };
   const builtins = [stock, { id: "pong" }, { id: "frog" }];
   const published = [{ id: "custom-new" }, { id: "stock-watchlist", version: "1.0.0" }, { id: "frog", version: "custom" }];
   const result = mergeComponentCatalog(published, builtins);
   assert.deepEqual(result.map((item) => item.id), ["custom-new", "stock-watchlist", "frog", "pong"]);
-  assert.equal(result[1], published[1]);
+  assert.equal(result[1].version, stock.version);
+  assert.deepEqual(result[1].sourceAlternatives,[published[1],stock]);
   assert.equal(result[2].version, "custom");
   assert.deepEqual(mergeComponentCatalog([], builtins), builtins);
+});
+
+test("renamed packages preserve identity and synchronize all display titles", () => {
+  for(const [id,name,version]of [['wooden-fish','静心木鱼','1.0.5'],['book-pocket','每天一本书','1.0.2']]){
+    const root=new URL(`../../builtin-clawpkgs/${id}/`,import.meta.url);
+    const read=file=>JSON.parse(readFileSync(new URL(file,root)));
+    assert.deepEqual([read('component.json').id,read('component.json').name,read('component.json').version],[id,name,version]);
+    assert.equal(read('runtime/widget.json').dashboard.title,name);
+    assert.equal(read('negative-screen.json').dashboard.title,name);
+    assert.equal(read('share.json').title,name);
+  }
 });
 
 test("component library keeps source order for equal or missing creation times", () => {

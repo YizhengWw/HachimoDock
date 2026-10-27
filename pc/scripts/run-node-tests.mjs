@@ -1,6 +1,6 @@
 /**
  * [Input] Optional test root relative to the caller's current directory.
- * [Output] Recursively discovers *.test.js files and runs them with Node's test runner.
+ * [Output] Recursively discovers *.test.js and *.test.mjs files with Node's test runner.
  * [Pos] Cross-platform repository test launcher used by pc/package.json.
  * [Sync] If this file changes, update scripts/.folder.md.
  */
@@ -17,7 +17,7 @@ async function collectTests(directory) {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) {
       tests.push(...await collectTests(path));
-    } else if (entry.isFile() && entry.name.endsWith(".test.js")) {
+    } else if (entry.isFile() && /\.test\.m?js$/.test(entry.name)) {
       tests.push(path);
     }
   }
@@ -32,7 +32,7 @@ const tests = (await Promise.all(roots.map((root) => collectTests(root))))
   .sort();
 
 if (tests.length === 0) {
-  console.error(`No *.test.js files found under ${roots.join(", ")}`);
+  console.error(`No *.test.js / *.test.mjs files found under ${roots.join(", ")}`);
   process.exit(1);
 }
 

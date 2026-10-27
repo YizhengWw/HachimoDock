@@ -1,48 +1,937 @@
 {
   "schema_version": 1,
-  "engine": "p4-bounded-runtime-v3",
-  "vars": {"score":{"type":"int","init":0}},
-  "states": ["ready","playing","result"],
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "score": {
+      "type": "int",
+      "init": 0
+    },
+    "best": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "ready",
+    "playing",
+    "result",
+    "paused"
+  ],
   "initial_state": "ready",
   "transitions": [
-    {"on":"shift_left","from":"playing","to":"playing"},
-    {"on":"shift_right","from":"playing","to":"playing"},
-    {"on":"start","from":"ready","to":"playing"},
-    {"on":"start","from":"result","to":"playing"}
+    {
+      "on": "shift_left",
+      "from": "playing",
+      "to": "playing"
+    },
+    {
+      "on": "shift_right",
+      "from": "playing",
+      "to": "playing"
+    },
+    {
+      "on": "start",
+      "from": "ready",
+      "to": "playing"
+    },
+    {
+      "on": "start",
+      "from": "result",
+      "to": "playing"
+    },
+    {
+      "from": "playing",
+      "on": "session.pause",
+      "to": "paused"
+    },
+    {
+      "from": "paused",
+      "on": "session.pause",
+      "to": "playing"
+    },
+    {
+      "from": "paused",
+      "on": "start",
+      "to": "playing"
+    }
   ],
   "tick": [],
   "dashboard": {
     "title": "双键接球",
-    "eyebrow": {"switch_state":{"ready":"经典电子乒乓","playing":"经典电子乒乓","result":"本局结束"}},
-    "headline": {"switch_state":{"ready":"按 SW1 开始","playing":"守住底线","result":"漏球了"}},
+    "eyebrow": {
+      "switch_state": {
+        "ready": "经典电子乒乓",
+        "playing": "经典电子乒乓",
+        "result": "本局结束",
+        "paused": "休息一下"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "ready": "准备接球",
+        "playing": "守住底线",
+        "result": "本局结束",
+        "paused": "已暂停"
+      }
+    },
     "metricLabel": "连续接球",
-    "metricValue": {"var":"score"},
-    "metricUnit": "次",
-    "footer": {"switch_state":{"ready":"SW1开始 · 摇杆左右移动 · 全局键退出","playing":"摇杆左右移动 · 全局键退出","result":"SW1重开 · 全局键退出"}},
-    "visualStyle": "pixel",
-    "visualPalette": "mono",
+    "metricValue": {
+      "var": "score"
+    },
+    "metricUnit": {
+      "switch_state": {
+        "ready": "开始接球",
+        "playing": "接球中",
+        "result": "再来一局",
+        "paused": "继续游戏"
+      }
+    },
+    "footer": "摇杆左右移动 · 主键开始/重开 · 全局键退出",
+    "visualStyle": "clean",
+    "visualPalette": "ocean",
     "visualLayout": "scoreboard",
-    "visualSprite": "trophy"
+    "visualSprite": "trophy",
+    "badge": {
+      "var": "best"
+    }
   },
   "scene": {
     "tick_ms": 170,
     "active_state": "playing",
     "result_state": "result",
     "score_var": "score",
-    "grid": {"width":16,"height":16},
+    "grid": {
+      "width": 16,
+      "height": 16
+    },
     "entities": [
-      {"id":"bat","x":6,"y":13,"width":4,"height":1,"shape":"paddle","tone":2,"bounds":"clamp","collidable":true},
-      {"id":"orb","x":4,"y":3,"width":2,"height":2,"shape":"ball","tone":4,"vx":1,"vy":1,"bounds":"clamp","collidable":true}
+      {
+        "id": "bat",
+        "x": 6,
+        "y": 13,
+        "width": 4,
+        "height": 1,
+        "shape": "paddle",
+        "tone": 2,
+        "bounds": "clamp",
+        "collidable": true
+      },
+      {
+        "id": "orb",
+        "x": 4,
+        "y": 3,
+        "width": 2,
+        "height": 2,
+        "shape": "ball",
+        "tone": 4,
+        "vx": 1,
+        "vy": 1,
+        "bounds": "clamp",
+        "collidable": true
+      }
     ],
     "rules": [
-      {"on":"start","do":[{"op":"restart"}]},
-      {"on":"shift_left","do":[{"op":"move","entity":"bat","dx":-2,"dy":0}]},
-      {"on":"shift_right","do":[{"op":"move","entity":"bat","dx":2,"dy":0}]},
-      {"on":"edge","entity":"orb","edge":"left","do":[{"op":"bounce","entity":"orb","axis":"x"}]},
-      {"on":"edge","entity":"orb","edge":"right","do":[{"op":"bounce","entity":"orb","axis":"x"}]},
-      {"on":"edge","entity":"orb","edge":"top","do":[{"op":"bounce","entity":"orb","axis":"y"}]},
-      {"on":"collision","entity":"orb","with":"bat","do":[{"op":"bounce","entity":"orb","axis":"y"},{"op":"score","add":1}]},
-      {"on":"edge","entity":"orb","edge":"bottom","do":[{"op":"stop"}]}
+      {
+        "on": "start",
+        "do": [
+          {
+            "op": "restart"
+          }
+        ]
+      },
+      {
+        "on": "shift_left",
+        "do": [
+          {
+            "op": "move",
+            "entity": "bat",
+            "dx": -2,
+            "dy": 0
+          }
+        ]
+      },
+      {
+        "on": "shift_right",
+        "do": [
+          {
+            "op": "move",
+            "entity": "bat",
+            "dx": 2,
+            "dy": 0
+          }
+        ]
+      },
+      {
+        "on": "edge",
+        "entity": "orb",
+        "edge": "left",
+        "do": [
+          {
+            "op": "bounce",
+            "entity": "orb",
+            "axis": "x"
+          }
+        ]
+      },
+      {
+        "on": "edge",
+        "entity": "orb",
+        "edge": "right",
+        "do": [
+          {
+            "op": "bounce",
+            "entity": "orb",
+            "axis": "x"
+          }
+        ]
+      },
+      {
+        "on": "edge",
+        "entity": "orb",
+        "edge": "top",
+        "do": [
+          {
+            "op": "bounce",
+            "entity": "orb",
+            "axis": "y"
+          }
+        ]
+      },
+      {
+        "on": "collision",
+        "entity": "orb",
+        "with": "bat",
+        "do": [
+          {
+            "op": "bounce",
+            "entity": "orb",
+            "axis": "y"
+          },
+          {
+            "op": "score",
+            "add": 1
+          }
+        ]
+      },
+      {
+        "on": "edge",
+        "entity": "orb",
+        "edge": "bottom",
+        "do": [
+          {
+            "op": "stop"
+          }
+        ]
+      }
     ]
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 4389,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 128,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 4389,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 28,
+        "y": 88,
+        "w": 348,
+        "h": 272,
+        "color": 4585,
+        "radius": 20,
+        "opacity": 185
+      },
+      {
+        "type": "panel",
+        "x": 404,
+        "y": 88,
+        "w": 208,
+        "h": 272,
+        "color": 2309,
+        "radius": 20,
+        "opacity": 210
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 23,
+        "w": 21,
+        "h": 21,
+        "color": 42743,
+        "icon": "spark"
+      },
+      {
+        "type": "text",
+        "x": 57,
+        "y": 18,
+        "w": 320,
+        "h": 30,
+        "color": 61374,
+        "font_size": 20,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 378,
+        "y": 22,
+        "w": 234,
+        "h": 25,
+        "color": 42487,
+        "font_size": 14,
+        "text": "一拍，一次专注。",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 424,
+        "y": 112,
+        "w": 168,
+        "h": 26,
+        "color": 42487,
+        "font_size": 16,
+        "bind": "metricLabel"
+      },
+      {
+        "type": "text",
+        "x": 420,
+        "y": 159,
+        "w": 170,
+        "h": 64,
+        "color": 61374,
+        "font_size": 48,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 424,
+        "y": 255,
+        "w": 168,
+        "h": 30,
+        "color": 42743,
+        "font_size": 20,
+        "bind": "headline"
+      },
+      {
+        "type": "text",
+        "x": 424,
+        "y": 302,
+        "w": 170,
+        "h": 25,
+        "color": 42487,
+        "font_size": 14,
+        "text": "漏球后可重新开始"
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 384,
+        "w": 166,
+        "h": 48,
+        "color": 8810,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61374,
+        "padding": 18,
+        "weight": 600,
+        "text": "向左",
+        "action": "shift_left",
+        "state_mask": 2
+      },
+      {
+        "type": "button",
+        "x": 210,
+        "y": 384,
+        "w": 166,
+        "h": 48,
+        "color": 8810,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 61374,
+        "padding": 18,
+        "weight": 600,
+        "text": "向右",
+        "action": "shift_right",
+        "state_mask": 2
+      },
+      {
+        "type": "button",
+        "x": 404,
+        "y": 384,
+        "w": 208,
+        "h": 48,
+        "color": 42743,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 4550,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "play",
+        "action": "start",
+        "state_mask": 13
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 446,
+        "w": 640,
+        "h": 34,
+        "color": 4389,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 455,
+        "w": 36,
+        "h": 17,
+        "color": 4389,
+        "text": "SW1",
+        "key_for": "start",
+        "font_size": 10,
+        "line_height": 13,
+        "padding": 2,
+        "radius": 3,
+        "foreground": 46713,
+        "opacity": 0,
+        "stroke": 46713,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 67,
+        "y": 451,
+        "w": 146,
+        "h": 24,
+        "color": 46713,
+        "font_size": 13,
+        "text": "开始/重开"
+      },
+      {
+        "type": "text",
+        "x": 504,
+        "y": 451,
+        "w": 112,
+        "h": 24,
+        "color": 46713,
+        "font_size": 13,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 218,
+        "y": 451,
+        "w": 260,
+        "h": 24,
+        "color": 46713,
+        "font_size": 13,
+        "text": "摇杆左右移动"
+      },
+      {
+        "type": "button",
+        "x": 492,
+        "y": 16,
+        "w": 122,
+        "h": 44,
+        "color": 4389,
+        "foreground": 61374,
+        "font_size": 15,
+        "radius": 14,
+        "padding": 10,
+        "text": "暂停/继续",
+        "action": "session.pause",
+        "state_mask": 10
+      },
+      {
+        "type": "text",
+        "x": 130,
+        "y": 52,
+        "w": 300,
+        "h": 28,
+        "color": 61374,
+        "font_size": 18,
+        "bind": "badge"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 54,
+        "w": 96,
+        "h": 24,
+        "color": 61374,
+        "font_size": 15,
+        "text": "历史最高"
+      }
+    ],
+    "scene_view": {
+      "engine": "p4-scene-surface-v1",
+      "x": 28,
+      "y": 88,
+      "w": 348,
+      "h": 272,
+      "colors": [
+        61374,
+        38520,
+        42743,
+        63156,
+        63252
+      ],
+      "sprites": []
+    },
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 准备接球守住底线本局结束score连续开始中再来一双键经典电",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            15,
+            11,
+            28
+          ],
+          [
+            16,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "子乒乓拍，次专注。漏后可重新向左右SW全退出摇杆移动",
+        "metrics": [
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            28,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "lifecycle": {
+    "pause_action": "session.pause",
+    "record_var": "best"
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "best"
+    ],
+    "states": {
+      "ready": "ready",
+      "playing": "ready",
+      "result": "ready",
+      "paused": "ready"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "repeat": [
+      "shift_left",
+      "shift_right"
+    ],
+    "drag": {
+      "entity": "bat",
+      "axis": "x"
+    }
   }
 }

@@ -6,6 +6,7 @@
  *          (`persona-voice.json`, normalized onto every record as `personaVoice`; new appearances are
  *          marked "persona setup pending" until saved). Successful saves refresh device-context
  *          consumers immediately and queue the saved persona/voice for an active conversation.
+ *          New documents omit volume; realtime volume is persisted globally by the native layer.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI components that consume the appearance manifest shape.
  */
@@ -59,6 +60,10 @@ function uuid() {
 
 async function prepareP4Appearance(appearanceId) {
   return invoke("prepare_p4_appearance", { appearanceId });
+}
+export async function prepareSavedAppearance(appearanceId) {
+  const result=await prepareP4Appearance(appearanceId);
+  invalidateAppearanceCache();return result;
 }
 
 async function ensureRoot() {
@@ -153,10 +158,11 @@ export async function savePersonaVoice(appearanceId, input) {
   if (!appearanceId) throw new Error("missing appearance id");
   const isBuiltin = appearanceId === BUILTIN_TERRIER_APPEARANCE_ID;
   const normalized = normalizePersonaVoice(input, { isBuiltin });
+  const { volume: _legacyVolume, ...appearanceVoice } = normalized.voice;
   const document = {
     schema_version: PERSONA_VOICE_SCHEMA_VERSION,
     persona: normalized.persona,
-    voice: normalized.voice,
+    voice: appearanceVoice,
     updated_at: new Date().toISOString(),
   };
   await ensureRoot();
@@ -266,12 +272,16 @@ function buildUploadedVideoFamilies(selectedFamily, videoRel, originalFilename =
  * @returns {Promise<AppearanceRecord>}
  */
 export async function saveAppearance(input) {
-  const id = uuid();
+  const id = input.appearanceId || uuid();
+  if (!/^[a-zA-Z0-9-]+$/.test(id)) throw new Error("invalid appearance id");
   const dir = await ensureAppearanceDir(id);
 
   const ext = extensionFromMime(input.imagePayload.mime);
   const sourceRel = `${dir}/source${ext}`;
   await writeFile(sourceRel, input.imagePayload.bytes, { baseDir: BaseDirectory.AppLocalData });
+  if (input.originalImagePayload) {
+    await writeFile(`${dir}/original${extensionFromMime(input.originalImagePayload.mime)}`, input.originalImagePayload.bytes, { baseDir: BaseDirectory.AppLocalData });
+  }
 
   const familiesOut = [];
   for (const f of input.families) {
@@ -316,7 +326,7 @@ export async function saveAppearance(input) {
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
-  await prepareP4Appearance(id);
+  if(!input.deferPreparation)await prepareP4Appearance(id);
 
   invalidateAppearanceCache();
   markPersonaSetupPending(id);
@@ -478,7 +488,7 @@ export async function readAppearanceSourceImage(appearanceId) {
 /**
  * Replace a single family's video (e.g. after a retry).
  */
-export async function replaceFamilyVideo({ appearanceId, family, videoBytes, taskId, videoUrl, prompt }) {
+export async function replaceFamilyVideo({ appearanceId, family, videoBytes, taskId, videoUrl, prompt, deferPreparation = false }) {
   const dir = `${ROOT_DIR}/${appearanceId}`;
   const videoRel = `${dir}/${VIDEO_DIR}/${family}.mp4`;
   await writeFile(videoRel, videoBytes, { baseDir: BaseDirectory.AppLocalData });
@@ -501,7 +511,7 @@ export async function replaceFamilyVideo({ appearanceId, family, videoBytes, tas
   await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
     baseDir: BaseDirectory.AppLocalData,
   });
-  await prepareP4Appearance(appearanceId);
+  if(!deferPreparation)await prepareP4Appearance(appearanceId);
   invalidateAppearanceCache();
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
 }

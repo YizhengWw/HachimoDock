@@ -42,6 +42,7 @@
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
 #include "pet_p4_media.h"
+#include "pet_p4_app_host.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_raw_assets.h"
 #include "pet_p4_touch.h"
@@ -1446,7 +1447,7 @@ void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_
   }
   if (pet_p4_conversation_active(state) && state->host_last_seen_ms
       && now_ms > state->host_last_seen_ms + PET_P4_HOST_HEARTBEAT_TIMEOUT_MS) {
-    (void) pet_p4_audio_conversation_set(false, true);
+    (void) pet_p4_audio_conversation_set(false, true, NULL);
     pet_p4_conversation_clear(state);
   }
   pet_p4_conversation_advance(state, pet_p4_audio_stream_played_bytes(),
@@ -1644,7 +1645,8 @@ static bool send_widget_inventory(
   );
   cJSON_AddBoolToObject(payload, "supportsMultiple", true);
   cJSON_AddNumberToObject(payload, "maxInstalled", PET_P4_MINIAPP_CATALOG_MAX);
-  cJSON_AddBoolToObject(payload, "complete", true);
+  cJSON_AddBoolToObject(payload, "complete", !pet_p4_miniapp_catalog_recovery_blocked());
+  cJSON_AddBoolToObject(payload, "recoveryBlocked", pet_p4_miniapp_catalog_recovery_blocked());
   if (!request_id[0] || strlen(request_id) >= 96) {
     cJSON_AddBoolToObject(payload, "ok", false);
     cJSON_AddStringToObject(payload, "error", "missing/invalid requestId");
@@ -1672,7 +1674,10 @@ static bool send_widget_inventory(
       cJSON_AddNullToObject(item, "kind");
       cJSON_AddNullToObject(item, "version");
       cJSON_AddBoolToObject(item, "active", entry.active);
-      cJSON_AddStringToObject(item, "manifestState", "valid");
+      cJSON_AddStringToObject(item, "manifestState", entry.resource_state == 1 ? "valid" : "resources-incomplete");
+      cJSON_AddStringToObject(item, "resourceState", entry.resource_state == 1 ? "ready"
+        : entry.resource_state == 2 ? "bootstrap" : entry.resource_state == 3 ? "damaged" : "unchecked");
+      cJSON_AddNumberToObject(item, "imageCount", entry.image_count);
       cJSON_AddBoolToObject(item, "removable", true);
       cJSON_AddItemToArray(items, item);
       active_in_catalog |= entry.active;
@@ -1789,19 +1794,47 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(capabilities, "mp4", false);
   cJSON_AddBoolToObject(capabilities, "widgets", true);
   cJSON_AddBoolToObject(capabilities, "widgetDelete", true);
+  cJSON_AddBoolToObject(capabilities, "widgetDeletePreserveSave", true);
   cJSON_AddBoolToObject(capabilities, "widgetInventory", true);
   cJSON_AddBoolToObject(capabilities, "componentCatalogGeneration", true);
   cJSON_AddStringToObject(capabilities, "widgetRuntime", "p4-bounded-runtime-v4");
+  cJSON_AddStringToObject(capabilities, "widgetResourceIntegrity", "p4-resource-integrity-v1");
   cJSON_AddItemToArray(widget_runtimes, cJSON_CreateString("p4-bounded-runtime-v3"));
   cJSON_AddItemToArray(widget_runtimes, cJSON_CreateString("p4-bounded-runtime-v4"));
   cJSON_AddItemToObject(capabilities, "widgetRuntimes", widget_runtimes);
   cJSON_AddStringToObject(capabilities, "widgetScene", "p4-grid-scene-v2");
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v1"));
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v2"));
+  cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-touch-slice-v1"));
+  cJSON_AddStringToObject(capabilities,"widgetPointer","p4-pointer-v1");
+  cJSON_AddNumberToObject(capabilities,"widgetSliceRevision",2);
   cJSON_AddItemToObject(capabilities, "widgetScenes", widget_scenes);
   cJSON_AddBoolToObject(capabilities, "widgetSprites", true);
   cJSON_AddStringToObject(capabilities, "widgetData", "p4-data-list-v1");
   cJSON_AddStringToObject(capabilities, "widgetMedia", "p4-media-v1");
+  cJSON_AddStringToObject(capabilities, "widgetMediaSurface", "p4-media-surface-v1");
+  cJSON_AddNumberToObject(capabilities, "widgetMediaQueueMax", 128);
+  cJSON_AddStringToObject(capabilities, "widgetMediaLifecycle", "p4-media-lifecycle-v1");
+  cJSON_AddStringToObject(capabilities, "widgetSurfaceImages", "p4-surface-images-v1");
+  cJSON_AddStringToObject(capabilities, "widgetAppSurface", "p4-app-surface-v1");
+  cJSON_AddStringToObject(capabilities, "widgetAppGraphics", "p4-app-graphics-v1");
+  cJSON_AddStringToObject(capabilities, "widgetAppTypography", "p4-app-type-v1");
+  cJSON_AddStringToObject(capabilities, "widgetGlyphCells", "p4-glyph-cells-v1");
+  cJSON_AddStringToObject(capabilities, "widgetAppInteraction", "p4-app-interaction-v1");
+  cJSON_AddStringToObject(capabilities, "widgetGameSurface", "p4-game-surface-v1");
+  cJSON_AddStringToObject(capabilities, "widgetDataSurface", "p4-data-surface-v1");
+  cJSON_AddStringToObject(capabilities, "widgetSceneSurface", "p4-scene-surface-v1");
+  cJSON_AddStringToObject(capabilities, "widgetFlappyTuning", "p4-flappy-tuning-v1");
+  cJSON_AddStringToObject(capabilities, "widgetLifecycle", "p4-lifecycle-v1");
+  cJSON_AddStringToObject(capabilities, "widgetInput", "p4-input-v1");
+  cJSON_AddStringToObject(capabilities, "widgetLocalTools", "p4-local-tools-v1");
+  cJSON_AddStringToObject(capabilities, "widgetMotion", "p4-motion-v1");
+  cJSON_AddStringToObject(capabilities, "widgetPlatformTrack", "p4-platform-track-v1");
+  cJSON_AddStringToObject(capabilities, "widgetMediaTouch", "p4-media-touch-v1");
+  cJSON_AddStringToObject(capabilities, "widgetSurfaceAtlas", "p4-wide-atlas-v1");
+  cJSON_AddStringToObject(capabilities, "widgetAppHost", "p4-app-host-v1");
+  cJSON_AddStringToObject(capabilities, "widgetState", "p4-app-state-v1");
+  cJSON_AddBoolToObject(capabilities, "widgetMediaNotice", true);
   cJSON_AddStringToObject(capabilities, "widgetInstrument", "p4-instrument-v1");
   cJSON_AddStringToObject(capabilities, "widgetLyrics", "p4-lrc-v1");
   cJSON_AddNumberToObject(capabilities, "componentCatalogMax", PET_P4_MINIAPP_CATALOG_MAX);
@@ -1824,7 +1857,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(widget_limits, "maxSceneOpsPerRule", PET_P4_GAME_MAX_OPS_PER_RULE);
   cJSON_AddNumberToObject(widget_limits, "maxSceneSprites", PET_P4_MINIAPP_SPRITE_MAX);
   cJSON_AddNumberToObject(widget_limits, "maxSceneSpritePixels", 4096);
-  cJSON_AddNumberToObject(widget_limits, "maxWidgetJsonBytes", 4095);
+  cJSON_AddNumberToObject(widget_limits, "maxWidgetJsonBytes", 8191);
   cJSON_AddNumberToObject(widget_limits, "maxButtonsJsonBytes", 2047);
   cJSON_AddBoolToObject(widget_limits, "fetchers", false);
   cJSON_AddBoolToObject(widget_limits, "readers", false);
@@ -1850,7 +1883,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(audio_capture, "maxCaptureMs", 30000);
   cJSON_AddBoolToObject(audio_capture, "playback", audio_playback_ready);
   cJSON_AddItemToObject(capabilities, "audioCapture", audio_capture);
-  cJSON_AddStringToObject(touch_input, "controller", touch_ready ? "GT911" : "unavailable");
+  cJSON_AddStringToObject(touch_input, "controller", touch_ready ? pet_p4_touch_controller() : "unavailable");
   cJSON_AddBoolToObject(touch_input, "ready", touch_ready);
   cJSON_AddStringToObject(touch_input, "coordinates", "logical-640x480");
   cJSON_AddBoolToObject(touch_input, "tap", true);
@@ -1940,6 +1973,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(features, "audioAec", pet_p4_afe_ready());
   cJSON_AddBoolToObject(features, "audioVad", pet_p4_afe_ready());
   cJSON_AddBoolToObject(features, "audioFullDuplex", pet_p4_afe_ready());
+  cJSON_AddBoolToObject(features, "audioAecRecovery", audio_ready && audio_playback_ready);
   cJSON_AddBoolToObject(features, "touchInput", touch_ready);
   cJSON_AddBoolToObject(features, "touchGestures", touch_ready);
   cJSON_AddBoolToObject(features, "firmwareOta", true);
@@ -2292,10 +2326,11 @@ static bool handle_widget_topic(
     send_widget_ack(send_line, ctx, transfer_id, phase, payload, ok, error);
   } else if (strcmp(topic, "widget/commit") == 0) {
     phase = "commit";
+    const bool repair_resources = pet_p4_miniapp_resource_repair_active();
     ok = pet_p4_miniapp_install_commit(payload, error, sizeof(error));
     if (ok && state) {
       pet_p4_miniapp_sync_stats(&state->stats);
-      copy_text(state->screen_page, sizeof(state->screen_page), "app");
+      if (!repair_resources) copy_text(state->screen_page, sizeof(state->screen_page), "app");
       state->last_update_ms += 1;
     }
     send_widget_ack(send_line, ctx, transfer_id, phase, payload, ok, error);
@@ -2307,7 +2342,9 @@ static bool handle_widget_topic(
       copy_text(error, sizeof(error), "missing/invalid transferId");
       ok = false;
     } else {
-      ok = pet_p4_miniapp_remove(json_string(payload, "widgetId"), error, sizeof(error));
+      ok = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload,"preserveSave"))
+        ? pet_p4_miniapp_remove_preserving_save(json_string(payload,"widgetId"),error,sizeof(error))
+        : pet_p4_miniapp_remove(json_string(payload, "widgetId"), error, sizeof(error));
     }
     if (ok && state) {
       copy_text(state->screen_page, sizeof(state->screen_page), "main");
@@ -2330,6 +2367,8 @@ bool pet_p4_handle_line(
   cJSON *payload;
   const char *topic;
   if (!state || !line || !line[0]) return false;
+  pet_app_host_transport(send_line,ctx,state->board_device_id);
+  pet_p4_media_transport(send_line,ctx);
   root = cJSON_Parse(line);
   if (!cJSON_IsObject(root)) {
     send_protocol_ack(send_line, ctx, "", NULL, false, "invalid_json", "message must be a JSON object");
@@ -2440,9 +2479,10 @@ bool pet_p4_handle_line(
     esp_err_t audio_err = ESP_ERR_INVALID_ARG;
     if (strcmp(action, "start") == 0) {
       audio_err = pet_p4_audio_set_enabled(true);
-      if (audio_err == ESP_OK) audio_err = pet_p4_audio_capture_start(state->session_queue_count == 0);
+      if (audio_err == ESP_OK) audio_err = pet_p4_audio_capture_start_owned(state->session_queue_count == 0,json_string(payload,"captureOwner"));
     } else if (strcmp(action, "stop") == 0) {
-      audio_err = pet_p4_audio_capture_stop();
+      const char *owner=json_string(payload,"captureOwner");
+      audio_err = owner[0]?pet_p4_audio_capture_stop_owned(owner):pet_p4_audio_capture_stop();
     }
     if (audio_err != ESP_OK) {
       send_protocol_ack(send_line, ctx, topic, payload, false, "audio_control_failed",
@@ -2451,13 +2491,18 @@ bool pet_p4_handle_line(
       return false;
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (!strcmp(topic,"app/snapshot")) {
+    bool ok=pet_app_host_apply(payload,esp_timer_get_time()/1000ULL);
+    if(!ok)send_protocol_ack(send_line,ctx,topic,payload,false,"app_snapshot_invalid","app snapshot did not match the active request");
+    else send_protocol_ack_if_requested(send_line,ctx,topic,payload);
+    state->last_update_ms+=1;
   } else if (pet_p4_media_handle(topic,payload,send_line,ctx)) {
     if(!strcmp(topic,"media/begin") && pet_p4_audio_music_active()
        && pet_p4_audio_stream_matches(json_string(payload,"sessionId"))) {
-      if(!pet_p4_miniapp_media_active()) {
+      if(!pet_p4_miniapp_media_active()&&!pet_p4_miniapp_host_source(json_string(payload,"source"))) {
         pet_p4_miniapp_catalog_activate_id("music-player");
       }
-      if(pet_p4_miniapp_media_active())copy_text(state->screen_page,sizeof(state->screen_page),"app");
+      if(pet_p4_miniapp_media_active()||pet_p4_miniapp_host_source(json_string(payload,"source")))copy_text(state->screen_page,sizeof(state->screen_page),"app");
     }
     state->last_update_ms += 1;
   } else if (strcmp(topic, "audio/query") == 0) {
@@ -2470,7 +2515,7 @@ bool pet_p4_handle_line(
     const cJSON *half_item = cJSON_GetObjectItemCaseSensitive(payload, "halfDuplex");
     bool enabled = cJSON_IsBool(enabled_item) ? cJSON_IsTrue(enabled_item) : false;
     bool half_duplex = cJSON_IsBool(half_item) ? cJSON_IsTrue(half_item) : true;
-    esp_err_t conv_err = pet_p4_audio_conversation_set(enabled, half_duplex);
+    esp_err_t conv_err = pet_p4_audio_conversation_set(enabled, half_duplex, json_string(payload, "sessionId"));
     pet_p4_audio_diagnostic(enabled ? "conversation_start" : "conversation_end", json_string(payload, "sessionId"), 0, conv_err == ESP_OK);
     if (!enabled) {
       pet_p4_conversation_clear(state);
@@ -2548,6 +2593,8 @@ bool pet_p4_handle_line(
     if (accepted && phase_changed) pet_p4_audio_diagnostic(failed ? "conversation_failed" : "conversation_state", json_string(payload, "sessionId"), 0, !failed);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "system/heartbeat") == 0) {
+    const cJSON *clock=cJSON_GetObjectItemCaseSensitive(payload,"clock");
+    if(clock)pet_p4_miniapp_clock_sync(clock,esp_timer_get_time()/1000ULL);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (pet_p4_diagnostics_handle_topic(topic, payload, state, send_line, ctx)) {
     state->last_update_ms += 1;
@@ -2569,7 +2616,10 @@ bool pet_p4_handle_line(
     }
   } else if (strcmp(topic, "miniapp/event") == 0) {
     const char *action = json_string(payload, "action");
-    if (!pet_p4_miniapp_dispatch_action(action, json_u64(payload, "tsMs", 0))) {
+    // Input eligibility, host freshness, throttles and confirmations all use
+    // device monotonic time. An omitted/desktop wall-clock timestamp must not
+    // silently disable actions or expire a freshly opened confirmation.
+    if (!pet_p4_miniapp_dispatch_action(action, esp_timer_get_time() / 1000ULL)) {
       send_protocol_ack(send_line, ctx, topic, payload, false, "miniapp_event_unhandled",
                         "action is not handled by the active mini-app state");
       cJSON_Delete(root);

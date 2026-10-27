@@ -29,7 +29,11 @@
 #define PET_P4_AUDIO_MAX_CAPTURE_MS 30000ULL
 #define PET_P4_ES7210_I2C_ADDRESS 0x40
 #define PET_P4_ES8311_I2C_ADDRESS 0x18
-#define PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES 4096
+/* Largest streaming write is 1920 bytes (20 ms at 48 kHz mono).
+ * A 2 KiB scratch buffer keeps that cadence unchanged and leaves 2 KiB more
+ * stack for codec/status calls; standalone WAV cancellation is checked sooner. */
+#define PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES 2048
+_Static_assert(PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES >= 1920, "music write scratch capacity");
 #define PET_P4_AUDIO_PLAYBACK_MAX_PCM_BYTES (1024 * 1024)
 /* Codec's documented full-scale output: 100 = 0 dB (60 was -20 dB). */
 #define PET_P4_AUDIO_PLAYBACK_VOLUME 100
@@ -80,6 +84,37 @@ static unsigned int g_playback_asset_revision;
 #define PET_P4_AUDIO_HALF_DUPLEX_TAIL_MS 250ULL
 static atomic_bool g_conversation;
 static atomic_bool g_conversation_half_duplex;
+static atomic_bool g_conversation_starting;
+static portMUX_TYPE g_conversation_lock = portMUX_INITIALIZER_UNLOCKED;
+static char g_conversation_session[64];
+static char g_capture_owner[64];
+static void conversation_session_copy(char session[64]) {
+  portENTER_CRITICAL(&g_conversation_lock);
+  memcpy(session, g_conversation_session, sizeof(g_conversation_session));
+  portEXIT_CRITICAL(&g_conversation_lock);
+}
+static atomic_uint g_capture_tx_last_us, g_capture_tx_max_us;
+static void add_conversation_metadata(cJSON *payload) {
+  char session[64];
+  conversation_session_copy(session);
+  cJSON_AddStringToObject(payload, "conversationSessionId", session);
+  cJSON_AddBoolToObject(payload, "audioAecPreparing", atomic_load(&g_conversation_starting)
+    || (pet_p4_audio_conversation_active() && !atomic_load(&g_conversation_half_duplex) && pet_p4_afe_preparing()));
+  cJSON_AddStringToObject(payload, "aecReason", pet_p4_afe_failure());
+  pet_p4_afe_metrics_t dsp = pet_p4_afe_metrics();
+  cJSON_AddNumberToObject(payload, "dspFrames", dsp.frames);
+  cJSON_AddNumberToObject(payload, "dspLastUs", dsp.last_us);
+  cJSON_AddNumberToObject(payload, "dspMaxUs", dsp.max_us);
+  cJSON_AddNumberToObject(payload, "dspAecUs", dsp.aec_us);
+  cJSON_AddNumberToObject(payload, "dspNsUs", dsp.ns_us);
+  cJSON_AddNumberToObject(payload, "dspVadUs", dsp.vad_us);
+  cJSON_AddNumberToObject(payload, "aecReferenceSamples", dsp.reference_samples);
+  cJSON_AddNumberToObject(payload, "internalFreeBytes", heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(payload, "internalLargestBytes", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+  cJSON_AddNumberToObject(payload, "captureTxLastUs", atomic_load(&g_capture_tx_last_us));
+  cJSON_AddNumberToObject(payload, "captureTxMaxUs", atomic_load(&g_capture_tx_max_us));
+  if (g_audio_task) cJSON_AddNumberToObject(payload, "captureStackMinBytes", uxTaskGetStackHighWaterMark(g_audio_task));
+}
 static atomic_bool g_stream_active;
 static atomic_bool g_stream_ended;
 static atomic_bool g_stream_playing;
@@ -161,6 +196,8 @@ static void send_topic(const char *topic, cJSON *payload) {
     cJSON_Delete(payload);
     return;
   }
+  if (!cJSON_GetObjectItemCaseSensitive(payload, "boardDeviceId"))
+    cJSON_AddStringToObject(payload, "boardDeviceId", g_board_device_id);
   cJSON_AddStringToObject(root, "topic", topic);
   cJSON_AddItemToObject(root, "payload", payload);
   line = cJSON_PrintUnformatted(root);
@@ -187,6 +224,7 @@ void pet_p4_audio_diagnostic(const char *event, const char *session_id, size_t b
   cJSON_AddNumberToObject(payload, "bufferedMs", stream_buffered() * 1000ULL / 32000ULL);
   cJSON_AddNumberToObject(payload, "uptimeMs", esp_timer_get_time() / 1000ULL);
   cJSON_AddBoolToObject(payload, "ok", ok);
+  add_conversation_metadata(payload);
   send_topic("audio/diagnostic", payload);
 }
 
@@ -214,6 +252,7 @@ void pet_p4_audio_send_status(void) {
   cJSON_AddBoolToObject(payload, "audioAec", pet_p4_afe_ready());
   cJSON_AddBoolToObject(payload, "audioVad", pet_p4_afe_ready());
   cJSON_AddBoolToObject(payload, "audioFullDuplex", pet_p4_afe_ready());
+  add_conversation_metadata(payload);
   cJSON_AddBoolToObject(payload, "streamActive", atomic_load_explicit(&g_stream_active, memory_order_acquire));
   cJSON_AddNumberToObject(payload, "streamBufferedMs", (double) (stream_buffered() * 1000ULL / 32000ULL));
   cJSON_AddNumberToObject(payload, "streamUnderruns", atomic_load(&g_stream_underruns));
@@ -227,6 +266,7 @@ static void send_audio_error(const char *session_id, const char *code, const cha
   cJSON_AddStringToObject(payload, "sessionId", session_id ? session_id : "");
   cJSON_AddStringToObject(payload, "code", code ? code : "audio_error");
   cJSON_AddStringToObject(payload, "error", message ? message : "audio capture failed");
+  add_conversation_metadata(payload);
   send_topic("audio/error", payload);
 }
 
@@ -234,6 +274,8 @@ static void send_audio_begin(const char *session_id, bool session_queue_empty) {
   pet_p4_audio_diagnostic("capture_started", session_id, 0, true);
   cJSON *payload = cJSON_CreateObject();
   cJSON_AddStringToObject(payload, "sessionId", session_id);
+  char owner[64];portENTER_CRITICAL(&g_conversation_lock);memcpy(owner,g_capture_owner,sizeof(owner));portEXIT_CRITICAL(&g_conversation_lock);
+  cJSON_AddStringToObject(payload,"captureOwner",owner);
   cJSON_AddStringToObject(payload, "boardDeviceId", g_board_device_id);
   cJSON_AddBoolToObject(payload, "sessionQueueEmpty", session_queue_empty);
   cJSON_AddStringToObject(payload, "format", "pcm_s16le");
@@ -243,6 +285,7 @@ static void send_audio_begin(const char *session_id, bool session_queue_empty) {
   cJSON_AddNumberToObject(payload, "frameMs", PET_P4_AUDIO_FRAME_MS);
   cJSON_AddStringToObject(payload, "transport", "usb-jsonl-pcm-v1");
   cJSON_AddBoolToObject(payload, "conversation", pet_p4_audio_conversation_active());
+  add_conversation_metadata(payload);
   send_topic("audio/begin", payload);
 }
 
@@ -252,7 +295,8 @@ static bool send_audio_chunk(
   const uint8_t *pcm,
   size_t pcm_len,
   bool processed,
-  bool speech
+  bool speech,
+  const char *conversation_session
 ) {
   char encoded[((PET_P4_AUDIO_FRAME_BYTES + 2) / 3) * 4 + 1];
   char checksum_hex[17];
@@ -271,6 +315,9 @@ static bool send_audio_chunk(
   cJSON_AddStringToObject(payload, "checksum", checksum_hex);
   cJSON_AddStringToObject(payload, "data", encoded);
   cJSON_AddBoolToObject(payload, "aec", processed);
+  /* Bind to the timeline captured BEFORE the codec read, never relabel a
+   * queued PTT/previous conversation frame with the latest control session. */
+  cJSON_AddStringToObject(payload, "conversationSessionId", conversation_session);
   if (processed) cJSON_AddBoolToObject(payload, "vadSpeech", speech);
   send_topic("audio/chunk", payload);
   return true;
@@ -457,6 +504,46 @@ static atomic_uint g_instrument_hit_ms;
 static atomic_bool g_instrument_hit;
 static atomic_int g_instrument_start_y, g_instrument_start_scale;
 static pet_instrument_core_t g_instrument_core;
+static atomic_bool g_fruit_enabled;
+static atomic_uint g_fruit_pending,g_fruit_volume;
+void pet_p4_audio_fruit_sound(unsigned events,unsigned volume,bool active) {
+  atomic_store(&g_fruit_volume,volume>100?100:volume);
+  bool old=atomic_exchange(&g_fruit_enabled,active);
+  if(old!=active) {
+    atomic_store(&g_fruit_pending,0);
+    atomic_fetch_add(&g_playback_generation,1);
+    if(g_playback_queue)xQueueReset(g_playback_queue);
+  }
+  if(active)atomic_fetch_or(&g_fruit_pending,events&7);
+}
+static bool fruit_drain_step(uint8_t *pcm) {
+  static unsigned position,length,kind,phase;
+  static uint32_t noise=0x739a42;
+  if(!g_stream_lock)return false;
+  xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
+  bool blocked=!atomic_load(&g_fruit_enabled)||atomic_load(&g_capture_requested)||atomic_load(&g_capture_active)
+    ||atomic_load(&g_conversation)||atomic_load(&g_stream_active)||atomic_load(&g_music);
+  unsigned events=atomic_exchange(&g_fruit_pending,0);
+  if(blocked){position=length=0;xSemaphoreGiveRecursive(g_stream_lock);return false;}
+  if(events){kind=(events&2)?2:(events&4)?4:1;position=phase=0;length=kind==1?1920:3840;}
+  if(position>=length){xSemaphoreGiveRecursive(g_stream_lock);return false;}
+  unsigned volume=atomic_load(&g_fruit_volume);
+  int16_t *samples=(int16_t*)pcm;
+  for(unsigned i=0;i<320;i++) {
+    if(position>=length){samples[i]=0;continue;}
+    noise^=noise<<13;noise^=noise>>17;noise^=noise<<5;
+    unsigned hz=kind==2?95:kind==4?(position<1920?660:880):1100-position/3;
+    phase=(phase+hz*65536/16000)&65535;
+    int triangle=phase<32768?(int)phase-16384:49151-(int)phase;
+    int n=(int)(noise&32767)-16384;
+    int wave=kind==1?(triangle+2*n)/3:kind==2?(triangle+n)/2:triangle;
+    unsigned attack=position<80?position:80;
+    samples[i]=(int16_t)((int64_t)wave*(length-position)*attack*volume/((int64_t)length*80*180));
+    position++;
+  }
+  if(esp_codec_dev_write(g_speaker,pcm,640)!=ESP_OK)position=length;
+  xSemaphoreGiveRecursive(g_stream_lock);return true;
+}
 
 void pet_p4_audio_instrument_set(bool active,unsigned effect,unsigned ambience) {
   atomic_store(&g_instrument_effect,effect>100?100:effect);
@@ -511,6 +598,7 @@ static void playback_task(void *arg) {
   pet_p4_audio_playback_request_t request;
   pet_instrument_reset(&g_instrument_core);
   while (true) {
+    if(fruit_drain_step(pcm)) {vTaskDelay(1);continue;}
     if(instrument_drain_step(pcm)) {vTaskDelay(1);continue;}
     if (xQueueReceive(g_playback_queue, &request,
           atomic_load(&g_stream_active) ? 0 : pdMS_TO_TICKS(10)) != pdTRUE) {
@@ -520,7 +608,7 @@ static void playback_task(void *arg) {
       vTaskDelay(1);
       continue;
     }
-    if (atomic_load(&g_instrument_enabled) || atomic_load(&g_music) || atomic_load_explicit(&g_stream_active, memory_order_acquire)
+    if (atomic_load(&g_fruit_enabled) || atomic_load(&g_instrument_enabled) || atomic_load(&g_music) || atomic_load_explicit(&g_stream_active, memory_order_acquire)
         || pet_p4_audio_conversation_active()) {
       /* 实时对话播放中：状态音效让路，不打断形象说话 */
       continue;
@@ -605,6 +693,8 @@ static void audio_task(void *arg) {
     snprintf(session_id, sizeof(session_id), "p4-audio-%llu-%u",
              (unsigned long long) started_ms, (unsigned int) session_sequence);
     atomic_store_explicit(&g_capture_active, true, memory_order_release);
+    atomic_store(&g_capture_tx_last_us, 0);
+    atomic_store(&g_capture_tx_max_us, 0);
     bool session_queue_empty = atomic_load_explicit(
       &g_capture_session_queue_empty, memory_order_acquire
     );
@@ -614,6 +704,13 @@ static void audio_task(void *arg) {
            && atomic_load_explicit(&g_enabled, memory_order_acquire)) {
       uint64_t now_ms = (uint64_t) (esp_timer_get_time() / 1000ULL);
       bool conversation = atomic_load_explicit(&g_conversation, memory_order_acquire);
+      if (atomic_load(&g_conversation_starting)) { vTaskDelay(1); continue; }
+      char conversation_session[64];
+      conversation_session_copy(conversation_session);
+      if (conversation && !atomic_load(&g_conversation_half_duplex) && pet_p4_afe_preparing()) {
+        (void) pet_p4_afe_prepare();
+        pet_p4_audio_send_status();
+      }
       if (!conversation && now_ms - started_ms >= PET_P4_AUDIO_MAX_CAPTURE_MS) {
         reason = "timeout";
         atomic_store_explicit(&g_capture_requested, false, memory_order_release);
@@ -626,13 +723,27 @@ static void audio_task(void *arg) {
         atomic_store_explicit(&g_capture_requested, false, memory_order_release);
         break;
       }
+      char current_session[64];
+      conversation_session_copy(current_session);
+      if (atomic_load(&g_conversation_starting)
+          || conversation != pet_p4_audio_conversation_active()
+          || strcmp(current_session, conversation_session) != 0) continue;
       bool processed = conversation && !atomic_load(&g_conversation_half_duplex) && pet_p4_afe_ready();
       if (processed && !pet_p4_afe_feed((const int16_t *)pcm)) processed = false;
+      conversation_session_copy(current_session);
+      if (atomic_load(&g_conversation_starting)
+          || conversation != pet_p4_audio_conversation_active()
+          || strcmp(current_session, conversation_session) != 0) continue;
       if (conversation && !processed && !atomic_load(&g_conversation_half_duplex)) {
         atomic_store(&g_conversation_half_duplex, true);
         (void) conversation_mic_gain(false);
         pet_p4_audio_diagnostic("aec_fallback", session_id, 0, false);
         pet_p4_audio_send_status();
+        /* Fail closed: do not transmit raw echo even while the PC's stop
+         * command is still in flight. A new entry can rebuild DSP once. */
+        reason = "aec_unavailable";
+        atomic_store_explicit(&g_capture_requested, false, memory_order_release);
+        break;
       }
       if (playback_gates_capture(now_ms)) {
         /* 半双工：形象说话时麦克风帧只读不发，避免自己听见自己 */
@@ -643,7 +754,13 @@ static void audio_task(void *arg) {
       bool speech = false;
       if (processed && !pet_p4_afe_take((int16_t *)pcm, &speech)) continue;
       do {
-      if (!send_audio_chunk(session_id, chunks, pcm, sizeof(pcm), processed, speech)) {
+      uint64_t tx_started_us = esp_timer_get_time();
+      bool sent = send_audio_chunk(session_id, chunks, pcm, sizeof(pcm), processed, speech, conversation_session);
+      uint64_t tx_elapsed = (uint64_t)esp_timer_get_time() - tx_started_us;
+      unsigned tx_us = tx_elapsed > UINT32_MAX ? UINT32_MAX : (unsigned)tx_elapsed;
+      atomic_store(&g_capture_tx_last_us, tx_us);
+      if (tx_us > atomic_load(&g_capture_tx_max_us)) atomic_store(&g_capture_tx_max_us, tx_us);
+      if (!sent) {
         reason = "encode_error";
         send_audio_error(session_id, "base64_failed", "PCM frame encoding failed");
         atomic_store_explicit(&g_capture_requested, false, memory_order_release);
@@ -840,7 +957,9 @@ esp_err_t pet_p4_audio_set_enabled(bool enabled) {
   return ESP_OK;
 }
 
-esp_err_t pet_p4_audio_capture_start(bool session_queue_empty) {
+esp_err_t pet_p4_audio_capture_start_owned(bool session_queue_empty,const char *owner) {
+  if(!owner||strlen(owner)>=sizeof(g_capture_owner))return ESP_ERR_INVALID_ARG;
+  if(owner[0]&&(atomic_load(&g_capture_active)||pet_p4_audio_conversation_active()))return ESP_ERR_INVALID_STATE;
   if (!pet_p4_audio_ready() || !pet_p4_audio_enabled()) return ESP_ERR_INVALID_STATE;
   if(g_stream_lock)xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
   /* Restore the voice clock before waking the microphone task. */
@@ -858,9 +977,18 @@ esp_err_t pet_p4_audio_capture_start(bool session_queue_empty) {
   atomic_store_explicit(
     &g_capture_session_queue_empty, session_queue_empty, memory_order_release
   );
+  portENTER_CRITICAL(&g_conversation_lock);snprintf(g_capture_owner,sizeof(g_capture_owner),"%s",owner);portEXIT_CRITICAL(&g_conversation_lock);
   if(g_stream_lock)xSemaphoreGiveRecursive(g_stream_lock);
   xTaskNotifyGive(g_audio_task);
   return ESP_OK;
+}
+esp_err_t pet_p4_audio_capture_start(bool session_queue_empty){return pet_p4_audio_capture_start_owned(session_queue_empty,"");}
+esp_err_t pet_p4_audio_capture_stop_owned(const char *owner){
+  if(!owner||!owner[0])return ESP_ERR_INVALID_ARG;
+  portENTER_CRITICAL(&g_conversation_lock);
+  bool matches=!strcmp(owner,g_capture_owner)&&!atomic_load(&g_conversation);
+  if(matches)atomic_store_explicit(&g_capture_requested,false,memory_order_release);
+  portEXIT_CRITICAL(&g_conversation_lock);return matches?ESP_OK:ESP_ERR_INVALID_STATE;
 }
 
 esp_err_t pet_p4_audio_capture_stop(void) {
@@ -873,10 +1001,13 @@ bool pet_p4_audio_conversation_active(void) {
   return atomic_load_explicit(&g_conversation, memory_order_acquire);
 }
 
-esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex) {
+esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex, const char *session_id) {
   if (!enabled) {
     pet_p4_audio_diagnostic("conversation_stopped", "", 0, true);
     atomic_store_explicit(&g_conversation, false, memory_order_release);
+    portENTER_CRITICAL(&g_conversation_lock);
+    g_conversation_session[0] = '\0';
+    portEXIT_CRITICAL(&g_conversation_lock);
     pet_p4_audio_stream_flush();
     (void) pet_p4_audio_capture_stop();
     (void) conversation_mic_gain(false);
@@ -884,12 +1015,25 @@ esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex) {
     return ESP_OK;
   }
   if (!pet_p4_audio_ready()) return ESP_ERR_INVALID_STATE;
+  if (session_id && strlen(session_id) >= sizeof(g_conversation_session)) return ESP_ERR_INVALID_ARG;
+  char current_session[64];
+  conversation_session_copy(current_session);
+  if (pet_p4_audio_conversation_active() && session_id && session_id[0]
+      && strcmp(current_session, session_id) == 0) {
+    pet_p4_audio_send_status();
+    return ESP_OK; /* Duplicate control request must not reset a live filter. */
+  }
   if (atomic_load(&g_music)) pet_p4_audio_stream_flush();
-  half_duplex = half_duplex || !pet_p4_afe_ready();
   if (!conversation_mic_gain(!half_duplex)) return ESP_FAIL;
+  atomic_store(&g_conversation_starting, true);
+  portENTER_CRITICAL(&g_conversation_lock);
+  snprintf(g_conversation_session, sizeof(g_conversation_session), "%s", session_id ? session_id : "");
+  g_capture_owner[0]=0; /* Conversation takes ownership; stale component stops cannot affect it. */
+  portEXIT_CRITICAL(&g_conversation_lock);
   pet_p4_afe_reset_stream();
-  atomic_store_explicit(&g_conversation_half_duplex, half_duplex || !pet_p4_afe_ready(), memory_order_release);
+  atomic_store_explicit(&g_conversation_half_duplex, half_duplex, memory_order_release);
   atomic_store_explicit(&g_conversation, true, memory_order_release);
+  atomic_store(&g_conversation_starting, false);
   atomic_fetch_add_explicit(&g_playback_generation, 1U, memory_order_acq_rel);
   esp_err_t err = pet_p4_audio_set_enabled(true);
   if (err == ESP_OK) {

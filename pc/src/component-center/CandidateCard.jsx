@@ -11,7 +11,8 @@ import React from "react";
 import { Download, PackageCheck, Trash2 } from "lucide-react";
 import Button from "../shell/Button";
 import { buildComponentPlayGuide } from "./binding-labels";
-import DeviceScreenPreview from "./DeviceScreenPreview";
+import ComponentCover from "./ComponentCover.jsx";
+import { componentRequiresPc } from "./catalog-state.js";
 
 export function resolveComponentKind(kind, gameType) {
   const explicitKind = String(kind || "").trim().toLowerCase();
@@ -30,6 +31,7 @@ export default function CandidateCard({
   isLocal,
   isInstalled,
   isEnabled,
+  deviceState,
   onClick,
   onDeviceAction,
   onDelete,
@@ -39,7 +41,8 @@ export default function CandidateCard({
     ? buildComponentPlayGuide(component.defaultBindings)
     : "";
   const sourceKind = component.isDeviceOnly ? "device" : isLocal ? "custom" : "builtin";
-  const sourceLabel = component.isDeviceOnly ? "仅设备" : isLocal ? "正式本地" : "内置";
+  const sourceLabel = component.isDeviceOnly ? "仅设备" : isLocal ? "本机" : "内置";
+  const needsPc = componentRequiresPc(component);
   const cardClass = [
     "candidate-card",
     `candidate-card--${component.isDeviceOnly ? "device" : isLocal ? "local" : "builtin"}`,
@@ -49,9 +52,9 @@ export default function CandidateCard({
 
   return (
     <article className={cardClass} aria-current={isEnabled ? "true" : undefined}>
-      <button className="candidate-card__select" onClick={onClick} type="button">
+      <button className="candidate-card__select" onClick={onClick} type="button" aria-label={`查看 ${component.name} 详情`}>
         <div className="candidate-card__preview">
-          <DeviceScreenPreview component={component} className="candidate-card__screen" />
+          <ComponentCover component={component} className="candidate-card__screen" />
         </div>
         <div className="candidate-card__body">
           <header className="candidate-card__head">
@@ -60,17 +63,17 @@ export default function CandidateCard({
               <span className={`candidate-card__badge candidate-card__badge--kind-${resolvedKind}`}>
                 {componentKindLabel(resolvedKind)}
               </span>
+              {!component.isDeviceOnly && <span className="candidate-card__badge">{needsPc ? "需连接 PC" : "可离线"}</span>}
               <span className={`candidate-card__badge candidate-card__badge--${sourceKind}`}>
                 {sourceLabel}
               </span>
             </div>
           </header>
-          {component.goal && <p className="candidate-card__goal">{component.goal}</p>}
-          {playGuide && (
-            <p className="candidate-card__play-guide">
-              <strong>怎么玩：</strong>{playGuide}
-            </p>
-          )}
+          {component.goal && <p className="candidate-card__goal" title={component.goal}>{component.goal}</p>}
+          {component.author && <p className="candidate-card__play-guide">by {component.author}</p>}
+          {deviceState&&<p className="candidate-card__play-guide" role="status">{deviceState.label}{isEnabled?' · 正在使用':''}{!component.isDeviceOnly&&` · 本机 ${component.version||'版本未知'}`}</p>}
+          {component.sourceAlternatives?.length>1&&<p className="candidate-card__play-guide">存在本地与内置两个来源，可在详情选择；不会删除本地创作。</p>}
+          {playGuide && <p className="candidate-card__play-guide" title={playGuide}>点击查看玩法与按键</p>}
         </div>
       </button>
       <footer className="candidate-card__actions">
@@ -80,7 +83,7 @@ export default function CandidateCard({
             size="small"
             className="candidate-card__install"
             aria-label={
-              isInstalled
+              component.isDeviceOnly ? `查看 ${component.name} 设备组件` : deviceState ? `${component.name} · ${deviceState.action}` : isInstalled
                 ? `${component.name} 已同步到设备，点击同步更新`
                 : `同步 ${component.name} 到设备`
             }
@@ -90,7 +93,7 @@ export default function CandidateCard({
             }}
           >
             {isInstalled ? <PackageCheck size={14} /> : <Download size={14} />}
-            {isInstalled ? "已同步到设备，点击同步更新" : "同步到设备"}
+            {component.isDeviceOnly ? "查看设备组件" : deviceState?.action || (isInstalled ? "配置与同步" : "同步到设备")}
           </Button>
         )}
         {onDelete && (

@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "on": "slice.restart",
+      "from": "*"
+    },
+    {
+      "on": "slice.pause",
+      "from": "*"
+    }
+  ],
+  "tick": [],
+  "scene": {
+    "engine": "p4-touch-slice-v1",
+    "duration_sec": 60,
+    "lives": 3,
+    "sound_volume": 55,
+    "sprites": [
+      {
+        "id": "apple",
+        "asset": "assets/apple.png",
+        "frame_width": 32,
+        "frame_height": 32,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "orange",
+        "asset": "assets/orange.png",
+        "frame_width": 32,
+        "frame_height": 32,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "lime",
+        "asset": "assets/lime.png",
+        "frame_width": 32,
+        "frame_height": 32,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "melon",
+        "asset": "assets/melon.png",
+        "frame_width": 32,
+        "frame_height": 32,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "revision": 2
+  },
+  "dashboard": {
+    "title": "鲜果一刀",
+    "headline": "一指划开，快乐爆汁。",
+    "note": "经典挑战 · 限时冲分 · 轻松练习",
+    "footer": "点击模式卡选择 · 开始键开局 · 全局键退出",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "arcade",
+    "visualSprite": "target"
+  },
+  "input": {
+    "engine": "p4-input-v1"
+  }
+}

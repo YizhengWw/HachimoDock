@@ -16,6 +16,7 @@ import { personaSummaryLabel } from "../lib/persona-voice.js";
 import { realtimeReadiness } from "../lib/usage-help.js";
 import { API_CONFIGURATION_UPDATED_EVENT } from "../lib/api-configuration.js";
 import UsageHelp from "../UsageHelp.jsx";
+import { isRecoveringAsr } from "../lib/realtime-feedback.js";
 
 export const REALTIME_STATE_LABELS = Object.freeze({
   idle: "未开始",
@@ -39,6 +40,7 @@ export default function RealtimeChatPanel({ keyBound = false, onOpenApiSettings,
   const active = Boolean(realtimeChat?.active);
   const state = active ? realtimeChat.state : "idle";
   const error = localError || realtimeChat?.error || "";
+  const recovering = !localError && isRecoveringAsr(realtimeChat);
   const [check, setCheck] = useState({ loading: true });
   const [checkRevision, setCheckRevision] = useState(0);
   useEffect(() => {
@@ -118,7 +120,7 @@ export default function RealtimeChatPanel({ keyBound = false, onOpenApiSettings,
           {realtimeChat.reply && <div><span className="muted small">{realtimeChat.displayName || "它"}：</span>{realtimeChat.reply}</div>}
         </div>
       )}
-      {error && <div role="alert" className="message-banner message-banner--error">实时对话失败：{error}</div>}
+      {error && <div role={recovering ? "status" : "alert"} className={recovering ? "usage-help" : "message-banner message-banner--error"}>{recovering ? "" : "实时对话失败："}{error}</div>}
       <details className="usage-help"><summary>问题排查与日志</summary><p>遇到问题时，可提供报错信息及诊断日志。日志位于应用数据目录 / logs / realtime-chat.jsonl，不记录录音与完整对话。</p></details>
       {!active && realtimeChat?.reason && realtimeChat.reason !== "ui" && (
         <div className="muted small">上次结束：{realtimeChat.reason === "idle" ? "60 秒无人说话" : realtimeChat.reason === "key" ? "按键结束" : realtimeChat.reason}</div>

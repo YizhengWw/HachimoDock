@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "title": "云端跳一跳",
+    "eyebrow": "蓄一点力，向前一点点",
+    "headline": "陪小狗，跳过下一朵云",
+    "metricValue": "0",
+    "metricLabel": "按住开始",
+    "metricUnit": "暂停",
+    "badge": "0",
+    "note": "按住越久，跳得越远",
+    "footer": "落上下一座平台得 1 分 · 掉落结束",
+    "progress": {
+      "value": 0,
+      "label": ""
+    },
+    "visualStyle": "clean",
+    "visualPalette": "mint",
+    "visualLayout": "scoreboard",
+    "visualSprite": "star"
+  }
+}

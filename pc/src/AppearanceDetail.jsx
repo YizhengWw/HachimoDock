@@ -9,6 +9,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { setExitReason, useExitProtection } from "./lib/exit-protection.js";
 import {
   ArrowLeft,
   Trash2,
@@ -27,6 +28,7 @@ import {
   removeFamilyAudioCue,
   replaceFamilyAudioCue,
   replaceFamilyVideo,
+  readAppearanceSourceImage,
 } from "./lib/appearance-store.js";
 import AppearancePreview from "./AppearancePreview.jsx";
 import { compressWavFileForBoard } from "./lib/audio-cue.js";
@@ -162,6 +164,8 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
   const [singleStateImagePreview, setSingleStateImagePreview] = useState("");
   const [singleStatePrompt, setSingleStatePrompt] = useState("");
   const [singleStateStatus, setSingleStateStatus] = useState("idle"); // idle | generating | success | error | syncing | synced | cancelled
+  const singleSubmitting = useRef(false);
+  useExitProtection(singleStateStatus === "generating" ? "形象动作仍在生成" : audioSyncState === "syncing" || singleStateStatus === "syncing" ? "形象资源仍在同步" : stateVideoState === "saving" ? "形象视频仍在保存" : "");
   const [singleStateMessage, setSingleStateMessage] = useState("");
   const [singleStateProgress, setSingleStateProgress] = useState(null);
   const [singleStateDialogOpen, setSingleStateDialogOpen] = useState(false);
@@ -520,7 +524,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
   }, [providerId, accessKey, secretKey, apiKey, baseUrl, model, isVolcengine]);
 
   const persistSingleStateProviderConfig = useCallback(() => {
-    saveProviderConfig(providerId, {
+    return saveProviderConfig(providerId, {
       apiKey,
       accessKey,
       secretKey,
@@ -570,7 +574,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
   }, []);
 
   const handleSingleStateGenerate = useCallback(async () => {
-    if (!record || !activeRecord?.ok || singleStateStatus === "generating") return;
+    if (!record || !activeRecord?.ok || singleSubmitting.current || singleStateStatus === "generating") return;
     if (record.type === "builtin") {
       setSingleStateStatus("error");
       setSingleStateMessage("内置形象不能直接替换单个状态，请先创建自定义形象后再编辑。");
@@ -593,7 +597,17 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       return;
     }
 
-    persistSingleStateProviderConfig();
+    singleSubmitting.current = true;
+    setSingleStateStatus("generating");
+    const exitId = `single-generation:${record.id}:${activeRecord.family}`;
+    setExitReason(exitId,"形象动作仍在生成");
+    try { await persistSingleStateProviderConfig(); } catch (error) {
+      singleSubmitting.current = false;
+      setExitReason(exitId,"");
+      setSingleStateStatus("error");
+      setSingleStateMessage(error.message || "配置未保存，请重试。");
+      return;
+    }
     const trimmedModel = model.trim();
     const providerConfig = {
       provider: providerId,
@@ -603,7 +617,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       baseUrl: isVolcengine ? VOLCENGINE_BASE_URL : baseUrl,
       model: trimmedModel,
       imageEdit: loadArkImageConfig(),
-      thinkingModel: isVolcengine ? VOLCENGINE_THINKING_MODEL : thinkingModel.trim() || trimmedModel,
+      thinkingModel: thinkingModel.trim() || (isVolcengine ? VOLCENGINE_THINKING_MODEL : trimmedModel),
       fastGeneration,
       ...(isVolcengine ? videoParameters : {}),
       advanced:
@@ -665,6 +679,9 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       setSingleStateStatus("error");
       setSingleStateMessage(generationFailure?.message || String(generationFailure));
       setSingleStateProgress(null);
+    } finally {
+      singleSubmitting.current = false;
+      setExitReason(exitId,"");
     }
   }, [
     activeRecord,
@@ -1252,6 +1269,14 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
                     nextLabel="下一步：生成配置"
                   >
                     <div className="field single-state-regenerate-modal__prompt">
+                      <button type="button" className="btn-secondary btn-sm" disabled={singleStateBusy} onClick={async () => {
+                        try {
+                          const source = await readAppearanceSourceImage(record.id);
+                          setSingleStateImageFile(new File([source.bytes], "saved-reference.png", { type: source.mime }));
+                          setRemoveBg(false);
+                          setSingleStateMessage("已复用已保存参考图，不重复调用图片处理。请先检查预览；旧形象的参考图可能是原始图片。");
+                        } catch (error) { setSingleStateMessage(error.message || String(error)); }
+                      }}>复用已保存参考图（不重复处理）</button>
                       <label className="field-label">当前状态 prompt</label>
                       <textarea
                         className="field-input"
@@ -1280,6 +1305,8 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
                     onBaseUrl={setBaseUrl}
                     model={model}
                     onModel={setModel}
+                    thinkingModel={thinkingModel}
+                    onThinkingModel={setThinkingModel}
                     advancedOpen={advancedOpen}
                     onAdvancedOpen={setAdvancedOpen}
                     openaiCompat={openaiCompat}

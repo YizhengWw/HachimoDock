@@ -2,13 +2,14 @@
 
 /*
  * [Input] Codex rollouts, read-only Desktop diagnostics, append notifications and session titles.
- * [Output] Bounded state recovery, original resumed-thread identity, current-day tokens and public reply mirror deduplication; older diagnostics cannot overwrite newer rollouts.
+ * [Output] Bounded state recovery, original resumed-thread identity, current-day tokens, modern/legacy exact user receipts and public message mirror deduplication; older diagnostics cannot overwrite newer rollouts.
  * [Pos] Codex live-state monitor for the managed Pet Manager Bridge.
  * [Sync] If discovery or state-tail semantics change, update `pc/.folder.md`.
  */
 
 const fs = require("fs");
 const { createHash } = require("node:crypto");
+const { requestText } = require("./codex-request-text");
 const path = require("path");
 const defaults = require("./codex");
 const {
@@ -553,7 +554,7 @@ class CodexLogMonitor {
       this.desktopLogEntries.set(signal.sessionId, entry);
     }
     if (rollout) {
-      for (const key of ["cwd", "sessionTitle", "firstUserMessage", "lastUserMessage",
+      for (const key of ["cwd", "sessionTitle", "firstUserMessage", "lastUserMessage", "lastUserHash",
         "lastAgentMessage", "userMessageCount", "agentMessageCount", "tokenUsage"]) {
         entry[key] = rollout[key];
       }
@@ -785,6 +786,13 @@ class CodexLogMonitor {
         modelContextWindow: entry.modelContextWindow || undefined,
         collaborationModeKind: entry.collaborationModeKind || "",
       },
+      // Correlate voice delegation without exporting the full user request.
+      taskCorrelation: {
+        userHash: entry.lastUserHash || "",
+        browserContextNormalized: entry.browserContextNormalized === true,
+        turnId: entry.turnId || "",
+        turnActive: entry.turnActive === true,
+      },
       messages: {
         firstUser: entry.firstUserMessage || "",
         lastUser: entry.lastUserMessage || "",
@@ -805,6 +813,7 @@ class CodexLogMonitor {
       state,
       event,
       display: extra.display,
+      taskCorrelation: extra.taskCorrelation,
       final: extra.messages.lastFinal,
       tokenUsage: extra.tokenUsage && {
         totalTokens: extra.tokenUsage.totalTokens,
@@ -832,7 +841,7 @@ class CodexLogMonitor {
     }
 
     const type = obj && typeof obj.type === "string" ? obj.type : "";
-    const payload = obj && typeof obj.payload === "object" ? obj.payload : null;
+    let payload = obj && typeof obj.payload === "object" ? obj.payload : null;
     const sourceEventTime = readTimestampMs(obj?.timestamp);
     if (!type) return;
     if (!entry.sessionStartDayKey && sourceEventTime) {
@@ -840,7 +849,18 @@ class CodexLogMonitor {
     }
 
     const subtype = payload && typeof payload.type === "string" ? payload.type : "";
-    const key = subtype ? `${type}:${subtype}` : type;
+    let key = subtype ? `${type}:${subtype}` : type;
+    const userSource = key === "response_item:message" && payload?.role === "user" ? "response_item" : "event_msg";
+    if (userSource === "response_item") {
+      // New Desktop rollouts omit event_msg:user_message. Normalize only actual
+      // user input_text blocks, never developer/tool/assistant content or images.
+      const message = Array.isArray(payload.content) ? payload.content
+        .filter(block => block?.type === "input_text" && typeof block.text === "string")
+        .map(block => block.text).join("\n").trim() : "";
+      if (!message) return;
+      payload = { type: "user_message", message };
+      key = "event_msg:user_message";
+    }
 
     if (key === "response_item:message" && payload?.role === "assistant") {
       const message = responseAssistantText(payload);
@@ -884,6 +904,12 @@ class CodexLogMonitor {
 
     if (key === "event_msg:task_started" && payload) {
       entry.pendingAssistantMessages = [];
+      if (!entry.userAwaitingStart) {
+        entry.pendingUserMessages = [];
+        entry.lastUserHash = "";
+      }
+      entry.userAwaitingStart = false;
+      entry.turnActive = true;
       entry.lastAgentMessage = "";
       entry.lastTaskCompleteMessage = "";
       entry.lastDisplayContent = "";
@@ -900,6 +926,17 @@ class CodexLogMonitor {
         entry.internalSession = true;
         return;
       }
+      const request = requestText(payload.message);
+      const userHash = typeof payload.message === "string"
+        ? createHash("sha256").update(request.text).digest("hex") : "";
+      const pending = entry.pendingUserMessages || (entry.pendingUserMessages = []);
+      const mirror = pending.findIndex(item => item.hash === userHash && item.source !== userSource);
+      if (mirror >= 0) { pending.splice(mirror, 1); return; }
+      pending.push({ hash: userHash, source: userSource });
+      if (pending.length > 32) pending.shift();
+      entry.lastUserHash = userHash;
+      entry.browserContextNormalized = request.normalized;
+      if (!entry.turnActive) entry.userAwaitingStart = true;
       const message = compactText(payload.message || "", MAX_MESSAGE_PREVIEW);
       if (message) {
         entry.lastUserMessage = message;
@@ -923,6 +960,8 @@ class CodexLogMonitor {
     }
 
     if (key === "event_msg:task_complete" && payload) {
+      entry.turnActive = false;
+      entry.userAwaitingStart = false;
       const message = compactText(payload.last_agent_message || "", MAX_MESSAGE_PREVIEW);
       if (message) {
         entry.lastTaskCompleteMessage = message;
@@ -951,6 +990,7 @@ class CodexLogMonitor {
     }
 
     const state = this.config.LOG_EVENT_MAP[key];
+    if (key === "event_msg:turn_aborted") { entry.turnActive = false; entry.userAwaitingStart = false; }
     if (typeof state !== "string" || !state) return;
 
     entry.lastState = state;

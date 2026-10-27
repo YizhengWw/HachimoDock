@@ -16,5 +16,23 @@
     "event": "knob.rotate_cw",
     "action": "reminder.switch_view",
     "label": "切换视图"
+  },
+  {
+    "action": "reminder.switch_previous",
+    "event": "knob.rotate_ccw",
+    "label": "切换倒计时/记录",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "reminder.less",
+    "event": "joystick.down",
+    "label": "提醒间隔减少 15 分钟",
+    "control": "前方摇杆"
+  },
+  {
+    "action": "reminder.more",
+    "event": "joystick.up",
+    "label": "提醒间隔增加 15 分钟",
+    "control": "前方摇杆"
   }
 ]

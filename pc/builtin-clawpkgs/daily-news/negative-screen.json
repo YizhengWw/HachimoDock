@@ -1,0 +1,17 @@
+{
+  "dashboard": {
+    "title": "每日新鲜事",
+    "eyebrow": "AI 科技 · 商业财经 · 娱乐",
+    "headline": "听听世界的新鲜事",
+    "note": "进入设备组件后自动整理九条资讯；需连接 PC。",
+    "footer": "核对来源与发布时间，不用旧闻凑数。",
+    "metricValue": "",
+    "metricLabel": "更新资讯",
+    "metricUnit": "播报",
+    "badge": "",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star"
+  }
+}

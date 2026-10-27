@@ -439,6 +439,8 @@ def compact_p4_component_json(
     if relative_path == "runtime/widget.json":
         if not isinstance(value, dict):
             raise ValueError(f"{source} must contain a JSON object")
+        if value.get("surface",{}).get("graphics")=="p4-app-graphics-v1":
+            max_bytes=max(max_bytes,8191)
         pages = value.get("pages")
         if isinstance(pages, list):
             for page in pages:
@@ -557,7 +559,7 @@ def build_builtin_component_tree(
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
-    if len(catalog_bytes) >= 4096:
+    if len(catalog_bytes) >= 16384:
         raise ValueError("generated P4 component catalog exceeds the firmware buffer")
     write_spiffs_root_file(spiffs_tree, MINIAPP_CATALOG_FILE, catalog_bytes)
     package_bytes += len(catalog_bytes)

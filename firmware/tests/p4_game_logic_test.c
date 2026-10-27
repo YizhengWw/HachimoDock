@@ -114,6 +114,37 @@ static void test_flappy_flaps_scrolls_scores_and_restarts(void) {
   assert(game.score == 0);
 }
 
+static void test_flappy_half_vertical_speed_keeps_pipe_cadence(void) {
+  pet_p4_game_engine_t game;
+  assert(pet_p4_game_configure(&game, PET_P4_GAME_FLAPPY, 100, 13));
+  assert(game.flappy_vertical_speed_percent == 100);
+  assert(!pet_p4_game_set_vertical_speed(&game, 0));
+  assert(!pet_p4_game_set_vertical_speed(&game, 101));
+  assert(pet_p4_game_set_vertical_speed(&game, 50));
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_FLAP, 10));
+  const int pipe_start = game.flappy_pipe_x[0];
+  int old_velocity = -256;
+  for (int step = 1; step <= 12; ++step) {
+    /* Reset only position to avoid a floor collision while checking the
+     * entire old/new velocity curve through terminal fall speed. */
+    game.flappy_y_q8 = 4 << 8;
+    game.flappy_pipe_gap_top[0] = 2;
+    game.flappy_pipe_gap_top[1] = 2;
+    const int y = game.flappy_y_q8;
+    assert(game.flappy_velocity_q8 == old_velocity);
+    assert(pet_p4_game_process(&game, 10 + step * 100));
+    assert(!game.game_over);
+    assert(2 * (game.flappy_y_q8 - y) == old_velocity);
+    old_velocity += 80;
+    if (old_velocity > 512) old_velocity = 512;
+    assert(game.flappy_velocity_q8 == old_velocity);
+    assert(game.flappy_pipe_x[0] == pipe_start - step / 2);
+  }
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_FLAP, 1211));
+  assert(game.flappy_velocity_q8 == -256);
+  assert(game.flappy_vertical_speed_percent == 50);
+}
+
 static void test_bounded_runtime_uses_data_rules_for_a_new_game(void) {
   pet_p4_bounded_game_config_t config = {0};
   pet_p4_game_engine_t game;
@@ -216,6 +247,7 @@ int main(void) {
   test_blocks_move_drop_and_game_over();
   test_snake_moves_eats_and_turns();
   test_flappy_flaps_scrolls_scores_and_restarts();
+  test_flappy_half_vertical_speed_keeps_pipe_cadence();
   test_bounded_runtime_uses_data_rules_for_a_new_game();
   return 0;
 }

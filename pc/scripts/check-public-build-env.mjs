@@ -14,6 +14,7 @@ const forbiddenVariables = [
   'PET_MANAGER_INTERNAL_CA_PEM', 'PET_MANAGER_INTERNAL_HTTPS_PROXY',
   'PET_MANAGER_INTERNAL_CA_FILE', 'PET_MANAGER_INTERNAL_CA_SHA256',
   'PET_MANAGER_INTERNAL_CREDENTIALS_FILE',
+  'PET_MANAGER_BUNDLED_SERVICE_KEYS_FILE',
 ];
 for (const name of forbiddenVariables) {
   if (process.env[name]?.trim()) throw new Error(`Public build refuses credential injection through ${name}`);

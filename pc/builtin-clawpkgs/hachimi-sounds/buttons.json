@@ -1,0 +1,38 @@
+[
+  {
+    "action": "host.primary",
+    "label": "开始播放",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "host.secondary",
+    "label": "十五分钟",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "host.previous",
+    "label": "上种声景",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "host.next",
+    "label": "下种声景",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  },
+  {
+    "action": "host.up",
+    "label": "提高音量",
+    "control": "前方摇杆",
+    "event": "joystick.up"
+  },
+  {
+    "action": "host.down",
+    "label": "降低音量",
+    "control": "前方摇杆",
+    "event": "joystick.down"
+  }
+]

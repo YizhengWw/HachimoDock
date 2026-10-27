@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
 #[cfg(target_os = "macos")]
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -413,7 +413,7 @@ fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
 }
 
 fn runtime_config_from_internal_build() -> Option<RuntimeAsrConfig> {
-    runtime_config_from_embedded_key(crate::internal_credentials::speech_key())
+    runtime_config_from_embedded_key(crate::service_credentials::speech_key())
 }
 
 fn runtime_config_from_embedded_key(api_key: Option<&str>) -> Option<RuntimeAsrConfig> {
@@ -552,8 +552,7 @@ fn read_macos_config_file(path: &Path) -> Result<Option<StoredAsrConfig>, String
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
         .map_err(|error| format!("无法保护 macOS ASR 本地配置 {}: {error}", path.display()))?;
-    let value = fs::read_to_string(path)
-        .map_err(|error| format!("无法读取 macOS ASR 本地配置 {}: {error}", path.display()))?;
+    let value = crate::secure_config::read(path,"speech-asr")?.ok_or("语音配置未找到")?;
     serde_json::from_str(&value)
         .map(Some)
         .map_err(|error| format!("火山引擎 ASR 本地配置损坏: {error}"))
@@ -568,41 +567,7 @@ fn write_macos_config_file(path: &Path, config: &StoredAsrConfig) -> Result<(), 
 
     let value = serde_json::to_vec(config)
         .map_err(|error| format!("无法序列化火山引擎 ASR 配置: {error}"))?;
-    let temporary_path =
-        directory.join(format!(".{MACOS_CONFIG_FILE_NAME}.{}.tmp", Uuid::new_v4()));
-    let write_result = (|| -> Result<(), String> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary_path)
-            .map_err(|error| {
-                format!(
-                    "无法创建 macOS ASR 临时配置 {}: {error}",
-                    temporary_path.display()
-                )
-            })?;
-        file.write_all(&value).map_err(|error| {
-            format!(
-                "无法写入 macOS ASR 临时配置 {}: {error}",
-                temporary_path.display()
-            )
-        })?;
-        file.sync_all().map_err(|error| {
-            format!(
-                "无法同步 macOS ASR 临时配置 {}: {error}",
-                temporary_path.display()
-            )
-        })?;
-        fs::rename(&temporary_path, path)
-            .map_err(|error| format!("无法提交 macOS ASR 本地配置 {}: {error}", path.display()))?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("无法保护 macOS ASR 本地配置 {}: {error}", path.display()))
-    })();
-    if write_result.is_err() {
-        let _ = fs::remove_file(&temporary_path);
-    }
-    write_result
+    crate::secure_config::write(path,"speech-asr",&value)
 }
 
 #[cfg(windows)]

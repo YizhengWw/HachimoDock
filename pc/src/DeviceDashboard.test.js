@@ -547,7 +547,7 @@ test("P4 reconnect automatically rearms device microphone relay without PC captu
   assert.match(source, /input: \{ interactive: false \},\s*\}\);\s*if \(cancelled\) return;/);
   assert.match(source, /input: \{ interactive: false \}/);
   assert.match(source, /if \(voiceRuntime\?\.deferred\)/);
-  assert.match(source, /onCredentialReady=\{resumeDeviceVoiceAfterCredentialAccess\}/);
+  assert.match(source, /subscribeAsrCredentialUpdates\(window, resumeDeviceVoiceAfterCredentialAccess\)/);
   assert.match(source, /message: "设备麦克风已自动恢复"/);
   assert.match(source, /voiceButton: activeVoiceTriggerId/);
   assert.match(source, /buttonConfigHydratedFor !== p4TargetBoardDeviceId/);
@@ -759,7 +759,9 @@ test("macOS Codex conversation switching uses native accessibility foreground de
     /ACCESSIBILITY_SETTINGS_ROUTE_DELAY: Duration = Duration::from_secs\(4\)/,
   );
   assert.match(macComposer, /WATCHER_ACTIVE/);
-  assert.match(app, /hasTauriRuntime\(\)[\s\S]*?invoke\("request_codex_accessibility_permission"\)/);
+  assert.doesNotMatch(app, /invoke\("request_codex_accessibility_permission"\)/,
+    "opening the app must not request Agent control permissions");
+  assert.match(macComposer, /fn ensure_accessibility_permission\(\)[\s\S]*request_accessibility_permission\(\)/);
   assert.doesNotMatch(dashboard, /需要辅助功能权限/);
   assert.doesNotMatch(dashboard, /macosAccessibilityNoticeShown/);
   const permissionGuard = macComposer.match(

@@ -59,18 +59,18 @@
       "on": "feed_pet",
       "from": "*",
       "inc": {
-        "bond": 10,
+        "bond": 2,
         "meals": 1
       },
       "set": {
-        "reply": "好吃好吃，我还要！"
+        "reply": "吃饱啦，谢谢你！"
       }
     }
   ],
   "tick": [],
   "dashboard": {
     "title": "蛙蛙养成",
-    "eyebrow": "植物系桌宠",
+    "eyebrow": "小小绿意，慢慢相伴",
     "headline": {
       "var": "reply"
     },
@@ -79,7 +79,7 @@
       "var": "bond"
     },
     "metricUnit": "芽",
-    "note": "抚摸 +1，喂食 +10",
+    "note": "抚摸间隔 2 秒，喂食间隔 30 秒；不减少亲密度。",
     "footer": "摇杆移动 · 互动养成 · 全局键退出",
     "progress": {
       "pct_of": "bond",
@@ -99,25 +99,14 @@
       "width": 16,
       "height": 12
     },
-    "sprites": [
-      {
-        "id": "bloomfrog",
-        "asset": "assets/bloomfrog.png",
-        "frame_width": 32,
-        "frame_height": 32,
-        "frames": 4,
-        "fps": 2
-      }
-    ],
     "entities": [
       {
         "id": "pet",
-        "x": 5,
-        "y": 3,
-        "width": 6,
-        "height": 6,
+        "x": 4,
+        "y": 2,
+        "width": 8,
+        "height": 8,
         "tone": 2,
-        "sprite": "bloomfrog",
         "bounds": "clamp",
         "collidable": false
       },
@@ -238,5 +227,607 @@
         ]
       }
     ]
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 61372,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "frog",
+        "asset": "assets/bloomfrog.png",
+        "frame_width": 192,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 61372,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 64,
+        "color": 61372,
+        "opacity": 210
+      },
+      {
+        "type": "panel",
+        "x": 442,
+        "y": 89,
+        "w": 174,
+        "h": 244,
+        "color": 65501,
+        "radius": 22,
+        "opacity": 230
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 22,
+        "w": 21,
+        "h": 21,
+        "color": 10856,
+        "icon": "leaf"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 270,
+        "h": 28,
+        "color": 10856,
+        "font_size": 20,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 334,
+        "y": 22,
+        "w": 278,
+        "h": 25,
+        "color": 10856,
+        "font_size": 14,
+        "bind": "eyebrow",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 462,
+        "y": 109,
+        "w": 130,
+        "h": 26,
+        "color": 10856,
+        "font_size": 16,
+        "bind": "metricLabel"
+      },
+      {
+        "type": "text",
+        "x": 460,
+        "y": 150,
+        "w": 130,
+        "h": 55,
+        "color": 10856,
+        "font_size": 38,
+        "bind": "metricValue",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 462,
+        "y": 210,
+        "w": 130,
+        "h": 24,
+        "color": 10856,
+        "font_size": 15,
+        "bind": "metricUnit"
+      },
+      {
+        "type": "panel",
+        "x": 462,
+        "y": 246,
+        "w": 132,
+        "h": 5,
+        "color": 55065,
+        "radius": 2
+      },
+      {
+        "type": "meter",
+        "x": 462,
+        "y": 246,
+        "w": 132,
+        "h": 5,
+        "color": 17258,
+        "bind": "progress"
+      },
+      {
+        "type": "text",
+        "x": 460,
+        "y": 271,
+        "w": 140,
+        "h": 48,
+        "color": 10856,
+        "font_size": 16,
+        "bind": "headline"
+      },
+      {
+        "type": "button",
+        "x": 310,
+        "y": 382,
+        "w": 142,
+        "h": 48,
+        "color": 17258,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65535,
+        "padding": 18,
+        "weight": 600,
+        "text": "摸摸",
+        "icon": "heart",
+        "action": "pet_pet"
+      },
+      {
+        "type": "button",
+        "x": 466,
+        "y": 382,
+        "w": 146,
+        "h": 48,
+        "color": 65501,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 10856,
+        "padding": 18,
+        "weight": 600,
+        "text": "喂食",
+        "icon": "leaf",
+        "action": "feed_pet"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 446,
+        "w": 640,
+        "h": 34,
+        "color": 61372,
+        "opacity": 235
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 455,
+        "w": 36,
+        "h": 17,
+        "color": 61372,
+        "text": "SW1",
+        "key_for": "pet_pet",
+        "font_size": 10,
+        "line_height": 13,
+        "padding": 2,
+        "radius": 3,
+        "foreground": 10856,
+        "opacity": 0,
+        "stroke": 10856,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 67,
+        "y": 451,
+        "w": 146,
+        "h": 24,
+        "color": 10856,
+        "font_size": 13,
+        "text": "抚摸"
+      },
+      {
+        "type": "button",
+        "x": 218,
+        "y": 455,
+        "w": 36,
+        "h": 17,
+        "color": 61372,
+        "text": "SW2",
+        "key_for": "feed_pet",
+        "font_size": 10,
+        "line_height": 13,
+        "padding": 2,
+        "radius": 3,
+        "foreground": 10856,
+        "opacity": 0,
+        "stroke": 10856,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 261,
+        "y": 451,
+        "w": 146,
+        "h": 24,
+        "color": 10856,
+        "font_size": 13,
+        "text": "喂食"
+      },
+      {
+        "type": "text",
+        "x": 504,
+        "y": 451,
+        "w": 112,
+        "h": 24,
+        "color": 10856,
+        "font_size": 13,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "panel",
+        "x": 32,
+        "y": 76,
+        "w": 384,
+        "h": 240,
+        "color": 0,
+        "opacity": 0,
+        "action": "pet_pet"
+      },
+      {
+        "type": "panel",
+        "x": 26,
+        "y": 334,
+        "w": 588,
+        "h": 32,
+        "color": 65502,
+        "opacity": 225,
+        "radius": 10
+      },
+      {
+        "type": "text",
+        "x": 36,
+        "y": 340,
+        "w": 568,
+        "h": 24,
+        "font_size": 14,
+        "color": 10856,
+        "bind": "note"
+      }
+    ],
+    "scene_view": {
+      "engine": "p4-scene-surface-v1",
+      "x": 32,
+      "y": 76,
+      "w": 384,
+      "h": 240,
+      "colors": [
+        10856,
+        21581,
+        29934,
+        54637,
+        54290
+      ],
+      "sprites": [
+        {
+          "entity": "pet",
+          "image": "frog",
+          "columns": 1,
+          "fps": 1
+        }
+      ]
+    },
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— replybond亲密度芽蛙养成小绿意，慢相伴抚摸+喂食上左",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            20,
+            11,
+            32
+          ],
+          [
+            9,
+            2,
+            28
+          ],
+          [
+            16,
+            11,
+            32
+          ],
+          [
+            20,
+            3,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            20,
+            3,
+            28
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            18,
+            7,
+            25
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ]
+        ]
+      }
+    ]
+  },
+  "limits": {
+    "bond": [
+      0,
+      100
+    ],
+    "bond_max": [
+      100,
+      100
+    ],
+    "pets": [
+      0,
+      1000000000
+    ],
+    "meals": [
+      0,
+      1000000000
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "bond",
+      "pets",
+      "meals"
+    ],
+    "states": {
+      "together": "together"
+    }
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "cooldown": {
+      "pet_pet": 2000,
+      "feed_pet": 30000
+    }
   }
 }

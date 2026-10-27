@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>一键生成离线验收</title></head><body><div id="root"></div><script type="module">
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import Wizard from '/src/CustomAvatarWizard.jsx';
+import '/src/styles.css';
+localStorage.setItem('claw-pet.video-gen-config.volcengine',JSON.stringify({apiKey:'offline-fixture',model:'doubao-seedance-2-0-fast-260128'}));
+createRoot(document.getElementById('root')).render(React.createElement(Wizard,{onExit:()=>{},onOpenApiSettings:()=>{}}));
+</script></body></html>

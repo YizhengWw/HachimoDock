@@ -17,7 +17,7 @@ esp_err_t pet_p4_diagnostics_init(void);
 bool pet_p4_diagnostics_handle_topic(
   const char *topic,
   const cJSON *payload,
-  const pet_p4_runtime_state_t *state,
+  pet_p4_runtime_state_t *state,
   pet_p4_send_line_fn send_line,
   void *ctx
 );

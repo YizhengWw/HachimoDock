@@ -1,0 +1,7 @@
+{
+  "id": "hachimi-garden",
+  "name": "专注花园",
+  "version": "1.0.4",
+  "kind": "tool",
+  "description": "用 5–60 分钟专注养一株花，可暂停继续；倒计时完成后只结算一次，花园成果在本机保留。"
+}

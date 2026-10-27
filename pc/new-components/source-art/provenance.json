@@ -1,0 +1,18 @@
+{
+  "tool": "image_gen.imagegen",
+  "origin": "Generated for this project; not extracted from another component or book cover.",
+  "outputs": [
+    {
+      "source": "almanac.png",
+      "asset": "../daily-almanac/assets/background.png",
+      "processing": "Mechanically resized to native 640x480 RGB PNG; device compiler uses bounded JPEG encoding.",
+      "prompt": "Use case: stylized-concept. Asset type: production background illustration for a 640x480 Chinese daily almanac desktop pet app, landscape 4:3. An exquisitely rendered small white West Highland terrier in a vermilion-red scarf, sitting only in the bottom-right quadrant, near a tiny branch of golden osmanthus and a wooden desk edge. Quiet ivory rice-paper background with warm daylight and very subtle pale gold cloud motifs at far edges. Left two-thirds and top fifth are almost empty warm ivory negative space for separately rendered date, calendar data and buttons. Premium tactile modern app illustration, realistic fluffy fur, gentle shallow shadows, refined restrained cream/vermilion palette. NO text, no dates, no numerals, no calendar grid, no buttons, no panels, no watermark, no border. Pet occupies about 23 percent of image width. Landscape 4:3."
+    },
+    {
+      "source": "books.png",
+      "asset": "../book-pocket/assets/background.png",
+      "processing": "Mechanically resized to native 640x480 RGB PNG; device compiler uses bounded JPEG encoding.",
+      "prompt": "Use case: stylized-concept. Production 4:3 landscape background illustration for a 640x480 desktop-pet book guide app. Premium cozy editorial 3D/photographic style. A tiny fluffy white West Highland terrier with a sage green neckerchief sits by a small open blank book, only in the lower-right corner. Soft warm library daylight, cream paper colors, subtle sage green fabric, a blurred bookshelf visible ONLY on the far right 20 percent. The left 70 percent and top fifth remain very light, quiet, nearly solid warm ivory negative space for real Chinese reading text and app buttons rendered separately. Refined tactile materials, beautiful fluffy fur, gentle shadows, elegant calm reading atmosphere, no busy wallpaper. NO text, no lettering, no buttons, no UI, no logos, no watermarks, no human. Dog and book occupy less than 25 percent of image width, leaving substantial readable space. 4:3 landscape."
+    }
+  ]
+}

@@ -1,51 +1,960 @@
 {
   "schema_version": 1,
   "engine": "p4-bounded-runtime-v4",
-  "vars": {
-    "list_page": {
-      "type": "int",
-      "init": 0
-    }
-  },
+  "vars": {},
   "states": [
     "view"
   ],
   "initial_state": "view",
-  "data": {
-    "source": "todos.upcoming",
-    "page_var": "list_page"
-  },
   "transitions": [
     {
-      "on": "first_page",
       "from": "*",
-      "set": {
-        "list_page": 0
-      }
+      "on": "host.open"
     },
     {
-      "on": "previous_page",
       "from": "*",
-      "inc": {
-        "list_page": -1
-      }
+      "on": "host.toggle"
     },
     {
-      "on": "next_page",
       "from": "*",
-      "inc": {
-        "list_page": 1
-      }
+      "on": "host.filter"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    },
+    {
+      "from": "*",
+      "on": "host.up"
+    },
+    {
+      "from": "*",
+      "on": "host.down"
+    },
+    {
+      "from": "*",
+      "on": "host.row_a"
+    },
+    {
+      "from": "*",
+      "on": "host.row_b"
+    },
+    {
+      "from": "*",
+      "on": "host.row_c"
+    },
+    {
+      "from": "*",
+      "on": "host.row_d"
+    },
+    {
+      "from": "*",
+      "on": "host.row_e"
     }
   ],
   "tick": [],
   "dashboard": {
     "title": "近期待办",
-    "headline": "等待数据",
-    "footer": "摇杆左右翻页 · 主操作回首页",
+    "headline": "等待电脑连接",
+    "note": "请保持 Pet Manager 运行",
+    "metricValue": "真实待办 · 本机保存",
     "visualStyle": "clean",
     "visualPalette": "mint",
     "visualLayout": "tool",
     "visualSprite": "target"
-  }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 63389,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "encoding": "jpeg",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 160,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 63389,
+        "image": "background"
+      },
+      {
+        "type": "icon",
+        "x": 28,
+        "y": 20,
+        "w": 24,
+        "h": 24,
+        "color": 13304,
+        "icon": "list"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 16,
+        "w": 340,
+        "h": 32,
+        "color": 16970,
+        "font_size": 24,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 58,
+        "w": 310,
+        "h": 26,
+        "color": 16970,
+        "font_size": 18,
+        "bind": "metricValue"
+      },
+      {
+        "type": "text",
+        "x": 350,
+        "y": 58,
+        "w": 78,
+        "h": 26,
+        "color": 31792,
+        "font_size": 18,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 448,
+        "y": 48,
+        "w": 164,
+        "h": 44,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.filter",
+        "text": "切换筛选",
+        "icon": "list",
+        "host_mask": 39
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 100,
+        "w": 584,
+        "h": 50,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.row_a",
+        "bind": "eyebrow",
+        "align": "left",
+        "host_mask": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 156,
+        "w": 584,
+        "h": 50,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.row_b",
+        "bind": "headline",
+        "align": "left",
+        "host_mask": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 212,
+        "w": 584,
+        "h": 50,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.row_c",
+        "bind": "metricLabel",
+        "align": "left",
+        "host_mask": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 268,
+        "w": 584,
+        "h": 50,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.row_d",
+        "bind": "note",
+        "align": "left",
+        "host_mask": 1
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 324,
+        "w": 584,
+        "h": 50,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.row_e",
+        "bind": "footer",
+        "align": "left",
+        "host_mask": 1
+      },
+      {
+        "type": "panel",
+        "x": 28,
+        "y": 100,
+        "w": 584,
+        "h": 276,
+        "color": 65534,
+        "radius": 18,
+        "host_mask": 34
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 112,
+        "w": 544,
+        "h": 28,
+        "color": 31792,
+        "font_size": 18,
+        "bind": "eyebrow",
+        "host_mask": 34
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 156,
+        "w": 544,
+        "h": 90,
+        "color": 16970,
+        "font_size": 22,
+        "bind": "headline",
+        "host_mask": 34,
+        "line_height": 30,
+        "valign": "top"
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 256,
+        "w": 544,
+        "h": 90,
+        "color": 16970,
+        "font_size": 22,
+        "bind": "note",
+        "host_mask": 34,
+        "line_height": 30,
+        "valign": "top"
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 162,
+        "w": 544,
+        "h": 64,
+        "color": 16970,
+        "font_size": 24,
+        "bind": "headline",
+        "host_mask": 132,
+        "align": "center"
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 240,
+        "w": 544,
+        "h": 90,
+        "color": 31792,
+        "font_size": 18,
+        "bind": "note",
+        "host_mask": 132,
+        "align": "center"
+      },
+      {
+        "type": "text",
+        "x": 48,
+        "y": 190,
+        "w": 544,
+        "h": 70,
+        "color": 16970,
+        "font_size": 18,
+        "text": "正在与电脑同步…",
+        "host_mask": 64,
+        "align": "center"
+      },
+      {
+        "type": "button",
+        "x": 28,
+        "y": 394,
+        "w": 118,
+        "h": 44,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.previous",
+        "text": "上一页"
+      },
+      {
+        "type": "button",
+        "x": 154,
+        "y": 394,
+        "w": 118,
+        "h": 44,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.next",
+        "text": "下一页"
+      },
+      {
+        "type": "button",
+        "x": 286,
+        "y": 394,
+        "w": 148,
+        "h": 44,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.open",
+        "text": "查看全文",
+        "host_mask": 5,
+        "icon": "book"
+      },
+      {
+        "type": "button",
+        "x": 286,
+        "y": 394,
+        "w": 148,
+        "h": 44,
+        "color": 65534,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 16970,
+        "padding": 12,
+        "action": "host.open",
+        "text": "返回清单",
+        "host_mask": 34,
+        "icon": "list"
+      },
+      {
+        "type": "button",
+        "x": 448,
+        "y": 394,
+        "w": 164,
+        "h": 44,
+        "color": 13304,
+        "font_size": 18,
+        "radius": 14,
+        "foreground": 65535,
+        "padding": 12,
+        "action": "host.toggle",
+        "bind": "metricUnit",
+        "host_mask": 34,
+        "icon": "check"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 446,
+        "w": 640,
+        "h": 34,
+        "color": 63389,
+        "opacity": 245
+      },
+      {
+        "type": "button",
+        "x": 18,
+        "y": 456,
+        "w": 32,
+        "h": 16,
+        "color": 63389,
+        "foreground": 31792,
+        "text": "SW1",
+        "key_for": "host.open",
+        "font_size": 10,
+        "line_height": 12,
+        "padding": 1,
+        "radius": 3,
+        "stroke": 31792,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 452,
+        "w": 98,
+        "h": 22,
+        "color": 16970,
+        "font_size": 12,
+        "text": "查看 / 返回"
+      },
+      {
+        "type": "button",
+        "x": 158,
+        "y": 456,
+        "w": 32,
+        "h": 16,
+        "color": 63389,
+        "foreground": 31792,
+        "text": "SW2",
+        "key_for": "host.toggle",
+        "font_size": 10,
+        "line_height": 12,
+        "padding": 1,
+        "radius": 3,
+        "stroke": 31792,
+        "stroke_width": 1,
+        "host_mask": 34
+      },
+      {
+        "type": "text",
+        "x": 196,
+        "y": 452,
+        "w": 100,
+        "h": 22,
+        "color": 16970,
+        "font_size": 12,
+        "text": "完成 / 撤销",
+        "host_mask": 34
+      },
+      {
+        "type": "button",
+        "x": 158,
+        "y": 456,
+        "w": 32,
+        "h": 16,
+        "color": 63389,
+        "foreground": 31792,
+        "text": "中键",
+        "key_for": "host.filter",
+        "font_size": 10,
+        "line_height": 12,
+        "padding": 1,
+        "radius": 3,
+        "stroke": 31792,
+        "stroke_width": 1,
+        "host_mask": 5
+      },
+      {
+        "type": "text",
+        "x": 196,
+        "y": 452,
+        "w": 100,
+        "h": 22,
+        "color": 16970,
+        "font_size": 12,
+        "text": "切换筛选",
+        "host_mask": 5
+      },
+      {
+        "type": "text",
+        "x": 308,
+        "y": 452,
+        "w": 310,
+        "h": 22,
+        "color": 31792,
+        "font_size": 12,
+        "text": "摇杆选项 / 翻页 · 全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 等待电脑连接真实办·本机保存近期请持PetMangr运行切换",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            12,
+            6,
+            28
+          ],
+          [
+            26,
+            4,
+            28
+          ],
+          [
+            18,
+            11,
+            28
+          ],
+          [
+            19,
+            11,
+            28
+          ],
+          [
+            18,
+            11,
+            32
+          ],
+          [
+            12,
+            11,
+            28
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "筛选正在与同步…上一页下查看全文返回清单SW完成撤销中键摇杆项翻局退出",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            3,
+            30
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            13,
+            18
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            19,
+            4,
+            28
+          ],
+          [
+            28,
+            4,
+            28
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    },
+    "confirm": {
+      "host.toggle": "确认切换这条待办的完成状态？可在详情中撤销。"
+    }
+  },
+  "host": true
 }

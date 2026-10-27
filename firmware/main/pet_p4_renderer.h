@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "esp_err.h"
 #include "pet_p4_protocol.h"
@@ -18,6 +19,12 @@ extern "C" {
 #endif
 
 esp_err_t pet_p4_renderer_init(void);
+typedef struct {
+  uint32_t last_us, p95_us, max_us, last_decode_us;
+  uint32_t window_samples, submitted_frames, unchanged_frames;
+} pet_p4_render_metrics_t;
+/* Thread-safe bounded snapshot; p95/max represent the last complete window. */
+pet_p4_render_metrics_t pet_p4_renderer_metrics(void);
 esp_err_t pet_p4_renderer_render(
   const pet_p4_runtime_state_t *state,
   const pet_p4_view_model_t *view,

@@ -15,12 +15,34 @@ import { LLM_PRESETS, DEFAULT_LLM_PROVIDER, selectLlmProvider, changeLlmEndpoint
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const readSource = (file) => readFileSync(join(srcDir, file), "utf8");
 
+test("API settings exposes video and prompt models independently using shared selectors", () => {
+  const page = readSource("ApiSettings.jsx");
+  assert.match(page, /import \{ VideoModelSelect \} from "\.\/VideoGenerationSettings.jsx"/);
+  assert.match(page, /<VideoModelSelect apiKey=\{config.apiKey\} baseUrl=\{config.baseUrl\}\s+model=\{config.model\} onModel=\{model => updateProvider\(provider.id, \{ model \}\)\}/);
+  assert.match(page, /thinkingModel => updateProvider\(provider.id, \{ thinkingModel \}\)/);
+  assert.match(page, /model: config.model \|\| ""/);
+  const selector = readSource("VideoGenerationSettings.jsx");
+  assert.match(selector, /onReady\?\.\(valid\)/);
+  assert.match(selector, /\[apiKey, baseUrl, revision\]/);
+});
+
 test("fresh configuration selects Doubao and search toggle is saved", () => {
   assert.equal(DEFAULT_LLM_PROVIDER,"doubao");
   const page=readSource("ApiSettings.jsx");
   assert.match(page,/llmProvider: DEFAULT_LLM_PROVIDER/);
   assert.match(page,/llmWebSearch: voiceChat.llmWebSearch/);
   assert.match(page,/llmWebSearch: status\?\.llmWebSearch !== false/);
+});
+
+test("loading API defaults cannot synthesize an unsaved edit; wizard still initializes its model", () => {
+  const page=readSource("ApiSettings.jsx");
+  assert.match(page, /<VideoModelSelect[\s\S]*?autoSelectDefault=\{false\}/);
+  const selector=readSource("VideoGenerationSettings.jsx");
+  assert.match(selector,/autoSelectDefault = true/);
+  assert.match(selector,/if \(!autoSelectDefault \|\| state.loading/);
+  assert.match(selector,/disabled=\{autoSelectDefault\}/);
+  assert.match(page,/useExitProtection\(saving/);
+  assert.match(page,/JSON.stringify\(videoConfigs\) !== JSON.stringify\(savedVideoConfigs\)/);
 });
 
 test("switching chat providers clears draft, masked key and configured state", () => {
@@ -67,7 +89,7 @@ test("provider and custom endpoint switches restore only their own saved masks",
 });
 
 test("chat model names are editable for presets and provider changes use their own defaults", () => {
-  assert.deepEqual(LLM_PRESETS.map(({ model }) => model), ["deepseek-flash", "doubao-seed-2-0-lite-260428", "mimo-v2.6-flash"]);
+  assert.deepEqual(LLM_PRESETS.map(({ model }) => model), ["deepseek-flash", "doubao-seed-2-1-lite-260915", "mimo-v2.6-flash"]);
   const current = { llmProvider: "deepseek", llmModel: "my-deepseek-model", llmBaseUrl: "old", llmApiKey: "" };
   assert.equal(selectLlmProvider(current, "deepseek"), current);
   for (const preset of LLM_PRESETS.slice(1)) {
@@ -135,7 +157,7 @@ test("saved ASR credentials are broadcast before the optional cloud probe", () =
 test("app exposes API configuration as a first-level sidebar page", () => {
   const app = readSource("App.jsx");
 
-  assert.match(app, /import ApiSettings from "\.\/ApiSettings"/);
+  assert.match(app, /const ApiSettings = lazy\(\(\) => import\("\.\/ApiSettings"\)\)/);
   assert.match(app, /activeTab = view === "api"/);
   assert.match(app, /title="API 配置"/);
   assert.match(app, /view === "api"[\s\S]*<ApiSettings/);

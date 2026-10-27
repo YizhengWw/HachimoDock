@@ -1,5 +1,5 @@
 # [Input] ESP-IDF component sources, build identity, and canonical PC built-in component JSON.
-# [Output] P4 runtime component with all eight sprite-complete built-ins embedded in the A/B application image.
+# [Output] P4 runtime with a bounded 26-component bootstrap and cached native launcher artwork.
 # [Pos] ESP32-P4 main firmware component build definition.
 # [Sync] If this file changes, update `firmware/.folder.md` and `protocol.md`.
 
@@ -20,6 +20,10 @@ idf_component_register(
     "pet_p4_input.c"
     "pet_p4_input_core.c"
     "pet_p4_miniapp.c"
+    "pet_p4_local_tools.c"
+    "pet_p4_app_store.c"
+    "pet_p4_app_host.c"
+    "pet_p4_surface.c"
     "pet_p4_widget_data.c"
     "pet_p4_media.c"
     "pet_p4_media_codec.c"
@@ -30,6 +34,8 @@ idf_component_register(
     "pet_p4_stats.c"
     "pet_p4_touch.c"
     "pet_p4_touch_core.c"
+    "pet_p4_slice_core.c"
+    "pet_p4_fruit_core.c"
     "pet_p4_usb_native.c"
     "pet_p4_usb_descriptors.c"
     "pet_p4_renderer.c"
@@ -61,10 +67,32 @@ idf_component_register(
 )
 
 # Shared, OTA-updatable status cues live in the application, not appearance slots.
+# Retain compiler stack reports for the nested component/media render path.
+# Large snapshots belong to renderer-owned storage, not the 10 KiB main stack.
+set_source_files_properties("pet_p4_renderer.c" PROPERTIES COMPILE_OPTIONS "-fstack-usage;-Wframe-larger-than=4096")
+# Bound declaration parsing/interpreter code growth as the PetUI contract grows.
+# Keep audio DSP, video and per-pixel rendering at the configured performance
+# optimization; never enlarge OTA partitions to accommodate resource features.
+set_source_files_properties("pet_p4_surface.c" "pet_p4_miniapp.c" PROPERTIES COMPILE_OPTIONS "-Os")
 foreach(layer body mallet)
-  target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../assets/instruments/wooden_fish_${layer}.bin" BINARY)
+  target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../assets/instruments/wooden_fish_${layer}.deflate" BINARY)
 endforeach()
-foreach(cue done error waiting_user)
+foreach(art center_background.jpg center_thumbs.deflate)
+  target_add_binary_data(${COMPONENT_LIB} "${CMAKE_CURRENT_LIST_DIR}/../assets/component-center/${art}" BINARY)
+endforeach()
+execute_process(
+  COMMAND "${PYTHON}" "${CMAKE_CURRENT_LIST_DIR}/../tools/compress_instrument_assets.py" "--check"
+  RESULT_VARIABLE PET_INSTRUMENT_PACK_STATUS
+)
+if(NOT PET_INSTRUMENT_PACK_STATUS EQUAL 0)
+  message(FATAL_ERROR "Lossless instrument assets are stale; run tools/compress_instrument_assets.py")
+endif()
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/error.wav" PET_ERROR_CUE_SHA)
+file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/waiting_user.wav" PET_WAIT_CUE_SHA)
+if(NOT PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA)
+  message(FATAL_ERROR "Shared waiting/error cue changed: restore separate embedding before shipping")
+endif()
+foreach(cue done error)
   set(cue_input "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/${cue}.wav")
   target_add_binary_data(${COMPONENT_LIB} "${cue_input}" BINARY)
 endforeach()

@@ -39,6 +39,11 @@ typedef enum {
   PET_P4_GAME_COMMAND_ROTATE,
   PET_P4_GAME_COMMAND_DROP,
   PET_P4_GAME_COMMAND_FLAP,
+  PET_P4_GAME_COMMAND_SOFT_DROP,
+  PET_P4_GAME_COMMAND_WEST,
+  PET_P4_GAME_COMMAND_EAST,
+  PET_P4_GAME_COMMAND_NORTH,
+  PET_P4_GAME_COMMAND_SOUTH,
 } pet_p4_game_command_t;
 
 typedef enum {
@@ -89,6 +94,7 @@ typedef struct {
   int8_t sprite_index;
   bool active;
   bool collidable;
+  int32_t x_q8, y_q8; /* Motion extension only; integer grid ABI stays intact. */
 } pet_p4_game_entity_t;
 
 typedef enum {
@@ -97,6 +103,7 @@ typedef enum {
   PET_P4_GAME_TRIGGER_COLLISION,
   PET_P4_GAME_TRIGGER_EDGE,
   PET_P4_GAME_TRIGGER_BLOCKED,
+  PET_P4_GAME_TRIGGER_LANDED,
 } pet_p4_game_trigger_t;
 
 typedef enum {
@@ -113,6 +120,9 @@ typedef enum {
   PET_P4_GAME_OP_RESTART,
   PET_P4_GAME_OP_BOUNCE,
   PET_P4_GAME_OP_TONE,
+  PET_P4_GAME_OP_CHARGE,
+  PET_P4_GAME_OP_LAUNCH,
+  PET_P4_GAME_OP_CANCEL,
 } pet_p4_game_op_kind_t;
 
 typedef struct {
@@ -156,6 +166,13 @@ typedef struct {
   pet_p4_game_entity_t entities[PET_P4_GAME_MAX_ENTITIES];
   uint8_t rule_count;
   pet_p4_game_rule_t rules[PET_P4_GAME_MAX_RULES];
+  bool motion;
+  int8_t motion_body;
+  uint16_t platform_mask;
+  uint16_t charge_ms;
+  uint8_t gravity, launch_min, launch_max, lift;
+  bool track;
+  uint8_t camera_x, gap_min, gap_max, width_min, width_max, tone_mask;
 } pet_p4_bounded_game_config_t;
 
 typedef struct {
@@ -169,6 +186,8 @@ typedef struct {
   uint8_t entity_count;
   pet_p4_game_entity_t entities[PET_P4_GAME_MAX_ENTITIES];
   uint32_t revision;
+  bool motion;
+  uint8_t charge_percent;
 } pet_p4_game_frame_t;
 
 typedef struct {
@@ -192,11 +211,14 @@ typedef struct {
   uint8_t snake_y[PET_P4_GAME_GRID_MAX_CELLS];
   uint16_t snake_length;
   uint8_t snake_direction;
+  uint8_t snake_pending_direction;
+  bool snake_turn_pending;
   uint8_t food_x;
   uint8_t food_y;
 
   int16_t flappy_y_q8;
   int16_t flappy_velocity_q8;
+  uint8_t flappy_vertical_speed_percent;
   int8_t flappy_pipe_x[2];
   uint8_t flappy_pipe_gap_top[2];
   bool flappy_pipe_scored[2];
@@ -204,6 +226,11 @@ typedef struct {
 
   pet_p4_bounded_game_config_t bounded;
   pet_p4_game_entity_t bounded_entities[PET_P4_GAME_MAX_ENTITIES];
+  int32_t motion_vx_q8, motion_vy_q8;
+  uint32_t charge_elapsed_ms;
+  bool charging, grounded;
+  uint16_t track_visited;
+  uint64_t camera_travel_q8;
 
   pet_p4_game_frame_t frame;
 } pet_p4_game_engine_t;
@@ -216,6 +243,7 @@ bool pet_p4_game_configure(
   uint32_t tick_ms,
   uint32_t seed
 );
+bool pet_p4_game_set_vertical_speed(pet_p4_game_engine_t *game, unsigned percent);
 bool pet_p4_game_configure_bounded(
   pet_p4_game_engine_t *game,
   const pet_p4_bounded_game_config_t *config,
@@ -231,6 +259,9 @@ bool pet_p4_game_dispatch_action(
   const char *action,
   uint64_t now_ms
 );
+/* Pointer coordinates are bounded grid centers; no collision/tick replay. */
+bool pet_p4_game_pointer(pet_p4_game_engine_t *game,unsigned entity,int x,int y,unsigned axes);
+bool pet_p4_game_release(pet_p4_game_engine_t *game,bool cancel,uint64_t now_ms);
 bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms);
 void pet_p4_game_get_frame(
   const pet_p4_game_engine_t *game,

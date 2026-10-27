@@ -44,7 +44,7 @@ test("required mode blocks closing until saved and validation gates the save", (
 test("built-in Terrier can restore its factory persona and preview stays gated on the voice runtime", () => {
   assert.match(source, /BUILTIN_TERRIER_PERSONA_VOICE/);
   assert.match(source, /恢复出厂人设/);
-  assert.match(source, /disabled=\{!previewAvailable \|\| previewing \|\| saving\}/);
+  assert.match(source, /disabled=\{!previewAvailable \|\| previewing \|\| saving \|\| !volumeReady\}/);
 });
 
 test("stylesheet defines the modal grid and the card persona line", () => {

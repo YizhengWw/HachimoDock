@@ -1664,6 +1664,7 @@ function publishClawdState(config, payload) {
     state: status,
     rawState: clawdState || undefined,
     reason: `clawd.${event || clawdState || "unknown"}`,
+    taskCorrelation: source === "workbuddy" ? payload.task_correlation : undefined,
     event: event || undefined,
     sessionId: typeof payload.session_id === "string" ? payload.session_id : undefined,
     sessionTitle,
@@ -1938,6 +1939,7 @@ function startCodexMonitor(config) {
         display: isVisibleEvent && extra && extra.display && typeof extra.display === "object" ? extra.display : undefined,
         session: extra && extra.session && typeof extra.session === "object" ? extra.session : undefined,
         turn: extra && extra.turn && typeof extra.turn === "object" ? extra.turn : undefined,
+        taskCorrelation: extra && extra.taskCorrelation,
         messages: isVisibleEvent && extra && extra.messages && typeof extra.messages === "object" ? extra.messages : undefined,
         tokenUsage: extra && extra.tokenUsage && typeof extra.tokenUsage === "object"
           ? extra.tokenUsage

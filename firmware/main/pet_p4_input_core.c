@@ -11,6 +11,15 @@
 
 #include "pet_p4_input_core.h"
 
+bool pet_p4_input_gate_accept(pet_p4_input_gate_t *gate,bool neutral,uint64_t context){
+  if(!gate)return false;
+  if(neutral){gate->held=false;gate->blocked=false;return false;}
+  if(gate->held&&gate->context!=context)gate->blocked=true;
+  if(gate->blocked)return false;
+  if(!gate->held){gate->held=true;gate->context=context;}
+  return true;
+}
+
 #include <stdlib.h>
 #include <string.h>
 

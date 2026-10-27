@@ -39,6 +39,8 @@ import {
 } from "./lib/appearance-store.js";
 import { listBuiltinAppearances } from "./lib/builtin-appearances.js";
 import AppearancePreview from "./AppearancePreview.jsx";
+import GenerationDiagnostics from "./GenerationDiagnostics.jsx";
+import { listGenerationHistory } from "./lib/avatar-pipeline/session.js";
 import { resolveGalleryPreviewMedia } from "./lib/appearance-preview.js";
 import { FAMILIES } from "./lib/avatar-pipeline/families.js";
 import {
@@ -58,6 +60,10 @@ import {
   acknowledgeGenerationTask,
   abortGenerationTask,
   subscribeGenerationTask,
+  initializeGenerationRecovery,
+  resumeGenerationTask,
+  confirmGenerationStage,
+  dismissGenerationSession,
 } from "./lib/generation-task.js";
 import PersonaVoiceModal from "./PersonaVoiceModal.jsx";
 import { listPersonaSetupPending, clearPersonaSetupPending, personaSummaryLabel } from "./lib/persona-voice.js";
@@ -77,6 +83,7 @@ const STAGE_LABELS = {
   submitting: "提交中…",
   polling: "排队 / 生成中…",
   downloading: "下载中…",
+  checking: "检查画面与格式…",
   done: "已完成",
   failed: "失败",
 };
@@ -201,6 +208,7 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
   const [task, setTask] = useState(null);
   const lastEpochRef = useRef(0);
   useEffect(() => {
+    void initializeGenerationRecovery();
     return subscribeGenerationTask((s) => {
       setTask(s);
       if (s.completionEpoch > lastEpochRef.current) {
@@ -210,6 +218,14 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
     });
   }, [reload]);
   const taskVisible = task?.status && task.status !== "idle";
+  const [generationHistory, setGenerationHistory] = useState([]);
+  const [historyError, setHistoryError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    void listGenerationHistory().then(rows => { if (alive) setGenerationHistory(rows); })
+      .catch(error => { if (alive) setHistoryError(error.message); });
+    return () => { alive = false; };
+  }, [task?.status, task?.completionEpoch]);
 
   const openCodexImport = useCallback(async () => {
     setCodexError("");
@@ -459,6 +475,19 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
         </Card>
       )}
 
+      {(generationHistory.length > 0 || historyError) && <Card>
+        <details>
+          <summary>生成历史（{generationHistory.length}）</summary>
+          <p className="muted small">旧任务已保留，不影响新建。恢复复用已有图片和视频；未完成的检查及未提交的动作可能产生费用，结果未知的视频提交不会重发。</p>
+          {historyError && <p role="alert">{historyError}</p>}
+          {generationHistory.map(row => <div key={row.key} className="inline-row">
+            <span>{row.appearanceName || "未命名形象"} · {row.createdAt ? new Date(row.createdAt).toLocaleString() : "时间未知"} · {row.label} · 已保存 {row.completed}/{row.total} 段 · {String(row.id || row.key).slice(0, 8)}</span>
+            {!row.finished && !row.dismissed && <button type="button" disabled={task?.status === "running"}
+              onClick={() => { setHistoryError(""); void resumeGenerationTask(row.key).catch(error => setHistoryError(error.message)); }}>恢复此任务</button>}
+          </div>)}
+        </details>
+      </Card>}
+
       {items === null ? (
         <div className="empty-state">
           <Loader size={20} className="spin" />
@@ -472,7 +501,7 @@ export default function AppearanceGallery({ binding, onEnterWizard, onOpenDetail
             <strong>还没有自定义形象</strong>
           </div>
           <div className="muted small">
-            点击上方「添加形象」上传一张图，生成属于你的 10 段桌宠动画。
+            上传参考图，确认一段试片后，再继续生成完整的 11 段桌宠动画。
           </div>
         </div>
       ) : (
@@ -1299,7 +1328,8 @@ function CommunityImportModal({ importingId, importError, onClose, onImport }) {
  * per-family stage, and lets the user open the partially-saved appearance or
  * abort the run.
  */
-function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
+export function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail, onConfirm = confirmGenerationStage }) {
+  const [resumeError, setResumeError] = useState("");
   const progress = task?.progress;
   const completed = progress?.completed ?? 0;
   const total = progress?.total ?? 0;
@@ -1312,25 +1342,28 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
   const partialId = task?.appearanceId;
   const isRunning = task?.status === "running";
   const isCompleted = task?.status === "completed";
+  const isPaused = task?.status === "paused";
   const referenceBlocked = Boolean(progress?.referenceImageError);
   const title = isRunning
-    ? `正在生成「${task?.appearanceName || "未命名形象"}」`
+    ? `${task.awaiting ? "等待确认" : "正在生成"}「${task?.appearanceName || "未命名形象"}」`
+    : isPaused
+      ? `「${task?.appearanceName || "未命名形象"}」${task.recoveryLabel || "任务尚未完成"}`
     : isCompleted
-      ? `「${task?.appearanceName || "未命名形象"}」${referenceBlocked ? "部分生成完成" : "生成完成"}`
-      : `「${task?.appearanceName || "未命名形象"}」生成失败`;
+      ? `「${task?.appearanceName || "未命名形象"}」${referenceBlocked || task.resumable ? "部分生成完成" : "生成完成"}`
+      : `「${task?.appearanceName || "未命名形象"}」${partialId ? "部分已保存，后续未完成" : "生成失败"}`;
 
   return (
     <div className="running-task-card">
       <div className="running-task-card__head">
         {isRunning ? (
-          <Loader size={16} className="spin" />
+          task.awaiting ? <CheckCircle2 size={16} /> : <Loader size={16} className="spin" />
         ) : isCompleted ? (
           <CheckCircle2 size={16} />
         ) : (
           <AlertCircle size={16} />
         )}
         <div className="running-task-card__title">{title}</div>
-        <span className="muted small">已处理 {completed}/{total || "?"}</span>
+        <span className="muted small">{isPaused || task.recoveryLabel ? "已保存" : "已处理"} {completed}/{total || "?"}</span>
         {!isRunning && (
           <button className="icon-btn" type="button" onClick={onDismiss} aria-label="关闭生成提示">
             <X size={14} />
@@ -1342,7 +1375,7 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
       </div>
       <div className="muted small running-task-card__sub">
         {task?.status === "failed"
-          ? task.error || "生成失败，请检查设置后重试。"
+          ? task.error || stageMessage || "生成失败，请检查设置后重试。"
           : referenceBlocked
             ? stageMessage
           : currentFamily
@@ -1350,6 +1383,29 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
             : stageMessage || (isCompleted ? "形象已保存到本地形象库。" : "正在准备…")}
       </div>
       <div className="running-task-card__actions">
+        {task.awaiting && (
+          <div style={{ width: "100%", display: "grid", gap: 12 }}>
+            <strong>{task.awaiting.kind === "reference" ? "确认宠物参考图" : "确认试生成动画"}</strong>
+            {task.awaiting.kind === "reference"
+              ? <img src={task.awaiting.url} alt="处理后的宠物参考图" style={{ width: 320, maxWidth: "100%", borderRadius: 12, background: "black" }} />
+              : <video src={task.awaiting.url} controls loop muted playsInline style={{ width: 320, maxWidth: "100%", borderRadius: 12, background: "black" }} />}
+            <p>{task.awaiting.message}</p>
+            <button className="btn-primary" onClick={onConfirm}>
+              {task.awaiting.kind === "reference" ? "参考图正确，生成一段试片" : "试片满意，生成剩余动作"}
+            </button>
+            <span className="muted small">不满意可取消；不会自动继续付费生成。</span>
+          </div>
+        )}
+        {!isRunning && task.resumable && <button className="btn-primary btn-sm" onClick={() => {
+          setResumeError(""); void resumeGenerationTask().catch(error => setResumeError(error.message));
+        }}>恢复已有任务</button>}
+        {!isRunning && task.resumable && <span className="muted small">复用已有成果；必要时补做检查或提示词，再继续未提交动作，会产生相应费用，不重做已有视频。</span>}
+        {resumeError && <span role="alert">{resumeError}</span>}
+        {!isRunning && task.resumable && <button className="btn-ghost btn-sm" onClick={() => {
+          if (window.confirm("放弃继续此任务？已保存的形象保留；云端已提交任务不会取消，也不会自动重新生成。")) {
+            void dismissGenerationSession().catch(error => setResumeError(error.message));
+          }
+        }}>放弃继续此任务</button>}
         {partialId && (
           <button className="btn-secondary btn-sm" onClick={() => onOpenDetail?.(partialId)}>
             <CheckCircle size={14} /> 查看已生成部分
@@ -1365,9 +1421,10 @@ function RunningTaskCard({ task, onAbort, onDismiss, onOpenDetail }) {
           </button>
         )}
       </div>
+      {!isRunning && <GenerationDiagnostics since={task?.startedAt || 0} />}
       {isRunning && (
         <div className="muted small running-task-card__hint">
-          生成可后台进行，你可以切换页面或继续操作。关闭应用会中断生成。
+          {task.automatic ? "可切换页面；自动检查参考图和试片，通过后继续全部动作。请保持客户端运行；重启后安全恢复已提交任务，不会重复收费提交。" : "可切换页面；参考图和试片需确认才继续。重启后可恢复已有云端任务，关闭客户端不会取消云端已提交任务。"}
         </div>
       )}
     </div>

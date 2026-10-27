@@ -11,11 +11,22 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 
 1. 完整读取 [references/contract.md](references/contract.md)。契约是实现与校验的唯一依据。
 2. 判断需求属于 `game` 还是 `tool`：
+   - 离线随机内容池、排除抽签、思考卡或设备端日期倒计时，完整读取 [references/local-tools.md](references/local-tools.md)。使用通用 local 引擎并校验 widgetLocalTools，不按组件 ID 写固件分支；断电后日期工具必须重新校时。
+   - 近期资讯/新闻简报读取 [references/news.md](references/news.md)，采用有来源、时间窗和数量约束的 PC 资讯宿主，不把模型记忆当作联网结果。
+   - 需要应用级布局、图标按钮、精细字号或原生 640×480 背景时，完整读取 [references/app-surface.md](references/app-surface.md)，核对设备图形能力；不得为了迁就旧图片配额静默降低分辨率或删掉图标。
+   - 组件需要点击、选择或直接操作画面时，读取 [references/touch.md](references/touch.md)。按需求灵活添加触屏区域，复用实体按键动作；应用点击与切果连续划线不是同一种能力，不能把可触屏等同于支持任意手势。
+   - 需要滑动翻页、摇杆连发、按下即响应、确认弹窗或按状态显示按钮时，另读 [references/input-policy.md](references/input-policy.md)。这些能力必须由 `widgetInput=p4-input-v1` 明确协商，不能仅通过提高版本号假定设备支持。
+   - 需要按住蓄力、松开发射和连续平台运动时，另读 [references/motion.md](references/motion.md)，使用 `widgetMotion=p4-motion-v1` 的通用单角色场景能力，不冒充任意物理引擎。
+   - 需要连续向前的随机平台和跟随镜头时，使用同一 motion 中的 `track` 扩展，另核验 `widgetPlatformTrack=p4-platform-track-v1`；不能用每次落台重置角色位置冒充连续前进。
    - 有目标、玩家输入、即时反馈、局面变化和回合结算时，使用 `game`。
    - 以计时、提醒、追踪、展示、查询或控制为主要价值时，使用 `tool`。
    - 展示行情等实时数据时，另读 [references/live-data.md](references/live-data.md)，确认 PC 数据源与设备能力；组件只订阅数据，不自行联网。
-   - 音频播放器使用已实现的受控媒体界面，另读 [references/media.md](references/media.md)。先确认 PC 音源服务和 widgetMedia 能力；不得用计时器、静态进度条假装播放。
+   - 维护城市天气应用时，另读 [references/location-forecast.md](references/location-forecast.md)，使用包内声明式接口、字段映射、城市与文案；宿主只解释受控能力，不运行包内代码。
+   - 分类知识库或长文阅读工具另读 [references/knowledge-library.md](references/knowledge-library.md)，知识和来源在 PC 资源包中，设备按页读取；校验数量、长度、随机不重复与授权，不用重复段落凑字数。
+   - 农历/黄历工具另读 [references/calendar.md](references/calendar.md)，历法与民俗内容保留在 PC 数据包，宿主负责日期切换和时区，不把宜忌作为现实决策建议。
+   - 新联网媒体组件使用双端声明式扩展，完整读取 [references/pc-extensions.md](references/pc-extensions.md)。PC 包声明面板与受控 GET 搜索映射，设备包声明 surface；宿主提供公共网络、解码与存储。先确认宿主和设备能力，不用模拟假装播放。维护旧 audio.player 时另读 [references/media.md](references/media.md)。
    - 本地木鱼音效工具另读 [references/instrument.md](references/instrument.md)，需要 widgetInstrument=p4-instrument-v1；不是任意音频或高分辨率素材的通用执行入口。
+   - 触屏切果游戏另读 [references/touch-slice.md](references/touch-slice.md)。需要设备声明 p4-touch-slice-v1、widgetPointer=p4-pointer-v1 且 touchInput.ready=true；只支持该受控玩法，不代表任意触屏脚本均可运行。校验、自测和发布都传入实际设备能力文件；自测需要 Node.js。
 3. 先判断这是新建组件还是优化/修复现有组件：
    - 新建组件才创建新的 `component.json.id`。
    - 优化、修复或继续迭代现有组件时，先读取用户指定的那个组件，并原样保留它的 `component.json.id`；除非用户明确要求另存为新组件，否则禁止生成新 ID。显示名称相同不能代替 ID 相同。
@@ -66,6 +77,10 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 
 ## 路由原则
 
+- 扩展现有组件时先复用通用能力：视觉/文案/动作映射/场景规则和受支持的物理参数放资源包；PC 网络、日期、阅读和音频等复用声明式宿主服务。不得用组件 ID、书名或玩法名称在固件内新增专用分支。
+- 发现缺失原语时，一次同步设备解释器、PC 预览、校验器、能力协商、技能参考和回归测试；记录支持边界。不能把仅某个包的补丁称为通用支持，也不能承诺未实现能力免固件升级。
+- 输入扩展必须覆盖实体解码→事件队列→动作派发，再覆盖场景核心和触屏；浏览器模拟通过不能代替实体按住/松开验收。新资源包若只使用设备已具备的原语，不因更换主题、布局或参数而提高固件要求。
+
 - 先实现用户真正要求的玩法或工具，不得把不支持的游戏静默替换成 Flappy Bird、贪吃蛇或其他示例。
 - 如果 P4 当前契约无法表达需求，明确指出具体限制，并询问用户是简化玩法还是等待运行时能力；不要生成一个名字相似但玩法不同的包。
 - 新建组件时，禁止读取或搜索 `pc/builtin-clawpkgs`、`references/examples`、`~/.claw-pet/components`、历史生成目录或其他完整 `.clawpkg`。只有用户明确要求修复某个现有组件时，才读取该组件本身。
@@ -85,6 +100,7 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 - 新组件默认 `visualStyle: "clean"`；只有用户明确要求复古、像素、8-bit 或街机风时才选 `pixel`。从 `candy|sunset|mint|arcade|ocean|forest|ember|mono` 中选择有理由的配色；`classic` 只用于读取历史包。不得无条件复用同一 style、palette、layout 或实体色阶组合。
 - 视觉选择必须来自当前需求：发布前说明该风格、配色和每个实体形状为何匹配题材。若两个不同游戏除标题、文案和数值外具有相同的视觉组合，视为未完成并重新设计。
 - 不生成 JS、Python、HTML、CSS、SVG、shell 或可执行代码到组件包中。
+- 已安装且校验通过的组件默认获准使用其声明的受控宿主服务，首次使用和更新均不增加授权确认。可展示非阻塞的数据使用说明；保留手动停用、系统权限、服务配置、实际操作及破坏性操作确认，不把默认授权实现为自动录音、播放或派发任务。
 
 ## 发布边界
 
@@ -103,7 +119,7 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 - 游戏在组件库中的 description 已经说明目标、核心规则与结束条件；按钮说明可由组件中心根据真实映射生成，不在 description 中写死 SW1/SW2/SW3。
 - 默认现代视觉不是“把格子间距去掉”：主体应优先使用语义形状或小型精灵，卡片/HUD 要有层级和留白；只有明确的复古需求才允许可见像素网格和方块化主体。
 - 使用 PNG 时，素材是透明背景横向帧带，文件名与 `scene.sprites.asset` 完全一致；所有 PNG 都有引用、所有引用都有文件，首帧能表达默认状态，连续帧不存在空白、错位或尺寸漂移。
-- 每个 action 同时存在于 `buttons.json` 和 runtime transition。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。组件不得声明 `page_main/page_back` 等系统导航 action；退出由设备全局绑定统一处理，摇杆中键长按默认不绑定。
+- 每个 action 都必须有 runtime transition。传统包还必须绑定实体输入；声明 `p4-input-v1` 的资源包可以额外提供仅触屏按钮或滑动动作，但须真实可达，不能只是未绑定的空动作。旧版 game 预设动作仍须有实体键兜底。新硬件可使用摇杆上/下/左/右与中按；左右和中按沿用历史事件名以兼容旧包。组件不得声明 `page_main/page_back` 等系统导航 action；退出由设备全局绑定统一处理，摇杆中键长按默认不绑定。
 - 游戏核心角色和主要动态物件已优先使用 PNG；若退回内置 shape，能够说明题材或能力限制上的具体理由，而不是为了省事。PNG 的透明背景、帧尺寸、帧数和引用路径均通过校验。
 - 出厂默认 SW3 短按是设备全局退出键，用户可以改绑或不绑定；生成或更新组件时仍不得占用 SW3，也不得自行声明退出动作。游戏优先将方向动作放到四向摇杆，将 SW1 用作开始/重新开始，将 SW2 留给射击、技能、暂停等题材专属动作。工具以 SW1 为主操作、SW2 为次操作，并可按语义使用摇杆方向切页或调节。
 - 组件画面、footer 和说明不得写死“SW3 退出”；需要提示时统一写“全局键退出”或“退出跟随设备全局设置”。
@@ -112,3 +128,5 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 - 结构校验、完整玩法自测和发布命令均成功；玩法报告证明开始、输入反馈、推进、进展/得分、结算与重开都可达。最终路径位于正式 `library`，而不是工作目录或 `.staging`。
 - 带 scene 的互动工具自测报告证明每个真实输入均有可见反馈，声明的 tick/自动运动在互动后的可达状态中会生效；PNG 横向帧带已逐帧检查，没有空帧、裁切、重影、尺寸或重心突变。
 - 优化/修复任务保留了原 `component.json.id`，交付说明包含组件中心刷新与“保存并同步”的设备覆盖步骤。
+
+媒体切图扩展：已支持 widgetSurfaceImages=p4-surface-images-v1 时，遵循 references/pc-extensions.md 的 surface.images 契约；这是媒体独立配额，不扩大游戏 scene 精灵配额。

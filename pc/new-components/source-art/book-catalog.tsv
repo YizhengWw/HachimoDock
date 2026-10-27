@@ -1,0 +1,100 @@
+category	title	originalTitle	author	concepts
+行为认知	思考，快与慢	Thinking, Fast and Slow	Daniel Kahneman	直觉与审慎推理；启发式与基准率；不把双系统当两块脑区，不把所有直觉判为错误
+行为认知	噪声	Noise	Daniel Kahneman	判断中的无谓差异与系统性偏差不同；独立判断与流程；减少噪声不等于消除合理差异
+行为认知	助推	Nudge	Richard Thaler	选择架构、默认项、退出自由；透明且可拒绝的设计；不能以助推代替制度改革或操纵用户
+行为认知	错误的行为	Misbehaving	Richard Thaler	行为经济学与理性模型的差距；心理账户与参照点；行为模式不是对每个人的确定预测
+行为认知	怪诞行为学	Predictably Irrational	Dan Ariely	相对比较、锚定与价格框架；只讨论概念和原创假设，不复述未经核对的实验或统计，提示研究与复现局限
+行为认知	非理性的积极力量	The Upside of Irrationality	Dan Ariely	动机、意义与适应；讨论假设场景，不把单项实验作普遍定律，不编数字与因果证据
+行为认知	风险认知	Risk Savvy	Gerd Gigerenzer	自然频数和条件概率；风险与不确定性；用假设数字演示分母，不提供医学或投资判断
+行为认知	直觉	Gut Feelings	Gerd Gigerenzer	简洁启发式与环境匹配；直觉需要领域经验；不能将直觉视作永远优于分析
+行为认知	智能时代的清醒思考	How to Stay Smart in a Smart World	Gerd Gigerenzer	数字素养、算法预测与不确定性；不把便利当正确；中文标题为导读展示译名
+行为认知	超预测	Superforecasting	Philip Tetlock	分解问题、基准率、概率更新；可校准判断；不承诺准确预测所有事件
+判断决策	对赌	Thinking in Bets	Annie Duke	决策质量与结果分离；概率表达；复盘过程而非只看输赢
+判断决策	放弃的艺术	Quit	Annie Duke	沉没成本、退出条件与机会成本；预设停止标准；退出不是遇到困难就放弃
+判断决策	如何做决定	How to Decide	Annie Duke	可逆性、信息价值、备选方案；决策日志；流程不保证结果
+判断决策	侦察者心态	The Scout Mindset	Julia Galef	求真与自我辩护；更新信念；开放不等于没有立场
+判断决策	清醒思考的艺术	The Art of Thinking Clearly	Rolf Dobelli	认知偏误与情境；幸存者偏差、社会认同；标签不能代替具体证据
+判断决策	黑天鹅	The Black Swan	Nassim Nicholas Taleb	罕见重大事件、事后解释与尾部风险；不声称可预测黑天鹅；区分不可预测和完全无法准备
+判断决策	随机漫步的傻瓜	Fooled by Randomness	Nassim Nicholas Taleb	运气与技能、样本选择与结果偏差；原创假设；不做交易建议
+判断决策	反脆弱	Antifragile	Nassim Nicholas Taleb	脆弱、稳健、反脆弱的区别；小规模试错和非对称损益；压力过大仍会伤害系统
+判断决策	非对称风险	Skin in the Game	Nassim Nicholas Taleb	承担后果与激励对齐；代理关系；承担风险不自动证明观点正确
+判断决策	成功的公式	The Success Equation	Michael Mauboussin	技能与运气连续谱；过程指标与样本规模；避免用单次结果推断能力
+习惯效率	掌控习惯	Atomic Habits	James Clear	线索、环境与小步重复；身份和行为循环；习惯并非万能，不承诺复利数字
+习惯效率	福格行为模型	Tiny Habits	BJ Fogg	动机、能力与提示；缩小动作门槛；不把困难归咎个人意志
+习惯效率	习惯的力量	The Power of Habit	Charles Duhigg	线索、惯例、回报；识别循环与替换行为；书中框架不是全部神经科学
+习惯效率	深度工作	Deep Work	Cal Newport	专注的高认知任务与浅工作；时段边界与训练；协作和响应性也有价值
+习惯效率	数字极简	Digital Minimalism	Cal Newport	按价值选择技术；重建注意力和休闲；不是拒绝一切数字工具
+习惯效率	慢生产力	Slow Productivity	Cal Newport	做较少的事、自然节奏、重视质量；在约束下减少并行；不是拖延许可证
+习惯效率	精要主义	Essentialism	Greg McKeown	辨认少数重要事项、取舍与缓冲；不等于忽略他人的合理责任
+习惯效率	轻松主义	Effortless	Greg McKeown	降低重要任务的摩擦；可持续流程；轻松不等于无需努力
+习惯效率	人生只有四千周	Four Thousand Weeks	Oliver Burkeman	时间有限、选择意味着放弃；接受无法清空待办；不把书名当每个人寿命预测
+习惯效率	搞定	Getting Things Done	David Allen	收集、澄清、下一步行动和回顾；可信外部系统；工具复杂度应适配任务
+经济基础	国富论	The Wealth of Nations	Adam Smith	分工、交换和市场范围；激励与制度背景；不要把作者简化为任何干预都反对
+经济基础	道德情操论	The Theory of Moral Sentiments	Adam Smith	同情、公正旁观者与社会评价；伦理不是简单逐利；不编作者原话
+经济基础	人口原理	An Essay on the Principle of Population	Thomas Malthus	人口与资源约束的历史论证；技术、制度、人口转变的局限；不将历史预测视为现代定律
+经济基础	政治经济学及赋税原理	On the Principles of Political Economy and Taxation	David Ricardo	比较优势、机会成本与分配；严格限定假设；整体收益不代表所有群体获益
+经济基础	政治经济学原理	Principles of Political Economy	John Stuart Mill	生产与分配、制度安排；历史理论与价值判断区分；不将现代模型强加给作者
+经济基础	国民经济学原理	Principles of Economics	Carl Menger	主观价值、边际用途与选择；不把价格等于道德价值
+经济基础	经济学原理	Principles of Economics	Alfred Marshall	供需、时间维度与局部均衡；其他条件不变的限制；不混同曼昆教材
+经济基础	就业、利息和货币通论	The General Theory of Employment, Interest and Money	John Maynard Keynes	有效需求、不确定性与总体就业；个体节俭与总体结果；不简化为无限增加支出
+经济基础	经济发展理论	The Theory of Economic Development	Joseph Schumpeter	企业家、新组合、创新与信用；区分发展和重复生产；不编造原书案例
+经济基础	通往奴役之路	The Road to Serfdom	Friedrich Hayek	集中计划、分散知识与自由的历史论证；标明作者立场和可争议边界；不是所有公共服务都会导向极权
+当代经济	一课经济学	Economics in One Lesson	Henry Hazlitt	机会成本、可见与不可见后果；长期与不同群体；不能跳过外部性与市场失灵
+当代经济	赤裸裸的经济学	Naked Economics	Charles Wheelan	激励、信息与公共政策权衡；经济思维而非无条件市场信仰
+当代经济	卧底经济学	The Undercover Economist	Tim Harford	稀缺租金、价格与信息；从日常价格看约束；不编现实价格
+当代经济	策略思维	Thinking Strategically	Avinash Dixit	相互依赖、承诺与向前看向后推；博弈模型的假设；不是操控他人
+当代经济	策略的艺术	The Art of Strategy	Avinash Dixit	可信承诺、信号和重复博弈；合作与竞争；模型不代替了解真实参与者
+当代经济	好的经济学	Good Economics for Hard Times	Abhijit Banerjee	证据、政策情境与人的尊严；避免单一模型解释一切；不编研究结果
+当代经济	贫穷的本质	Poor Economics	Abhijit Banerjee	具体约束、现场证据与政策设计；贫困者不是一类同质人群；局部证据外推有限
+当代经济	国家为什么会失败	Why Nations Fail	Daron Acemoglu	包容与攫取性制度的论证；政治经济互动；制度解释不是唯一历史因果
+当代经济	自由的窄廊	The Narrow Corridor	Daron Acemoglu	国家能力与社会制衡的动态关系；不是越强或越弱越好；避免给现实国家简单贴标签
+当代经济	经济学的思维方式	The Economic Way of Thinking	Paul Heyne	机会成本、边际选择与相互协调；把方法用于原创日常例子；不混同其他同名著作
+创业产品	精益创业	The Lean Startup	Eric Ries	可验证学习、最小可行产品与迭代；实验要有指标；不是上线粗制滥造产品
+创业产品	从0到1	Zero to One	Peter Thiel	差异化、独特价值与长期优势；作者的创业视角有边界；不鼓励违法垄断
+创业产品	妈妈测试	The Mom Test	Rob Fitzpatrick	问过去的行为而非索取夸奖；具体问题和承诺；访谈不能替代成交验证
+创业产品	精益实战	Running Lean	Ash Maurya	问题方案匹配、关键假设和验证；先识别风险；不是只画画布
+创业产品	创业方法论	Disciplined Entrepreneurship	Bill Aulet	滩头市场、用户画像、价值与商业模式；有序验证但不迷信线性步骤
+创业产品	创业维艰之外的企业系统	The E-Myth Revisited	Michael Gerber	技术工作者、管理者、创业者的角色；可复现流程；流程不能消除人的判断
+创业产品	创业者手册	The Startup Owner's Manual	Steve Blank	客户发现与客户验证；走出办公室验证假设；搜索商业模式不同于执行成熟计划
+创业产品	跨越鸿沟	Crossing the Chasm	Geoffrey Moore	早期采用者与主流用户差异；完整产品和聚焦细分市场；不是所有市场都一模一样
+创业产品	创新者的窘境	The Innovator's Dilemma	Clayton Christensen	既有客户与资源分配；破坏性创新的特定含义；不把所有新技术叫颠覆
+创业产品	创新者的解答	The Innovator's Solution	Clayton Christensen	增长、客户任务与组织匹配；新业务不宜机械套旧指标；不保证成功
+商业战略	好战略，坏战略	Good Strategy Bad Strategy	Richard Rumelt	诊断、指导方针与协调行动；目标不是战略；聚焦约束
+商业战略	竞争战略	Competitive Strategy	Michael Porter	行业结构和竞争力量；相对位置；分析框架不是静态行业结论
+商业战略	竞争优势	Competitive Advantage	Michael Porter	价值链、成本与差异化；活动系统的配合；不是只追求单项效率
+商业战略	蓝海战略	Blue Ocean Strategy	W. Chan Kim	价值创新、取舍与非顾客；降低成本与增加价值的组合；蓝海不会永远无竞争
+商业战略	赢的策略	Playing to Win	A. G. Lafley	在哪里竞争、如何取胜、能力与管理系统；成套选择；不是愿景口号
+商业战略	七种力量	7 Powers	Hamilton Helmer	持续优势的收益与壁垒；规模、转换成本等；优势须有条件，不必同时拥有七种
+商业战略	目标	The Goal	Eliyahu Goldratt	瓶颈、吞吐与在制品；局部效率可能损害整体；不复述小说情节和人物
+商业战略	从优秀到卓越	Good to Great	Jim Collins	纪律、聚焦与组织建设；成功样本和事后研究局限；关联不等于成功配方
+商业战略	基业长青	Built to Last	Jim Collins	核心理念与持续改变；组织而非明星领袖；注意幸存者偏差
+商业战略	选择卓越	Great by Choice	Jim Collins	纪律、经验验证与不确定环境；稳定节奏与小试验；不把事后案例当必然规律
+营销传播	影响力	Influence	Robert Cialdini	社会认同、互惠与稀缺线索；防范与伦理应用；不伪造稀缺和背书
+营销传播	先发影响力	Pre-Suasion	Robert Cialdini	注意焦点与判断情境；准备环境；效应依赖条件，不是洗脑按钮
+营销传播	疯传	Contagious	Jonah Berger	传播动机、情绪与实用价值；传播不等于质量；不编造传播统计
+营销传播	让创意更有黏性	Made to Stick	Chip Heath	具体性、可信度与故事；让信息易懂易记；不能牺牲真实性
+营销传播	定位	Positioning	Al Ries	受众认知中的相对位置；聚焦与竞争参照；不把重复口号当价值创造
+营销传播	这就是营销	This Is Marketing	Seth Godin	服务特定人群、信任与承诺；最小可行受众；不是人人都要喜欢你
+营销传播	紫牛	Purple Cow	Seth Godin	值得谈论的产品差异；传播与真实使用价值；奇怪不等于有用
+营销传播	故事品牌	Building a StoryBrand	Donald Miller	用户目标、阻力和清晰行动；品牌不是故事英雄；不编造产品效果
+营销传播	显而易见的优势	Obviously Awesome	April Dunford	竞争替代、差异化与目标市场；产品定位依赖上下文；不靠自封品类逃避验证
+营销传播	增长黑客	Hacking Growth	Sean Ellis	跨职能实验、激活留存与学习；用证据改进；不鼓励骚扰、暗黑模式或只追虚荣指标
+财富常识	金钱心理学	The Psychology of Money	Morgan Housel	风险感受、时间与安全边际；个人经历影响金钱观；不提供资产配置比例或收益承诺
+财富常识	一如既往	Same as Ever	Morgan Housel	不变的人性与不确定的事件；耐心和叙事吸引力；不是对未来的确定预测
+财富常识	聪明的投资者	The Intelligent Investor	Benjamin Graham	价格与价值、安全边际和纪律；估值不确定；无买卖建议，无具体证券
+财富常识	漫步华尔街	A Random Walk Down Wall Street	Burton Malkiel	市场定价、预测困难与分散；学术观点有适用条件；不把随机游走说成市场永远正确
+财富常识	共同基金常识的小书	The Little Book of Common Sense Investing	John Bogle	成本、分散与长期纪律；不是保证收益或适合所有人；不推荐具体基金
+财富常识	财务自由之路：金钱与人生	Your Money or Your Life	Vicki Robin	金钱与生命时间、支出觉察和足够；价值取舍；不声称人人可提前退休
+财富常识	邻家的百万富翁	The Millionaire Next Door	Thomas Stanley	财富与消费表象不同；储蓄习惯；样本、年代、地域和幸存者偏差
+财富常识	巴比伦最富有的人	The Richest Man in Babylon	George Clason	储蓄、审慎和学习；寓言不是现代金融证据；不复述故事、不把固定比例作个人建议
+财富常识	常识的财富	A Wealth of Common Sense	Ben Carlson	简单原则、行为和复杂产品风险；透明度和成本；不承诺击败市场
+财富常识	投资最重要的事	The Most Important Thing	Howard Marks	风险、周期与第二层思维；认识不确定性；不择时荐股，不拿结果倒推过程
+组织系统	第五项修炼	The Fifth Discipline	Peter Senge	学习型组织、系统思考与共同愿景；反馈和心智模式；不是开培训会就能改变组织
+组织系统	格鲁夫给经理人的第一课	High Output Management	Andrew Grove	管理杠杆、产出与一对一沟通；任务成熟度；方法需适配不同组织
+组织系统	这就是OKR	Measure What Matters	John Doerr	目标与可验证关键结果；对齐和复盘；不把指标当全部价值或机械绩效排名
+组织系统	绝对坦率	Radical Candor	Kim Scott	真诚关心与直接挑战；反馈具体且尊重；不是以坦率为名羞辱
+组织系统	团队协作的五大障碍	The Five Dysfunctions of a Team	Patrick Lencioni	信任、建设性冲突、承诺、责任和共同结果；不复述寓言情节；信任不是无边界暴露
+组织系统	赋能式领导：把船调个头	Turn the Ship Around	L. David Marquet	领导者培养领导者、意图与能力；授权伴随信息和责任；不复制原书故事
+组织系统	驱动力	Drive	Daniel Pink	自主、精进和目的；内在外在动机的条件；不声称报酬不重要
+组织系统	原则	Principles	Ray Dalio	显式决策规则、反馈与修正；个人管理哲学而非普遍定律；不美化监控与强制透明
+组织系统	文化密码	The Culture Code	Daniel Coyle	安全感、共同脆弱性与目的；具体互动塑造文化；避免把相关案例说成因果实验

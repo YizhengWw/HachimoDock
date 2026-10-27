@@ -52,8 +52,10 @@ import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
 import RealtimeChatPanel, { realtimeStateLabel } from "./dashboard/RealtimeChatPanel.jsx";
+import { isRecoveringAsr } from "./lib/realtime-feedback.js";
 import { useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
 import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
+import { subscribeAsrCredentialUpdates } from "./dashboard/voice-credential-events.js";
 import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
 import DashboardActionsMenu from "./dashboard/DashboardActionsMenu.jsx";
 import FirmwareUpdateModal from "./dashboard/FirmwareUpdateModal.jsx";
@@ -1352,6 +1354,12 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     usb.connected,
   ]);
 
+  // This controller stays mounted across tabs; VoiceAssistantPanel does not.
+  // Read native readiness again after a successful save, then restore the
+  // transport and replace any old "please configure" recovery error.
+  useEffect(() => subscribeAsrCredentialUpdates(window, resumeDeviceVoiceAfterCredentialAccess),
+    [resumeDeviceVoiceAfterCredentialAccess]);
+
   const sendMockButtonInject = useCallback(() => {
     const text = (voiceState.mockInjectInput || "").trim();
     if (!text || !selectedAgentId) return;
@@ -1491,7 +1499,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         <DeviceStatusBar />
       </Card>
 
-      {realtimeChat?.error && <div role="alert" className="message-banner message-banner--error">
+      {realtimeChat?.error && !isRecoveringAsr(realtimeChat) && <div role="alert" className="message-banner message-banner--error">
         实时对话失败：{realtimeChat.error}。详情与诊断日志见下方「实时对话」。
       </div>}
 
@@ -1556,7 +1564,6 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onVoiceConfigChange={updateVoiceConfig}
           onVoiceTriggerChange={updateVoiceTrigger}
           onVoiceEnabledChange={updateVoiceEnabled}
-          onCredentialReady={resumeDeviceVoiceAfterCredentialAccess}
           onOpenApiSettings={onOpenApiSettings}
         />
       </Card.Collapsible>

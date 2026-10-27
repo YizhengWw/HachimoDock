@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-test("both build flavors use per-computer networking, never embedded proxy or credentials", () => {
+test("public builds use per-computer networking, never embedded proxy or credentials", () => {
   const llm = read("../src-tauri/src/persona_llm.rs");
   const network = read("../src-tauri/src/llm_network.rs");
   assert.match(llm, /crate::llm_network::client/);
@@ -11,7 +11,8 @@ test("both build flavors use per-computer networking, never embedded proxy or cr
   assert.match(network, /use_native_tls\(\)/);
   assert.match(network, /ProxyMode::Direct => builder.no_proxy\(\)/);
   assert.match(network, /Policy::none\(\)/);
-  assert.match(network, /#\[cfg\(not\(feature = "internal-network"\)\)\]\s*const BUNDLED_CA: &str = ""/);
+  assert.match(network, /const BUNDLED_CA: &str = ""/);
+  assert.doesNotMatch(network, /approved-internal-ca|include_str!.*OUT_DIR/);
   assert.match(network, /certificates\(BUNDLED_CA\)/);
 });
 test("API settings exposes saved-config probes and private per-machine certificate import", () => {

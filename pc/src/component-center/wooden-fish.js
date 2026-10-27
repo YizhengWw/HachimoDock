@@ -21,9 +21,9 @@ export async function loadLayer(name, signal) {
   ctx.putImageData(image,0,0);return canvas;
 }
 
-export function paint(ctx, body, mallet, age, startY=0, startScale=1) {
+export function paint(ctx, body, mallet, age, startY=0, startScale=1, title='静心木鱼') {
   const m=motion(age,startY,startScale);ctx.fillStyle="#f1e3cf";ctx.fillRect(0,0,640,480);
-  ctx.fillStyle="#54422f";ctx.font='600 27px "PingFang SC", "Microsoft YaHei", sans-serif';ctx.fillText("敲木鱼",30,53);
+  ctx.fillStyle="#54422f";ctx.font='600 27px "PingFang SC", "Microsoft YaHei", sans-serif';ctx.fillText(title,30,53);
   ctx.fillStyle="#8b7354";ctx.font='15px "PingFang SC", sans-serif';ctx.fillText("一声木响，一刻安静",31,85);
   if(m.wave<1) {
     ctx.strokeStyle=`rgba(196,159,104,${(1-m.wave)*.45})`;ctx.lineWidth=2;

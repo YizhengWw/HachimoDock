@@ -1,18 +1,28 @@
 /**
  * [Input] image payload + requested family list + Volcengine Ark API-key/model-name config.
- * [Output] structured persona + per-family prompts via Ark Responses with Doubao 2.0 multimodal by default.
+ * [Output] structured persona + per-family prompts via Ark Responses; known Doubao models
+ *          use direct generation unless deeper reasoning was explicitly requested.
  * [Pos] lib node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
 
-import { pipelineFetch, withRetry, readJsonOrThrow } from "./http.js";
+import { pipelineFetch, withRetry, readJsonOrThrow, shouldRetryTransientHttp } from "./http.js";
+import { DEFAULT_LITE_MODEL } from "../text-models.js";
 import { buildUserPrompt, parseModelJson } from "./prompts.js";
 import { SYSTEM_PROMPT_ZH } from "./system-prompt.js";
 import { FAMILIES } from "./families.js";
 
-export const DEFAULT_THINKING_MODEL = "doubao-seed-2-0-pro-260215";
+export const DEFAULT_THINKING_MODEL = DEFAULT_LITE_MODEL;
 export const DEFAULT_THINKING_API_URL = "https://ark.cn-beijing.volces.com/api/v3/responses";
 const TEXT_ONLY_THINKING_MODELS = new Set(["deepseek-v3-2-251201"]);
+// Only models whose thinking switch is documented by Ark. Do not send a
+// provider-specific parameter to custom endpoints or unknown model IDs.
+const THINKING_SWITCH_MODELS = new Set([
+  "doubao-seed-2-1-lite-260915", "doubao-seed-2-1-pro-260915",
+  "doubao-seed-2-1-pro-260628", "doubao-seed-2-1-turbo-260628",
+  "doubao-seed-2-0-lite-260428", "doubao-seed-2-0-mini-260428",
+  "doubao-seed-2-0-pro-260215", "doubao-seed-2-0-lite-260215", "doubao-seed-2-0-mini-260215",
+]);
 
 function joinUrl(baseUrl, path) {
   if (!baseUrl) return path;
@@ -87,6 +97,7 @@ export function buildThinkingModelRequest({
   content.push({ type: "input_text", text: inputText });
   const body = {
     model: thinking?.model || DEFAULT_THINKING_MODEL,
+    store: false,
     input: [
       {
         role: "user",
@@ -94,7 +105,12 @@ export function buildThinkingModelRequest({
       },
     ],
   };
+  // Ark Responses structured JSON avoids relying on prompt wording alone.
+  if (apiUrl === DEFAULT_THINKING_API_URL) body.text = { format: { type: 'json_object' } };
   if (thinking?.maxTokens) body.max_output_tokens = thinking.maxTokens;
+  if (THINKING_SWITCH_MODELS.has(body.model) && apiUrl === DEFAULT_THINKING_API_URL) {
+    body.thinking = { type: thinking?.reasoningEffort ? "enabled" : "disabled" };
+  }
   if (typeof thinking?.temperature === "number") body.temperature = thinking.temperature;
   if (thinking?.reasoningEffort) body.reasoning_effort = thinking.reasoningEffort;
   return { apiUrl, body };
@@ -118,6 +134,8 @@ export async function callThinkingModel({
   appearanceName = "",
   personality = "",
   signal,
+  cachedResponse,
+  onResponse,
 }) {
   if (!thinking?.apiKey) throw new Error("Missing thinking-model API key");
   const { apiUrl, body } = buildThinkingModelRequest({
@@ -128,9 +146,10 @@ export async function callThinkingModel({
     personality,
   });
 
-  const responseJson = await withRetry(
+  const responseJson = cachedResponse || await withRetry(
     async () => {
       const response = await pipelineFetch(apiUrl, {
+        diagnosticStage: "thinking",
         method: "POST",
         signal,
         headers: {
@@ -142,14 +161,21 @@ export async function callThinkingModel({
       return readJsonOrThrow(response, "thinking model");
     },
     {
-      retries: 3,
+      retries: 0,
       signal,
-      shouldRetry: (err) => !/aborted/i.test(String(err?.message || err)),
+      shouldRetry: shouldRetryTransientHttp,
     },
   );
 
   const text = extractMessageContent(responseJson);
-  const parsed = parseModelJson(text);
+  if (!cachedResponse) await onResponse?.({ output_text: text.slice(0,128*1024),
+    status: responseJson.status, truncated: text.length>128*1024 });
+  let parsed;
+  try {
+    if(responseJson.truncated || ['incomplete','failed'].includes(responseJson.status))throw Error('incomplete');
+    parsed = parseModelJson(text);
+  }
+  catch { const error = new Error('动作提示词返回格式异常，参考图已保留，尚未提交新视频任务。'); error.code='PROMPT_OUTPUT_INVALID'; throw error; }
   return {
     persona: parsed.persona || {},
     prompts: Array.isArray(parsed.prompts) ? parsed.prompts : [],

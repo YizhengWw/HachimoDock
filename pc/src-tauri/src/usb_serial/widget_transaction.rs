@@ -17,7 +17,10 @@ pub(super) const WIDGET_BEGIN_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 pub(super) const WIDGET_CHUNK_ACK_TIMEOUT: Duration = Duration::from_secs(2);
 // P4 may spend several seconds syncing its flash-backed widget catalog and
 // refreshing the active mini-app before the final acknowledgement reaches the host.
-pub(super) const WIDGET_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(15);
+// A/B catalog + image generations can trigger SPIFFS GC during durable commit.
+// Real full-resolution app packages approach/exceed 15s after repeated updates.
+// Wait for the original transaction only; never retransmit an uncertain commit.
+pub(super) const WIDGET_COMMIT_ACK_TIMEOUT: Duration = Duration::from_secs(45);
 pub(super) const WIDGET_DELETE_ACK_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const WIDGET_CHUNK_MAX_ATTEMPTS: usize = 3;
 pub(super) const P4_WIDGET_JSON_MAX_BYTES: usize = 4095;
@@ -113,7 +116,9 @@ pub(super) fn widget_ota_relative_path(root: &Path, path: &Path) -> Result<Strin
 }
 
 pub(super) fn widget_ota_should_skip_path(path: &str) -> bool {
-    path.split('/').next_back() == Some(".keep")
+    path.starts_with("pc/") || path.starts_with("licenses/")
+        || matches!(path, "LICENSE.txt" | "THIRD_PARTY_NOTICES.txt")
+        || path.split('/').next_back() == Some(".keep")
 }
 
 pub(super) fn prepare_p4_widget_sprite_files(
@@ -122,6 +127,19 @@ pub(super) fn prepare_p4_widget_sprite_files(
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     let widget: Value = serde_json::from_slice(widget_bytes)
         .map_err(|error| format!("runtime/widget.json is invalid JSON: {error}"))?;
+    if let Some(images)=widget["surface"]["images"].as_array() {
+        crate::component_extension::validate_surface(&widget["surface"])?;
+        let mut compiled=Vec::new();let mut total=0;
+        for im in images {
+            let id=im["id"].as_str().ok_or("image id")?;
+            let bytes=std::fs::read(widget_root.join(im["asset"].as_str().ok_or("image asset")?)).map_err(|e|e.to_string())?;
+            let image=crate::component_extension::decode_surface_image(im,&bytes)?;
+            let encoded=if im["encoding"]=="jpeg" {crate::surface_image::encode_background(&image)?}else{crate::surface_image::encode(&image)};
+            total+=encoded.len();if encoded.len()>100000||total>128*1024{return Err("组件图片超过 128 KiB 设备存储预算".into());}
+            compiled.push((format!("runtime/images/{id}.p4i"),encoded));
+        }
+        return Ok(compiled);
+    }
     let Some(sprites) = widget
         .get("scene")
         .and_then(|scene| scene.get("sprites"))
@@ -235,6 +253,7 @@ pub(super) fn prepare_p4_widget_file(
     };
     let mut value: Value = serde_json::from_slice(bytes)
         .map_err(|error| format!("{} is invalid JSON: {}", path, error))?;
+    let max_bytes=if path=="runtime/widget.json"&&value["surface"]["graphics"]=="p4-app-graphics-v1"{8191}else{max_bytes};
 
     if path == "runtime/widget.json" {
         let object = value

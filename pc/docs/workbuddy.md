@@ -1,5 +1,17 @@
 # WorkBuddy Agent 支持
 
+### 实时对话任务追加（未打包）
+
+macOS 和 Windows 的实时任务派发共用输入队列：仅原生写入/提交串行，旧任务等待接收或完成回执不阻塞新的明确要求。新任务成功、失败或取消均不停止、重启或结束旧任务的跟踪；同一句话仍去重，每个 Agent 最多 8 条待处理请求。只使用当前窗口实际可用的原生发送/排队/引导入口，不点击停止、不自动批准权限，也不在发送不确定时重试。
+
+输入框已有文字时，提交前读取并核对包含 Agent、窗口、编辑器和草稿的快照。既有文字（包括手动修改）作为 `existing_draft` 原样引用，本轮原话放在最外层 `current_user_request`，附上完整语音上下文；旧草稿不能覆盖本轮请求，已执行或结果不确定的事项不能因此重放。macOS 保留受控粘贴与剪贴板恢复；Windows 保留原生 UIA 与单次写入/Invoke 提交。输入期间窗口、会话或草稿变化则停止本次写入，保留内容，不改投其他 Agent。
+
+完成回执仍按 WorkBuddy 的生成编号或已验证消息父链关联，不套用 Codex 同一活动轮次共享结果的规则。此处是实时对话委托任务；普通按键语音仍是写入草稿、按确认键发送。自动化测试及 Windows 交叉编译不能代替双端客户端实机验收。
+
+### 实时任务完成回执（0.1.114）
+
+提交 Hook 不带 generation_id 并不表示客户端无法返回完成结果。现在继续等待 Stop，除了原有生成标识关联，还可通过 Stop 指定的同会话记录、精确回复及消息父链证明对应的原始用户请求。读取仍限 projects 内匹配会话名的文件末尾 256 KiB，不按最近任务猜测，不导出思考或工具正文。原生层要求原请求哈希、新提交事件和用户消息时间全部匹配后才报告完成；缺失、陈旧或歧义证据保留为未确认，不建议用户盲目升级。已做本机实际记录只读验证及合成并发/串轮防护测试；真实语音自动播报仍需安装新包后验收。
+
 ### Windows 空界面树恢复（0.1.92）
 
 若只暴露少量窗口节点而没有可写输入框，先对 WorkBuddy 自身窗口执行一轮辅助功能请求，再刷新 UIA 根节点。采用 Windows 的 [AccessibleObjectFromWindow](https://learn.microsoft.com/en-us/windows/win32/api/oleacc/nf-oleacc-accessibleobjectfromwindow) 和 [Chromium 渲染窗口的 MSAA 客户端检测机制](https://raw.githubusercontent.com/chromium/chromium/main/content/browser/renderer_host/legacy_render_widget_host_win.cc)。请求仅限已核对进程归属的主窗口及最多四个渲染子窗口，每次录音最多一轮；不更改系统设置、修改启动参数或重启 WorkBuddy。

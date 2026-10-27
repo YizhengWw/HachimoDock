@@ -30,10 +30,15 @@ test("CH343 live audio retains 64-byte bursts and never drains or pauses RX", ()
   const source = rust("usb_serial.rs");
   assert.match(source, /P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64/);
   assert.match(source, /write_serial_live_frame\(conn.writer.as_mut\(\), bytes,\s*paced_slice_bytes.unwrap_or\(bytes.len\(\)\), P4_CH343_SERIAL_WRITE_GAP\)/);
-  const live = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]")[0];
+  const live = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]\nmod tests")[0];
   assert.doesNotMatch(live, /writer\.flush\(/);
   assert.match(source, /\(!live_frame\).then\(\|\| SerialReaderPause/);
   assert.doesNotMatch(source, /live_write_plan/);
+  assert.match(live,/writer.write\(&chunk\[offset\.\.\]\)/);
+  assert.doesNotMatch(live,/writer.write_all\(/);
+  assert.match(live,/MAX_RECOVERY_RETRIES/);
+  assert.match(live,/RECOVERY_DEADLINE/);
+  assert.match(rust("usb_serial/windows_serial.rs"),/uncertain_write_error\(error\)/);
 });
 
 test("device rejection logs allowlisted topic and reason without provider payloads", () => {
@@ -49,6 +54,6 @@ test("failed audio writes stop playback and do not advance the sent-byte counter
   const chunk = source.slice(source.indexOf("let flush_chunk ="), source.indexOf("while let Ok((expected, cmd))"));
   assert.match(chunk, /let result = usb.send_to_board/);
   assert.match(chunk, /"playback_tx"/);
-  assert.match(chunk, /if result.is_err\(\) \{[\s\S]*?request_stop\(&session, "playback_write_failed"\);\s+return;/);
-  assert.ok(chunk.indexOf("if result.is_err()") < chunk.indexOf("*sent_bytes +="));
+  assert.match(chunk, /if let Err\(error\) = result \{[\s\S]*?request_stop\(&session, "playback_write_failed"\);\s+return;/);
+  assert.ok(chunk.indexOf("if let Err(error) = result") < chunk.indexOf("*sent_bytes +="));
 });

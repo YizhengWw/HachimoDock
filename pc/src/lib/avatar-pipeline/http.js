@@ -5,6 +5,8 @@
  * [Sync] If this file changes, update this header and the Tauri runtime command list that depends on these helpers.
  */
 
+import { recordDiagnostic, parseNativeDiagnostic, formatDiagnostic, transportHint, safeRequestId } from "./diagnostics.js";
+
 let cachedTauriFetch; // undefined = not probed yet; null = probed, unavailable
 let cachedTauriInvoke; // undefined = not probed; null = unavailable
 
@@ -35,10 +37,17 @@ function normalizeBody(body) {
 
 function isMissingTauriCommand(err) {
   const raw = String(err?.message || err || "");
-  return /command .* not found|unknown command|not found/i.test(raw);
+  return /command\s+[`'"]?http_request_text[`'"]?\s+not found|unknown command\s*:?\s*[`'"]?http_request_text/i.test(raw);
 }
 
-function buildTransportError(err, { url, method, label }) {
+function buildTransportError(err, { url, method, label, diagnostic }) {
+  const details = parseNativeDiagnostic(err) || diagnostic;
+  if (details) {
+    const safe = recordDiagnostic(details);
+    const error = new Error(`云服务请求失败：${transportHint(safe)}\n${formatDiagnostic(safe)}`);
+    error.diagnostic = safe;
+    return error;
+  }
   const raw = err?.message || String(err);
   // Rust supplies sanitized, actionable errors. Do not add signed URLs or dump
   // native/plugin exceptions, which can contain query credentials and proxy URLs.
@@ -91,9 +100,17 @@ async function getTauriFetch() {
  * pure-web dev (`npm run dev:web`).
  */
 export async function pipelineFetch(input, init = {}) {
+  if (init.signal?.aborted) throw new DOMException('aborted', 'AbortError');
   const url = typeof input === "string" ? input : String(input);
   const method = init?.method || "GET";
   const invoke = await getTauriInvoke();
+  const started = Date.now();
+  const fallbackDiagnostic = (phase, outcome, response) => ({
+    timestampMs: started, localId: globalThis.crypto?.randomUUID?.() || `local-${started}`,
+    stage: init.diagnosticStage, phase, outcome, elapsedMs: Date.now() - started,
+    timeoutMs: 0, status: response?.status,
+    requestId: safeRequestId(response?.headers?.get("x-request-id") || response?.headers?.get("x-tt-logid")),
+  });
 
   if (invoke) {
     try {
@@ -103,10 +120,13 @@ export async function pipelineFetch(input, init = {}) {
         headersJson: JSON.stringify(normalizeHeaders(init.headers)),
         body: normalizeBody(init.body),
         timeoutMs: typeof init?.timeoutMs === "number" ? init.timeoutMs : undefined,
+        diagnosticStage: init.diagnosticStage,
       });
-      return new Response(result?.body ?? "", {
+      const response = new Response(result?.body ?? "", {
         status: Number(result?.status) || 200,
       });
+      response.generationDiagnostic = recordDiagnostic(result.diagnostic || fallbackDiagnostic("complete", response.ok ? "success" : "http_error", response));
+      return response;
     } catch (err) {
       if (!isMissingTauriCommand(err)) {
         const safeError = buildTransportError(err, { url, method, label: "tauri-invoke" });
@@ -121,9 +141,12 @@ export async function pipelineFetch(input, init = {}) {
   const label = tauriFetch ? "tauri-http" : "browser-fetch";
   try {
     const impl = tauriFetch || fetch;
-    return await impl(input, init);
+    const response = await impl(input, init);
+    response.generationDiagnostic = recordDiagnostic(fallbackDiagnostic("response_body", response.ok ? "success" : "http_error", response));
+    return response;
   } catch (err) {
-    const safeError = buildTransportError(err, { url, method, label });
+    if (err?.name === "AbortError") throw err;
+    const safeError = buildTransportError(err, { url, method, label, diagnostic: fallbackDiagnostic("unknown", "transport_error") });
     console.error(`[pipelineFetch/${label}]`, safeError.message);
     throw safeError;
   }
@@ -209,7 +232,7 @@ export async function downloadBinary(url, signal) {
       throw safeError;
     }
   }
-  const response = await pipelineFetch(url, { method: "GET", signal });
+  const response = await pipelineFetch(url, { method: "GET", signal, diagnosticStage: "download" });
   if (!response.ok) {
     throw new Error(`素材下载失败（HTTP ${response.status}）`);
   }
@@ -222,7 +245,10 @@ export async function readJsonOrThrow(response, label) {
   const text = await response.text();
   if (!response.ok) {
     const trimmed = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-    throw new Error(`${label} HTTP ${response.status}: ${trimmed}`);
+    const error = new Error(`${label} HTTP ${response.status}: ${trimmed}${response.status === 404 && label === "thinking model" ? "；模型不存在或账号无权访问，请在模型下拉框重新选择，不会自动改用其他模型。" : ""}`);
+    error.status = response.status;
+    error.diagnostic = response.generationDiagnostic;
+    throw error;
   }
   if (!text) return null;
   try {
@@ -230,4 +256,12 @@ export async function readJsonOrThrow(response, label) {
   } catch {
     throw new Error(`${label} returned non-JSON response: ${text.slice(0, 200)}`);
   }
+}
+
+// Configuration and permission failures cannot be repaired by repeating the
+// same paid request. Only explicit transient HTTP failures are retried here;
+// transport failures have unknown execution outcome and require user action.
+export function shouldRetryTransientHttp(error) {
+  if (error?.name === "AbortError") return false;
+  return [408, 429, 500, 502, 503, 504].includes(error?.status);
 }

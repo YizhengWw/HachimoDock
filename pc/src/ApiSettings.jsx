@@ -1,6 +1,6 @@
 /**
  * [Input] Shared avatar provider configs including persisted video parameters, native Volcengine ASR credential commands, and optional return navigation.
- * [Output] Shared speech Key and fixed ASR/TTS 2.0, user-facing setup guidance; editable LLM model names with provider defaults and generation credentials. Saved ASR changes are immediately broadcast, with save vs. test results distinguished.
+ * [Output] Independent LLM/ASR reads, honest credential-save errors and retained navigation drafts; saved ASR changes are broadcast with save vs. test results distinguished.
  * [Pos] top-level page node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
@@ -22,8 +22,12 @@ import {
 import PageShell from "./shell/PageShell.jsx";
 import Card from "./shell/Card.jsx";
 import LlmNetworkSettings from "./LlmNetworkSettings.jsx";
+import GenerationDiagnostics from "./GenerationDiagnostics.jsx";
+import TextModelSelect from "./TextModelSelect.jsx";
+import { VideoModelSelect } from "./VideoGenerationSettings.jsx";
 import { useUsageHelp } from "./shell/DeviceContext.jsx";
 import UsageHelp from "./UsageHelp.jsx";
+import { useExitProtection } from "./lib/exit-protection.js";
 import {
   VIDEO_PROVIDERS,
   loadProviderConfig,
@@ -62,11 +66,14 @@ function resultToneClass(tone) {
   return tone ? ` is-${tone}` : "";
 }
 
-export default function ApiSettings({ onBack }) {
+export default function ApiSettings({ onBack, configReadError = "" }) {
   const usageHelp = useUsageHelp();
   const [showSecrets, setShowSecrets] = useState(false);
   const [videoConfigs, setVideoConfigs] = useState(loadVideoConfigs);
+  const [savedVideoConfigs, setSavedVideoConfigs] = useState(() => videoConfigs);
   const [providerResults, setProviderResults] = useState({});
+  const [providerPending, setProviderPending] = useState({});
+  const [savedLlm, setSavedLlm] = useState(null);
   const [asrApiKey, setAsrApiKey] = useState("");
   const [asrState, setAsrState] = useState({
     loading: true,
@@ -91,6 +98,13 @@ export default function ApiSettings({ onBack }) {
     llmTone: "muted",
     llmMessage: "正在读取对话大模型配置…",
   });
+  const llmDraft = JSON.stringify([voiceChat.llmProvider, voiceChat.llmBaseUrl, voiceChat.llmModel,
+    voiceChat.llmWebSearch, voiceChat.llmApiKey]);
+  useEffect(() => { if (!voiceChat.loading && savedLlm === null) setSavedLlm(llmDraft); }, [voiceChat.loading, savedLlm, llmDraft]);
+  const dirty = JSON.stringify(videoConfigs) !== JSON.stringify(savedVideoConfigs)
+    || !!asrApiKey || (savedLlm !== null && savedLlm !== llmDraft);
+  const saving = voiceChat.llmPending || asrState.pending || Object.values(providerPending).some(Boolean);
+  useExitProtection(saving ? "API 配置正在保存或测试" : dirty ? "API 配置有未保存的修改" : "");
 
   const applyVoiceChatStatus = (status, patch = {}) => {
     setVoiceChat((current) => ({
@@ -128,6 +142,7 @@ export default function ApiSettings({ onBack }) {
         llmTone: status?.llmConfigured ? "success" : "warning",
         llmMessage: status?.llmConfigured ? "配置已保存，开始聊天时将使用所选模型。" : "已保存，但还没有 API Key",
       });
+      setSavedLlm(null);
     } catch (error) {
       setVoiceChat((current) => ({ ...current, llmPending: false, llmTone: "error", llmMessage: `保存失败：${error}` }));
     }
@@ -141,8 +156,13 @@ export default function ApiSettings({ onBack }) {
           llmTone: status?.llmConfigured ? "success" : "muted",
           llmMessage: status?.llmConfigured ? "对话大模型已配置" : "选一家大模型，填入 API Key 即可",
         });
-        return invoke("load_device_asr_settings");
       })
+      .catch((error) => {
+        if (!cancelled) setVoiceChat((current) => ({ ...current, loading: false,
+          llmTone: "error", llmMessage: `读取对话模型配置失败：${error}` }));
+      });
+    // Independent services: a failed LLM read must not suppress the ASR read.
+    invoke("load_device_asr_settings")
       .then((status) => {
         if (cancelled) return;
         setAsrState({
@@ -155,7 +175,6 @@ export default function ApiSettings({ onBack }) {
       })
       .catch((error) => {
         if (cancelled) return;
-        setVoiceChat((current) => ({ ...current, loading: false }));
         setAsrState({
           loading: false,
           pending: false,
@@ -171,9 +190,9 @@ export default function ApiSettings({ onBack }) {
 
   const configuredProviderCount = useMemo(
     () => VIDEO_PROVIDERS.filter((provider) =>
-      providerCredentialsConfigured(provider.id, videoConfigs[provider.id]),
+      providerCredentialsConfigured(provider.id, savedVideoConfigs[provider.id]),
     ).length,
-    [videoConfigs],
+    [savedVideoConfigs],
   );
   const configuredCount = configuredProviderCount + (asrState.configured ? 1 : 0)
     + (voiceChat.llmConfigured ? 1 : 0);
@@ -189,7 +208,8 @@ export default function ApiSettings({ onBack }) {
     setProviderResults((current) => ({ ...current, [providerId]: null }));
   };
 
-  const saveProvider = (providerId) => {
+  const saveProvider = async (providerId) => {
+    if (providerPending[providerId]) return;
     const config = videoConfigs[providerId];
     if (!providerCredentialsConfigured(providerId, config)) {
       setProviderResults((current) => ({
@@ -214,7 +234,18 @@ export default function ApiSettings({ onBack }) {
         return;
       }
     }
-    saveProviderConfig(providerId, persistedProviderConfig(config));
+    setProviderPending(current => ({ ...current, [providerId]: true }));
+    try {
+      await saveProviderConfig(providerId, persistedProviderConfig(config));
+    } catch (error) {
+      setProviderResults((current) => ({ ...current,
+        [providerId]: { tone: "error", message: error.message || "配置未保存，请重试。" },
+      }));
+      return;
+    } finally {
+      setProviderPending(current => ({ ...current, [providerId]: false }));
+    }
+    setSavedVideoConfigs(current => ({ ...current, [providerId]: config }));
     setProviderResults((current) => ({
       ...current,
       [providerId]: { tone: "success", message: "已保存到当前客户端。" },
@@ -294,12 +325,13 @@ export default function ApiSettings({ onBack }) {
         </div>
       )}
     >
+      {dirty && <p role="status" className="api-settings__draft">有未保存的修改。切换页面会保留草稿；关闭客户端前请保存。</p>}
       <section className="api-settings__overview" aria-label="API 配置概览">
         <div className="api-settings__overview-icon" aria-hidden="true">
           <ShieldCheck size={22} />
         </div>
         <div className="api-settings__overview-copy">
-          <strong>{configuredCount} / {VIDEO_PROVIDERS.length + 2} 项凭据已配置</strong>
+          <strong>{configReadError ? "已有配置暂时无法读取（不是配置丢失）" : `${configuredCount} / ${VIDEO_PROVIDERS.length + 2} 项凭据已配置`}</strong>
           <span>按需配置即可：给 Agent 语音输入只需语音识别；和宠物聊天还需语音合成与对话大模型；生成形象需配置形象生成服务。</span>
         </div>
         <div className="api-settings__storage-note">
@@ -408,16 +440,11 @@ export default function ApiSettings({ onBack }) {
           )}
           <label className="ui-field" htmlFor="api-settings-llm-model">
             <span className="ui-field__label">模型名称 / 接入点 ID</span>
-            <input
-              id="api-settings-llm-model"
-              aria-label="模型名称 / 接入点 ID"
-              className="ui-control"
-              value={voiceChat.llmModel}
-              onChange={(event) => setVoiceChat((current) => ({ ...current, llmModel: event.target.value }))}
-              placeholder={LLM_PRESETS.find((preset) => preset.id === voiceChat.llmProvider)?.model || "model-name"}
-              disabled={voiceChat.llmPending || voiceChat.loading}
-              aria-describedby="api-settings-llm-model-help"
-            />
+            <TextModelSelect value={voiceChat.llmModel}
+              onChange={llmModel => setVoiceChat(current => ({ ...current, llmModel }))}
+              provider={voiceChat.llmProvider} baseUrl={voiceChat.llmBaseUrl}
+              apiKey={voiceChat.llmApiKey} configured={!voiceChat.loading && voiceChat.llmConfigured}
+              disabled={voiceChat.llmPending || voiceChat.loading} />
             <span id="api-settings-llm-model-help" className="muted small">可填写账号已开通的模型名称或接入点 ID；留空使用默认模型。</span>
           </label>
           <label className="ui-field" htmlFor="api-settings-llm-key">
@@ -459,10 +486,11 @@ export default function ApiSettings({ onBack }) {
       </Card>
 
       <Card title="形象生成" subtitle="用于新形象生成与单状态视频替换">
+        <GenerationDiagnostics />
         <div className="api-settings__provider-grid">
           {VIDEO_PROVIDERS.map((provider) => {
             const config = videoConfigs[provider.id];
-            const configured = providerCredentialsConfigured(provider.id, config);
+            const configured = providerCredentialsConfigured(provider.id, savedVideoConfigs[provider.id]);
             const result = providerResults[provider.id];
             const isKling = provider.id === "kling";
             const isCustom = provider.id === "custom";
@@ -490,11 +518,11 @@ export default function ApiSettings({ onBack }) {
                     </small>
                   </span>
                   <span className={`api-settings__status${configured ? " is-success" : ""}`}>
-                    {configured ? "已配置" : "未配置"}
+                    {configReadError ? "读取失败" : configured ? "已配置" : "未配置"}
                   </span>
                 </header>
 
-                <div className="api-settings__provider-fields">
+                <fieldset className="api-settings__provider-fields" disabled={Boolean(configReadError)} style={{border:0,padding:0,margin:0,minWidth:0}}>
                   {isKling ? (
                     <>
                       <label className="ui-field" htmlFor="api-settings-kling-access">
@@ -530,9 +558,9 @@ export default function ApiSettings({ onBack }) {
                         className="ui-control api-settings__secret-input"
                         type={showSecrets ? "text" : "password"}
                         autoComplete="new-password"
-                        value={config.apiKey}
+                        value={config.apiKey === "hachimidock-bundled-ark-v1" ? "" : config.apiKey}
                         onChange={(event) => updateProvider(provider.id, { apiKey: event.target.value })}
-                        placeholder={`输入${provider.label} API Key`}
+                        placeholder={config.apiKey === "hachimidock-bundled-ark-v1" ? "内置服务已启用，可填写自己的 Key 替换" : `输入${provider.label} API Key`}
                       />
                     </label>
                   )}
@@ -548,18 +576,32 @@ export default function ApiSettings({ onBack }) {
                       />
                     </label>
                   )}
-                </div>
+                  {provider.id === "volcengine" && <div className="ui-field">
+                    <span className="ui-field__label">视频生成模型</span>
+                    <VideoModelSelect apiKey={config.apiKey} baseUrl={config.baseUrl}
+                      model={config.model} onModel={model => updateProvider(provider.id, { model })}
+                      autoSelectDefault={false} />
+                    <span className="muted small">用于生成形象视频；与下方提示词模型独立。修改后点击保存。</span>
+                  </div>}
+                  {provider.id === "volcengine" && <div className="ui-field">
+                    <span className="ui-field__label">图像理解 / 提示词模型</span>
+                    <TextModelSelect vision label="图像理解模型" value={config.thinkingModel}
+                      onChange={thinkingModel => updateProvider(provider.id, { thinkingModel })}
+                      apiKey={config.apiKey} baseUrl={config.baseUrl} />
+                  </div>}
+                </fieldset>
 
                 <footer className="api-settings__provider-foot">
                   <span className={`api-settings__provider-result${resultToneClass(result?.tone)}`}>
-                    {result?.message || (configured ? "可用于形象生成" : "等待填写凭据")}
+                    {result?.message || (configReadError ? "原配置保留，暂不可修改" : configured ? "可用于形象生成" : "等待填写凭据")}
                   </span>
                   <button
                     type="button"
                     className="btn-secondary btn-sm"
                     onClick={() => saveProvider(provider.id)}
+                    disabled={providerPending[provider.id] === true || Boolean(configReadError)}
                   >
-                    保存
+                    {providerPending[provider.id] ? "保存中…" : "保存"}
                   </button>
                 </footer>
               </section>

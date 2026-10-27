@@ -21,6 +21,9 @@ for (const file of new Set(paths)) {
   // A public checkout may contain either LFS pointers or resolved binary assets.
   if (bytes.includes(0)) continue;
   const text = bytes.toString();
+  if (text.startsWith('version https://git-lfs.github.com/spec/v1\n')) {
+    problems.push(`${file}: unresolved LFS pointer; public resources must be available in ordinary Git`);
+  }
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)
       || /\b(?:ark-[a-f0-9-]{25,}|sk-[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{24,}|AKIA[0-9A-Z]{16})/.test(text)) {
     problems.push(`${file}: potential credential; value redacted`);

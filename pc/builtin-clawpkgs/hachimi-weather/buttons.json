@@ -1,0 +1,38 @@
+[
+  {
+    "action": "host.primary",
+    "label": "更新或确认",
+    "control": "SW1",
+    "event": "button.sw1.short_press"
+  },
+  {
+    "action": "host.secondary",
+    "label": "待办或取消",
+    "control": "SW2",
+    "event": "button.sw2.short_press"
+  },
+  {
+    "action": "host.previous",
+    "label": "上个城市",
+    "control": "前方摇杆",
+    "event": "knob.rotate_ccw"
+  },
+  {
+    "action": "host.next",
+    "label": "下个城市",
+    "control": "前方摇杆",
+    "event": "knob.rotate_cw"
+  },
+  {
+    "action": "host.choose",
+    "label": "选择城市",
+    "control": "前方摇杆",
+    "event": "joystick.up"
+  },
+  {
+    "action": "host.details",
+    "label": "预报说明",
+    "control": "前方摇杆",
+    "event": "joystick.down"
+  }
+]

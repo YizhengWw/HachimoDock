@@ -263,7 +263,9 @@ def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
     assert "#define MINIAPP_MAX_VARS 8" in source
     assert "#define MINIAPP_MAX_STATES 6" in source
     assert "#define MINIAPP_MAX_PAGES 4" in source
-    assert "#define MINIAPP_MAX_TRANSITIONS 12" in source
+    assert "#define MINIAPP_MAX_TRANSITIONS 24" in source
+    assert "parsed->transition_count>12&&!parsed->input_v1" in source
+    assert '"widgetInput", "p4-input-v1"' in protocol
     assert "#define MINIAPP_MAX_TICKS 8" in source
     assert "#define MINIAPP_MAX_BUTTONS 8" in source
     assert "#define MINIAPP_MAX_EFFECTS 4" in source
@@ -391,7 +393,8 @@ def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
     assert "visual_literal_allowed" in source
     assert 'cJSON_AddStringToObject(payload, "visualStyle", view->visual_style)' in protocol
     assert 'cJSON_AddStringToObject(payload, "visualSprite", view->visual_sprite)' in protocol
-    assert "pet_p4_miniapp_get_view(&snapshot)" in renderer
+    assert "pet_p4_miniapp_get_view(&g_miniapp_view_snapshot)" in renderer
+    assert "static EXT_RAM_BSS_ATTR pet_p4_miniapp_view_t g_miniapp_view_snapshot;" in renderer
     main = read("main/pet_p4_main.c")
     assert "g_render_mutex" in main
     assert "xSemaphoreTake(g_render_mutex" in main
@@ -458,8 +461,9 @@ def test_builtin_tool_widgets_declare_bounded_completion_cycles():
     }
     assert rest_tick["then"] == {
         "to": "focus",
-        "set": {"remaining_s": 1500, "phase_total_s": 1500},
+        "set": {"remaining_s": {"var": "focus_s"}, "phase_total_s": {"var": "focus_s"}},
     }
+    assert tomato["initial_state"] == "ready"
     assert {"focus_paused", "rest_paused"}.issubset(tomato["states"])
     assert tomato["dashboard"]["progress"] == {
         "pct_of": "remaining_s",
@@ -478,7 +482,7 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
         "tomato-clock": [
             "tomato.start_pause",
             "tomato.skip_phase",
-            "tomato.reset_phase",
+            "tomato.shorter",
         ],
         "drink-reminder": [
             "reminder.acknowledge",
@@ -488,7 +492,7 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
         "token-usage": [
             "stats.show_total",
             "stats.show_input",
-            "stats.show_output",
+            "stats.next",
         ],
     }
     displaced_action_events = {
@@ -520,9 +524,11 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
         )
         assert len(runtime["vars"]) <= 8
         assert len(runtime["states"]) <= 6
-        assert len(runtime["transitions"]) <= 12
+        assert runtime["input"]["engine"] == "p4-input-v1"
+        assert len(runtime["transitions"]) <= 24
         assert len(runtime.get("tick", [])) <= 8
-        assert len(json.dumps(runtime, ensure_ascii=False, separators=(",", ":")).encode()) < 4096
+        limit = 8192 if runtime.get("surface", {}).get("graphics") == "p4-app-graphics-v1" else 4096
+        assert len(json.dumps(runtime, ensure_ascii=False, separators=(",", ":")).encode()) < limit
         assert len(json.dumps(buttons, ensure_ascii=False, separators=(",", ":")).encode()) < 2048
         switch_bindings = [
             binding for binding in buttons
@@ -544,7 +550,7 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
             for binding in buttons
             if binding["action"] == actions[2]
         ) == displaced_action_events[widget_id]
-        assert runtime["dashboard"]["visualStyle"] == "pixel"
+        assert runtime["dashboard"]["visualStyle"] == "clean"
         assert runtime["dashboard"]["visualLayout"] in {"arcade", "scoreboard", "tool"}
         assert "visualPalette" in runtime["dashboard"]
         assert "visualSprite" in runtime["dashboard"]
@@ -552,8 +558,9 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
     drink = json.loads(
         read_workspace("pc/builtin-clawpkgs/drink-reminder/runtime/widget.json")
     )
-    assert drink["states"] == ["counting", "paused", "due"]
-    assert [page["id"] for page in drink["pages"]] == ["next", "today"]
+    assert drink["states"] == ["counting", "paused", "due", "paused_due"]
+    assert next(t for t in drink["transitions"] if t["from"]=="paused_due")["to"]=="due"
+    assert [page["id"] for page in drink["pages"]] == ["countdown", "records"]
     assert all(set(page) == {"id"} for page in drink["pages"])
     assert drink["tick"][0]["then"] == {"to": "due", "set": {"remaining_min": 0}}
 
@@ -571,12 +578,8 @@ def test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits():
     }
     assert "readers" not in token
     assert "fetchers" not in token
-    assert token["dashboard"]["visualStyle"] == "pixel"
-    assert token["dashboard"]["visualPalette"]["switch_page"] == {
-        "total": "arcade",
-        "input": "mint",
-        "output": "sunset",
-    }
+    assert token["dashboard"]["visualStyle"] == "clean"
+    assert token["dashboard"]["visualPalette"] == "ocean"
     assert token["dashboard"]["visualLayout"] == "tool"
     assert token["dashboard"]["visualSprite"]["switch_page"] == {
         "total": "gauge",
@@ -664,7 +667,8 @@ def test_p4_component_packages_commit_through_validated_ab_catalog_snapshots():
     assert '"spritesChecksum"' in miniapp
     assert "load_catalog_snapshot(0, snapshot0)" in miniapp
     assert "load_catalog_snapshot(1, snapshot1)" in miniapp
-    assert 'recovered ? " after rollback" : ""' in miniapp
+    assert 'recovered ? " after per-component recovery" : ""' in miniapp
+    assert 'recover_catalog_items(selected, selected == snapshot0 ? snapshot1 : snapshot0)' in miniapp
     assert "package_generation = (uint8_t) (1 - next_catalog[catalog_index].package_generation)" in commit
     assert "next_catalog[catalog_index].widget_checksum = miniapp_checksum" in commit
     assert "next_catalog[catalog_index].buttons_checksum = miniapp_checksum" in commit
@@ -696,7 +700,6 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     builtin_ids = [
         "stock-watchlist",
         "wooden-fish",
-        "music-player",
         "upcoming-todos",
         "computer-status",
         "two-key-pong",
@@ -709,40 +712,59 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
         "token-usage",
     ]
     assert bundle["version"] == 1
+    builtin_ids = json.loads(read("factory-config.json"))["components"]["ids"]
+    assert len(builtin_ids) == 29 and "music-player" not in builtin_ids
+    assert builtin_ids[-3:] == ["decision-capsule", "answer-book", "hope-train"]
     assert [item["id"] for item in bundle["components"]] == builtin_ids
     for item in bundle["components"]:
         component_id = item["id"]
-        assert item["widget"] == json.loads(
-            read_workspace(f"pc/builtin-clawpkgs/{component_id}/runtime/widget.json")
-        )
+        source = json.loads(read_workspace(f"pc/builtin-clawpkgs/{component_id}/runtime/widget.json"))
+        if item["resourcePackage"]:
+            assert source["surface"]["images"]
+            for key in ("images", "fonts", "typography", "interaction"):
+                source["surface"].pop(key, None)
+            source["surface"]["elements"] = [n for n in source["surface"]["elements"] if n["type"] != "image"]
+            for node in source["surface"]["elements"]:
+                for key in ("key_for", "show", "tile"):
+                    node.pop(key,None)
+            if "scene_view" in source["surface"]:
+                mapped={s["entity"] for s in source["surface"]["scene_view"]["sprites"]}
+                source["surface"]["scene_view"]["sprites"]=[]
+                for entity in source.get("scene",{}).get("entities",[]):
+                    if entity["id"] in mapped:
+                        entity["shape"]="character"
+        assert item["widget"] == source
         assert item["buttons"] == json.loads(
             read_workspace(f"pc/builtin-clawpkgs/{component_id}/buttons.json")
         )
         assert re.fullmatch(r"[0-9a-f]{8}", item["spritesChecksum"])
         assert isinstance(item["spriteFiles"], list)
     frog = next(item for item in bundle["components"] if item["id"] == "bloomfrog_companion")
-    assert [sprite["id"] for sprite in frog["spriteFiles"]] == ["bloomfrog"]
-    assert all(sprite["data"] for sprite in frog["spriteFiles"])
+    assert frog["resourcePackage"] is True
+    assert frog["spriteFiles"] == []  # Full art lives in factory/PC packages, not duplicated in OTA.
 
     assert '"pet_p4_builtin_components_data.c"' in cmake
     assert "build_builtin_bundle.py" in cmake
     assert '"--check"' in cmake
-    assert "extern const unsigned char pet_p4_builtin_components_json[]" in miniapp
+    assert "extern const unsigned char pet_p4_builtin_components_zlib[]" in miniapp
     assert "pet_p4_miniapp_sync_builtins" in miniapp_header
     assert "esp_err_t pet_p4_miniapp_sync_builtins(void)" in miniapp
     assert "pet_p4_miniapp_sync_builtins()" in main
     assert "MINIAPP_BUILTIN_MARKER_PATH" in miniapp
     assert "strcmp(marker, expected_marker) == 0" in miniapp
-    assert "miniapp_checksum((const char *) pet_p4_builtin_components_json" in miniapp
+    assert "miniapp_checksum((const char *) pet_p4_builtin_components_zlib" in miniapp
     assert "strlen(expected_marker)" in miniapp
-    assert "cJSON_Parse((const char *) pet_p4_builtin_components_json)" in miniapp
+    assert "cJSON_Parse(json)" in miniapp
+    assert "tinfl_decompress_mem_to_mem(" not in miniapp
+    assert "tinfl_decompressor *inflater = calloc" in miniapp
+    assert "TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF" in miniapp
+    assert 'cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(package, "resourcePackage"))' in miniapp
     assert "commit_builtin_package" in miniapp
     assert "new_component && !g_builtin_sync_in_progress" in miniapp
-    assert "builtin_bundle_contains_id" in miniapp
-    assert "later installs still prepend normally" in miniapp
+    assert "Bundle order is generated from the same factory-config.json used by the PC." in miniapp
+    assert "default_tools[]" not in miniapp
     assert "next_catalog[0] = installed;" in miniapp
     assert "catalog_index = 0;" in miniapp
-    assert '"stock-watchlist", "wooden-fish", "music-player", "upcoming-todos", "computer-status"' in miniapp
     assert "cJSON_GetArraySize(components) > PET_P4_MINIAPP_CATALOG_MAX" in miniapp
     assert '"falling-catch"' in miniapp
     assert "restore_active_after_builtin_sync" in miniapp
@@ -786,10 +808,12 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             "right": "blocks.right",
             "rotate": "blocks.rotate",
             "drop": "blocks.drop",
+            "soft_drop": "blocks.soft_drop",
         },
     }
     assert snake["game"] == {
         "type": "snake",
+        "direction_mode": "absolute",
         "tick_ms": 220,
         "playing_state": "playing",
         "result_state": "result",
@@ -798,10 +822,13 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             "start": "snake.start",
             "left": "snake.turn_left",
             "right": "snake.turn_right",
+            "up": "snake.up",
+            "down": "snake.down",
         },
     }
     assert flappy["game"] == {
         "type": "flappy",
+        "vertical_speed_percent": 50,
         "tick_ms": 100,
         "playing_state": "playing",
         "result_state": "result",
@@ -822,7 +849,7 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
             for binding in buttons
             if binding["event"].endswith(".short_press")
         }
-        assert switch_controls == {"SW1"}
+        assert switch_controls == ({"SW1","SW2","前方摇杆"} if widget_id=="block-combo" else {"SW1","SW2"})
         actions = [binding["action"] for binding in buttons]
         assert len(actions) == len(set(actions))
     block_buttons = json.loads(
@@ -834,17 +861,21 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
         "blocks.start": "button.sw1.short_press",
         "blocks.left": "knob.rotate_ccw",
         "blocks.right": "knob.rotate_cw",
-        "blocks.rotate": "joystick.up",
-        "blocks.drop": "joystick.down",
+        "blocks.rotate": "button.sw2.short_press",
+        "blocks.drop": "joystick.up",
+        "blocks.soft_drop": "joystick.down",
+        "session.pause": "button.encoder.short_press",
     }
     flappy_buttons = json.loads(
         read_workspace("pc/builtin-clawpkgs/flappy-bird/buttons.json")
     )
     assert [binding["action"] for binding in flappy_buttons] == [
         "flappy.flap",
+        "session.pause",
     ]
     assert [binding["event"] for binding in flappy_buttons] == [
         "button.sw1.short_press",
+        "button.sw2.short_press",
     ]
 
 
@@ -864,10 +895,10 @@ def test_generic_scene_runtime_is_shared_by_games_and_tools():
         )
     )
 
-    assert two_key_pong["engine"] == "p4-bounded-runtime-v3"
+    assert two_key_pong["engine"] == "p4-bounded-runtime-v4"
     assert two_key_pong["scene"]["grid"] == {"width": 16, "height": 16}
     assert two_key_pong.get("game") is None
-    assert tomato["engine"] == "p4-bounded-runtime-v3"
+    assert tomato["engine"] == "p4-bounded-runtime-v4"
     assert tomato.get("scene") is None
     assert '"engine", "scene"' in miniapp
     assert "parse_bounded_scene" in miniapp
@@ -1419,7 +1450,8 @@ def test_p4_runtime_renders_pet_frames_to_lcd():
     assert "pet_p4_renderer_render(g_render_state, &render_view, now_ms)" in main
     assert "PET_P4_MAIN_RENDER_INTERVAL_MS 50ULL" in main
     assert "PET_P4_MAIN_LOOP_DELAY_MS 1" in main
-    assert "now_ms - last_render_ms >= PET_P4_MAIN_RENDER_INTERVAL_MS" in main
+    assert 'now_ms - last_render_ms >= ((!strcmp(g_state.screen_page,"app") && (pet_p4_miniapp_slicing_active() || pet_p4_miniapp_media_surface_animated()))' in main
+    assert '? 33ULL : PET_P4_MAIN_RENDER_INTERVAL_MS)' in main
     assert "now_ms - last_render_ms >= 250ULL" not in main
     assert "PET_P4_ASSET_DECODE_BACKOFF_MS 500ULL" in renderer
     assert "g_framebuffer_initialized" in renderer
@@ -1628,10 +1660,10 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert ".rgb_swap = false" in renderer
     assert ".byte_swap = false" in renderer
     assert "panel-order=RGB" in renderer
-    assert "rgb565(255, 110, 0)" in component_center
+    assert "rgb565(184, 97, 49)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.72-p4")' in project
+    assert 'set(PROJECT_VER "0.7.103-p4-r1")' in project
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
@@ -1713,7 +1745,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.72-p4")' in project
+    assert 'set(PROJECT_VER "0.7.103-p4-r1")' in project
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -2214,12 +2246,12 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "pet_p4_miniapp_catalog_move(event.delta)" in input_source
     assert "pet_p4_miniapp_catalog_move(-event.delta)" not in input_source
     assert "pet_p4_miniapp_catalog_activate_selected" in input_source
-    assert "PET_P4_MINIAPP_CATALOG_MAX 16" in read_required("main/pet_p4_miniapp.h")
+    assert "PET_P4_MINIAPP_CATALOG_MAX 32" in read_required("main/pet_p4_miniapp.h")
     assert "MINIAPP_CATALOG_PATH" in read_required("main/pet_p4_miniapp.c")
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
-    assert '"左右切换    确认键打开    全局键返回"' in renderer
+    assert '"摇杆选择    确认键打开    全局键返回"' in renderer
     assert "int count = 2;" in renderer
     assert 'strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0' in renderer
     assert "dispatch_component_binding_event" in input_source

@@ -1,0 +1,12 @@
+{
+  "background": {
+    "source": "f612cb2668282abcdacf09ff034e69d516552257ee0bc7bb4f1a2da3fcfa021f",
+    "spec": "48e1efe7e24c3977367266eda2a638067e24da9038a963dddd34eb1f3c1ab670",
+    "encoded": "377314b70ea8ce7f4bbc1badbef7ec774614c5f756c3c33f7332f045c74eea0e"
+  },
+  "labels": {
+    "source": "56aa269119faa5890fbfb61321196984aff3dbaf942d87b71f191990922ba2eb",
+    "spec": "62890b47ccb1f7f3eb20033ed0a51e2c8e843437351e0d2812927468c9d4ecea",
+    "encoded": "6272c06ce7798cc2086b605087ecb203340366148db004e4ae3b669b318dd72e"
+  }
+}

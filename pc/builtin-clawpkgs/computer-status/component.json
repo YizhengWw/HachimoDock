@@ -1,7 +1,8 @@
 {
   "id": "computer-status",
   "name": "电脑状态",
-  "version": "1.0.0",
-  "description": "查看当前电脑的资源占用与网络速率，保持 PC 运行并连接设备。",
-  "kind": "tool"
+  "version": "1.1.3",
+  "description": "显示电脑提供的真实运行状态，支持设备触屏或摇杆翻页；断连或数据失效时明确提示。",
+  "kind": "tool",
+  "author": "手搓飞机"
 }

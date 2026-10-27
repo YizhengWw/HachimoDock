@@ -1,0 +1,105 @@
+{
+  "detail-page-2": {
+    "ui": {
+      "actions": [
+        "host.details",
+        "host.previous",
+        "host.today"
+      ],
+      "mode": 1
+    },
+    "values": {
+      "badge": "2/2",
+      "eyebrow": "2026-02-17 · 民俗参考",
+      "footer": "",
+      "headline": "传统宜忌",
+      "metricLabel": "回到今天",
+      "metricUnit": "返回日历",
+      "metricValue": "",
+      "note": "等于法定休假。"
+    }
+  },
+  "details": {
+    "ui": {
+      "actions": [
+        "host.details",
+        "host.next",
+        "host.today"
+      ],
+      "mode": 1
+    },
+    "values": {
+      "badge": "1/2",
+      "eyebrow": "2026-02-17 · 民俗参考",
+      "footer": "些内容来自传统历书，属于民俗文化参考，不预测吉凶，不代替医疗、投资、法律等现实决策。节日标记不",
+      "headline": "传统宜忌",
+      "metricLabel": "回到今天",
+      "metricUnit": "返回日历",
+      "metricValue": "",
+      "note": "传统宜：祭祀、塞穴、结网、破土、谢土、安葬、移柩、除服、成服、馀事勿取。传统忌：嫁娶、入宅。这"
+    }
+  },
+  "leap-month": {
+    "ui": {
+      "actions": [
+        "host.details",
+        "host.next",
+        "host.previous",
+        "host.today"
+      ],
+      "mode": 0
+    },
+    "values": {
+      "badge": "浏览",
+      "eyebrow": "2025年7月 · 星期五",
+      "footer": "乙巳年 · 癸未月 · 乙未日",
+      "headline": "闰六月初一",
+      "metricLabel": "回到今天",
+      "metricUnit": "宜忌详情",
+      "metricValue": "25",
+      "note": ""
+    }
+  },
+  "solar-term": {
+    "ui": {
+      "actions": [
+        "host.details",
+        "host.next",
+        "host.previous",
+        "host.today"
+      ],
+      "mode": 0
+    },
+    "values": {
+      "badge": "浏览",
+      "eyebrow": "2026年4月 · 星期日",
+      "footer": "丙午年 · 壬辰月 · 己酉日",
+      "headline": "二月十八",
+      "metricLabel": "回到今天",
+      "metricUnit": "宜忌详情",
+      "metricValue": "05",
+      "note": "清明"
+    }
+  },
+  "today": {
+    "ui": {
+      "actions": [
+        "host.details",
+        "host.next",
+        "host.previous",
+        "host.today"
+      ],
+      "mode": 0
+    },
+    "values": {
+      "badge": "今天",
+      "eyebrow": "2026年2月 · 星期二",
+      "footer": "丙午年 · 庚寅月 · 壬戌日",
+      "headline": "正月初一",
+      "metricLabel": "回到今天",
+      "metricUnit": "宜忌详情",
+      "metricValue": "17",
+      "note": "春节"
+    }
+  }
+}

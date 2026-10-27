@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "哈基米小屋",
+    "visualStyle": "clean",
+    "visualPalette": "sunset",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "窗边相伴",
+    "headline": "今天，也一起慢慢来。",
+    "metricValue": "0",
+    "note": "点选物件，左右换样式；布置自动保存。",
+    "footer": "主键互动/更换  副键布置/完成  全局键退出",
+    "metricLabel": "摸摸头",
+    "metricUnit": "布置小屋"
+  }
+}

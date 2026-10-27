@@ -1,5 +1,5 @@
 /**
- * [Input] A cargo-xwin-built Pet Manager x64 executable and prepared firmware, Node, audited LGPL FFmpeg, notice/source, bridge, and WebView resource sources.
+ * [Input] A cargo-xwin-built HachimiDock x64 executable and prepared firmware, Node, audited LGPL FFmpeg, notice/source, bridge, and WebView resource sources.
  * [Output] A current-user NSIS installer (explicit INTERNAL filename when requested) with exact validated Windows P4 firmware, install-relative Node and LGPL FFmpeg resources, complete corresponding source/notices, and embedded WebView2 bootstrapper.
  * [Pos] Reproducible macOS-to-Windows installer bundler used after `build:win:portable`.
  * [Sync] If this file changes, update `scripts/.folder.md` and `docs/runtime-dependencies.md`.
@@ -44,10 +44,10 @@ const appExeSource = resolve(
   process.env.PET_MANAGER_WINDOWS_EXE
     || join(releaseRoot, "pet-manager-tauri.exe"),
 );
-const appExeName = "Pet Manager.exe";
+const appExeName = "HachimiDock.exe";
 const flavor = process.env.PET_MANAGER_WINDOWS_INSTALLER_FLAVOR || "";
 if (flavor && flavor !== "INTERNAL") throw new Error("Unsupported Windows installer flavor");
-const installerName = `Pet_Manager_${version}${flavor ? `_${flavor}` : ""}_x64-setup.exe`;
+const installerName = `HachimiDock_${version}${flavor ? `_${flavor}` : ""}_x64-setup.exe`;
 const installerPath = join(bundleRoot, installerName);
 const webviewBootstrapperUrl =
   "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
@@ -108,7 +108,7 @@ function nsiPath(path) {
   return path.replaceAll("\\", "/").replaceAll("$", "$$").replaceAll('"', '$\\"');
 }
 
-assertPeExecutable(appExeSource, "Pet Manager Windows 主程序");
+assertPeExecutable(appExeSource, "HachimiDock Windows 主程序");
 const windowsNode = join(tauriRoot, "generated-runtime", "node.exe");
 assertPeExecutable(windowsNode, "Windows Node runtime");
 const windowsFfmpeg = join(tauriRoot, "generated-runtime", "ffmpeg.exe");
@@ -269,7 +269,7 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 !include "x64.nsh"
 
-!define APPNAME "Pet Manager"
+!define APPNAME "HachimiDock"
 !define APPVERSION "${version}"
 !define APPGUID "com.petmanager.desktop"
 !define WEBVIEW2APPGUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
@@ -282,7 +282,7 @@ RequestExecutionLevel user
   Pop $1
   Pop $2
   ${"${If}"} $1 != 0
-    MessageBox MB_ICONSTOP "Pet Manager background services are still running. Close Pet Manager and retry.$\\r$\\n$2"
+    MessageBox MB_ICONSTOP "HachimiDock background services are still running. Close HachimiDock and retry.$\\r$\\n$2"
     Abort
   ${"${EndIf}"}
 !macroend
@@ -296,12 +296,12 @@ UninstallIcon "${iconPath}"
 VIProductVersion "${version}.0"
 VIAddVersionKey /LANG=1033 "ProductName" "${"${APPNAME}"}"
 VIAddVersionKey /LANG=1033 "ProductVersion" "${version}"
-VIAddVersionKey /LANG=1033 "CompanyName" "Pet Manager"
-VIAddVersionKey /LANG=1033 "FileDescription" "Pet Manager Setup"
+VIAddVersionKey /LANG=1033 "CompanyName" "HachimiDock"
+VIAddVersionKey /LANG=1033 "FileDescription" "HachimiDock Setup"
 
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\\${appExeName}"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch Pet Manager"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch HachimiDock"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -311,9 +311,9 @@ VIAddVersionKey /LANG=1033 "FileDescription" "Pet Manager Setup"
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
 
-Section "Pet Manager" SEC_APP
+Section "HachimiDock" SEC_APP
   ${"${IfNot}"} ${"${RunningX64}"}
-    MessageBox MB_ICONSTOP "Pet Manager requires 64-bit Windows."
+    MessageBox MB_ICONSTOP "HachimiDock requires 64-bit Windows."
     Abort
   ${"${EndIf}"}
 
@@ -342,14 +342,16 @@ Section "Pet Manager" SEC_APP
   SetOutPath "$INSTDIR"
   File /r "${stagePath}/*"
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
-  CreateShortcut "$SMPROGRAMS\\Pet Manager.lnk" "$INSTDIR\\${appExeName}"
-  CreateShortcut "$DESKTOP\\Pet Manager.lnk" "$INSTDIR\\${appExeName}"
+  Delete "$SMPROGRAMS\\Pet Manager.lnk"
+  Delete "$DESKTOP\\Pet Manager.lnk"
+  CreateShortcut "$SMPROGRAMS\\HachimiDock.lnk" "$INSTDIR\\${appExeName}"
+  CreateShortcut "$DESKTOP\\HachimiDock.lnk" "$INSTDIR\\${appExeName}"
 
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "DisplayName" "${"${APPNAME}"}"
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "DisplayVersion" "${version}"
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "DisplayIcon" "$INSTDIR\\${appExeName}"
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "Publisher" "Pet Manager"
+  WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "Publisher" "HachimiDock"
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "UninstallString" '"$INSTDIR\\Uninstall.exe"'
   WriteRegStr HKCU "${"${UNINSTALLKEY}"}" "QuietUninstallString" '"$INSTDIR\\Uninstall.exe" /S'
   WriteRegDWORD HKCU "${"${UNINSTALLKEY}"}" "NoModify" 1
@@ -360,8 +362,8 @@ SectionEnd
 Section "Uninstall"
   SetRegView 64
   !insertmacro StopPetManagerOwnedRuntimes
-  Delete "$SMPROGRAMS\\Pet Manager.lnk"
-  Delete "$DESKTOP\\Pet Manager.lnk"
+  Delete "$SMPROGRAMS\\HachimiDock.lnk"
+  Delete "$DESKTOP\\HachimiDock.lnk"
   DeleteRegKey HKCU "${"${UNINSTALLKEY}"}"
   RMDir /r "$INSTDIR"
 SectionEnd

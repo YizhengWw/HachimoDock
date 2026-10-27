@@ -102,24 +102,6 @@ fn api_redirects_stop_while_downloads_follow_and_limit_loops() {
 }
 
 #[test]
-#[ignore = "internal authenticated model catalog + asset download; no generation tasks"]
-fn live_generation_transports() {
-    let key = crate::internal_credentials::ark_key().expect("requires internal build");
-    tauri::async_runtime::block_on(async {
-        let response = crate::http_request_text("https://ark.cn-beijing.volces.com/api/v3/models".into(), Some("GET".into()),
-            Some(serde_json::json!({"Authorization":format!("Bearer {key}")}).to_string()), None, Some(15000)).await.unwrap();
-        assert_eq!(response.status, 200);
-        let json: serde_json::Value = serde_json::from_str(&response.body).unwrap();
-        let rows = json["data"].as_array().unwrap();
-        assert!(rows.iter().any(|row| row["id"].as_str().is_some_and(|id| id.contains("seedance") && id.contains("fast"))));
-        println!("PASS authenticated model catalog: {} rows, Fast model present", rows.len());
-        let bytes = crate::download_bytes("https://portal.volccdn.com/obj/volcfe/misc/favicon.png".into()).await.unwrap();
-        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
-        println!("PASS cloud binary download: {} bytes", bytes.len());
-    });
-}
-
-#[test]
 fn desktop_http_bridge_preserves_post_headers_body_and_status() {
     tauri::async_runtime::block_on(async {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -137,16 +119,43 @@ fn desktop_http_bridge_preserves_post_headers_body_and_status() {
             assert!(request.to_lowercase().contains("authorization: bearer fixture-key"));
             stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 11\r\nConnection: close\r\n\r\n{\"id\":\"ok\"}").await.unwrap();
         });
-        let response = crate::http_request_text(url, Some("POST".into()), Some("{\"Authorization\":\"Bearer fixture-key\",\"Content-Type\":\"application/json\"}".into()), Some("{\"model\":\"fixture\"}".into()), Some(3000)).await.unwrap();
+        let response = crate::http_request_text(url, Some("POST".into()), Some("{\"Authorization\":\"Bearer fixture-key\",\"Content-Type\":\"application/json\"}".into()), Some("{\"model\":\"fixture\"}".into()), Some(3000), Some("video_submit".into())).await.unwrap();
         assert!(response.ok); assert_eq!(response.status, 202); assert_eq!(response.body, "{\"id\":\"ok\"}");
         server.await.unwrap();
     });
 }
 
 #[test]
-fn community_certificate_file_is_feature_gated_and_ephemeral() {
+fn generation_bridge_timeout_diagnostics_cover_wait_and_body_without_secrets() {
+    tauri::async_runtime::block_on(async {
+        for send_headers in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/private?token=SECRET", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = [0; 2048]; let _ = stream.read(&mut bytes).await;
+                if send_headers { stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200\r\nx-request-id: req-bridge-timeout\r\n\r\nx").await.unwrap(); }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            });
+            let error = crate::http_request_text(url, Some("POST".into()), None, Some("PRIVATE_IMAGE".into()), Some(150), Some("thinking".into())).await.unwrap_err();
+            let encoded = error.strip_prefix(crate::generation_diagnostics::PREFIX).unwrap();
+            let value: serde_json::Value = serde_json::from_str(encoded).unwrap();
+            let d = &value["diagnostic"];
+            assert_eq!(d["stage"], "thinking");
+            assert_eq!(d["outcome"], "timeout");
+            assert_eq!(d["phase"], if send_headers { "response_body" } else { "request_wait" });
+            assert!(d["elapsedMs"].as_u64().unwrap() >= 100);
+            if send_headers { assert_eq!(d["requestId"], "req-bridge-timeout"); } else { assert!(d["requestId"].is_null()); }
+            for forbidden in ["SECRET", "PRIVATE_IMAGE", "127.0.0.1", "公司"] { assert!(!error.contains(forbidden)); }
+            server.abort();
+        }
+    });
+}
+
+#[test]
+fn public_community_connection_has_no_bundled_certificate() {
     let file = community_ca_file().unwrap();
-    assert_eq!(file.is_some(), cfg!(feature = "internal-network"));
+    assert!(file.is_none());
     if let Some(file) = file {
         let path = file.path().to_path_buf();
         assert!(!certificates(&fs::read_to_string(&path).unwrap()).unwrap().is_empty());

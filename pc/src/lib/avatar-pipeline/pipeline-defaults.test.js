@@ -15,8 +15,8 @@ import {
 } from "./pipeline-defaults.js";
 
 test("fast generation profile keeps Volcano reference frames above Ark minimum height", () => {
-  assert.equal(PIPELINE_MAX_IMAGE_DIMENSION, 400);
-  assert.equal(FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension, 400);
+  assert.equal(PIPELINE_MAX_IMAGE_DIMENSION, 768);
+  assert.equal(FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension, 768);
 
   const resolved = resolveGenerationSpeedConfig({
     provider: "volcengine",
@@ -24,7 +24,7 @@ test("fast generation profile keeps Volcano reference frames above Ark minimum h
   });
 
   assert.equal(resolved.fastGeneration, true);
-  assert.equal(resolved.imageMaxDimension, 400);
+  assert.equal(resolved.imageMaxDimension, 768);
   assert.equal(resolved.providerConfig.duration, 5);
   assert.equal(resolved.providerConfig.ratio, PIPELINE_OUTPUT_ASPECT_RATIO.label);
   assert.equal(resolved.providerConfig.resolution, "480p");

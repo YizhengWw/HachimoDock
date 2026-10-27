@@ -1,0 +1,592 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "host": true,
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.random"
+    },
+    {
+      "from": "*",
+      "on": "host.category"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "每天一本书",
+    "eyebrow": "原创导读 · 100 本",
+    "headline": "连接后，打开一本书",
+    "metricValue": "10 类主题 · 进入随机打开一本",
+    "metricLabel": "换一本",
+    "metricUnit": "",
+    "badge": "",
+    "note": "连接 Pet Manager 后阅读。进入设备组件会自动朗读，退出停止。",
+    "footer": "音色跟随当前宠物；左右滑动或摇杆翻页。",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "timer"
+  },
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 65501,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "digits",
+        "asset": "assets/digits.png",
+        "frame_width": 160,
+        "frame_height": 128,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "labels",
+        "asset": "assets/labels.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "image": "background",
+        "color": 65535
+      },
+      {
+        "type": "icon",
+        "x": 24,
+        "y": 22,
+        "w": 23,
+        "h": 23,
+        "color": 21420,
+        "icon": "book"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 20,
+        "w": 260,
+        "h": 30,
+        "color": 18918,
+        "font_size": 20,
+        "line_height": 26,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "button",
+        "x": 362,
+        "y": 16,
+        "w": 254,
+        "h": 44,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 14,
+        "font_size": 16,
+        "padding": 12,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.category",
+        "bind": "eyebrow",
+        "icon": "list"
+      },
+      {
+        "type": "text",
+        "x": 27,
+        "y": 75,
+        "w": 500,
+        "h": 42,
+        "color": 18918,
+        "font_size": 30,
+        "line_height": 39,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 551,
+        "y": 85,
+        "w": 65,
+        "h": 28,
+        "color": 18918,
+        "font_size": 18,
+        "line_height": 23,
+        "bind": "badge",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 121,
+        "w": 450,
+        "h": 26,
+        "color": 33709,
+        "font_size": 16,
+        "line_height": 21,
+        "bind": "metricValue"
+      },
+      {
+        "type": "panel",
+        "x": 20,
+        "y": 153,
+        "w": 427,
+        "h": 218,
+        "color": 65501,
+        "opacity": 224,
+        "radius": 18
+      },
+      {
+        "type": "text",
+        "x": 33,
+        "y": 165,
+        "w": 400,
+        "h": 94,
+        "color": 18918,
+        "font_size": 20,
+        "line_height": 28,
+        "bind": "note"
+      },
+      {
+        "type": "text",
+        "x": 33,
+        "y": 269,
+        "w": 400,
+        "h": 94,
+        "color": 18918,
+        "font_size": 20,
+        "line_height": 28,
+        "bind": "footer"
+      },
+      {
+        "type": "button",
+        "x": 24,
+        "y": 387,
+        "w": 174,
+        "h": 48,
+        "color": 21420,
+        "foreground": 65501,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.random",
+        "bind": "metricLabel",
+        "icon": "spark"
+      },
+      {
+        "type": "button",
+        "x": 468,
+        "y": 387,
+        "w": 66,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.previous",
+        "text": "‹"
+      },
+      {
+        "type": "button",
+        "x": 546,
+        "y": 387,
+        "w": 66,
+        "h": 48,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 16,
+        "font_size": 20,
+        "padding": 14,
+        "gap": 8,
+        "icon_size": 20,
+        "action": "host.next",
+        "text": "›"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 448,
+        "w": 640,
+        "h": 32,
+        "color": 65501,
+        "opacity": 240
+      },
+      {
+        "type": "button",
+        "x": 20,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW1",
+        "key_for": "host.random"
+      },
+      {
+        "type": "text",
+        "x": 59,
+        "y": 453,
+        "w": 65,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "换一本"
+      },
+      {
+        "type": "button",
+        "x": 135,
+        "y": 454,
+        "w": 33,
+        "h": 20,
+        "color": 65501,
+        "foreground": 18918,
+        "radius": 4,
+        "font_size": 11,
+        "padding": 0,
+        "gap": 8,
+        "icon_size": 20,
+        "text": "SW2",
+        "key_for": "host.category"
+      },
+      {
+        "type": "text",
+        "x": 174,
+        "y": 453,
+        "w": 100,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "分类 / 返回"
+      },
+      {
+        "type": "text",
+        "x": 296,
+        "y": 453,
+        "w": 172,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "左右翻页 / 选分类"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 453,
+        "w": 106,
+        "h": 22,
+        "color": 18918,
+        "font_size": 13,
+        "line_height": 17,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "digits",
+        "chars": "0123456789",
+        "metrics": [
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            8,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ],
+          [
+            16,
+            7,
+            28
+          ]
+        ],
+        "cell": [
+          32,
+          64
+        ]
+      },
+      {
+        "image": "labels",
+        "chars": "每日一本书系统之美全部籍分类原创导读换确认返回页上下左右局键退出—/·‹›",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            10,
+            12,
+            26
+          ],
+          [
+            10,
+            12,
+            26
+          ]
+        ],
+        "cell": [
+          32,
+          32
+        ]
+      }
+    ]
+  }
+}

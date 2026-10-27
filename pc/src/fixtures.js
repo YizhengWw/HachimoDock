@@ -34,9 +34,7 @@ import computerBindings from "../builtin-clawpkgs/computer-status/buttons.json";
 import todoManifest from "../builtin-clawpkgs/upcoming-todos/component.json";
 import todoWidget from "../builtin-clawpkgs/upcoming-todos/runtime/widget.json";
 import todoBindings from "../builtin-clawpkgs/upcoming-todos/buttons.json";
-import musicManifest from "../builtin-clawpkgs/music-player/component.json";
-import musicWidget from "../builtin-clawpkgs/music-player/runtime/widget.json";
-import musicBindings from "../builtin-clawpkgs/music-player/buttons.json";
+import {completeBuiltinCatalog} from "./component-center/builtin-preview.js";
 
 const localDataComponents = [
   [computerManifest, computerWidget, computerBindings],
@@ -44,7 +42,7 @@ const localDataComponents = [
 ].map(([manifest, widget, bindings]) => ({
   id: manifest.id, name: manifest.name, version: manifest.version, kind: "tool",
   category: "内置工具", source: "PC 本地实时数据", status: "available", accent: "blue",
-  runtimeEngine: widget.engine, dataSource: widget.data.source, goal: manifest.description,
+  runtimeEngine: widget.engine, dataSource: widget.data?.source || "", goal: manifest.description,
   capabilities: ["widget.data", "input.device_global_exit"],
   packageIncludes: ["组件说明", "负一屏页面", "按钮绑定", "运行文件", "分享信息"],
   dashboard: widget.dashboard, defaultBindings: bindings,
@@ -163,16 +161,7 @@ export const BUILTIN_COMPONENT_CENTER = {
       goal: woodenFishManifest.description, dashboard: woodenFishWidget.dashboard, defaultBindings: woodenFishBindings,
       capabilities: ["widget.instrument", "input.device_global_exit"],
       packageIncludes: ["组件说明", "本地音效界面", "按钮绑定", "运行文件"],
-      screens: [{ name: "敲木鱼", purpose: "单键敲击，清脆木响与轻柔伴奏。", regions: [] }],
-    },
-    {
-      id: musicManifest.id, name: musicManifest.name, version: musicManifest.version,
-      kind: "tool", category: "内置工具", source: "GD音乐台 / 本地音频", status: "available", accent: "orange",
-      runtimeEngine: musicWidget.engine, mediaSource: musicWidget.media.source,
-      goal: musicManifest.description, dashboard: musicWidget.dashboard, defaultBindings: musicBindings,
-      capabilities: ["widget.media", "input.device_global_exit"],
-      packageIncludes: ["组件说明", "播放器界面", "按钮绑定", "运行文件"],
-      screens: [{ name: "随身听", purpose: "播放本机音乐，查看真实播放进度与曲目。", regions: [] }],
+      screens: [{ name: "静心木鱼", purpose: "单键敲击，清脆木响与轻柔伴奏。", regions: [] }],
     },
     { ...localDataComponents[1] },
     { ...localDataComponents[0] },
@@ -594,3 +583,6 @@ export const BUILTIN_COMPONENT_CENTER = {
     },
   ],
 };
+// Keep ordering/product metadata, but never use hand-maintained UI or bindings
+// for covers/install previews when the actual package is available.
+BUILTIN_COMPONENT_CENTER.components=completeBuiltinCatalog(BUILTIN_COMPONENT_CENTER.components);

@@ -1,0 +1,752 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {},
+  "states": [
+    "idle"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "*",
+      "on": "host.primary"
+    },
+    {
+      "from": "*",
+      "on": "host.secondary"
+    },
+    {
+      "from": "*",
+      "on": "host.previous"
+    },
+    {
+      "from": "*",
+      "on": "host.next"
+    }
+  ],
+  "tick": [],
+  "dashboard": {
+    "title": "宠物旅行",
+    "visualStyle": "clean",
+    "visualPalette": "mint",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "PC 通用服务 · 连接后即可使用",
+    "headline": "在设备上选一站",
+    "metricValue": "",
+    "note": "左右挑选目的地，确认后出发；也可以先看看明信片。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "选目的地",
+    "metricUnit": "明信片"
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "background": 63387,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type1",
+        "asset": "assets/type1.png",
+        "frame_width": 224,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 63387,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 332,
+        "h": 304,
+        "color": 63387,
+        "opacity": 200,
+        "opacity_end": 0
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 12904,
+        "icon": "compass"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 12904,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 87,
+        "w": 278,
+        "h": 28,
+        "color": 12904,
+        "font_size": 14,
+        "bind": "eyebrow"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 126,
+        "w": 278,
+        "h": 48,
+        "color": 12904,
+        "font_size": 32,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 185,
+        "w": 278,
+        "h": 42,
+        "color": 12904,
+        "font_size": 26,
+        "bind": "metricValue"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 236,
+        "w": 270,
+        "h": 96,
+        "color": 12904,
+        "font_size": 16,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 338,
+        "w": 132,
+        "h": 44,
+        "color": 21322,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 8,
+        "weight": 600,
+        "bind": "metricLabel",
+        "action": "host.primary"
+      },
+      {
+        "type": "button",
+        "x": 168,
+        "y": 338,
+        "w": 132,
+        "h": 44,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 12904,
+        "padding": 8,
+        "weight": 600,
+        "bind": "metricUnit",
+        "action": "host.secondary",
+        "opacity": 220
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 388,
+        "w": 132,
+        "h": 44,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 12904,
+        "padding": 10,
+        "weight": 600,
+        "text": "上一项",
+        "action": "host.previous",
+        "opacity": 230
+      },
+      {
+        "type": "button",
+        "x": 168,
+        "y": 388,
+        "w": 132,
+        "h": 44,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 12904,
+        "padding": 10,
+        "weight": 600,
+        "text": "下一项",
+        "action": "host.next",
+        "opacity": 230
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 63387,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 12904,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 63387,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 12904,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 12904,
+        "font_size": 15,
+        "text": "出发/确认"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 63387,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 12904,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "host.secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 94,
+        "h": 24,
+        "color": 12904,
+        "font_size": 15,
+        "text": "明信片/取消"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 12904,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 在设备上选一站风铃海岸苔藓森林云朵山丘星光小镇目的地明信片宠",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            30
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            32,
+            2,
+            30
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ]
+        ]
+      },
+      {
+        "image": "type1",
+        "chars": "物旅行P通用服务·连接后即可使左右挑，确认出发；也以先看。下取消全局键退",
+        "metrics": [
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            12,
+            19
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            8,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            2,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            2,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            2,
+            31
+          ]
+        ]
+      }
+    ]
+  },
+  "host": true,
+  "input": {
+    "engine": "p4-input-v1",
+    "swipe": {
+      "left": "host.next",
+      "right": "host.previous"
+    }
+  }
+}

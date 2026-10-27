@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><title>离线任务存储回归</title>
+<body><pre id="result">测试中（无云端请求）</pre><script type="module">
+import * as m from '/src/lib/avatar-pipeline/session.js';
+const assert=(value,label)=>{if(!value)throw Error(label);};
+try {
+ if(!sessionStorage.getItem('archive-test-reload')){
+  await m.saveGenerationSession({id:'fixture-old',createdAt:1,appearanceName:'离线旧任务',actions:{done:{intent:true,taskId:'fixture-task',videoBytes:new Uint8Array([1,2,3])},unknown:{intent:true}}});
+  await m.beginGenerationSession({id:'fixture-new',createdAt:2,appearanceName:'离线新任务',actions:{}});
+  assert((await m.loadGenerationSession()).id==='fixture-new','新任务未激活');
+  sessionStorage.setItem('archive-test-reload','1');location.reload();
+ }else{
+  const old=await m.loadGenerationSession('archive:fixture-old');
+  assert(old.actions.done.taskId==='fixture-task','云端编号丢失');
+  assert(old.actions.done.videoBytes[2]===3,'二进制结果丢失');
+  assert(old.actions.unknown.intent,'结果未知的请求丢失');
+  await m.beginGenerationSession(old);
+  const history=await m.listGenerationHistory();
+  assert((await m.loadGenerationSession()).id==='fixture-old','未恢复旧任务');
+  assert(history.some(row=>row.id==='fixture-new'),'恢复旧任务覆盖了新任务');
+  assert(!history.some(row=>row.id==='fixture-old'),'当前任务重复出现在历史');
+  sessionStorage.removeItem('archive-test-reload');
+  document.querySelector('#result').textContent='通过：新任务不受旧任务阻塞；编号、二进制结果、未知提交记录完整保留；页面重载与历史恢复正常；云端请求0次。';
+ }
+}catch(error){document.querySelector('#result').textContent='失败：'+error.message;}
+</script></body></html>

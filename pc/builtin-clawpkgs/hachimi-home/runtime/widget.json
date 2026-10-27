@@ -1,0 +1,987 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+    "pats": {
+      "type": "int",
+      "init": 0
+    },
+    "left": {
+      "type": "int",
+      "init": 0
+    },
+    "plant": {
+      "type": "int",
+      "init": 0
+    },
+    "object": {
+      "type": "int",
+      "init": 0
+    },
+    "editing": {
+      "type": "int",
+      "init": 0
+    }
+  },
+  "states": [
+    "idle",
+    "glad",
+    "plant",
+    "object",
+    "place"
+  ],
+  "initial_state": "idle",
+  "transitions": [
+    {
+      "from": "plant",
+      "on": "primary",
+      "inc": {
+        "plant": 1
+      }
+    },
+    {
+      "from": "object",
+      "on": "primary",
+      "inc": {
+        "object": 1
+      }
+    },
+    {
+      "from": "place",
+      "on": "primary",
+      "page": "next"
+    },
+    {
+      "from": "*",
+      "on": "primary",
+      "to": "glad",
+      "inc": {
+        "pats": 1
+      },
+      "set": {
+        "left": 3,
+        "editing": 0
+      }
+    },
+    {
+      "from": "plant",
+      "on": "secondary",
+      "to": "object",
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "object",
+      "on": "secondary",
+      "to": "place",
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "place",
+      "on": "secondary",
+      "to": "idle",
+      "set": {
+        "editing": 0
+      }
+    },
+    {
+      "from": "*",
+      "on": "secondary",
+      "to": "plant",
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "*",
+      "on": "finish",
+      "to": "idle",
+      "set": {
+        "editing": 0
+      }
+    },
+    {
+      "from": "plant",
+      "on": "previous",
+      "inc": {
+        "plant": -1
+      },
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "plant",
+      "on": "next",
+      "inc": {
+        "plant": 1
+      },
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "object",
+      "on": "previous",
+      "inc": {
+        "object": -1
+      },
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "object",
+      "on": "next",
+      "inc": {
+        "object": 1
+      },
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "place",
+      "on": "previous",
+      "page": "prev"
+    },
+    {
+      "from": "place",
+      "on": "next",
+      "page": "next"
+    },
+    {
+      "from": "*",
+      "on": "select.plant",
+      "to": "plant",
+      "set": {
+        "editing": 1
+      }
+    },
+    {
+      "from": "*",
+      "on": "select.object",
+      "to": "object",
+      "set": {
+        "editing": 1
+      }
+    }
+  ],
+  "tick": [
+    {
+      "every_ms": 1000,
+      "while_state": "glad",
+      "inc": {
+        "left": -1
+      },
+      "when": {
+        "var": "left",
+        "lte": 0
+      },
+      "then": {
+        "to": "idle"
+      }
+    }
+  ],
+  "dashboard": {
+    "title": "哈基米小屋",
+    "visualStyle": "clean",
+    "visualPalette": "sunset",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": {
+      "switch_page": {
+        "oak": "窗边相伴",
+        "mint": "茶桌小景",
+        "night": "左右相望"
+      }
+    },
+    "headline": {
+      "switch_state": {
+        "idle": "今天，也一起慢慢来。",
+        "glad": "摸摸收到啦，喜欢你。",
+        "plant": "选一株喜欢的绿植。",
+        "object": "给小屋添一件好物。",
+        "place": "把喜欢的摆在身边。"
+      }
+    },
+    "metricValue": {
+      "var": "pats"
+    },
+    "note": "点选物件，左右换样式；布置自动保存。",
+    "footer": "主键互动/更换  副键布置/完成  全局键退出",
+    "metricLabel": {
+      "switch_state": {
+        "idle": "摸摸头",
+        "glad": "再摸摸",
+        "plant": "换一株",
+        "object": "换一件",
+        "place": "换个位置"
+      }
+    },
+    "metricUnit": {
+      "switch_state": {
+        "idle": "布置小屋",
+        "glad": "布置小屋",
+        "plant": "选摆件",
+        "object": "调位置",
+        "place": "完成布置"
+      }
+    }
+  },
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "interaction": "p4-app-interaction-v1",
+    "background": 65501,
+    "images": [
+      {
+        "id": "background",
+        "asset": "assets/background.png",
+        "frame_width": 640,
+        "frame_height": 480,
+        "frames": 1,
+        "fps": 1,
+        "encoding": "jpeg"
+      },
+      {
+        "id": "decor",
+        "asset": "assets/decor.png",
+        "frame_width": 192,
+        "frame_height": 192,
+        "frames": 1,
+        "fps": 1
+      },
+      {
+        "id": "type0",
+        "asset": "assets/type0.png",
+        "frame_width": 224,
+        "frame_height": 224,
+        "frames": 1,
+        "fps": 1
+      }
+    ],
+    "elements": [
+      {
+        "type": "image",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 480,
+        "color": 65501,
+        "image": "background"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 0,
+        "w": 640,
+        "h": 115,
+        "color": 65468,
+        "opacity": 221,
+        "opacity_end": 138,
+        "gradient": "vertical"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 115,
+        "w": 640,
+        "h": 111,
+        "color": 65468,
+        "opacity": 138,
+        "opacity_end": 0,
+        "gradient": "vertical"
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 336,
+        "w": 640,
+        "h": 144,
+        "color": 63321,
+        "opacity": 0,
+        "opacity_end": 170,
+        "gradient": "vertical"
+      },
+      {
+        "type": "icon",
+        "x": 26,
+        "y": 21,
+        "w": 21,
+        "h": 21,
+        "color": 20998,
+        "icon": "home"
+      },
+      {
+        "type": "text",
+        "x": 56,
+        "y": 18,
+        "w": 300,
+        "h": 28,
+        "color": 20998,
+        "font_size": 18,
+        "bind": "title",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 426,
+        "y": 20,
+        "w": 188,
+        "h": 24,
+        "color": 20998,
+        "font_size": 14,
+        "bind": "eyebrow",
+        "align": "right"
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 78,
+        "w": 580,
+        "h": 48,
+        "color": 20998,
+        "font_size": 32,
+        "bind": "headline",
+        "weight": 600
+      },
+      {
+        "type": "text",
+        "x": 28,
+        "y": 131,
+        "w": 430,
+        "h": 27,
+        "color": 20998,
+        "font_size": 17,
+        "text": "在小屋里，陪你度过平凡的一天。"
+      },
+      {
+        "type": "button",
+        "x": 496,
+        "y": 175,
+        "w": 118,
+        "h": 38,
+        "color": 65467,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 20998,
+        "padding": 12,
+        "weight": 600,
+        "text": "在家陪你",
+        "opacity": 220,
+        "stroke": 65501,
+        "stroke_width": 1
+      },
+      {
+        "type": "image",
+        "x": 510,
+        "y": 270,
+        "w": 82,
+        "h": 82,
+        "color": 20998,
+        "image": "decor",
+        "page": 0,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 0,
+          "var": "plant"
+        },
+        "action": "select.plant"
+      },
+      {
+        "type": "image",
+        "x": 228,
+        "y": 228,
+        "w": 78,
+        "h": 78,
+        "color": 20998,
+        "image": "decor",
+        "page": 0,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 1,
+          "var": "object"
+        },
+        "action": "select.object"
+      },
+      {
+        "type": "image",
+        "x": 196,
+        "y": 222,
+        "w": 82,
+        "h": 82,
+        "color": 20998,
+        "image": "decor",
+        "page": 1,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 0,
+          "var": "plant"
+        },
+        "action": "select.plant"
+      },
+      {
+        "type": "image",
+        "x": 506,
+        "y": 284,
+        "w": 78,
+        "h": 78,
+        "color": 20998,
+        "image": "decor",
+        "page": 1,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 1,
+          "var": "object"
+        },
+        "action": "select.object"
+      },
+      {
+        "type": "image",
+        "x": 74,
+        "y": 230,
+        "w": 82,
+        "h": 82,
+        "color": 20998,
+        "image": "decor",
+        "page": 2,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 0,
+          "var": "plant"
+        },
+        "action": "select.plant"
+      },
+      {
+        "type": "image",
+        "x": 526,
+        "y": 276,
+        "w": 78,
+        "h": 78,
+        "color": 20998,
+        "image": "decor",
+        "page": 2,
+        "tile": {
+          "columns": 3,
+          "rows": 3,
+          "row": 1,
+          "var": "object"
+        },
+        "action": "select.object"
+      },
+      {
+        "type": "panel",
+        "x": 28,
+        "y": 309,
+        "w": 326,
+        "h": 42,
+        "color": 65501,
+        "opacity": 225,
+        "radius": 12,
+        "stroke": 65535,
+        "stroke_width": 1
+      },
+      {
+        "type": "text",
+        "x": 42,
+        "y": 318,
+        "w": 300,
+        "h": 24,
+        "color": 20998,
+        "font_size": 15,
+        "bind": "note"
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 366,
+        "w": 126,
+        "h": 48,
+        "color": 39687,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 65502,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricLabel",
+        "icon": "heart",
+        "action": "primary"
+      },
+      {
+        "type": "button",
+        "x": 162,
+        "y": 366,
+        "w": 144,
+        "h": 48,
+        "color": 65502,
+        "font_size": 17,
+        "radius": 16,
+        "foreground": 20998,
+        "padding": 18,
+        "weight": 600,
+        "bind": "metricUnit",
+        "icon": "home",
+        "action": "secondary",
+        "opacity": 230,
+        "stroke": 65535,
+        "stroke_width": 1
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 44,
+        "color": 65501,
+        "opacity": 240
+      },
+      {
+        "type": "panel",
+        "x": 0,
+        "y": 436,
+        "w": 640,
+        "h": 1,
+        "color": 20998,
+        "opacity": 24
+      },
+      {
+        "type": "button",
+        "x": 26,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 65501,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 20998,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "primary"
+      },
+      {
+        "type": "text",
+        "x": 64,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 20998,
+        "font_size": 15,
+        "text": "互动/更换"
+      },
+      {
+        "type": "button",
+        "x": 164,
+        "y": 449,
+        "w": 32,
+        "h": 18,
+        "color": 65501,
+        "text": "—",
+        "font_size": 11,
+        "line_height": 14,
+        "radius": 4,
+        "padding": 2,
+        "opacity": 0,
+        "foreground": 20998,
+        "stroke": 46484,
+        "stroke_width": 1,
+        "key_for": "secondary"
+      },
+      {
+        "type": "text",
+        "x": 202,
+        "y": 446,
+        "w": 79,
+        "h": 24,
+        "color": 20998,
+        "font_size": 15,
+        "text": "布置/完成"
+      },
+      {
+        "type": "text",
+        "x": 510,
+        "y": 446,
+        "w": 104,
+        "h": 24,
+        "color": 20998,
+        "font_size": 14,
+        "text": "全局键退出",
+        "align": "right"
+      },
+      {
+        "type": "button",
+        "x": 328,
+        "y": 366,
+        "w": 142,
+        "h": 48,
+        "color": 65502,
+        "foreground": 20998,
+        "font_size": 14,
+        "radius": 14,
+        "padding": 10,
+        "text": "完成 · 自动保存",
+        "action": "finish",
+        "show": {
+          "var": "editing",
+          "min": 1,
+          "max": 1
+        }
+      },
+      {
+        "type": "button",
+        "x": 480,
+        "y": 366,
+        "w": 64,
+        "h": 48,
+        "color": 63454,
+        "foreground": 16970,
+        "font_size": 12,
+        "radius": 14,
+        "padding": 4,
+        "text": "上一个",
+        "action": "previous",
+        "show": {
+          "var": "editing",
+          "min": 1,
+          "max": 1
+        },
+        "state_mask": 28
+      },
+      {
+        "type": "button",
+        "x": 552,
+        "y": 366,
+        "w": 64,
+        "h": 48,
+        "color": 63454,
+        "foreground": 16970,
+        "font_size": 12,
+        "radius": 14,
+        "padding": 4,
+        "text": "下一个",
+        "action": "next",
+        "show": {
+          "var": "editing",
+          "min": 1,
+          "max": 1
+        },
+        "state_mask": 28
+      }
+    ],
+    "typography": "p4-app-type-v1",
+    "fonts": [
+      {
+        "image": "type0",
+        "chars": "0123456789:%.-/°C— 今天，也一起慢来。摸收到啦喜欢你选株的绿植给小屋添件好物把摆",
+        "metrics": [
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            18,
+            4,
+            28
+          ],
+          [
+            9,
+            10,
+            28
+          ],
+          [
+            29,
+            4,
+            28
+          ],
+          [
+            9,
+            23,
+            28
+          ],
+          [
+            11,
+            18,
+            21
+          ],
+          [
+            13,
+            2,
+            32
+          ],
+          [
+            12,
+            3,
+            13
+          ],
+          [
+            20,
+            4,
+            28
+          ],
+          [
+            29,
+            18,
+            20
+          ],
+          [
+            7,
+            0,
+            0
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            3,
+            32
+          ],
+          [
+            32,
+            21,
+            32
+          ],
+          [
+            32,
+            0,
+            30
+          ],
+          [
+            32,
+            14,
+            17
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            20,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            3,
+            31
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            1,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            0,
+            32
+          ],
+          [
+            32,
+            1,
+            31
+          ],
+          [
+            32,
+            0,
+            32
+          ]
+        ]
+      }
+    ]
+  },
+  "pages": [
+    {
+      "id": "oak"
+    },
+    {
+      "id": "mint"
+    },
+    {
+      "id": "night"
+    }
+  ],
+  "initial_page": "oak",
+  "limits": {
+    "pats": [
+      0,
+      1000000000
+    ],
+    "left": [
+      0,
+      3
+    ],
+    "plant": [
+      -1000000000,
+      1000000000
+    ],
+    "object": [
+      -1000000000,
+      1000000000
+    ]
+  },
+  "persist": {
+    "version": 1,
+    "vars": [
+      "pats",
+      "plant",
+      "object"
+    ],
+    "states": {
+      "idle": "idle",
+      "glad": "idle",
+      "plant": "idle",
+      "object": "idle",
+      "place": "idle"
+    },
+    "page": true
+  },
+  "input": {
+    "engine": "p4-input-v1"
+  }
+}

@@ -1,0 +1,1 @@
+Original text and generated background artwork: HachimoDock Project License (see LICENSE.txt). Font atlas: SIL OFL-1.1 (see petui-type-OFL.txt).

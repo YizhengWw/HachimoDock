@@ -11,7 +11,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import StockScreenPreview from "./StockScreenPreview.jsx";
 import WoodenFishPreview from "./WoodenFishPreview.jsx";
+import FruitSlicePreview from "./FruitSlicePreview.jsx";
 import { MusicScreenPreview } from "./MusicPlayer.jsx";
+import { ComponentMediaPreview } from "./MediaSurface.jsx";
+import { ComponentAppPreview } from "./AppSurface.jsx";
 import LocalDataScreenPreview from "./LocalDataScreenPreview.jsx";
 import { LOCAL_SOURCES } from "./local-widget-model.js";
 import {
@@ -904,9 +907,9 @@ function PixelToolPreview({ component, dashboard, progress }) {
   );
 }
 
-export default function DeviceScreenPreview({ component, className = "" }) {
+export default function DeviceScreenPreview({ component, className = "", interactive = false, cover = false }) {
   const previewRef = useRef(null);
-  const animationActive = usePreviewAnimationAllowed(previewRef, Boolean(component));
+  const animationActive = usePreviewAnimationAllowed(previewRef, Boolean(component) && !cover);
   if (!component) return null;
   const dashboard = component.dashboard || {};
   const isStocks = component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist";
@@ -914,6 +917,7 @@ export default function DeviceScreenPreview({ component, className = "" }) {
   const isPixel = dashboard.visualStyle === "pixel";
   const isClean = dashboard.visualStyle === "clean";
   const hasCanvasGame = Boolean(component.scene || component.gameType);
+  const nativeSurface = Boolean(component.mediaSurface || component.instrumentSource || component.mediaSource || component.scene?.engine === "p4-touch-slice-v1" || LOCAL_SOURCES.has(component.dataSource));
   const usesCanvasShell = isPixel || (isClean && hasCanvasGame);
   const isPixelTool = isPixel && dashboard.visualLayout === "tool";
   const palette = PIXEL_PALETTES.has(dashboard.visualPalette)
@@ -925,14 +929,14 @@ export default function DeviceScreenPreview({ component, className = "" }) {
   return (
     <div
       ref={previewRef}
-      className={`component-device-screen ${isStocks ? "component-device-screen--stocks" : ""} ${usesCanvasShell ? "component-device-screen--pixel" : ""} ${isClean ? "component-device-screen--clean" : ""} ${isPixelTool ? "component-device-screen--pixel-tool" : ""} ${className}`.trim()}
+      className={`component-device-screen ${nativeSurface ? "component-device-screen--native" : ""} ${isStocks ? "component-device-screen--stocks" : ""} ${usesCanvasShell ? "component-device-screen--pixel" : ""} ${isClean ? "component-device-screen--clean" : ""} ${isPixelTool ? "component-device-screen--pixel-tool" : ""} ${className}`.trim()}
       data-widget={component.id}
       data-visual-style={isPixel ? "pixel" : (isClean ? "clean" : "classic")}
       data-palette={palette}
       data-layout={layout}
       aria-label={`${component.name || ""} 设备屏预览`}
     >
-      {component.instrumentSource === "percussion.wooden-fish" ? <WoodenFishPreview active={animationActive} /> : component.mediaSource === "audio.player" || component.id === "music-player" ? <MusicScreenPreview active={animationActive} /> : LOCAL_SOURCES.has(component.dataSource) ? <LocalDataScreenPreview source={component.dataSource} name={component.name} active={animationActive} /> : isStocks ? <StockScreenPreview active={animationActive} /> : usesCanvasShell ? (
+      {component.mediaSurface?.engine === "p4-app-surface-v1" ? <ComponentAppPreview component={component} active={animationActive} interactive={interactive}/> : component.mediaSurface ? <ComponentMediaPreview component={component} active={animationActive}/> : component.scene?.engine === "p4-touch-slice-v1" ? <FruitSlicePreview scene={component.scene} sprites={component.sceneSprites} active={animationActive} interactive={interactive}/> : component.instrumentSource === "percussion.wooden-fish" ? <WoodenFishPreview active={animationActive} cover={cover} title={component.name} /> : component.mediaSource === "audio.player" || component.id === "music-player" ? <MusicScreenPreview active={animationActive} /> : LOCAL_SOURCES.has(component.dataSource) ? <LocalDataScreenPreview source={component.dataSource} name={component.name} active={animationActive} /> : isStocks ? <StockScreenPreview active={animationActive} /> : usesCanvasShell ? (
         isPixelTool ? (
           <PixelToolPreview component={component} dashboard={dashboard} progress={progress} />
         ) : (

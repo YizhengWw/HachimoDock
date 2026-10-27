@@ -1,0 +1,16 @@
+{
+  "dashboard": {
+    "title": "自然声景",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "PC 通用服务 · 连接后即可使用",
+    "headline": "窗边细雨",
+    "metricValue": "35%",
+    "note": "点选声景；左右切换，上下调音量。",
+    "footer": "默认：主键操作  副键管理  全局键退出",
+    "metricLabel": "开始播放",
+    "metricUnit": "十五分钟"
+  }
+}

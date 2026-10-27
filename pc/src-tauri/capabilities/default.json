@@ -4,10 +4,12 @@
   "description": "Default capability for the Pet Manager desktop client.",
   "windows": ["main"],
   "permissions": [
+    "local-app-commands",
     "core:default",
     "core:path:default",
     "core:webview:default",
     "dialog:allow-open",
+    "dialog:allow-message",
     "fs:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",

@@ -10,6 +10,7 @@ export default function StockWatchlist({ usb }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [pollError,setPollError]=useState('');
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -26,8 +27,8 @@ export default function StockWatchlist({ usb }) {
       const epoch = requestEpoch.current;
       try {
         const next = await invoke("stock_watchlist_status");
-        if (!stopped && !editing.current && epoch === requestEpoch.current) setStatus(next);
-      } catch (e) { if (!stopped) setError(String(e)); }
+        if (!stopped && !editing.current && epoch === requestEpoch.current) {setStatus(next);setPollError('');}
+      } catch (e) { if (!stopped&&epoch===requestEpoch.current) setPollError(String(e)); }
       finally { if (!stopped) setLoading(false); }
     }
     poll(); const timer = setInterval(poll, 2000);
@@ -101,7 +102,7 @@ export default function StockWatchlist({ usb }) {
           <small>{symbols.includes(item.symbol) ? "已添加" : "添加"}</small>
         </button>)}
       </div>}
-      {(error || status?.error) && <p className="stock-watchlist__notice" role="alert">{error || status.error}</p>}
+      {(error || pollError || status?.error) && <p className="stock-watchlist__notice" role="alert">{error || pollError || status.error}</p>}
       {!symbols.length && <p className="muted small">{loading ? "读取自选股…" : "还没有自选股。输入中文名称检索，或选择市场并输入代码添加，列表和顺序会自动保存。"}</p>}
       {!!symbols.length && <div className="stock-watchlist__table"><table>
         <thead><tr><th>股票</th><th>最新价</th><th>涨跌幅</th><th>行情时间</th><th>管理</th></tr></thead>

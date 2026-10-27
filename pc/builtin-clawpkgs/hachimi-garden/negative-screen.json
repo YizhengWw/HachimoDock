@@ -1,0 +1,21 @@
+{
+  "dashboard": {
+    "title": "专注花园",
+    "visualStyle": "clean",
+    "visualPalette": "forest",
+    "visualLayout": "tool",
+    "visualSprite": "star",
+    "eyebrow": "只做眼前这一件事",
+    "headline": "准备专注",
+    "metricValue": "25:00",
+    "badge": "0",
+    "note": "左右调节 5–60 分钟；完成才计入花园。",
+    "footer": "SW1 开始/暂停  SW2 花园  左右调时  全局键退出",
+    "metricLabel": "开始专注",
+    "metricUnit": "我的花园",
+    "progress": {
+      "value": 100,
+      "label": "剩余时间"
+    }
+  }
+}

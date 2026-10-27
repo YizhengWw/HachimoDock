@@ -2,27 +2,39 @@
 #include "cJSON.h"
 #include "pet_p4_media_codec.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_miniapp.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "mbedtls/base64.h"
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define EXT_RAM_BSS_ATTR
+#endif
 static SemaphoreHandle_t lock;
-static pet_p4_media_view_t view;
+/* Task-only catalog text is not DMA/ISR state. Keep its capacity without
+ * taking the internal RAM needed by codecs, USB and task stacks. */
+static EXT_RAM_BSS_ATTR pet_p4_media_view_t view;
 static char session[64];
 static uint32_t next_seq,offset_ms;
 static uint64_t last_request;
 static uint8_t *cover;
 static size_t cover_bytes;
-static char queue_keys[20][180];
+static EXT_RAM_BSS_ATTR char queue_keys[PET_P4_MEDIA_QUEUE_MAX][180];
 typedef struct {uint32_t at_ms;char text[PET_P4_MEDIA_LYRIC_BYTES];} lyric_line_t;
 static lyric_line_t *lyrics;
 static uint32_t lyric_received,lyric_total;
 static pet_p4_send_line_fn send_line;
 static void *send_ctx;
+void pet_p4_media_transport(pet_p4_send_line_fn send,void *ctx){
+  if(!lock)return;xSemaphoreTake(lock,portMAX_DELAY);send_line=send;send_ctx=ctx;xSemaphoreGive(lock);
+}
 static const char *str(const cJSON *v,const char *k) {const cJSON *s=cJSON_GetObjectItemCaseSensitive(v,k);return cJSON_IsString(s)?s->valuestring:"";}
 static bool number(const cJSON *v,const char *k,uint32_t max,uint32_t *out) {
   const cJSON *n=cJSON_GetObjectItemCaseSensitive(v,k);
@@ -41,18 +53,43 @@ static void emit(const char *topic,cJSON *payload) {
 static bool library_valid(const cJSON *p) {
   const cJSON *q=cJSON_GetObjectItemCaseSensitive(p,"queue");
   const cJSON *keys=cJSON_GetObjectItemCaseSensitive(p,"keys");
-  if(!cJSON_IsArray(q)||cJSON_GetArraySize(q)>20||!cJSON_IsArray(keys)||cJSON_GetArraySize(keys)!=cJSON_GetArraySize(q))return false;
+  if(!cJSON_IsArray(q)||cJSON_GetArraySize(q)>PET_P4_MEDIA_QUEUE_MAX||!cJSON_IsArray(keys)||cJSON_GetArraySize(keys)!=cJSON_GetArraySize(q))return false;
   for(int i=0;i<cJSON_GetArraySize(q);i++) {
     const cJSON *title=cJSON_GetArrayItem(q,i),*key=cJSON_GetArrayItem(keys,i);
     if(!cJSON_IsString(title)||!cJSON_IsString(key)||!key->valuestring[0]||strlen(key->valuestring)>=180)return false;
+    if(cJSON_GetArraySize(q)>20 && (strlen(key->valuestring)>80||strlen(title->valuestring)>90))return false;
   }
   return true;
 }
 static void apply_library(const cJSON *p) {
+  static uint32_t generation;
+  char selected_key[180]="";
+  if(view.selected<view.count)copy(selected_key,sizeof(selected_key),queue_keys[view.selected]);
+  view.queue_revision=++generation;
   const cJSON *q=cJSON_GetObjectItemCaseSensitive(p,"queue"),*keys=cJSON_GetObjectItemCaseSensitive(p,"keys");
   view.count=cJSON_GetArraySize(q);
   for(int i=0;i<view.count;i++) {copy(view.queue[i],91,cJSON_GetArrayItem(q,i)->valuestring);copy(queue_keys[i],180,cJSON_GetArrayItem(keys,i)->valuestring);}
   if(view.selected>=view.count)view.selected=0;
+  for(int i=0;i<view.count;i++)if(!strcmp(selected_key,queue_keys[i])){view.selected=i;break;}
+}
+void pet_p4_media_visibility(const char *source,bool visible,uint64_t now_ms) {
+  static char prior[48];static bool was_visible;static uint32_t epoch,boot;static uint64_t last;
+  if(!lock)return;
+  xSemaphoreTake(lock,portMAX_DELAY);
+  if(!boot)boot=esp_random()|1;
+  if(was_visible&&(!visible||strcmp(prior,source))){
+    cJSON *p=cJSON_CreateObject();cJSON_AddStringToObject(p,"source",prior);cJSON_AddStringToObject(p,"operation","visibility");
+    cJSON_AddNumberToObject(p,"boot",boot);cJSON_AddNumberToObject(p,"epoch",++epoch);cJSON_AddBoolToObject(p,"visible",false);emit("media/event",p);was_visible=false;
+  }
+  if(visible&&source[0]){
+    if(!was_visible||strcmp(prior,source)){copy(prior,sizeof(prior),source);++epoch;last=0;}
+    was_visible=true;
+    if(send_line&&(!last||now_ms-last>=2000)){
+      cJSON *p=cJSON_CreateObject();cJSON_AddStringToObject(p,"source",source);cJSON_AddStringToObject(p,"operation","visibility");
+      cJSON_AddNumberToObject(p,"boot",boot);cJSON_AddNumberToObject(p,"epoch",epoch);cJSON_AddBoolToObject(p,"visible",true);emit("media/event",p);last=now_ms;
+    }
+  }
+  xSemaphoreGive(lock);
 }
 void pet_p4_media_init(void) {
   if(lock)return;lock=xSemaphoreCreateMutex();view.volume=65;
@@ -82,10 +119,12 @@ bool pet_p4_media_handle(const char *topic,const cJSON *p,pet_p4_send_line_fn se
         ||!number(p,"sampleRate",48000,&rate)||rate!=48000
         ||!number(p,"durationMs",3600000,&duration)||!number(p,"offsetMs",3600000,&offset)
         ||!number(p,"volume",100,&volume)||!library_valid(p)) {ok=false;message="音乐格式或参数无效";}
+    else if(!strncmp(str(p,"source"),"app.",4)&&!pet_p4_miniapp_host_source(str(p,"source"))) {ok=false;message="请先打开对应组件";}
     else if(pet_p4_audio_music_begin(id)!=ESP_OK) {ok=false;message="麦克风或语音正在使用，音乐未启动";}
     else {
       const uint8_t page=view.page==2?2:0;
       memset(&view,0,sizeof(view));view.page=page;view.lyric_index=-1;lyric_received=lyric_total=0;
+      copy(view.source,sizeof(view.source),str(p,"source"));if(!strcmp(str(p,"mode"),"live"))view.page=0;
       view.volume=volume;view.duration_ms=duration;offset_ms=offset;next_seq=0;cover_bytes=0;
       copy(session,sizeof(session),id);copy(view.title,sizeof(view.title),str(p,"title"));copy(view.artist,sizeof(view.artist),str(p,"artist"));
       apply_library(p);
@@ -98,11 +137,11 @@ bool pet_p4_media_handle(const char *topic,const cJSON *p,pet_p4_send_line_fn se
       ||mbedtls_base64_decode(encoded,sizeof(encoded),&bytes,(const unsigned char*)data,strlen(data))
       ||!pet_p4_media_decode(encoded,bytes,pcm,sizeof(pcm),&written)) {ok=false;message="音乐数据顺序或格式无效";}
     else if(pet_p4_audio_stream_push(pcm,written)!=ESP_OK) {ok=false;message="音乐缓冲区已满";}
-    else next_seq++;
+    else {next_seq++;unsigned peak=0;for(size_t i=0;i+1<written;i+=2){int sample=(int16_t)(pcm[i]|pcm[i+1]<<8);unsigned a=sample<0?-sample:sample;if(a>peak)peak=a;}view.level=(uint8_t)(peak*100/32768);}
   } else if(!strcmp(topic,"media/end")) {
     if(!exact) {ok=false;message="音乐会话不匹配";} else pet_p4_audio_stream_end();
   } else if(!strcmp(topic,"media/stop")) {
-    if(!id[0]||exact) {if(pet_p4_audio_music_active())pet_p4_audio_stream_flush();session[0]=0;copy(view.status,sizeof(view.status),"idle");view.position_ms=0;}
+    if(!id[0]||exact) {if(pet_p4_audio_music_active())pet_p4_audio_stream_flush();session[0]=0;copy(view.status,sizeof(view.status),!strcmp(str(p,"state"),"error")?"error":"idle");copy(view.message,sizeof(view.message),str(p,"message"));view.position_ms=0;view.level=0;}
   } else if(!strcmp(topic,"media/control")) {
     const char *op=str(p,"operation");
     if(!strcmp(op,"volume")&&number(p,"volume",100,&n)) {view.volume=n;pet_p4_audio_music_volume(n);}
@@ -146,15 +185,23 @@ bool pet_p4_media_handle(const char *topic,const cJSON *p,pet_p4_send_line_fn se
       }
     }
   } else if(!strcmp(topic,"media/library")) {
-    if(!library_valid(p)) {ok=false;message="播放列表格式无效";}
-    else apply_library(p);
-    if(number(p,"volume",100,&n)) {view.volume=n;pet_p4_audio_music_volume(n);}
+    if(pet_p4_audio_music_active()&&strcmp(str(p,"source"),view.source)) {ok=false;message="其他组件正在播放";}
+    else if(!library_valid(p)) {ok=false;message="播放列表格式无效";}
+    else {apply_library(p);copy(view.source,sizeof(view.source),str(p,"source"));}
+    if(ok&&number(p,"volume",100,&n)) {view.volume=n;pet_p4_audio_music_volume(n);}
+  } else if(!strcmp(topic,"media/notice")) {
+    const char *source=str(p,"source"),*state=str(p,"state");
+    if(!source[0]||strcmp(source,view.source)||strlen(str(p,"message"))>240
+       ||(strcmp(state,"error")&&strcmp(state,"idle")&&strcmp(state,"buffering"))) {ok=false;message="组件提示已过期或无效";}
+    else if(!pet_p4_audio_music_active()) {
+      session[0]=0;copy(view.status,sizeof(view.status),state);copy(view.message,sizeof(view.message),str(p,"message"));
+    }
   } else if(!strcmp(topic,"media/metadata")) {
     if(!exact || !number(p,"durationMs",3600000,&n)) {ok=false;message="曲目信息已过期";}else view.duration_ms=n;
   } else if(!strcmp(topic,"media/query")) {
     if(id[0]&&!exact) {ok=false;message="音乐会话不匹配";}
   } else {ok=false;message="未知媒体指令";}
-  if(ok && strcmp(topic,"media/library"))last_request=esp_timer_get_time()/1000ULL;
+  if(ok && strcmp(topic,"media/library") && strcmp(topic,"media/notice"))last_request=esp_timer_get_time()/1000ULL;
   refresh();
   cJSON *reply=cJSON_CreateObject();
   cJSON_AddBoolToObject(reply,"ok",ok);cJSON_AddStringToObject(reply,"requestId",str(p,"requestId"));
@@ -208,6 +255,8 @@ void pet_p4_media_stop_background(pet_p4_send_line_fn send, void *ctx) {
   // Always notify PC, including when a song is still being prepared there.
   cJSON *payload=cJSON_CreateObject();
   cJSON_AddStringToObject(payload,"operation","stop");
+  cJSON_AddBoolToObject(payload,"global",true);
+  cJSON_AddStringToObject(payload,"source",view.source[0]?view.source:"audio.player");
   emit("media/event",payload);
   xSemaphoreGive(lock);
 }
@@ -226,4 +275,45 @@ bool pet_p4_media_action(const char *action) {
   else {xSemaphoreGive(lock);return false;}
   if(remote) {cJSON *payload=cJSON_CreateObject();cJSON_AddStringToObject(payload,"operation",remote);if(view.selected<view.count)cJSON_AddStringToObject(payload,"key",queue_keys[view.selected]);emit("media/event",payload);}
   xSemaphoreGive(lock);return true;
+}
+bool pet_p4_media_live_action(const char *source,const char *action) {
+  pet_p4_media_init();if(!lock||!action||strncmp(action,"media.",6))return false;
+  xSemaphoreTake(lock,portMAX_DELAY);
+  if(strcmp(view.source,source)){memset(&view,0,sizeof(view));copy(view.source,sizeof(view.source),source);}
+  view.seeking=false;
+  const char *op=action+6,*remote=NULL;
+  if(!strcmp(op,"queue")){view.page=view.page==1?0:1;if(view.page==1)remote="sync";}
+  else if(!strcmp(op,"select")){if(view.page==1)remote="select";else {view.page=1;remote="sync";}}
+  else if(!strcmp(op,"up")||!strcmp(op,"down")){
+    if(view.page==1&&view.count)view.selected=(view.selected+view.count+(!strcmp(op,"up")?-1:1))%view.count;
+    else remote=!strcmp(op,"up")?"volume_up":"volume_down";
+  }else if(!strcmp(op,"toggle"))remote=view.page==1?"select":"toggle";
+  else if(!strcmp(op,"previous")||!strcmp(op,"next"))remote=op;
+  else{xSemaphoreGive(lock);return false;}
+  if(remote){cJSON *p=cJSON_CreateObject();cJSON_AddStringToObject(p,"source",source);cJSON_AddStringToObject(p,"operation",remote);
+    if(view.selected<view.count)cJSON_AddStringToObject(p,"key",queue_keys[view.selected]);emit("media/event",p);}
+  xSemaphoreGive(lock);return true;
+}
+bool pet_p4_media_touch(const char *source,int index,int volume,uint32_t revision,uint64_t now_ms){
+  static uint64_t last_select;
+  if(!lock||!source||strncmp(source,"pc.",3))return false;
+  xSemaphoreTake(lock,portMAX_DELAY);
+  bool select=index>=0;
+  if(strcmp(source,view.source)||revision!=view.queue_revision||
+     (select&&(view.page!=1||index>=view.count||(last_select&&now_ms-last_select<300)))||
+     (!select&&(volume<0||volume>100||view.page!=0))){
+    xSemaphoreGive(lock);return false;
+  }
+  cJSON *p=cJSON_CreateObject();
+  if(!p){xSemaphoreGive(lock);return false;}
+  cJSON_AddStringToObject(p,"source",source);
+  if(select){
+    view.selected=index;view.page=0;last_select=now_ms;
+    cJSON_AddStringToObject(p,"operation","select");cJSON_AddStringToObject(p,"key",queue_keys[index]);
+  }else{
+    cJSON_AddStringToObject(p,"operation","volume");cJSON_AddNumberToObject(p,"volume",volume);
+    /* Show requested position; authoritative host volume will confirm it. */
+    view.volume=volume;
+  }
+  emit("media/event",p);xSemaphoreGive(lock);return true;
 }

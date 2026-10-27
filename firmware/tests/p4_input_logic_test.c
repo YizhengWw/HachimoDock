@@ -16,6 +16,13 @@ static void release_to_center(pet_p4_joystick_decoder_t *decoder) {
 }
 
 int main(void) {
+  pet_p4_input_gate_t gate={0};
+  assert(pet_p4_input_gate_accept(&gate,false,1));
+  assert(pet_p4_input_gate_accept(&gate,false,1));
+  assert(!pet_p4_input_gate_accept(&gate,false,2));
+  assert(!pet_p4_input_gate_accept(&gate,false,1)); /* cannot rearm by returning */
+  assert(!pet_p4_input_gate_accept(&gate,true,2));
+  assert(pet_p4_input_gate_accept(&gate,false,2));
   int center_x;
   int center_y;
   const int samples = PET_P4_JOYSTICK_CALIBRATION_SAMPLES;

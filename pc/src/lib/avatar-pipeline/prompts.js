@@ -6,15 +6,11 @@
  */
 
 import { FAMILIES } from "./families.js";
-
-function stripJsonFence(raw) {
-  const text = String(raw || "").trim();
-  const match = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return match ? match[1].trim() : text;
-}
+import { parseStrictModelJson } from './model-json.js';
+import { KEEP_CHIBI_STYLE_EN } from './character-style.js';
 
 export function parseModelJson(raw) {
-  return JSON.parse(stripJsonFence(raw));
+  return parseStrictModelJson(raw);
 }
 
 function normalizeFamilyId(value) {
@@ -43,6 +39,7 @@ export function normalizeFamilies(rawFamilies) {
       spatial_path: String(item.spatial_path || "").trim(),
       pose_signature: String(item.pose_signature || "").trim(),
       prop_policy: String(item.prop_policy || "").trim(),
+      ...(item.preserve_reference_accessories === true ? {preserve_reference_accessories:true} : {}),
       avoid_motion: String(item.avoid_motion || "").trim(),
       variation_hint: String(item.variation_hint || "").trim(),
     };
@@ -131,52 +128,57 @@ export function buildDryRunResponse({ families, sourceImageName = "uploaded imag
 function buildDryRunPrompt(family, sourceImageName) {
   const stateLabel = family.label || family.family;
   const shared = [
+    KEEP_CHIBI_STYLE_EN,
     `Keep the uploaded subject identity, markings, proportions, fixed camera, composition, background style, and lighting from ${sourceImageName}.`,
     "Use subject-adaptive anatomy: human or humanoid subjects use hands, arms, shoulders, gaze, and steps; cats or dogs use paws, tail, ears, crouch, and body lean; birds use wings, head, and feet; toys, plush, icons, or objects use tilt, bounce, rotation, or movable parts.",
     "Do not write paws for a human, hands for a cat, wings for a cat, or pet-only body language when the uploaded subject is not an animal.",
-    "The middle action must be a medium-to-large visible middle motion with a clear silhouette or position change, while the first and last frame still match the uploaded pose.",
+    family.family === "idle.default" ? (family.preserve_reference_accessories ? "Only subtle breathing and blinking; retain original character-associated accessories, no large movement or new props." : "Only subtle breathing and blinking; no large movement or props.")
+      : "Use subject-appropriate medium-to-large visible middle motion without inventing limbs; let the action begin and finish naturally in state-specific poses.",
     family.spatial_path ? `Spatial path: ${family.spatial_path}` : "",
     family.pose_signature ? `Silhouette signature: ${family.pose_signature}` : "",
-    family.prop_policy ? `Required small marker prop policy: ${family.prop_policy}` : "",
+    family.prop_policy ? `${family.preserve_reference_accessories ? 'Original character accessory policy' : 'Optional small marker prop policy (idle.default forbids props)'}: ${family.prop_policy}` : "",
     family.avoid_motion ? `Avoid motion collapse: ${family.avoid_motion}` : "",
-    "Every prompt must include exactly one small marker prop from the prop_policy. No text, no watermark, no second main character, no oversized props, no identity drift. Animal-like props are allowed only when prop_policy explicitly allows them and they stay tiny and secondary.",
+    family.preserve_reference_accessories ? "Every state retains original character-associated accessories already held or worn, including a tennis racket or instrument. Never add unrelated props, markers, text, watermarks or a second character; no identity drift."
+      : "Idle.default has no props; other states may include at most one small marker prop if useful. No text, no watermark, no second main character, no oversized props, no identity drift.",
   ].filter(Boolean);
 
   if (family.playback === "one_shot_entry") {
     return [
-      `Use the uploaded image ${sourceImageName} as both the first and last frame reference.`,
+      `Use the uploaded image ${sourceImageName} as the character identity and appearance reference.`,
       `Create one concise one-shot greeting for the ${stateLabel} state.`,
       family.motion_brief || `The action must clearly express ${family.label}.`,
-      "Start from the exact uploaded pose, perform one readable medium-to-large greeting beat with a visibly different middle silhouette, and return to the exact uploaded pose for a seamless single clip.",
+      "Perform a readable greeting beat with a distinct silhouette and a relaxed natural finish; do not reset to a shared reference pose or freeze at the end.",
       ...shared,
     ].join(" ");
   }
 
   return [
-    `Use the uploaded image ${sourceImageName} as both the first and last frame reference.`,
+    `Use the uploaded image ${sourceImageName} as the character identity and appearance reference.`,
     `Create one concise ${stateLabel} loop_state animation.`,
     family.motion_brief || `The middle motion must clearly express ${family.label}.`,
-    "Start from the exact uploaded pose, perform one readable medium-to-large action cycle with a visibly different middle silhouette, and return to the exact uploaded pose for a seamless loop.",
+    "Create fluid state-appropriate motion (subtle only for idle.default). For repeated playback seek a gentle rhythmic transition, not an identical reference-pose reset or static ending.",
     ...shared,
   ].join(" ");
 }
 
 export function buildUserPrompt({ families = FAMILIES, appearanceName = "", personality = "" } = {}) {
   const lines = [
+    KEEP_CHIBI_STYLE_EN,
     "Analyze the uploaded image first, then generate exactly one image-to-video prompt for each family below.",
     "Identify the uploaded image subject_type before writing prompts: human/humanoid, cat/dog/animal, bird, plush/toy/object, or other character.",
     "Use subject-appropriate anatomy in every prompt: human/humanoid uses hands, arms, shoulders, gaze, and steps; cat/dog/animal uses paws, tail, ears, crouch, and body lean; bird uses wings, head, and feet; plush/toy/object uses tilt, bounce, rotation, or movable parts.",
     "Do not write paws for a human, hands for a cat, wings for a cat, or pet-only body language when the uploaded subject is not an animal.",
-    "Every prompt must include a medium-to-large visible middle motion: the subject should visibly shift pose, limb position, body angle, foreground depth, or 15-30% in-frame position before returning to the uploaded first/last pose.",
+    "Except idle.default (subtle breathing/blinking only), use subject-appropriate medium-to-large visible middle motion where helpful. Never invent limbs on a robot or object.",
     "All final video prompts must be in English.",
-    "For playback=loop_state, each prompt must describe one loop-safe state animation: uploaded image pose -> medium-to-large state action variation -> uploaded image pose.",
-    "For playback=one_shot_entry, each prompt must also describe a first/last-frame-safe single clip: uploaded image pose -> medium-to-large greeting variation -> uploaded image pose.",
+    "For playback=loop_state, describe continuous state-specific movement with a gentle repeat rhythm; do not require the same first/last pose or a shared reference-image reset. Idle.default stays calm.",
+    "For playback=one_shot_entry, describe a readable greeting and natural relaxed finish. Different clips may start and end in different poses while retaining the same character.",
     "Do not collapse different families into the same sitting or standing pose. Every family must use its spatial_path, pose_signature, and avoid_motion fields.",
     "Custom generation should output a single working family clip. Built-in appearances may provide working.thinking, working.typing, and working.browsing for richer variation.",
     "The runtime treats both working and working.* clips as the same working state, and randomly chooses only when more than one working clip is present.",
     "Do not output thinking or tool_running families; they are legacy input states that map to working.",
     "waiting_user is the separate decide/user-choice state; do not mix it into random working variants.",
-    "Each prompt must include exactly one small marker prop from prop_policy as an action cue; never let props cover the subject or become the subject.",
+    families.some(f=>f.preserve_reference_accessories) ? "Every state, including idle.default, must preserve original character-associated accessories already held or worn, including a tennis racket, instrument, glasses or hat. Do not invent new props or markers. Keep the subject and accessories fully within frame."
+      : "Idle.default has no props. Other states may use at most one small marker prop from prop_policy when needed; never cover the subject or become the subject.",
     "Treat touch.lick and touch.what as touch-screen feedback variants, not literal-name actions or symbolic reactions: the subject should move its face or front side close to the foreground and gently touch the screen glass.",
     "Do not copy legacy family ids into the final video prompt text; write the visible state behavior instead.",
     "Do not create enter / loop / exit prompts. Do not omit any family. Do not add extra families.",

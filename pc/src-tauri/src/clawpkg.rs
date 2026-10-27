@@ -265,6 +265,7 @@ fn validate_p4_compact_json_sizes(files: &HashMap<String, Vec<u8>>, errors: &mut
         let Ok(compact) = serde_json::to_vec(&value) else {
             continue;
         };
+        let max_bytes=if path=="runtime/widget.json"&&value["surface"]["graphics"]=="p4-app-graphics-v1"{8191}else{max_bytes};
         if compact.len() > max_bytes {
             errors.push(format!(
                 "{} 压缩后为 {} 字节，超过 P4 {} 字节上限",
@@ -410,12 +411,21 @@ fn validate_widget_media(files:&HashMap<String,Vec<u8>>,errors:&mut Vec<String>)
     if widget["vars"].as_object().is_none_or(|v|!v.is_empty()) || widget["tick"].as_array().is_some_and(|v|!v.is_empty()) || widget.get("pages").is_some() {errors.push("media 不使用自定义变量、tick 或 pages；状态由真实音频服务提供".into());}
     let kind=files.get("component.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok());
     if kind.as_ref().and_then(|v|v["kind"].as_str())!=Some("tool") {errors.push("media 仅用于 tool 组件".into());}
-    if media.as_object().is_none_or(|m|m.len()!=1) || media["source"]!="audio.player" || widget["engine"]!="p4-bounded-runtime-v4"
+    let extension=media["source"].as_str().and_then(|s|s.strip_prefix("pc.")).filter(|s|crate::component_extension::valid_id(s));
+    let generic=extension.is_some()&&media["mode"]=="live"&&media.as_object().is_some_and(|m|m.len()==2);
+    let legacy=media["source"]=="audio.player"&&media.as_object().is_some_and(|m|m.len()==1);
+    if !(generic||legacy) || widget["engine"]!="p4-bounded-runtime-v4"
        || ["data","scene","game"].iter().any(|k|widget.get(k).is_some()) {
-        errors.push("media 仅支持 v4 的受控 audio.player，不得混用 data/scene/game".into());
+        errors.push("media 需要受控 PC 扩展或兼容播放器，不能混用 data/scene/game".into());
+    }
+    if let Some(id)=extension {
+        if kind.as_ref().and_then(|k|k["id"].as_str())!=Some(id){errors.push("PC 媒体源必须属于当前组件".into());}
+        match files.get("pc/extension.json").ok_or("缺少 pc/extension.json".to_string()).and_then(|b|crate::component_extension::parse(b)) {Ok(_)=>{},Err(e)=>errors.push(e)}
+        if let Err(e)=crate::component_extension::validate_surface(&widget["surface"]){errors.push(e);}
     }
     let allowed=["media.toggle","media.queue","media.previous","media.next","media.up","media.down","media.select","media.lyrics"];
     if let Some(rules)=widget["transitions"].as_array() {for rule in rules {
+        if generic && rule["on"]=="media.lyrics" {errors.push("直播不支持歌词或进度跳转".into());}
         if !allowed.contains(&rule["on"].as_str().unwrap_or("")) || rule["from"]!="*" || rule.as_object().is_none_or(|r|r.len()!=2) {errors.push("media transition 只能声明受控 on 动作和 from=*，不接受变量或附加效果".into());}
     }}
 }
@@ -584,7 +594,7 @@ fn validate_scene_op(
                 errors.push(format!("{} place 需要合法实体、坐标范围或 source", label));
             }
         }
-        "show" | "hide" => {
+        "show" | "hide" | "charge" => {
             if !object_has_only_keys(operation, &["op", "entity"]) || !entity_known {
                 errors.push(format!("{} {} 需要一个已声明实体", label, name));
             }
@@ -655,9 +665,10 @@ fn validate_component_scene(
         errors.push("runtime/widget.json scene 必须是对象".to_string());
         return;
     };
+    let slicing = scene.get("engine").and_then(|v|v.as_str()) == Some("p4-touch-slice-v1");
     if !object_has_only_keys(
         scene,
-        &[
+        if slicing { &["engine","duration_sec","lives","sound_volume","sprites","revision"][..] } else { &[
             "tick_ms",
             "active_state",
             "result_state",
@@ -667,7 +678,8 @@ fn validate_component_scene(
             "sprites",
             "entities",
             "rules",
-        ],
+            "motion",
+        ][..] },
     ) {
         errors.push("runtime/widget.json scene 含未知字段".to_string());
     }
@@ -779,7 +791,25 @@ fn validate_component_scene(
             P4_SCENE_MAX_SPRITE_PIXELS
         ));
     }
-    if !json_int_between(scene.get("tick_ms"), 100, 2000) {
+    if slicing {
+        let actions=widget["transitions"].as_array();
+        let bindings=files.get("buttons.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok());
+        let valid=runtime_engine==P4_RUNTIME_ENGINE_V4
+            && (!scene.contains_key("revision") || json_int_between(scene.get("revision"),1,2))
+            && bindings.as_ref().and_then(|b|b.as_array()).is_some_and(|b|b.len()==2 && ["slice.restart","slice.pause"].iter().all(|a|b.iter().any(|v|v["action"]==*a)))
+            && json_int_between(scene.get("duration_sec"),30,120)
+            && json_int_between(scene.get("lives"),1,5)
+            && json_int_between(scene.get("sound_volume"),0,100)
+            && sprites.is_some_and(|v|v.len()==4 && v.iter().all(|s|s["frames"]==1))
+            && widget["vars"]==serde_json::json!({}) && widget["states"]==serde_json::json!(["idle"])
+            && widget["initial_state"]=="idle" && widget["tick"]==serde_json::json!([])
+            && ["data","media","instrument","game","pages"].iter().all(|k|widget.get(*k).is_none())
+            && actions.is_some_and(|v|v.len()==2 && ["slice.restart","slice.pause"].iter().all(|a|v.iter().any(|t|t==&serde_json::json!({"on":a,"from":"*"}))));
+        let game_kind=files.get("component.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()).is_some_and(|v|v["kind"]=="game");
+        if !valid || !game_kind {errors.push("触控切果需要 v4 game、四张精灵、受限参数及开始/暂停动作".into());}
+        return;
+    }
+    if !json_int_between(scene.get("tick_ms"), if scene.contains_key("motion"){16}else{100}, if scene.contains_key("motion"){40}else{2000}) {
         errors.push("runtime/widget.json scene.tick_ms 必须在 100-2000".to_string());
     }
     let state_ids: HashSet<&str> = widget
@@ -1019,7 +1049,7 @@ fn validate_component_scene(
             .get("on")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        if trigger == "collision" {
+        if matches!(trigger,"collision"|"landed") {
             let entity = rule
                 .get("entity")
                 .and_then(|value| value.as_str())
@@ -1117,6 +1147,8 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         return;
     }
     let allowed_game_keys: HashSet<&str> = [
+        "vertical_speed_percent",
+        "direction_mode",
         "type",
         "tick_ms",
         "playing_state",
@@ -1136,6 +1168,11 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         .get("tick_ms")
         .and_then(|value| value.as_u64())
         .unwrap_or(0);
+    if let Some(value)=game.get("vertical_speed_percent"){
+        if game_type!="flappy"||!value.as_u64().is_some_and(|n|(25..=100).contains(&n)){
+            errors.push("vertical_speed_percent 只支持 flappy 的 25-100 整数".into());
+        }
+    }
     if !(100..=2000).contains(&tick_ms) {
         errors.push("runtime/widget.json game.tick_ms 必须在 100-2000".to_string());
     }
@@ -1186,13 +1223,23 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         .flatten()
         .filter_map(|value| value.get("action").and_then(|action| action.as_str()))
         .collect();
-    let required_actions: &[&str] = if game_type == "blocks" {
-        &["start", "left", "right", "rotate", "drop"]
+    let mut required_actions: Vec<&str> = if game_type == "blocks" {
+        vec!["start", "left", "right", "rotate", "drop"]
     } else if game_type == "snake" {
-        &["start", "left", "right"]
+        vec!["start", "left", "right"]
     } else {
-        &["flap"]
+        vec!["flap"]
     };
+    if let Some(mode)=game.get("direction_mode"){
+        if game_type!="snake"||mode!="absolute"||widget["input"]["engine"]!="p4-input-v1"{
+            errors.push("绝对方向仅支持声明 p4-input-v1 的贪吃蛇".into());
+        }
+        required_actions.extend(["up","down"]);
+    }
+    if game.get("actions").is_some_and(|a|a.get("soft_drop").is_some()){
+        if game_type!="blocks"||widget["input"]["engine"]!="p4-input-v1"{errors.push("软降仅支持声明 p4-input-v1 的方块".into());}
+        required_actions.push("soft_drop");
+    }
     let action_keys: HashSet<&str> = game
         .get("actions")
         .and_then(|value| value.as_object())
@@ -1209,7 +1256,7 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
             game_type
         ));
     }
-    for key in required_actions {
+    for key in &required_actions {
         let action = game
             .get("actions")
             .and_then(|value| value.get(*key))
@@ -1329,6 +1376,59 @@ fn build_manifest_preview(
     validate_p4_widget_vars_shape(files, errors);
     validate_widget_data(files, errors);
     validate_widget_media(files, errors);
+    if let Some(runtime)=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()){
+        if let Err(e)=crate::component_extension::validate_app_runtime(&runtime){errors.push(e);}
+        if let Some(hold)=runtime["input"]["hold"].as_str(){
+            let b=files.get("buttons.json").and_then(|v|serde_json::from_slice::<serde_json::Value>(v).ok());
+            if !b.as_ref().and_then(|v|v.as_array()).is_some_and(|a|a.iter().any(|b|b["action"]==hold&&b["event"]=="button.sw1.short_press")){errors.push("蓄力动作必须绑定 SW1 短按以捕获按住和松开".into());}
+        }
+        if runtime.get("host").is_some()||files.contains_key("pc/application.json"){
+            match files.get("pc/application.json").ok_or("缺少 PC 应用声明".to_string()).and_then(|b|crate::app_services::parse(b,&runtime)){
+                Ok(_)=>{},Err(e)=>errors.push(e)
+            }
+            let images:HashSet<_>=runtime["surface"]["images"].as_array().into_iter().flatten().filter_map(|v|v["asset"].as_str()).collect();
+            for path in files.keys(){
+                let notice=path=="LICENSE.txt"||path=="THIRD_PARTY_NOTICES.txt"||path.starts_with("licenses/");
+                if !REQUIRED_FILES.contains(&path.as_str())&&path!="pc/application.json"&&path!="assets/.keep"&&!images.contains(path.as_str())&&!notice{errors.push("PC 应用包含额外文件".into());}
+            }
+        }
+        if runtime.get("surface").is_some()&&runtime.get("media").is_none(){
+            let game_surface=runtime["surface"].get("game_view").is_some();
+            let data_surface=runtime["surface"].get("data_view").is_some();
+            let scene_surface=runtime["surface"].get("scene_view").is_some();
+            if runtime["engine"]!="p4-bounded-runtime-v4"||(game_surface&&kind!=Some("game"))||(data_surface&&kind!=Some("tool"))||(!game_surface&&!data_surface&&!scene_surface&&(kind!=Some("tool")||["scene","game","instrument","data"].iter().any(|k|runtime.get(*k).is_some()))){
+                errors.push("通用应用布局仅支持 v4 tool，不能混用原生场景".into());
+            }
+            if let Err(e)=crate::component_extension::validate_app_surface(&runtime["surface"],Some(&runtime)){errors.push(e);}
+            for im in runtime["surface"]["images"].as_array().into_iter().flatten(){
+                match im["asset"].as_str().and_then(|p|files.get(p)){
+                    Some(bytes)=>{if let Err(e)=crate::component_extension::decode_surface_image(im,bytes){errors.push(e);}},
+                    None=>errors.push("通用应用图片缺失".into())
+                }
+            }
+        }
+    }
+    if files.contains_key("pc/extension.json") {
+        let source=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()).and_then(|v|v["media"]["source"].as_str().map(str::to_owned));
+        if source.as_deref()!=Some(format!("pc.{id}").as_str()){errors.push("PC 扩展必须与组件 ID、媒体源绑定".into());}
+        let runtime:serde_json::Value=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice(b).ok()).unwrap_or_default();
+        let images=runtime["surface"]["images"].as_array();
+        let mut allowed=std::collections::HashSet::new();
+        for im in images.into_iter().flatten(){
+            if let Some(path)=im["asset"].as_str(){
+                allowed.insert(path);
+                match files.get(path){
+                    Some(bytes)=>{if let Err(e)=crate::component_extension::decode_surface_image(im,bytes){errors.push(e);}},
+                    None=>errors.push(format!("缺少图片: {path}"))
+                }
+            }
+        }
+        // Legal notices stay in the PC resource package; the USB transaction
+        // excludes them. Match the server/PetUI gate without allowing scripts
+        // or general-purpose files under the licenses directory.
+        let license_path=regex::Regex::new(r"^licenses/[A-Za-z0-9_.-]+\.(?:txt|md)$").expect("static license path");
+        if files.keys().any(|p|!REQUIRED_FILES.contains(&p.as_str())&&p!="pc/extension.json"&&p!="assets/.keep"&&p!="LICENSE.txt"&&p!="THIRD_PARTY_NOTICES.txt"&&!license_path.is_match(p)&&!allowed.contains(p.as_str())){errors.push("声明式媒体包不能携带用户数据、凭据或额外文件".into());}
+    }
     validate_widget_instrument(files, errors);
     validate_p4_widget_effect_bounds(files, errors);
     validate_component_game(files, errors);
@@ -1527,6 +1627,23 @@ pub fn render_component_dashboard_payload(dashboard: &HashMap<String, String>) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authored_touch_package_and_strict_scene_boundary() {
+        let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/fresh-fruit-slice");
+        let names=["component.json","buttons.json","negative-screen.json","share.json","runtime/widget.json",
+            "assets/apple.png","assets/orange.png","assets/lime.png","assets/melon.png"];
+        let mut files: std::collections::HashMap<String,Vec<u8>>=names.iter().map(|n|(n.to_string(),std::fs::read(root.join(n)).unwrap())).collect();
+        let refs=files.iter().map(|(n,b)|(n.as_str(),b.as_slice())).collect::<Vec<_>>();
+        let good=super::validate_clawpkg_bytes(&make_zip(&refs)).unwrap();
+        assert!(good.ok,"{:?}",good.errors);
+        let original:serde_json::Value=serde_json::from_slice(&files["runtime/widget.json"]).unwrap();
+        for (field,value) in [("duration_sec",serde_json::json!(121)),("sound_volume",serde_json::json!(-1)),("script",serde_json::json!("evil()"))] {
+            let mut runtime=original.clone();runtime["scene"][field]=value;
+            files.insert("runtime/widget.json".into(),serde_json::to_vec(&runtime).unwrap());
+            let refs=files.iter().map(|(n,b)|(n.as_str(),b.as_slice())).collect::<Vec<_>>();
+            assert!(!super::validate_clawpkg_bytes(&make_zip(&refs)).unwrap().ok);
+        }
+    }
     use super::*;
     use std::io::Write;
 

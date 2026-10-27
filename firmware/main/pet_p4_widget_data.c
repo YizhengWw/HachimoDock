@@ -4,6 +4,11 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#ifdef ESP_PLATFORM
+#include "esp_attr.h"
+#else
+#define EXT_RAM_BSS_ATTR
+#endif
 typedef struct {
   bool used;
   char source[48], status[8], message[91], date[11];
@@ -12,7 +17,7 @@ typedef struct {
   uint8_t count;
   pet_p4_data_row_t rows[PET_P4_DATA_MAX_ROWS];
 } data_snapshot_t;
-static data_snapshot_t g_sources[4];
+static EXT_RAM_BSS_ATTR data_snapshot_t g_sources[4];
 static portMUX_TYPE g_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool text(const cJSON *obj, const char *key, char *out, size_t size) {
   const cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);

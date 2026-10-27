@@ -50,12 +50,13 @@ function assertDebugOnlyFallback(source, snippet, label) {
   );
 }
 
-test("desktop window opens at the configured minimum size and remains centered", () => {
+test("desktop window can shrink for high DPI and fits before first show", () => {
   const config = JSON.parse(readSource("src-tauri/tauri.conf.json"));
   const [mainWindow] = config.app.windows;
 
-  assert.equal(mainWindow.width, mainWindow.minWidth);
-  assert.equal(mainWindow.height, mainWindow.minHeight);
+  assert.ok(mainWindow.minWidth <= 900 && mainWindow.minWidth < mainWindow.width);
+  assert.ok(mainWindow.minHeight <= 540 && mainWindow.minHeight < mainWindow.height);
+  assert.equal(mainWindow.visible, false);
   assert.equal(mainWindow.center, true);
 });
 
@@ -79,7 +80,7 @@ test("desktop CSP no longer exposes the removed browser-local background model",
 
   assert.doesNotMatch(csp, /staticimgly|imgly/i);
   assert.doesNotMatch(csp, /connect-src[^;]*https:\s/);
-  assert.doesNotMatch(csp, /script-src[^;]*(?:blob:|'wasm-unsafe-eval')/);
+  assert.doesNotMatch(csp, /script-src[^;]*(?:blob:|https?:|data:)/);
 });
 
 test("desktop CSP permits Tauri local appearance images and videos", () => {
@@ -107,7 +108,9 @@ test("release CSP and Cargo features exclude development-only privileges", () =>
 
   assert.equal(csp.includes("'unsafe-eval'"), false);
   assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
-  assert.doesNotMatch(csp, /script-src[^;]*'wasm-unsafe-eval'/);
+  // Only the bundled, import-free bounded game core uses WASM compilation.
+  // JavaScript eval, remote scripts, blob scripts and package code stay denied.
+  assert.equal(csp.match(/script-src\s+([^;]+)/)?.[1], "'self' 'wasm-unsafe-eval'");
   assert.doesNotMatch(csp, /127\.0\.0\.1:\*|localhost:\*|ws:\/\//);
   assert.match(csp, /connect-src[^;]*http:\/\/127\.0\.0\.1:8181(?:\s|;)/);
   assert.doesNotMatch(csp, /(?:img-src|media-src)[^;]*127\.0\.0\.1/);
@@ -219,7 +222,7 @@ test("Tauri release resources are target-specific and package only audited LGPL 
   assert.doesNotMatch(localMacDmgBundler, /Pet Manager_0\.1\.0/);
   assert.match(localMacDmgBundler, /hdiutil/);
   assert.match(localMacDmgBundler, /--skip-jenkins/);
-  assert.match(viteConfig, /__PET_MANAGER_INTERNAL_CONTENT_API_KEY__/);
+  assert.doesNotMatch(viteConfig, /__PET_MANAGER_INTERNAL_CONTENT_API_KEY__/);
   assert.doesNotMatch(viteConfig, /process\.env\.VITE_INTERNAL_CONTENT_API_KEY/);
   assertResource(
     windowsConfig.bundle.resources,
@@ -453,7 +456,7 @@ test("app shell routes device, pet album, component center, API settings, detail
   assert.match(app, /<AppearanceGallery/);
   assert.match(app, /<CustomAvatarWizard/);
   assert.match(app, /<AppearanceDetail/);
-  assert.match(app, /<ComponentCenter \/>/);
+  assert.match(app, /<ComponentCenter active=\{view === "components"\} \/>/);
   assert.match(app, /<ApiSettings/);
   assert.doesNotMatch(app, /CommunityImportHelp/);
 });
@@ -536,7 +539,7 @@ test("generation setup clearly supports GIF first-frame input and field help aff
   assert.match(providerConfig, /VOLCENGINE_THINKING_MODEL = DEFAULT_THINKING_MODEL/);
   assert.match(wizard, /loadProviderConfig/);
   assert.match(wizard, /saveProviderConfig/);
-  assert.match(wizard, /thinkingModel: isVolcengine \? VOLCENGINE_THINKING_MODEL : thinkingModel\.trim\(\) \|\| trimmedModel/);
+  assert.match(wizard, /thinkingModel: thinkingModel\.trim\(\) \|\| \(isVolcengine \? VOLCENGINE_THINKING_MODEL : trimmedModel\)/);
   assert.match(wizard, /请先在 API 配置中保存火山引擎 API Key/);
   assert.doesNotMatch(wizard, /Thinking 模型 endpoint/);
   assert.doesNotMatch(wizard, /providerId === "volcengine" && !thinkingModel\.trim\(\)/);
@@ -550,8 +553,8 @@ test("generation defaults still favor faster Ark-safe low-resolution video outpu
 
   assert.match(wizard, /fastGeneration/);
   assert.match(wizard, /FAST_VIDEO_GENERATION_PROFILE\.imageMaxDimension/);
-  assert.match(defaults, /PIPELINE_MAX_IMAGE_DIMENSION = 400/);
-  assert.match(defaults, /400 keeps 4:3 height at Ark's 300px minimum/);
+  assert.match(defaults, /PIPELINE_MAX_IMAGE_DIMENSION = 768/);
+  assert.match(defaults, /THINKING_IMAGE_DIMENSION = 400/);
   assert.match(defaults, /FAST_VIDEO_GENERATION_PROFILE/);
   assert.match(run, /resolveGenerationSpeedConfig/);
   assert.match(run, /resolveThinkingModelName/);
