@@ -301,7 +301,7 @@ HachimoDock 的实现参考、借鉴并集成了以下开源项目，特此致�
     <th>微信好友二维码（群满备用）</th>
   </tr>
   <tr>
-    <td align="center"><img src="assets/group-qrcode.jpg" width="180" alt="HachimoDock 微信交流群二维码" /></td>
+    <td align="center"><img src="assets/group-qrcode.png" width="180" alt="HachimoDock 微信交流群二维码" /></td>
     <td align="center"><img src="assets/wechat-contact-qrcode.png" width="180" alt="ai-maker 微信好友二维码，备注 HachimiDock 后邀请入群" /></td>
   </tr>
 </table>
