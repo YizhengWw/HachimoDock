@@ -107,14 +107,48 @@ test("Ark image editing resolves independently from the selected video provider"
   });
 });
 
-test("Flash default replaces old built-in image config without changing selected video, prompt or key", () => {
+test("saved image model is preserved independently of video, prompt and key", () => {
   const storage = { getItem: () => JSON.stringify({
     apiKey: "preserved-test-key", imageModel: "doubao-seedream-5-0-lite-260128",
     model: "doubao-seedance-2-0-mini-260615", thinkingModel: "doubao-seed-2-1-pro-260915", fastGeneration: true,
   }) };
   const config = loadProviderConfig("volcengine", storage);
-  assert.equal(config.imageModel, "doubao-seedream-5-0-flash-260915");
+  assert.equal(config.imageModel, "doubao-seedream-5-0-lite-260128");
+  assert.equal(loadArkImageConfig(storage).model, "doubao-seedream-5-0-lite-260128");
   assert.equal(config.apiKey, "preserved-test-key");
   assert.equal(config.model, "doubao-seedance-2-0-mini-260615");
   assert.equal(config.thinkingModel, "doubao-seed-2-1-pro-260915");
+});
+
+test("blank image choices use the default; configured endpoints survive browser reload", async () => {
+  let saved;
+  const storage = { getItem: () => saved, setItem: (_key, value) => { saved = value; } };
+  for (const imageModel of [undefined, "", "   "]) {
+    saveProviderConfig("volcengine", { apiKey: "fixture", imageModel }, storage);
+    assert.equal(loadArkImageConfig(storage).model, "doubao-seedream-5-0-flash-260915");
+  }
+  saveProviderConfig("volcengine", { apiKey: "fixture", imageModel: "  ep-chosen-image  " }, storage);
+  assert.equal(loadProviderConfig("volcengine", storage).imageModel, "ep-chosen-image");
+  assert.equal(loadArkImageConfig(storage).model, "ep-chosen-image");
+});
+
+test("native credential storage roundtrips the configured image model", async () => {
+  const previous = globalThis.window;
+  let stored = {};
+  globalThis.window = { __TAURI_INTERNALS__: { invoke: async (command, args) => {
+    if (command === "load_generation_provider_configs") return structuredClone(stored);
+    assert.equal(command, "save_generation_provider_config");
+    stored[args.providerId] = structuredClone(args.config);
+  } } };
+  try {
+    const storage = { getItem: () => null };
+    await initializeProviderConfigs(storage);
+    await saveProviderConfig("volcengine", { apiKey: "fixture", imageModel: "ep-native-image" }, storage);
+    await initializeProviderConfigs(storage);
+    assert.equal(loadArkImageConfig(storage).model, "ep-native-image");
+    assert.equal(loadArkImageConfig(storage).apiKey, "fixture");
+  } finally {
+    if (previous === undefined) delete globalThis.window;
+    else globalThis.window = previous;
+  }
 });

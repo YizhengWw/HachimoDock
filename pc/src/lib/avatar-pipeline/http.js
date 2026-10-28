@@ -1,6 +1,6 @@
 /**
  * [Input] HTTP request descriptors from provider scripts.
- * [Output] desktop-first HTTP bridge (Rust invoke first, Tauri plugin fallback, browser fallback) + retry helpers.
+ * [Output] desktop-first HTTP bridge + retry helpers and actionable errors preserving model-specific request labels.
  * [Pos] lib node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header and the Tauri runtime command list that depends on these helpers.
  */
@@ -245,7 +245,7 @@ export async function readJsonOrThrow(response, label) {
   const text = await response.text();
   if (!response.ok) {
     const trimmed = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-    const error = new Error(`${label} HTTP ${response.status}: ${trimmed}${response.status === 404 && label === "thinking model" ? "；模型不存在或账号无权访问，请在模型下拉框重新选择，不会自动改用其他模型。" : ""}`);
+    const error = new Error(`${label} HTTP ${response.status}: ${trimmed}${response.status === 404 && label.startsWith("thinking model") ? "；模型不存在或账号无权访问，请在模型下拉框重新选择，不会自动改用其他模型。" : ""}`);
     error.status = response.status;
     error.diagnostic = response.generationDiagnostic;
     throw error;

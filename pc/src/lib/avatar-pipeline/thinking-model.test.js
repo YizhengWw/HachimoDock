@@ -1,6 +1,6 @@
 /**
  * [Input] Volcano Ark Responses API thinking-model request builder.
- * [Output] Node regression coverage for requested-family prompts, `/api/v3/responses` Doubao multimodal, and text-only payloads.
+ * [Output] Node regression coverage for requested-family prompts, multimodal/text-only payloads, and model-specific access failures.
  * [Pos] test node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -12,6 +12,23 @@ import {
   buildThinkingModelRequest,
   callThinkingModel,
 } from "./thinking-model.js";
+
+test("analysis access failures retain the actual requested model ID", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return Response.json({ error: { code: "ModelNotOpen", message: "model is not activated" } }, { status: 404 });
+  };
+  try {
+    await assert.rejects(callThinkingModel({ thinking: { apiKey: "fixture-only", model: "ep-analysis-fixture" }, image: {} }), error => {
+      assert.match(error.message, /thinking model \(ep-analysis-fixture\) HTTP 404/);
+      assert.equal(error.status, 404);
+      return true;
+    });
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test('prompt JSON is constrained, persisted before parse and replayed locally without billing',async()=>{
   assert.equal(buildThinkingModelRequest({thinking:{},image:{}}).body.text.format.type,'json_object');
