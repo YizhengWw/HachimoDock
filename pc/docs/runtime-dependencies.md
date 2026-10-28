@@ -2,7 +2,7 @@
 
 Node.js 使用对应系统/架构的官方可重定位发行包，通过 `PET_MANAGER_NODE_BIN` 指定可执行文件。不要使用依赖 Homebrew 动态库的 Node 构建打包分发。
 
-FFmpeg 为独立可执行文件。可从HachimoDock **v0.1.52** 安装包取得配套文件（在干净环境解包，先核对 Release 的 SHA-256）。macOS DMG 中位于 `Pet Manager.app/Contents/Resources/tools/`；Windows 安装目录位于 `tools/`。源码压缩包也作为该 Release 独立附件提供。不需要安装或启动客户端来构建源码。
+FFmpeg 为独立可执行文件。可从 HachimiDock **v0.1.167** 正常公开版安装包取得配套文件（在干净环境解包，先核对 Release 的 SHA-256）。macOS DMG 中位于 `HachimiDock.app/Contents/Resources/tools/`；Windows 安装目录位于 `tools/`。源码压缩包也作为该 Release 独立附件提供。不需要安装或启动客户端来构建源码。
 
 将下列环境变量指向对应系统与架构的文件：
 

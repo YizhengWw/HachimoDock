@@ -213,19 +213,17 @@ fn write_file(path: &Path, settings: &VoiceChatSettings) -> Result<(), String> {
     crate::secure_config::write(path,"voice-chat",raw.as_bytes())
 }
 
-/// Stored values first, then internal-build defaults, then public defaults.
+/// Stored user credentials and public model defaults; no embedded credentials.
 pub fn load() -> Result<(VoiceChatSettings, &'static str), String> {
     let stored = read_file(&settings_path()?)?.unwrap_or_default();
-    let mut source = "local";
     let mut settings = stored;
     remember_active_key(&mut settings);
     if settings.llm_api_key.trim().is_empty() {
         settings.llm_api_key = settings.llm_api_keys.get(&credential_scope(&settings)).cloned().unwrap_or_default();
     }
-    if apply_internal_ark_default(&mut settings, crate::service_credentials::ark_key()) { source = "internal-build"; }
     apply_llm_defaults(&mut settings);
     settings.tts_resource_id = TTS_DEFAULT_RESOURCE_ID.to_string();
-    Ok((settings, source))
+    Ok((settings, "local"))
 }
 
 fn apply_llm_defaults(settings: &mut VoiceChatSettings) {
@@ -249,17 +247,6 @@ fn apply_llm_defaults(settings: &mut VoiceChatSettings) {
             settings.llm_model = LLM_DEFAULT_MODEL.to_string();
         }
     }
-}
-
-fn apply_internal_ark_default(settings: &mut VoiceChatSettings, key: Option<&str>) -> bool {
-    let Some(key) = key.filter(|key| !key.trim().is_empty()) else { return false; };
-    if !settings.llm_api_key.trim().is_empty() { return false; }
-    if settings.llm_provider.trim().is_empty() { settings.llm_provider = "doubao".into(); }
-    // Never send a built-in Ark credential to DeepSeek, MiMo or a custom endpoint.
-    if settings.llm_provider.trim().eq_ignore_ascii_case("doubao") {
-        settings.llm_api_key = key.into();
-        true
-    } else { false }
 }
 
 /// ASR and TTS resolve the same key after legacy migration; no hidden TTS override.
@@ -311,7 +298,7 @@ pub fn status() -> Result<VoiceChatSettingsStatus, String> {
         llm_base_url: settings.llm_base_url.clone(),
         llm_model: settings.llm_model.clone(),
         llm_api_key_masked: mask_secret(&settings.llm_api_key),
-        llm_api_key_masks: credential_masks(&settings, crate::service_credentials::ark_key()),
+        llm_api_key_masks: credential_masks(&settings),
         llm_custom_base_url: settings.llm_custom_base_url.clone(),
         tts_api_key_masked: mask_secret(&tts_key),
         tts_resource_id: settings.tts_resource_id.clone(),
@@ -336,14 +323,11 @@ fn remember_active_key(settings: &mut VoiceChatSettings) {
     }
 }
 
-fn credential_masks(settings: &VoiceChatSettings, internal_ark: Option<&str>) -> BTreeMap<String, String> {
+fn credential_masks(settings: &VoiceChatSettings) -> BTreeMap<String, String> {
     let mut masks: BTreeMap<_, _> = settings.llm_api_keys.iter().filter(|(_, key)| !key.trim().is_empty())
         .map(|(scope, key)| (scope.clone(), mask_secret(key))).collect();
     if !settings.llm_api_key.trim().is_empty() {
         masks.insert(credential_scope(settings), mask_secret(&settings.llm_api_key));
-    }
-    if let Some(key) = internal_ark.filter(|key| !key.trim().is_empty()) {
-        masks.entry("doubao".into()).or_insert_with(|| mask_secret(key));
     }
     masks
 }
@@ -638,14 +622,11 @@ mod tests {
     }
 
     #[test]
-    fn switch_to_doubao_uses_only_its_internal_default_and_never_carries_it_back() {
+    fn switching_provider_never_borrows_a_key() {
         let previous = VoiceChatSettings {llm_provider:"deepseek".into(),llm_api_key:"deepseek-test-key".into(),..Default::default()};
-        let mut next = merge_settings(previous,VoiceChatSettingsInput {llm_provider:Some("doubao".into()),..Default::default()});
+        let next = merge_settings(previous,VoiceChatSettingsInput {llm_provider:Some("doubao".into()),..Default::default()});
         assert!(next.llm_api_key.is_empty());
-        assert!(!apply_internal_ark_default(&mut next,None));
-        assert!(apply_internal_ark_default(&mut next,Some("ark-test-key")));
-        let mut back = merge_settings(next,VoiceChatSettingsInput {llm_provider:Some("deepseek".into()),..Default::default()});
-        assert!(!apply_internal_ark_default(&mut back,Some("ark-test-key")));
+        let back = merge_settings(next,VoiceChatSettingsInput {llm_provider:Some("deepseek".into()),..Default::default()});
         assert_eq!(back.llm_api_key,"deepseek-test-key");
     }
 
@@ -665,7 +646,7 @@ mod tests {
             settings = merge_settings(settings,VoiceChatSettingsInput {llm_provider:Some(provider.into()),
                 llm_base_url:Some(endpoint.into()),..Default::default()});
             assert_eq!(settings.llm_api_key,key);
-            let masks = credential_masks(&settings,None);
+            let masks = credential_masks(&settings);
             assert_eq!(masks.len(),5);
             for (_, _, raw) in cases { assert!(!serde_json::to_string(&masks).unwrap().contains(raw)); }
             write_file(&path,&settings).unwrap(); settings=read_file(&path).unwrap().unwrap();
@@ -681,26 +662,20 @@ mod tests {
         remember_active_key(&mut legacy);
         assert_eq!(legacy.llm_api_keys.len(),1);
         assert_eq!(legacy.llm_api_keys.get("mimo").map(String::as_str),Some("legacy-mimo-key"));
-        let masks = credential_masks(&legacy,Some("internal-ark-key"));
-        assert!(masks.contains_key("doubao")); assert!(!masks.contains_key("deepseek"));
+        let masks = credential_masks(&legacy);
+        assert!(masks.contains_key("mimo")); assert!(!masks.contains_key("doubao")); assert!(!masks.contains_key("deepseek"));
     }
 
     #[test]
-    fn bundled_ark_key_only_defaults_to_official_doubao_and_never_overwrites_user_key() {
-        let mut fresh = VoiceChatSettings::default();
-        assert!(apply_internal_ark_default(&mut fresh, Some("test-internal-key")));
-        assert_eq!(fresh.llm_provider, "doubao");
-        for provider in ["deepseek", "mimo", "custom", "unknown"] {
-            let mut other = VoiceChatSettings { llm_provider: provider.into(), ..Default::default() };
-            assert!(!apply_internal_ark_default(&mut other, Some("test-internal-key")));
-            assert!(other.llm_api_key.is_empty());
+    fn public_model_defaults_never_create_or_overwrite_user_keys() {
+        for provider in ["doubao", "deepseek", "mimo", "custom", "unknown"] {
+            let mut fresh = VoiceChatSettings { llm_provider:provider.into(), ..Default::default() };
+            apply_llm_defaults(&mut fresh);
+            assert!(fresh.llm_api_key.is_empty());
+            fresh.llm_api_key="fixture-user-key".into();
+            apply_llm_defaults(&mut fresh);
+            assert_eq!(fresh.llm_api_key,"fixture-user-key");
         }
-        let mut saved = VoiceChatSettings { llm_provider: "doubao".into(), llm_api_key:"user-test-key".into(), ..Default::default() };
-        assert!(!apply_internal_ark_default(&mut saved, Some("test-internal-key")));
-        assert_eq!(saved.llm_api_key, "user-test-key");
-        let mut public = VoiceChatSettings::default();
-        assert!(!apply_internal_ark_default(&mut public, None));
-        assert!(public.llm_api_key.is_empty());
     }
 
     #[test]

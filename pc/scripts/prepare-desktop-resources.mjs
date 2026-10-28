@@ -379,11 +379,11 @@ function validateBundledP4Firmware(target, firmwareName, expectedMin, expectedMa
   }
   const buildId = readFirmwareBuildId(firmware, version);
   const cleanBuildPattern = new RegExp(`^${version.replaceAll(".", "\\.")}\\+[0-9a-f]{12}$`);
-  // Explicit private-development packaging only. Keep the truthful -dirty
+  // Explicit development packaging only. Keep the truthful -dirty
   // identity; ordinary/public builds must still use clean release firmware.
-  const internalDevelopment = process.argv.includes("--internal-development-firmware")
+  const developmentFirmware = process.argv.includes("--development-firmware")
     && new RegExp(`^${version.replaceAll(".", "\\.")}\\+[0-9a-f]{12}-dirty$`).test(buildId);
-  if (!cleanBuildPattern.test(buildId) && !internalDevelopment) {
+  if (!cleanBuildPattern.test(buildId) && !developmentFirmware) {
     throw new Error(
       `PC 内置固件必须来自干净的 12 位 Git 提交，当前 buildId：${buildId || "(missing)"}`,
     );

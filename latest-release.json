@@ -8,9 +8,9 @@
   "sourceRef": "refs/heads/main",
   "sourcePublished": true,
   "sourcePublication": {
-    "date": "2026-10-27",
+    "date": "2026-10-28",
     "edition": "normal-public-no-keys",
-    "note": "Sanitized public functionality export. Private build options, deployment material and local acceptance records are excluded. Existing release assets and tag are unchanged; this source update does not claim to fix the Windows COM-port issue."
+    "note": "Public source and documentation cleanup. Public refs were rewritten; existing Release installer and firmware attachments remain unchanged. Re-clone instead of merging old history. This update does not claim to fix the Windows COM-port issue."
   },
   "embeddedServiceKeys": false,
   "embeddedInternalCredentials": false,

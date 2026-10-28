@@ -1,6 +1,6 @@
 /**
  * [Input] A cargo-xwin-built HachimiDock x64 executable and prepared firmware, Node, audited LGPL FFmpeg, notice/source, bridge, and WebView resource sources.
- * [Output] A current-user NSIS installer (explicit INTERNAL filename when requested) with exact validated Windows P4 firmware, install-relative Node and LGPL FFmpeg resources, complete corresponding source/notices, and embedded WebView2 bootstrapper.
+ * [Output] A current-user NSIS installer (explicit DEVELOPMENT filename when requested) with exact validated Windows P4 firmware, install-relative Node and LGPL FFmpeg resources, complete corresponding source/notices, and embedded WebView2 bootstrapper.
  * [Pos] Reproducible macOS-to-Windows installer bundler used after `build:win:portable`.
  * [Sync] If this file changes, update `scripts/.folder.md` and `docs/runtime-dependencies.md`.
  */
@@ -46,7 +46,7 @@ const appExeSource = resolve(
 );
 const appExeName = "HachimiDock.exe";
 const flavor = process.env.PET_MANAGER_WINDOWS_INSTALLER_FLAVOR || "";
-if (flavor && flavor !== "INTERNAL") throw new Error("Unsupported Windows installer flavor");
+if (flavor && flavor !== "DEVELOPMENT") throw new Error("Unsupported Windows installer flavor");
 const installerName = `HachimiDock_${version}${flavor ? `_${flavor}` : ""}_x64-setup.exe`;
 const installerPath = join(bundleRoot, installerName);
 const webviewBootstrapperUrl =

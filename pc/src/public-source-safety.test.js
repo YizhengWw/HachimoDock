@@ -4,6 +4,17 @@ import assert from 'node:assert/strict';
 import {readFileSync,existsSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
 const read=p=>readFileSync(new URL(p,import.meta.url),'utf8');
+test('public configuration has no private-edition fallback or explanatory UI',()=>{
+  const source=read('../src-tauri/src/voice_chat_settings.rs')+read('../src-tauri/src/volcengine_asr.rs');
+  assert.doesNotMatch(source,/apply_internal_ark_default|runtime_config_from_internal_build|embedded-internal-build/);
+  assert.doesNotMatch(read('./LlmNetworkSettings.jsx'),/此内部版已内置/);
+  assert.doesNotMatch(read('../src-tauri/src/service_credentials.rs'),/pub fn (?:ark_key|speech_key|apply_generation_default)/);
+});
+test('publication gate checks removed media and private delivery notes',()=>{
+  const source=read('../scripts/check-source-safety.mjs');
+  assert.match(source,/BLOCKED_PUBLICATION_MEDIA/);
+  assert.match(source,/private delivery or local acceptance notes/);
+});
 test('public checkout resources do not depend on LFS quota',()=>{
   assert.doesNotMatch(read('../../.gitattributes'),/filter=lfs/);
   const image=readFileSync(new URL('../src-tauri/firmware/esp32-p4/firmware.bin',import.meta.url));

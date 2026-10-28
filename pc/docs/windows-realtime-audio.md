@@ -1,10 +1,16 @@
-# Windows 实时对话播放修复（0.1.78）
+# Windows 实时音频与诊断
 
-## 传输边界
+Windows 串口采用原生重叠 I/O，并复用 serialport 的配置边界。读写操作分别持有完成事件；取消只针对所属请求，待真正结束后再释放缓冲区，不把句柄继承给子进程。
 
-- Windows 端用 `FILE_FLAG_OVERLAPPED` 打开串口，每个读写克隆各自持有完成事件；与同步串口句柄不同，待完成的读操作不要求写操作排在其后。配置接口继续复用 serialport。
-- COM 口、完成事件均不继承给子进程；取消只针对当前请求，并等待真正完成后才释放缓冲区和 OVERLAPPED。
-- Windows 的 `audio/play_chunk` 恢复为 64 字节/400 μs 间隔；不以提高单次突发量换取吞吐。控制帧、素材/固件传输节奏和 Mac 分片逻辑不变。
-- 实时音频仍不调用 FlushFileBuffers，不暂停接收麦克风，不禁用 AEC、VAD 或打断。
-- `playback_tx` 日志记录前三帧、每十帧及所有 ≥80 ms 的写入耗时、字节数、序号和成功状态；`protocol_rejected` 记录白名单指令和拒绝码。失败停止会话且不累计为成功。只记录元数据，不记录声音、对话正文和 Key。
-- 沿用 v1/v3 的 0.7.63-p4 固件，无需为该修复刷机。
+音频发送保留有界分片，不用同步排空阻塞收音，也不禁用设备 AEC、VAD 或插话处理。配置、传输及设备状态分别记录错误，不能由一条通用报错直接推断为网络或驱动原因。
+
+## 排查
+
+1. 使用匹配的公开客户端和设备固件，不先清空用户数据。
+2. 区分串口打开/初始化失败、控制协议错误、音频供流不足和识别服务错误。
+3. 听取完整开场白和连续回复，检查播放中插话、停声、后续识别及退出后的状态。
+4. 提供脱敏日志中的阶段、错误码、写入耗时和设备缓冲状态；不要公开声音、对话正文、Key 或本机用户目录。
+
+macOS 构建、交叉编译或主机回归不能代替 Windows 上实际驱动及硬件组合的验证。部分电脑上的 COM 口问题仍需按实际证据排查，不在此声称已经解决。
+
+Windows I/O 生命周期参考：[GetOverlappedResult](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getoverlappedresult)、[CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex)。

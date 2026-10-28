@@ -28,7 +28,7 @@ npm run build:web
 
 ## 完整客户端依赖 / Native runtime dependencies
 
-应用打包需要目标平台的可重定位 Node.js 和 FFmpeg 8.1.2、对应许可证与源码。默认会校验 FFmpeg 的官方发布构建哈希。准备方式见 [runtime-dependencies.md](docs/runtime-dependencies.md)。
+应用打包需要目标平台的可重定位 Node.js 和 FFmpeg 8.1.2、对应许可证与源码。默认会校验准备脚本记录的已审核 FFmpeg 构建哈希。准备方式见 [runtime-dependencies.md](docs/runtime-dependencies.md)。
 
 ```sh
 npm run prepare:desktop

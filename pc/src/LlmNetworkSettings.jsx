@@ -1,4 +1,4 @@
-/** Per-computer LLM networking; internal CA status never exposes certificate contents. */
+/** Per-computer LLM networking; imported CA status never exposes certificate contents. */
 import React, { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -69,7 +69,6 @@ export default function LlmNetworkSettings() {
           <span className="muted small">{caFile ? `待导入：${caFile.split(/[\\/]/).pop()}` : clearCertificate ? "保存后移除" : settings.certificateConfigured ? "已导入企业 CA" : "使用系统信任证书"}</span>
         </div>
         <p className="muted small">仅导入 IT 提供并确认可信的 PEM 公共证书，不能导入私钥。证书仅用于此应用，不修改系统信任设置，也不关闭 TLS 校验。</p>
-        {settings.bundledCertificateConfigured && <p className="muted small">此内部版已内置企业 CA 公共证书，无需重复导入。移除手动导入的证书不会移除内置证书。</p>}
         <div className="llm-network-settings__actions">
           <button type="button" className="btn-primary btn-sm" disabled={busy} onClick={save}>保存网络设置</button>
           <button type="button" className="btn-ghost btn-sm" disabled={busy || dirty} onClick={test}>测试已保存配置</button>

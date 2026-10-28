@@ -254,20 +254,12 @@ pub fn settings_status() -> Result<DeviceAsrSettingsStatus, String> {
         }
     }
 
-    match runtime_config_from_internal_build() {
-        Some(config) => Ok(public_status(
-            true,
-            config.resource_id,
-            "embedded-internal-build",
-            "火山引擎云端 ASR 已由内部版本预配置",
-        )),
-        None => Ok(public_status(
-            false,
-            DEFAULT_RESOURCE_ID.to_string(),
-            "none",
-            "请配置火山引擎语音识别 API Key",
-        )),
-    }
+    Ok(public_status(
+        false,
+        DEFAULT_RESOURCE_ID.to_string(),
+        "none",
+        "请配置火山引擎语音识别 API Key",
+    ))
 }
 
 pub fn settings_status_for_automatic_restore() -> Result<DeviceAsrSettingsStatus, String> {
@@ -283,7 +275,6 @@ pub fn save_settings(input: DeviceAsrSettingsInput) -> Result<DeviceAsrSettingsS
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or_else(|| existing.as_ref().map(|value| value.api_key.clone()))
-        .or_else(|| runtime_config_from_internal_build().map(|value| value.api_key))
         .ok_or_else(|| "请填写火山引擎语音识别 API Key".to_string())?;
     let resource_id = input
         .resource_id
@@ -412,22 +403,7 @@ fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
     })
 }
 
-fn runtime_config_from_internal_build() -> Option<RuntimeAsrConfig> {
-    runtime_config_from_embedded_key(crate::service_credentials::speech_key())
-}
-
-fn runtime_config_from_embedded_key(api_key: Option<&str>) -> Option<RuntimeAsrConfig> {
-    let api_key = api_key?.trim();
-    if api_key.is_empty() {
-        return None;
-    }
-    Some(RuntimeAsrConfig {
-        api_key: api_key.to_string(),
-        resource_id: DEFAULT_RESOURCE_ID.to_string(),
-    })
-}
-
-/// The Doubao speech API key the ASR module resolved (stored, env, or internal build).
+/// The Doubao speech API key the ASR module resolved (stored user configuration or runtime environment).
 /// Realtime chat reuses it for Seed TTS when no separate TTS key is configured.
 pub fn stored_api_key() -> Option<String> {
     load_runtime_config().ok().map(|config| config.api_key).filter(|key| !key.trim().is_empty())
@@ -446,7 +422,7 @@ fn load_runtime_config() -> Result<RuntimeAsrConfig, String> {
             });
         }
     }
-    runtime_config_from_internal_build().ok_or_else(|| "未配置火山引擎语音识别 API Key".to_string())
+    Err("未配置火山引擎语音识别 API Key".to_string())
 }
 
 #[cfg(target_os = "macos")]
@@ -1114,12 +1090,11 @@ mod tests {
     }
 
     #[test]
-    fn embedded_asr_fallback_rejects_blank_values_and_uses_the_default_resource() {
-        assert!(runtime_config_from_embedded_key(None).is_none());
-        assert!(runtime_config_from_embedded_key(Some("  ")).is_none());
-        let config = runtime_config_from_embedded_key(Some("internal-test-key")).unwrap();
-        assert_eq!(config.api_key, "internal-test-key");
-        assert_eq!(config.resource_id, DEFAULT_RESOURCE_ID);
+    fn unconfigured_asr_status_requests_a_user_key() {
+        let status = public_status(false, DEFAULT_RESOURCE_ID.to_string(), "none", "请配置火山引擎语音识别 API Key");
+        assert!(!status.configured);
+        assert_eq!(status.credential_source, "none");
+        assert_eq!(status.resource_id, DEFAULT_RESOURCE_ID);
     }
 
     #[cfg(target_os = "macos")]

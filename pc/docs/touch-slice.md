@@ -11,7 +11,7 @@
 - 退出跟随设备全局设置，不占用全局退出键。实时对话、资源传输和离开游戏暂停本局并停止音效；回来后按暂停键继续或重开。
 - 最高分仅在当前组件运行期内保留，不保证重启/切换组件后恢复。
 
-组件包在 `generated-components/fresh-fruit-slice/`。先按 PetUI 工作流发布，再在组件中心刷新并同步。必须使用包含此次改动的客户端和固件；旧客户端不认识 `p4-touch-slice-v1`，不能只更新组件包。
+组件包在 `builtin-clawpkgs/fresh-fruit-slice/`。先按 PetUI 工作流发布，再在组件中心刷新并同步。必须使用包含此次改动的客户端和固件；旧客户端不认识 `p4-touch-slice-v1`，不能只更新组件包。
 
 ## 实现
 
@@ -20,3 +20,7 @@
 `scene.engine=p4-touch-slice-v1` 的精确字段、四个 PNG 的预算和输入语义见 [PetUI 契约](../skills/petui/references/touch-slice.md)。1.1.0 声明 `scene.revision=2`，必须有 `widgetSliceRevision>=2`；旧固件明确拒绝，不静默降级成单模式。这是一种受控玩法，不能据此宣称已支持任意触屏游戏脚本。
 
 WebView CSP 只新增 `wasm-unsafe-eval` 以编译随应用分发的可信核心，继续禁止 JavaScript eval、远程/内联/blob 脚本。组件校验不接受 WASM 文件。修改核心后从 pc 目录运行 `node scripts/build-fruit-runtime.mjs`（需要支持 wasm32 的 clang 和 wasm-ld），同时更新预览与插件的受控二进制。
+
+## 验证
+
+主机回归覆盖碰撞、连击、暂停、取消、重开、资源预算与能力门禁。真实触屏方向、手感及各硬件组合需分别验证。安装工具会独占串口，使用前应断开客户端；不要在普通 CI 中自动操作设备。
