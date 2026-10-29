@@ -1,16 +1,17 @@
 {
   "schemaVersion": 2,
   "product": "HachimiDock",
-  "desktopVersion": "0.1.167",
-  "firmwareVersion": "0.7.103-p4-r1",
-  "releaseTag": "v0.1.167",
-  "releaseUrl": "https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.167",
-  "sourceRef": "refs/heads/main",
+  "desktopVersion": "0.1.168",
+  "firmwareVersion": "0.7.103-p4-r2",
+  "releaseTag": "v0.1.168",
+  "releaseUrl": "https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.168",
+  "sourceRef": "refs/tags/v0.1.168",
+  "sourceBuildCommit": "b0381bf0a57b73e5e99842933a1a3def346498a0",
   "sourcePublished": true,
   "sourcePublication": {
-    "date": "2026-10-28",
+    "date": "2026-10-29",
     "edition": "normal-public-no-keys",
-    "note": "Public source and documentation cleanup. Public refs were rewritten; existing Release installer and firmware attachments remain unchanged. Re-clone instead of merging old history. This update does not claim to fix the Windows COM-port issue."
+    "note": "Component withdrawal maintenance release. Desktop and device menus exclude withdrawn cached packages without deleting user data. Unaccepted framework changes are not included."
   },
   "embeddedServiceKeys": false,
   "embeddedInternalCredentials": false,
@@ -24,17 +25,17 @@
   "firmware": [
     {
       "file": "firmware.bin",
-      "version": "0.7.103-p4-r1",
-      "identity": "0.7.103-p4-r1+b258287dc361",
-      "sha256": "1f1498c6349e811b824ea547ae62d0695bc5a06ba78bf23bf56117b9417da80a",
+      "version": "0.7.103-p4-r2",
+      "identity": "0.7.103-p4-r2+555572a5f2fe",
+      "sha256": "c1a2e152b50cf646a40f9414df601336c42d917ba4995c3f0671824e15092acb",
       "minChipRevision": 1,
       "maxChipRevision": 199
     },
     {
       "file": "firmware-v3.bin",
-      "version": "0.7.103-p4-r1",
-      "identity": "0.7.103-p4-r1+50a16b436f15",
-      "sha256": "1deaf2605cd8409c1ffb28d2d63176ab260e349f13d50a5e88be8f147365620c",
+      "version": "0.7.103-p4-r2",
+      "identity": "0.7.103-p4-r2+555572a5f2fe",
+      "sha256": "9d701b28d9203ba42132e6d0816bdc015c7108e94649548490335275522df819",
       "minChipRevision": 300,
       "maxChipRevision": 399
     }
@@ -42,28 +43,26 @@
   "releaseValidation": {
     "tests": {
       "frontend": {
-        "passed": 847,
+        "passed": 856,
         "skipped": 1
       },
       "bridge": {
         "passed": 215,
         "skipped": 0
       },
-      "native": {
-        "passed": 728,
-        "ignored": 84
-      },
       "firmware": {
-        "passed": 222,
+        "passed": 225,
         "skipped": 1,
         "subtests": 11
+      },
+      "communityWeb": {
+        "passed": 4,
+        "skipped": 0
       }
     },
     "installerPayloadsVerified": true,
     "embeddedFrontendDecompressedAndScanned": true,
-    "priorSpecialKeyEnvelopesAbsent": true,
-    "knownPrivatePhotosAndReferencesScanned": true,
-    "componentCount": 29,
+    "componentCount": 28,
     "factorySegmentsAndChecksumsVerified": true,
     "physicalDeviceValidationThisPackagingRun": false,
     "windowsRuntimeValidationThisPackagingRun": false,
@@ -73,28 +72,28 @@
   },
   "artifacts": [
     {
-      "file": "HachimiDock_0.1.167_macOS-arm64.dmg",
+      "file": "HachimiDock_0.1.168_macOS-arm64.dmg",
       "role": "macos",
-      "bytes": 128622542,
-      "sha256": "845adc85834e9e23cbd6790e3e511598db47ad80e683d7eb8ef9dd3f10ac00e5"
+      "bytes": 128398705,
+      "sha256": "61faa46f49990b8c0b36374bf0cc5b797b2e36ec0b80c22c90ef8a7a541d1d88"
     },
     {
-      "file": "HachimiDock_0.1.167_Windows-x64-setup.exe",
+      "file": "HachimiDock_0.1.168_Windows-x64-setup.exe",
       "role": "windows",
-      "bytes": 113964231,
-      "sha256": "5a79d40e3212ca74ba5844e9a06f1dc0f3febb9645ed62faa23fc3ba0d0a298e"
+      "bytes": 113759140,
+      "sha256": "8d86fde38c0db6192606ea2bd3e0cfd1d3210225342262fff4dd24f4e79f5a22"
     },
     {
-      "file": "HachimoDock-P4-v1_0.7.103-p4-r1_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v1_0.7.103-p4-r2_Factory-Flasher.zip",
       "role": "factory-v1",
-      "bytes": 25896646,
-      "sha256": "6064288258cf61ae06e9524c65fe35db30b049e9287babe5cde0730554c0d3ac"
+      "bytes": 25747936,
+      "sha256": "faf6e98e25ae24fc559364b426f9330b25e3562c47da583352af17c7e88b78a9"
     },
     {
-      "file": "HachimoDock-P4-v3_0.7.103-p4-r1_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v3_0.7.103-p4-r2_Factory-Flasher.zip",
       "role": "factory-v3",
-      "bytes": 25915534,
-      "sha256": "1034a7f5ea8c711b520c13e973b5a2f7b8d78680fdaaf8bbdaad1eaa67b0d9a5"
+      "bytes": 25763611,
+      "sha256": "aef9d065612459ba123d40692555824b3ee39fffb420253ca221702214696678"
     },
     {
       "file": "FFmpeg-8.1.2-source.tar.xz",
@@ -135,8 +134,8 @@
     {
       "file": "RELEASE-NOTES.txt",
       "role": "release-notes",
-      "bytes": 3030,
-      "sha256": "2012b8e8a3f5e2442fe6df9b7ff974cb3a4f66ac81da73ba763b06869daf37df"
+      "bytes": 2768,
+      "sha256": "f99bc6d783c7bbcae69463f5c3ee02c89acc5434b750665f95245858e05f035b"
     }
   ]
 }
