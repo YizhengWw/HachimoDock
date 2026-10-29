@@ -21,8 +21,8 @@ HARNESS = r'''
 typedef struct {char widget_id[64],title[128];bool active;} pet_p4_miniapp_catalog_entry_t;
 static size_t count,selected,reads;
 static bool preview;
-static const char *ids[]={"city-radio","cloud-hop","stock-watchlist","wooden-fish"};
-static const char *titles[]={"城市电台","云端跳一跳","自选股行情","静心木鱼"};
+static const char *ids[]={"cloud-hop","stock-watchlist","wooden-fish","daily-news"};
+static const char *titles[]={"云端跳一跳","自选股行情","静心木鱼","每日新鲜事"};
 static size_t pet_p4_miniapp_catalog_count(void){return count;}
 static size_t pet_p4_miniapp_catalog_selected(void){return selected;}
 static bool pet_p4_miniapp_catalog_get(size_t i,pet_p4_miniapp_catalog_entry_t *out){

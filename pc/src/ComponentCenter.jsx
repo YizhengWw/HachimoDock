@@ -150,7 +150,7 @@ function gameInstallBlockedReason(component, usb) {
     return "这个组件的歌词模式需要更新固件，请先升级设备固件。";
   }
   if (component?.pcExtension && usb?.capabilities?.widgetMediaSurface !== "p4-media-surface-v1") {
-    return "当前固件不支持城市电台，请先升级固件";
+    return "当前固件不支持此媒体组件，请先升级固件";
   }
   if ((component?.mediaSource || component?.id === "music-player") && usb?.capabilities?.widgetMedia !== "p4-media-v1") {
     return "这个组件需要音乐播放能力，请先升级设备固件。";

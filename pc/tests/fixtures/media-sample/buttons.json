@@ -1,0 +1,4 @@
+[
+  {"action":"media.toggle","control":"SW1","event":"button.sw1.short_press","label":"Play or stop"},
+  {"action":"media.queue","control":"SW2","event":"button.sw2.short_press","label":"List"}
+]

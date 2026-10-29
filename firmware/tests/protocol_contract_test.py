@@ -713,7 +713,7 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     ]
     assert bundle["version"] == 1
     builtin_ids = json.loads(read("factory-config.json"))["components"]["ids"]
-    assert len(builtin_ids) == 29 and "music-player" not in builtin_ids
+    assert len(builtin_ids) == 28 and "music-player" not in builtin_ids
     assert builtin_ids[-3:] == ["decision-capsule", "answer-book", "hope-train"]
     assert [item["id"] for item in bundle["components"]] == builtin_ids
     for item in bundle["components"]:

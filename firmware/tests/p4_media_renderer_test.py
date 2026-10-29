@@ -25,7 +25,7 @@ def test_media_snapshots_are_renderer_owned_not_nested_stack_copies():
     assert 'pet_p4_miniapp_media_surface_animated()' in (ROOT/'firmware/main/pet_p4_main.c').read_text()
 
 
-def test_actual_radio_renderer_empty_full_queue_images_rotation_and_bad_resource(tmp_path):
+def test_actual_media_renderer_empty_full_queue_images_rotation_and_bad_resource(tmp_path):
     source = (ROOT / 'firmware/main/pet_p4_renderer.c').read_text()
     renderer = 'static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;' + source.split(
         'static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;', 1
@@ -56,7 +56,7 @@ static uint16_t *g_jpeg_output;
 static bool decode_jpeg_frame_hardware(const void*p,size_t n,int*w,int*h,int*s,esp_err_t*e){assert(!"unexpected JPEG in palette rotation test");return false;}
 static bool decode_jpeg_frame_tjpgd(const void*p,size_t n,int*w,int*h,JRESULT*e){assert(!"unexpected JPEG in palette rotation test");return false;}
 bool pet_p4_miniapp_media_config(char source[48],pet_surface_t *surface){
-  strcpy(source,"pc.city-radio");*surface=fixture;return true;
+  strcpy(source,"pc.media-sample");*surface=fixture;return true;
 }
 bool pet_p4_miniapp_get_surface_images(pet_p4_miniapp_sprite_pack_t *out,uint32_t *seen){
   if(*seen==revision)return false;*seen=revision;*out=packed;return true;
@@ -114,7 +114,7 @@ int main(int argc,char **argv){
   for(int layout=1;layout<argc;layout++){
     load_fixture(argv[layout]);
     for(int count=0;count<=20;count++)for(int page=0;page<=1;page++){
-      memset(&m,0,sizeof(m));strcpy(m.source,"pc.city-radio");m.count=count;m.page=page;m.volume=50;
+      memset(&m,0,sizeof(m));strcpy(m.source,"pc.media-sample");m.count=count;m.page=page;m.volume=50;
       for(int i=0;i<count;i++)snprintf(m.queue[i],sizeof(m.queue[i]),"Radio %d",i);
       for(int select=0;select<(count?count:1);select++){
         m.selected=select;assert(render_package_media(1000,&m));
@@ -171,12 +171,12 @@ int main(int argc,char **argv){
     subprocess.run(['cc', '-std=c11', '-fsanitize=address,undefined', '-g', '-I', str(tmp_path),
                     '-I', str(ROOT/'firmware/main'), '-I', str(cjson), str(code),
                     str(ROOT/'firmware/main/pet_p4_surface.c'), str(cjson/'cJSON.c'), '-lm', '-o', str(binary)], check=True)
-    new = json.loads((ROOT/'pc/builtin-clawpkgs/city-radio/runtime/widget.json').read_text())['surface']
+    new = json.loads((ROOT/'pc/tests/fixtures/media-sample/runtime/widget.json').read_text())['surface']
     old = {'background':65535,'elements':[
         {'type':'text','x':24,'y':24,'w':500,'h':64,'color':1,'scale':2,'bind':'title'},
         {'type':'list','x':24,'y':100,'w':590,'h':288,'color':1,'page':1},
         {'type':'transport','x':280,'y':400,'w':60,'h':60,'color':1,'page':0}]}
     paths = []
-    for name, layout in [('legacy',old),('vinyl',new)]:
+    for name, layout in [('legacy',old),('images',new)]:
         file = tmp_path / f'{name}.json';file.write_text(json.dumps(layout));paths.append(str(file))
     subprocess.run([str(binary), *paths], check=True)

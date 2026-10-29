@@ -44,12 +44,12 @@ test("release hides builtin and already-installed music without deleting records
 
 test("PC and firmware share the curated default component order", () => {
   const factory = JSON.parse(readFileSync(new URL("../../../firmware/factory-config.json", import.meta.url)));
-  const firstTen=['city-radio','cloud-hop','stock-watchlist','wooden-fish','daily-news','book-pocket','block-combo','tomato-clock','fresh-fruit-slice','hachimi-sounds','snake-turn'];
-  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(0,11),firstTen);
+  const firstTen=['cloud-hop','stock-watchlist','wooden-fish','daily-news','book-pocket','block-combo','tomato-clock','fresh-fruit-slice','hachimi-sounds','snake-turn'];
+  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(0,10),firstTen);
   assert.deepEqual(factory.components.ids,DEFAULT_COMPONENT_ORDER);
-  assert.equal(new Set(DEFAULT_COMPONENT_ORDER).size,29);
+  assert.equal(new Set(DEFAULT_COMPONENT_ORDER).size,28);
   assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(-3), ['decision-capsule','answer-book','hope-train']);
-  assert.equal(factory.components.defaultActiveId,'city-radio');
+  assert.equal(factory.components.defaultActiveId,'cloud-hop');
   assert.ok(!factory.components.ids.includes('music-player'));
   const items=[{id:'custom-b'},...firstTen.toReversed().map(id=>({id})),{id:'custom-a'}];
   const snapshot=[...items];
@@ -72,7 +72,7 @@ test("component library sorts mixed records by creation time newest first", () =
 });
 
 test("factory copies keep curated order after loading; actual user revisions stay recent",()=>{
-  const builtins=[{id:"city-radio",version:"1.0"},{id:"cloud-hop",version:"1.0"},{id:"wooden-fish",version:"1.0"}];
+  const builtins=[{id:"stock-watchlist",version:"1.0"},{id:"cloud-hop",version:"1.0"},{id:"wooden-fish",version:"1.0"}];
   const locals=[{...builtins[2],isBundledCopy:true},{...builtins[0],isBundledCopy:true},{...builtins[1],isBundledCopy:true}];
   assert.deepEqual(mergeComponentCatalog(locals,builtins).map(v=>v.id),mergeComponentCatalog([],builtins).map(v=>v.id));
   const custom={id:"wooden-fish",version:"2.0",isBundledCopy:false};

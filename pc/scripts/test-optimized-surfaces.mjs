@@ -12,7 +12,7 @@ try{
   page.on("pageerror",e=>errors.push(e.message));
   await page.goto(process.env.PET_APP_PREVIEW_URL||"http://127.0.0.1:4198/app-surface-preview.html");
   await page.locator("article").last().waitFor();
-  assert.equal(await page.locator("article").count(),22);
+  assert.equal(await page.locator("article").count(),21);
   await page.waitForTimeout(700); // WASM initialization, not device I/O.
   for(const card of await page.locator("article").all()){
     const id=await card.getAttribute("data-id"),screen=card.locator(".screen");
@@ -61,10 +61,7 @@ try{
   assert.deepEqual(await ball.evaluate(e=>[e.getAttribute("cx"),e.getAttribute("cy")]),position);
   await pong.getByRole("button",{name:"暂停/继续",exact:true}).click();
   assert.doesNotMatch(await pong.textContent(),/已暂停/);
-  const radio=page.locator('[data-id="city-radio"] .screen');
-  assert.equal(await radio.locator("circle").count(),1,"real media renderer must render transport");
-  assert.match(await radio.textContent(),/等待选台|等待收听/);
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(output,"report.json"),JSON.stringify({results,errors,homeDecoration:true,gardenControls:true,pongPause:true,mediaRenderer:true},null,2));
-  console.log(`PASS: ${results.length} components; ${results.filter(r=>r.status==="rendered").length} rendered, home/decor and garden touch, radio transport, no JS errors.`);
+  fs.writeFileSync(path.join(output,"report.json"),JSON.stringify({results,errors,homeDecoration:true,gardenControls:true,pongPause:true},null,2));
+  console.log(`PASS: ${results.length} components; ${results.filter(r=>r.status==="rendered").length} rendered, home/decor and garden touch, no JS errors.`);
 }finally{await browser.close();}

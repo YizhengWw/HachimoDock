@@ -4093,7 +4093,7 @@ impl UsbSerialManager {
         if widget_definition["surface"].get("input").is_some() && self.status().capabilities["widgetMediaTouch"]!="p4-media-touch-v1"{return Err("需要媒体触屏控制能力，请先升级设备固件；未安装不兼容资源".into());}
         if widget_definition["surface"]["images"].as_array().is_some_and(|a|a.iter().any(|im|im["encoding"]!="jpeg"&&im["frame_width"].as_u64().unwrap_or(0)>240))&&self.status().capabilities["widgetSurfaceAtlas"]!="p4-wide-atlas-v1"{return Err("需要高清分格素材能力，请先升级设备固件；未安装不兼容资源".into());}
         if widget_definition.get("surface").is_some() && widget_definition["surface"]["engine"]!="p4-app-surface-v1" && self.status().capabilities["widgetMediaSurface"]!="p4-media-surface-v1" {
-            return Err("请先更新支持城市电台的固件".into());
+            return Err("请先更新支持此媒体组件的固件".into());
         }
         if widget_definition["transitions"].as_array().is_some_and(|rules| rules.iter().any(|r| r["on"] == "media.lyrics"))
             && self.status().capabilities["widgetLyrics"] != "p4-lrc-v1" {
@@ -9156,15 +9156,17 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Requires explicit permission and exclusive USB: updates only city-radio and exercises its display"]
-    fn p4_radio_surface_hardware_sync_and_reenter() {
+    #[ignore = "Requires explicit permission and exclusive USB: updates only the selected existing media package"]
+    fn p4_media_surface_hardware_sync_and_reenter() {
         let port = std::env::var("P4_SERIAL_PORT").expect("explicit port");
         let expected_board = std::env::var("P4_EXPECTED_BOARD_ID").expect("explicit board");
         let expected_version = std::env::var("P4_EXPECTED_VERSION").expect("explicit firmware");
         let package = PathBuf::from(std::env::var("P4_WIDGET_DIR").expect("explicit package"));
         let entry = crate::component_library::inspect(&package).expect("validate package");
         assert!(entry.valid, "{:?}", entry.validation_errors);
-        assert_eq!(entry.id, "city-radio");
+        let expected_id = std::env::var("P4_EXPECTED_WIDGET_ID").expect("explicit existing component ID");
+        assert_eq!(entry.id, expected_id);
+        assert!(entry.pc_extension.is_some(), "a declarative media package is required");
         assert_eq!(entry.version, std::env::var("P4_EXPECTED_WIDGET_VERSION").expect("explicit component version"));
         // Pass the current component-specific controls explicitly; never infer
         // that an empty override map is safe for another user's installation.
@@ -9204,13 +9206,13 @@ mod tests {
             v["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_owned()).collect()
         };
         let prior_ids = ids(&inventory);
-        assert!(prior_ids.contains("city-radio"), "only update the authorized existing component");
-        let result = usb.install_widget_clawpkg("city-radio", &package, &bindings, |file, total, bytes| {
+        assert!(prior_ids.contains(&expected_id), "only update the authorized existing component");
+        let result = usb.install_widget_clawpkg(&expected_id, &package, &bindings, |file, total, bytes| {
             eprintln!("radio sync {file}/{total}, transferred={bytes}");
         }).expect("atomic component sync");
         let after_inventory = usb.query_widget_inventory(&expected_board).unwrap();
         assert_eq!(ids(&after_inventory), prior_ids);
-        assert_eq!(after_inventory["activeWidgetId"], "city-radio");
+        assert_eq!(after_inventory["activeWidgetId"], expected_id);
         for cycle in 0..10 {
             for page in ["main", "app"] {
                 command("control/screen-page", serde_json::json!({"page":page}));

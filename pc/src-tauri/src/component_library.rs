@@ -988,7 +988,7 @@ mod tests {
         let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs");
         ensure_bundled(home.path(),&root).unwrap();
         let first=scan_latest_versions(home.path()).unwrap();
-        assert_eq!(first.len(),29);
+        assert_eq!(first.len(),28);
         assert!(first.iter().all(|c|c.is_bundled_copy));
         for id in ["cloud-hop","daily-almanac","book-pocket","daily-news","decision-capsule","answer-book","hope-train"] {
             assert!(first.iter().any(|c|c.id==id&&c.valid));
@@ -996,7 +996,6 @@ mod tests {
         assert!(!first.iter().any(|c|matches!(c.id.as_str(),"music-player"|"hachimi-agent"|"hachimi-desk")));
         let learn=first.iter().find(|c|c.id=="hachimi-learn").unwrap();
         assert_eq!(learn.name,"每日新知");assert!(learn.pc_application.is_some());
-        assert!(first.iter().find(|c|c.id=="city-radio").unwrap().pc_extension.is_some());
         assert_eq!(first.iter().find(|c|c.id=="two-key-pong").unwrap().author,"弹珠汽水");
         let before:HashMap<_,_>=first.iter().map(|c|(c.id.clone(),c.version_hash.clone())).collect();
         ensure_bundled(home.path(),&root).unwrap();
@@ -1004,6 +1003,23 @@ mod tests {
         assert_eq!(before,after);
         // Importing resources must not create host recordings, todos or API settings.
         assert!(!home.path().join(".claw-pet/component-apps").exists());
+    }
+
+    #[test]
+    fn generic_media_package_keeps_extension_and_surface_after_library_scan() {
+        let home = tempfile::tempdir().unwrap();
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../tests/fixtures/media-sample");
+        publish_source(home.path(), &source).unwrap();
+        let entries = scan_latest_versions(home.path()).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.id, "media-sample");
+        assert!(entry.valid, "{:?}", entry.validation_errors);
+        assert!(!entry.is_bundled_copy);
+        assert!(entry.pc_extension.is_some());
+        assert!(entry.media_surface.is_some());
+        assert_eq!(entry.media_source.as_deref(), Some("pc.media-sample"));
     }
 
     fn write_package(path: &Path, id: &str) {
