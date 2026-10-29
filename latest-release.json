@@ -5,13 +5,13 @@
   "firmwareVersion": "0.7.103-p4-r2",
   "releaseTag": "v0.1.168",
   "releaseUrl": "https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.168",
-  "sourceRef": "refs/tags/v0.1.168",
+  "sourceRef": "refs/heads/main",
   "sourceBuildCommit": "b0381bf0a57b73e5e99842933a1a3def346498a0",
   "sourcePublished": true,
   "sourcePublication": {
     "date": "2026-10-29",
     "edition": "normal-public-no-keys",
-    "note": "Component withdrawal maintenance release. Desktop and device menus exclude withdrawn cached packages without deleting user data. Unaccepted framework changes are not included."
+    "note": "Public maintenance release based on 0.1.167. Existing user data and settings are preserved. Unaccepted framework changes are not included."
   },
   "embeddedServiceKeys": false,
   "embeddedInternalCredentials": false,
@@ -134,8 +134,8 @@
     {
       "file": "RELEASE-NOTES.txt",
       "role": "release-notes",
-      "bytes": 2768,
-      "sha256": "f99bc6d783c7bbcae69463f5c3ee02c89acc5434b750665f95245858e05f035b"
+      "bytes": 2187,
+      "sha256": "c2bcf4affc615481b98bd17ba65f253d9b6aa9ca24db8b059252ae42f508b9e9"
     }
   ]
 }
