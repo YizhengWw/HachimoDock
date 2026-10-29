@@ -26,7 +26,7 @@ test("device catalog is distinct from favorites and paginated preview uses its q
   assert.match(ui,/Math.floor\(selected\/rows\)\*rows/);
 });
 test("package owns its adapter; UI uses generic host IPC",()=>{
-  const p=JSON.parse(readFileSync(new URL('../../builtin-clawpkgs/city-radio/pc/extension.json',import.meta.url)));
+  const p=JSON.parse(readFileSync(new URL('../../tests/fixtures/media-sample/pc/extension.json',import.meta.url)));
   assert.equal(p.engine,"pc-declarative-media-v1");
   const ui=readFileSync(new URL('./ComponentMediaPanel.jsx',import.meta.url),'utf8');
   assert(!ui.includes('radio_request'));assert(ui.includes('component_extension_request'));
@@ -36,7 +36,7 @@ test("surface preview matches the device's 16px base font and keeps persistent p
   assert(ui.includes('fontSize={16*(n.scale||1)}'));
   assert(ui.includes('y={n.y+15*(n.scale||1)}'));
   assert(!ui.includes('fontSize={26'));
-  const {surface}=JSON.parse(readFileSync(new URL('../../builtin-clawpkgs/city-radio/runtime/widget.json',import.meta.url)));
+  const {surface}=JSON.parse(readFileSync(new URL('../../tests/fixtures/media-sample/runtime/widget.json',import.meta.url)));
   for(const page of [0,1]){
     const footer=surface.elements.find(n=>n.page===page&&n.type==='text'&&n.y===444);
     assert.match(footer?.text || '', /全局(?:键)?退出/);assert(!footer.bind);

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "media": {"source":"pc.media-sample","mode":"live"},
+  "vars": {},
+  "states": ["idle"],
+  "initial_state": "idle",
+  "transitions": [{"on":"media.toggle","from":"*"},{"on":"media.queue","from":"*"}],
+  "tick": [],
+  "dashboard": {"title":"Media fixture","headline":"Offline test","visualStyle":"clean","visualPalette":"mono","visualLayout":"tool","visualSprite":"music"},
+  "surface": {
+    "background": 0,
+    "input": "p4-media-touch-v1",
+    "images": [
+      {"id":"checker","asset":"assets/checker.png","frame_width":64,"frame_height":64,"frames":1,"fps":1},
+      {"id":"stripe","asset":"assets/stripe.png","frame_width":32,"frame_height":16,"frames":1,"fps":1}
+    ],
+    "elements": [
+      {"type":"image","x":0,"y":0,"w":640,"h":480,"color":65535,"image":"stripe"},
+      {"type":"text","x":16,"y":16,"w":608,"h":32,"color":65535,"bind":"title","page":0},
+      {"type":"transport","x":288,"y":64,"w":64,"h":64,"color":65535,"action":"media.toggle","page":0},
+      {"type":"meter","x":16,"y":160,"w":608,"h":8,"color":65535,"bind":"volume","page":0},
+      {"type":"list","x":16,"y":64,"w":608,"h":288,"color":65535,"page":1},
+      {"type":"image","x":24,"y":208,"w":64,"h":64,"color":65535,"image":"checker","rotate_ms":16000,"page":0},
+      {"type":"text","x":16,"y":444,"w":608,"h":32,"color":65535,"text":"测试主页面 · 全局键退出","page":0},
+      {"type":"text","x":16,"y":444,"w":608,"h":32,"color":65535,"text":"测试列表 · 全局键退出","page":1},
+      {"type":"text","x":16,"y":384,"w":608,"h":32,"color":65535,"bind":"message","page":2}
+    ]
+  }
+}

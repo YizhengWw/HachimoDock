@@ -272,7 +272,7 @@ impl Service {
             return Err("请先连接设备".into());
         }
         if board.capabilities["widgetMediaSurface"] != "p4-media-surface-v1" {
-            return Err("请先更新支持城市电台的固件".into());
+            return Err("请先更新支持此媒体组件的固件".into());
         }
         if crate::realtime_chat::status().active {
             return Err("请先结束实时对话，再播放电台".into());
@@ -1054,7 +1054,7 @@ mod tests {
     #[test]
     fn automatic_cache_migration_and_stop_cancel_pending() {
         let root=tempfile::tempdir().unwrap();
-        let ext=crate::component_extension::parse(include_bytes!("../../builtin-clawpkgs/city-radio/pc/extension.json")).unwrap();
+        let ext=crate::component_extension::parse(include_bytes!("../../tests/fixtures/media-sample/pc/extension.json")).unwrap();
         let mut old=Snapshot::default();
         old.catalog=vec![Station{id:"old".into(),name:"old".into(),city:"".into(),homepage:"".into(),codec:"".into(),hls:false,url:"https://example.com/live".into()}];
         std::fs::write(root.path().join("library.json"),serde_json::to_vec(&old).unwrap()).unwrap();
@@ -1062,49 +1062,6 @@ mod tests {
         assert!(s.data.lock().unwrap().catalog.is_empty());
         s.pending_auto.store(true,Ordering::SeqCst);s.stop("idle","test");assert!(!s.pending_auto.load(Ordering::SeqCst));
         assert_eq!(s.snapshot()["state"],"idle");
-    }
-    #[test]
-    #[ignore="Explicit permission: synchronize radio, automatic play/switch/stop on a real device; no recording"]
-    fn automatic_radio_hardware() {
-        assert_eq!(std::env::var("RADIO_AUTOMATIC_TEST").as_deref(),Ok("1"));
-        let board=std::env::var("P4_EXPECTED_BOARD_ID").unwrap();
-        let usb=UsbSerialManager::new();
-        usb.connect(&std::env::var("P4_SERIAL_PORT").unwrap(),|topic,p|{if topic=="media/event"{device_event(&p);}}).unwrap();
-        assert_eq!(usb.status().board_device_id,board);
-        assert_eq!(usb.status().capabilities["widgetMediaQueueMax"],128);
-        let before=usb.query_diagnostics(&board).unwrap();
-        let prior=usb.media_request(&board,"media/query",json!({})).unwrap();
-        assert!(!matches!(prior["state"].as_str(),Some("playing"|"buffering"|"paused")));
-        let inventory=usb.query_widget_inventory(&board).unwrap();
-        let package=PathBuf::from(std::env::var("P4_WIDGET_DIR").unwrap());
-        usb.install_widget_clawpkg_on_board(&board,"city-radio",&package,&HashMap::new(),|_,_,_|{}).unwrap();
-        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
-        let root=tempfile::tempdir().unwrap();configure(root.path().into(),usb.clone());
-        struct Close(UsbSerialManager,String,u64);impl Drop for Close{fn drop(&mut self){if let Ok(s)=service("city-radio"){s.stop("idle","验收结束");}let _=self.0.media_request(&self.1,"media/control",json!({"operation":"volume","volume":self.2}));self.0.disconnect();}}
-        let _close=Close(usb.clone(),board.clone(),prior["volume"].as_u64().unwrap());
-        request("city-radio".into(),json!({"operation":"status"})).unwrap();
-        let s=service("city-radio").unwrap();
-        let until=Instant::now()+Duration::from_secs(120);
-        while s.snapshot()["queue"].as_array().unwrap().is_empty(){assert!(Instant::now()<until,"{}",s.snapshot()["message"]);std::thread::sleep(Duration::from_millis(200));}
-        assert_eq!(s.snapshot()["state"],"idle","PC status must not autoplay");
-        let count=s.snapshot()["queue"].as_array().unwrap().len();assert!(count>=10);
-        if s.snapshot()["location"]=="全国"{assert_eq!(count,30);}
-        usb.send_to_board(&board,"control/screen-page",&json!({"page":"app"})).unwrap();
-        let wait_play=|| {let until=Instant::now()+Duration::from_secs(150);loop{let v=s.snapshot();if v["state"]=="playing"{return v;}assert_ne!(v["state"],"error","{}",v["message"]);assert!(Instant::now()<until,"automatic start timeout: {v}");std::thread::sleep(Duration::from_millis(250));}};
-        let first=wait_play();eprintln!("AUTO PLAY: city={} count={} station={}",first["location"],count,first["current"]["name"]);
-        let session=s.session.lock().unwrap().clone();
-        for _ in 0..20{std::thread::sleep(Duration::from_millis(500));assert_eq!(s.snapshot()["state"],"playing");}
-        execute("city-radio",json!({"operation":"sync"})).unwrap();assert_eq!(*s.session.lock().unwrap(),session,"catalog sync restarted playback");
-        usb.send_to_board(&board,"miniapp/event",&json!({"action":"media.next"})).unwrap();
-        let until=Instant::now()+Duration::from_secs(8);while s.snapshot()["current"]["id"]==first["current"]["id"]{assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(100));}
-        let second=wait_play();eprintln!("NEXT PLAY: {}",second["current"]["name"]);
-        std::thread::sleep(Duration::from_secs(8));
-        execute("city-radio",json!({"operation":"stop"})).unwrap();
-        std::thread::sleep(Duration::from_secs(5));assert_eq!(s.snapshot()["state"],"idle","visibility heartbeat restarted stopped audio");
-        usb.send_to_board(&board,"control/screen-page",&json!({"page":"main"})).unwrap();
-        let after=usb.query_diagnostics(&board).unwrap();assert_eq!(before["bootCount"],after["bootCount"]);assert_eq!(before["faultResetCount"],after["faultResetCount"]);
-        let after_inventory=usb.query_widget_inventory(&board).unwrap();assert_eq!(inventory["items"].as_array().unwrap().len(),after_inventory["items"].as_array().unwrap().len());
-        eprintln!("PASS: production lifecycle, automatic catalogue, auto playback, next, refresh continuity, stopped heartbeat, unchanged component count");
     }
     fn station(id: &str) -> Station {
         Station {
@@ -1116,20 +1073,6 @@ mod tests {
             hls: false,
             url: "https://example.com/live".into(),
         }
-    }
-    #[test]
-    #[ignore = "Read-only public station-directory request; no USB or audio"]
-    fn live_device_catalog() {
-        let ext = crate::component_extension::parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
-        ))
-        .unwrap();
-        let stations = network::search(&ext, ext.search.browse_query.as_deref().unwrap()).unwrap();
-        assert!(!stations.is_empty() && stations.len() <= 20);
-        eprintln!(
-            "device catalog: {} real stations, no playback",
-            stations.len()
-        );
     }
     #[test]
     fn device_queue_is_bounded_deduplicated_and_preserves_favorites() {
@@ -1155,7 +1098,7 @@ mod tests {
         )
         .unwrap();
         let mut ext = crate::component_extension::parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
+            "../../tests/fixtures/media-sample/pc/extension.json"
         ))
         .unwrap();
         // This tests the legacy/manual cache. Automatic discovery deliberately
@@ -1163,7 +1106,7 @@ mod tests {
         ext.discovery = None;
         serde_json::from_slice::<Snapshot>(&std::fs::read(root.path().join("library.json")).unwrap()).unwrap();
         let service = create_service(
-            "city-radio".into(),
+            "media-sample".into(),
             "test".into(),
             ext,
             root.path().into(),
@@ -1193,8 +1136,8 @@ mod tests {
         serde_json::from_slice::<Snapshot>(&bytes).unwrap();
         assert!(bytes.len() > 128 * 1024 && bytes.len() < MAX_LIBRARY_BYTES as usize);
         std::fs::write(root.path().join("library.json"), bytes).unwrap();
-        let ext = crate::component_extension::parse(include_bytes!("../../builtin-clawpkgs/city-radio/pc/extension.json")).unwrap();
-        let service = create_service("city-radio".into(), "test".into(), ext, root.path().into(), UsbSerialManager::new());
+        let ext = crate::component_extension::parse(include_bytes!("../../tests/fixtures/media-sample/pc/extension.json")).unwrap();
+        let service = create_service("media-sample".into(), "test".into(), ext, root.path().into(), UsbSerialManager::new());
         assert_eq!(service.data.lock().unwrap().stations.len(), 20);
         assert_eq!(service.data.lock().unwrap().catalog.len(), 20);
     }
@@ -1202,13 +1145,13 @@ mod tests {
     fn empty_device_controls_remain_idle_instead_of_playback_error() {
         let root = tempfile::tempdir().unwrap();
         let mut ext = crate::component_extension::parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
+            "../../tests/fixtures/media-sample/pc/extension.json"
         ))
         .unwrap();
         ext.search.browse_query = None;
         let usb = UsbSerialManager::new();
         let s = create_service(
-            "city-radio".into(),
+            "media-sample".into(),
             "test".into(),
             ext,
             root.path().into(),
@@ -1218,156 +1161,22 @@ mod tests {
             .set(Host {
                 root: root.path().into(),
                 usb,
-                services: Mutex::new(HashMap::from([("city-radio".into(), s.clone())])),
+                services: Mutex::new(HashMap::from([("media-sample".into(), s.clone())])),
                 operation: Mutex::new(()),
                 requests: Mutex::new(())
             })
             .is_ok());
         for op in ["toggle", "next", "previous", "select", "sync"] {
-            let state = execute("city-radio", json!({"operation":op})).unwrap();
+            let state = execute("media-sample", json!({"operation":op})).unwrap();
             assert_eq!(state["state"], "idle");
             assert!(state["message"].as_str().unwrap().contains("暂无电台"));
         }
     }
     #[test]
-    #[ignore = "Requires explicit permission, exclusive USB and RADIO_TEST_PORT; plays real radio for 25–120 seconds"]
-    fn live_usb_radio() {
-        let port = std::env::var("RADIO_TEST_PORT").expect("explicit test port");
-        let test_seconds = std::env::var("RADIO_TEST_SECONDS")
-            .map(|v| v.parse::<u64>().expect("integer test duration"))
-            .unwrap_or(25);
-        assert!((25..=120).contains(&test_seconds), "test duration must be 25–120 seconds");
-        let play_duration = Duration::from_secs(test_seconds);
-        let usb = UsbSerialManager::new();
-        usb.set_desktop_device_id("radio-playback-hil");
-        let input_seen = Arc::new(AtomicBool::new(false));
-        let input_flag = input_seen.clone();
-        usb.connect(&port, move |topic, _| {
-            if matches!(topic.as_str(), "input/event" | "touch/event" | "media/event") {
-                eprintln!("radio test interrupted by device input: {topic}");
-                input_flag.store(true, Ordering::SeqCst);
-                // A physical stop must never be treated as a failed stream and
-                // automatically restarted by this unattended test harness.
-                stop_all();
-            }
-        })
-            .expect("exclusive USB connection");
-        let board = usb.status().board_device_id;
-        if let Ok(expected) = std::env::var("P4_EXPECTED_BOARD_ID") {
-            assert_eq!(board, expected, "refusing playback on a different board");
-        }
-        let diagnostics_before = usb.query_diagnostics(&board).unwrap();
-        if let Ok(expected) = std::env::var("P4_EXPECTED_VERSION") {
-            assert_eq!(diagnostics_before["runtime"]["firmware"], expected, "unexpected firmware");
-        }
-        let inventory = usb.query_widget_inventory(&board).unwrap();
-        assert_eq!(inventory["activeWidgetId"], "city-radio", "playback test must exercise the authorized component");
-        let prior = usb
-            .media_request(&usb.status().board_device_id, "media/query", json!({}))
-            .unwrap();
-        assert!(
-            !matches!(
-                prior["state"].as_str(),
-                Some("playing" | "buffering" | "paused")
-            ),
-            "do not interrupt existing playback"
-        );
-        let prior_volume = prior["volume"].as_u64().expect("device volume");
-        usb.send_to_board(&board, "control/screen-page", &json!({"page":"app"}))
-            .expect("show the authorized radio component for observation");
-        let root = tempfile::tempdir().unwrap();
-        let extension = crate::component_extension::parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
-        ))
-        .unwrap();
-        let station = network::search(&extension, "北京")
-            .expect("live directory")
-            .into_iter()
-            .find(|s| s.hls && s.url.contains("rbc.cn"))
-            .expect("public broadcaster");
-        let s = create_service(
-            "city-radio".into(),
-            "explicit-live-test".into(),
-            extension,
-            root.path().join("city-radio"),
-            usb.clone(),
-        );
-        assert!(HOST
-            .set(Host {
-                root: root.path().into(),
-                usb: usb.clone(),
-                services: Mutex::new(HashMap::from([("city-radio".into(), s.clone())])),
-                operation: Mutex::new(()),
-                requests: Mutex::new(())
-            })
-            .is_ok());
-        struct Cleanup(Arc<Service>, u64);
-        impl Drop for Cleanup {
-            fn drop(&mut self) {
-                self.0.stop("idle", "测试结束");
-                let _ = self.0.usb.media_request(
-                    &self.0.usb.status().board_device_id,
-                    "media/control",
-                    json!({"operation":"volume", "volume":self.1}),
-                );
-                self.0.usb.disconnect();
-            }
-        }
-        let _cleanup = Cleanup(s.clone(), prior_volume);
-        s.start(station.clone()).expect("start playback");
-        let test_started = Instant::now();
-        let deadline = test_started + play_duration + Duration::from_secs(25);
-        let mut first = None;
-        let mut samples = 0;
-        let mut last_state = String::new();
-        let mut rebuffer_samples = 0;
-        while Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(500));
-            assert!(!input_seen.load(Ordering::SeqCst), "manual input interrupted the unattended playback test; not a continuous-playback result");
-            let snapshot = s.snapshot();
-            if snapshot["state"].as_str().unwrap_or("") != last_state {
-                last_state = snapshot["state"].as_str().unwrap_or("").into();
-                eprintln!(
-                    "radio state at {} ms: {last_state}",
-                    test_started.elapsed().as_millis()
-                );
-            }
-            assert_ne!(snapshot["state"], "error", "{}", snapshot["message"]);
-            if first.is_some() && snapshot["state"] != "playing" {
-                rebuffer_samples += 1;
-            }
-            if snapshot["state"] == "playing" {
-                samples += 1;
-                let started = first.get_or_insert_with(Instant::now);
-                if started.elapsed() >= play_duration {
-                    break;
-                }
-            }
-        }
-        assert!(
-            first.is_some_and(|t| t.elapsed() >= play_duration) && samples >= test_seconds * 8 / 5,
-            "insufficient sustained playback samples: {samples}"
-        );
-        s.stop("idle", "测试结束");
-        let ack = usb
-            .media_request(&usb.status().board_device_id, "media/query", json!({}))
-            .unwrap();
-        assert_eq!(ack["state"], "idle");
-        let diagnostics_after = usb.query_diagnostics(&board).unwrap();
-        assert_eq!(diagnostics_after["bootCount"], diagnostics_before["bootCount"]);
-        assert_eq!(diagnostics_after["faultResetCount"], diagnostics_before["faultResetCount"]);
-        assert_eq!(diagnostics_after["runtime"]["screenPage"], "app");
-        assert_eq!(rebuffer_samples, 0, "playback stalled after startup");
-        eprintln!(
-            "LIVE USB PASS: station={}, playingSeconds={}, playingSamples={}, rebufferSamples=0, stopped=true, display=app, noReboot=true",
-            station.name, test_seconds, samples
-        );
-    }
-    #[test]
     fn component_storage_survives_update_without_cross_component_data() {
         let root = tempfile::tempdir().unwrap();
         let extension = crate::component_extension::parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
+            "../../tests/fixtures/media-sample/pc/extension.json"
         ))
         .unwrap();
         let a = create_service(

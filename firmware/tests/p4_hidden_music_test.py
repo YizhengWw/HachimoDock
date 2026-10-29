@@ -15,6 +15,7 @@ def test_hidden_music_keeps_storage_and_navigation_indices(tmp_path):
             end += 1
         return source[start:end]
     functions = [function(name) for name in [
+        "static bool component_withdrawn(",
         "static bool catalog_entry_visible(", "static int catalog_visible_index(",
         "static int catalog_visible_preferred(", "size_t pet_p4_miniapp_catalog_count(",
         "size_t pet_p4_miniapp_catalog_selected(", "bool pet_p4_miniapp_catalog_move(",

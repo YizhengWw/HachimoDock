@@ -12,7 +12,6 @@ const write=(p,v)=>fs.writeFileSync(p,JSON.stringify(v,null,2)+"\n");
 const mechanisms={
   "block-combo":["保留 SW2 旋转；新增摇杆按下暂停","暂停时停止时钟，继续不补帧","跨重开保存最高分"],
   "bloomfrog_companion":["亲密度封顶 100","亲密度/喂食/抚摸次数存档","动作反馈和触屏与实体键一致"],
-  "city-radio":["保留真实受控媒体服务","补充设备触屏播放/切台的通用媒体能力","错误和断线不能伪装播放"],
   "computer-status":["扩大翻页触屏命中区","保存最后查看页","保留真实指标和过期标识"],
   "drink-reminder":["确认才增加记录","到期暂停后仍恢复到期状态","保存间隔/记录，重进暂停，主动继续"],
   "flappy-bird":["保留 50% 纵向速度","暂停时不能拍翅/意外重开","最高分存档"],
@@ -122,26 +121,6 @@ for(const [id,checks] of Object.entries(mechanisms)){
   if(id==="token-usage"){
     r.surface.elements.find(n=>n.bind==="note").h=44;
     r.dashboard.footer="统计来自当前 Agent 的本地可读记录，不代表账单。";
-  }
-  if(id==="city-radio"){
-    r.surface.input="p4-media-touch-v1";
-    for(const n of r.surface.elements){
-      if(n.type==="transport")n.action="media.toggle";
-      if(n.text==="上一台")Object.assign(n,{action:"media.previous",y:330,h:54});
-      if(n.text==="下一台")Object.assign(n,{action:"media.next",y:330,h:54});
-      if(n.bind==="message")Object.assign(n,{y:54});
-      if(n.text==="可选电台")Object.assign(n,{action:"media.queue",h:48});
-    }
-    const node=(text,action,x,y,w,page)=>({type:"text",x,y,w,h:48,color:65337,text,action,page});
-    r.surface.elements.push(node("音量−","media.down",28,388,118,0),node("音量+","media.up",512,388,100,0),
-      node("上一个","media.up",28,386,120,1),node("下一个","media.down",172,386,120,1),
-      node("收听","media.select",318,386,112,1),node("返回","media.queue",474,386,138,1));
-    // Volume remains visible next to the record without overlapping touch targets.
-    const volume=r.surface.elements.find(n=>n.bind==="volume"&&n.type==="text");
-    Object.assign(volume,{x:180,y:404,w:200});
-    for(const n of r.surface.elements)if(n.type==="meter"||n.type==="panel"&&n.y===396){n.x=160;n.w=320;}
-    const foot=r.surface.elements.find(n=>n.page===0&&n.y===444);
-    foot.text="轻点播停 / 切台 / 电台列表 · 全局键退出";
   }
   if(id==="stock-watchlist"){
     const ink=61343,muted=40313,accent=40478,bg=4325;

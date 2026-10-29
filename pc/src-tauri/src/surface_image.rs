@@ -93,15 +93,15 @@ mod tests {
         }out
     }
     #[test]
-    fn bounded_codec_roundtrip_and_actual_assets(){
+    fn bounded_codec_roundtrip_and_generated_fixtures(){
         for color in [[0,0,0,0],[255,230,180,255]]{
             let im=image::RgbaImage::from_pixel(240,240,image::Rgba(color));
             let encoded=encode(&im);let d=decode(&encoded);
             assert_eq!(d.len(),57600);assert!(d.iter().all(|p|*p==color));assert!(encoded.len()<2100);
         }
         let mut total=0;
-        for name in ["background","vinyl"]{
-            let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../builtin-clawpkgs/city-radio/assets/{name}.png"));
+        for name in ["checker","stripe"]{
+            let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../tests/fixtures/media-sample/assets/{name}.png"));
             let im=image::open(path).unwrap().to_rgba8();let packed=encode(&im);let d=decode(&packed);total+=packed.len();
             let error:f64=im.pixels().zip(&d).filter(|(a,_)|a[3]>250).map(|(a,b)|(0..3).map(|c|(f64::from(a[c])-f64::from(b[c])).powi(2)).sum::<f64>()).sum::<f64>()/(im.width()*im.height()*3) as f64;
             eprintln!("{name}: {} bytes, RGB RMSE {:.2}",packed.len(),error.sqrt());

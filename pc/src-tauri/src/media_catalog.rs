@@ -77,9 +77,8 @@ pub fn discover(e: &Extension) -> Result<Catalog,String> {
 }
 #[cfg(test)] mod tests {
     use super::*;
-    fn ext()->Extension {crate::component_extension::parse(include_bytes!("../../builtin-clawpkgs/city-radio/pc/extension.json")).unwrap()}
+    fn ext()->Extension {crate::component_extension::parse(include_bytes!("../../tests/fixtures/media-sample/pc/extension.json")).unwrap()}
     fn rows()->Vec<Value>{(0..70).map(|i|serde_json::json!({"stationuuid":format!("s{i}"),"name":format!("{}广播{i}",if i<12{"北京"}else{"其他"}),"url_resolved":format!("https://example.com/{i}"),"lastcheckok":1,"clickcount":70-i,"votes":1,"state":""})).collect()}
     #[test] fn city_all_plus_ten_and_national_thirty(){let e=ext();let r=rows();let c=select(&e,&r,Some(&serde_json::json!({"city":"Beijing","country_code":"CN"}))).unwrap();assert_eq!(c.stations.len(),22);assert_eq!(c.location,"北京");for v in [None,Some(serde_json::json!({"city":"Beijing","country_code":"US"})),Some(serde_json::json!({"city":"未收录","country_code":"CN"}))]{let c=select(&e,&r,v.as_ref()).unwrap();assert_eq!(c.stations.len(),30);assert_eq!(c.location,"全国");}}
     #[test] fn deduplicates_and_filters_invalid(){let e=ext();let mut r=rows();r.push(r[0].clone());r[1]["lastcheckok"]=0.into();r[2]["url_resolved"]="file:///etc/passwd".into();let c=select(&e,&r,None).unwrap();assert_eq!(c.stations.len(),30);assert!(!c.stations.iter().any(|s|s.id=="s1"||s.id=="s2"));}
-    #[test] #[ignore="Uses public catalogue and IP city endpoints, no audio"] fn live_catalog(){let c=discover(&ext()).unwrap();eprintln!("automatic catalogue: location={}, count={}",c.location,c.stations.len());assert!(c.stations.len()>=10);if c.location=="全国"{assert_eq!(c.stations.len(),30);}for s in c.stations.iter().take(5){eprintln!("{}",s.name);}}
 }

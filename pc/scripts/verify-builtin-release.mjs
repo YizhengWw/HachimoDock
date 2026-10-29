@@ -24,11 +24,15 @@ function exactTree(source,dest) {
   return names.length;
 }
 const report={version:JSON.parse(readFileSync(join(pc,'package.json'))).version,components:[],petuiFiles:0,firmware:[],privateFiles:[]};
+const packageRoot=join(resources,'builtin-clawpkgs');
+const packageEntries=readdirSync(packageRoot,{withFileTypes:true});
+assert.ok(packageEntries.every(entry=>entry.isDirectory()&&!entry.isSymbolicLink()),'unexpected file or symlink in bundled component root');
+assert.deepEqual(packageEntries.map(entry=>entry.name).sort(),[...config.components.ids].sort(),'bundled component list differs from the factory catalog');
 for(const id of config.components.ids) {
   const src=join(pc,'builtin-clawpkgs',id),dst=join(resources,'builtin-clawpkgs',id);
   report.components.push({id,version:JSON.parse(readFileSync(join(src,'component.json'))).version,files:exactTree(src,dst)});
 }
-assert.equal(report.components.length,29);
+assert.equal(report.components.length,config.components.ids.length);
 assert.deepEqual(report.components.slice(-3).map(x=>x.id),['decision-capsule','answer-book','hope-train']);
 report.petuiFiles=exactTree(join(pc,'skills/petui'),join(resources,'skills/petui'));
 for(const name of ['firmware.bin','firmware-v3.bin']) {

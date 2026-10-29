@@ -13,7 +13,6 @@ const repo=path.dirname(pc),out=path.resolve(process.argv[2]||'');
 if(!process.argv[2]||out===repo||out.startsWith(repo+path.sep))throw Error('Choose an output directory outside the repository');
 fs.mkdirSync(out,{recursive:true,mode:0o700});
 const roots=fs.readdirSync(path.join(pc,'builtin-clawpkgs'),{withFileTypes:true}).filter(e=>e.isDirectory()).map(e=>path.join(pc,'builtin-clawpkgs',e.name));
-roots.push(...['city-radio','fresh-fruit-slice'].map(id=>path.join(pc,'builtin-clawpkgs',id)));
 const browser=await chromium.launch({headless:true,executablePath:process.env.PET_TEST_CHROMIUM||'/Applications/360Chrome.app/Contents/MacOS/360Chrome'});
 const batch=[],reports=[];
 try {
@@ -59,7 +58,7 @@ try {
   const files=fs.readdirSync(stage).sort();
   const packed=spawnSync('python3',['-m','zipfile','-c',zip,...files],{cwd:stage,encoding:'utf8'});if(packed.status!==0)throw Error(packed.stderr);
   const data=fs.readFileSync(zip);
-  const category=manifest.kind==='game'?'game':(['wooden-fish','music-player','city-radio'].includes(manifest.id)?'relax':(['tomato-clock','upcoming-todos','token-usage'].includes(manifest.id)?'productivity':manifest.id==='drink-reminder'?'life':'tool'));
+  const category=manifest.kind==='game'?'game':(['wooden-fish','music-player'].includes(manifest.id)?'relax':(['tomato-clock','upcoming-todos','token-usage'].includes(manifest.id)?'productivity':manifest.id==='drink-reminder'?'life':'tool'));
   batch.push({approve:manifest.id!=='music-player',publication:{requestId:'official-'+createHash('sha256').update(data).update(cover).digest('hex').slice(0,48),rightsConfirmed:true,privacyConfirmed:true,package:data.toString('base64'),covers:[cover.toString('base64')],metadata:{author:'哈基米桌搭',summary:manifest.description.slice(0,160),description:manifest.description+'\n截图为组件真实默认预览，不包含用户数据。设备需安装支持相应能力的固件。'+(manifest.id==='music-player'?'\n此版本仅供管理员审核测试，音源尚未开放，不对外上架。':''),category,license:'HachimoDock Project License 1.0（非商业）',sourceUrl:'https://github.com/YizhengWw/HachimoDock',releaseNotes:'官方组件首次发布到社区，保留现有功能与组件身份。'}}});
   reports.push({id:manifest.id,version:manifest.version,source:path.relative(repo,source),status:manifest.id==='music-player'?'pending':'approve-requested',bytes:data.length});
   console.log(manifest.id,manifest.version,'preview and archive ready');

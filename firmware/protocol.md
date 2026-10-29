@@ -699,7 +699,7 @@ Complete artwork belongs to factory/PC resource packages, not duplicated OTA slo
 `pet_p4_miniapp_sync_builtins` adds missing entries, never downgrades an existing
 complete artwork package to a bootstrap, removes retired entries, and restores
 the active id (otherwise the first visible entry). The unreleased canonical list
-in `factory-config.json` has 26 entries, with `daily-news` fifth and `city-radio`
+in `factory-config.json` has 28 entries, with `daily-news` fourth and `cloud-hop`
 first. User-created packages remain ahead of firmware defaults; later installs
 prepend normally. `two-key-pong` and `bloomfrog_companion` remain available.
 Migration reorders catalog records without moving slots or saved data. A build-id

@@ -6,7 +6,7 @@ export const COMPONENT_AUTHORS = Object.freeze({
   'two-key-pong':'弹珠汽水','bloomfrog_companion':'青团',
   'flappy-bird':'纸飞机','block-combo':'方糖','snake-turn':'小豆包',
   'tomato-clock':'番茄吐司','drink-reminder':'柠檬水','token-usage':'代码泡面',
-  'city-radio':'半杯乌龙','fresh-fruit-slice':'西瓜籽',
+  'fresh-fruit-slice':'西瓜籽',
   'cloud-hop':'小豆包','daily-almanac':'橘子酱','book-pocket':'橘子酱',
   'daily-news':'早起小鸟',
   'decision-capsule':'橘子酱','answer-book':'土豆泥','hope-train':'cobi123',

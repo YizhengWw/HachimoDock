@@ -1,5 +1,5 @@
 # [Input] ESP-IDF component sources, build identity, and canonical PC built-in component JSON.
-# [Output] P4 runtime with a bounded 26-component bootstrap and cached native launcher artwork.
+# [Output] P4 runtime with a bounded 28-component bootstrap and cached native launcher artwork.
 # [Pos] ESP32-P4 main firmware component build definition.
 # [Sync] If this file changes, update `firmware/.folder.md` and `protocol.md`.
 

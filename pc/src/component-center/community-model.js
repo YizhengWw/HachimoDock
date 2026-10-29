@@ -20,6 +20,7 @@ export const FAVORITES_KEY = "pet-manager:community-favorites:v1";
 export const NAME_KEY = "pet-manager:community-display-name:v1";
 export const CONTACT_URL = "https://github.com/YizhengWw/HachimoDock/issues";
 import {compareVersions} from './catalog-state.js';
+import {isWithdrawnComponent} from './library-order.js';
 export {compareVersions};
 export function versionState(work, local, inventory) {
   const installed =
@@ -48,7 +49,7 @@ export function readFavorites(storage) {
     const entries = JSON.parse(storage.getItem(FAVORITES_KEY) || "[]");
     return Array.isArray(entries)
       ? entries
-          .filter((v) => v && /^[a-z][a-z0-9_-]{0,43}$/.test(v.id))
+          .filter((v) => v && /^[a-z][a-z0-9_-]{0,43}$/.test(v.id) && !isWithdrawnComponent(v))
           .slice(0, 200)
       : [];
   } catch {
@@ -56,6 +57,7 @@ export function readFavorites(storage) {
   }
 }
 export function updateFavorites(entries, work) {
+  if (isWithdrawnComponent(work)) return entries;
   if (entries.some((v) => v.id === work.id))
     return entries.filter((v) => v.id !== work.id);
   // Public metadata only; never serialize package paths, private settings or tokens.

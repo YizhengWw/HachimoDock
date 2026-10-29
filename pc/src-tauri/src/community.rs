@@ -23,7 +23,6 @@ const RESERVED: &[&str] = &[
     "music-player",
     "upcoming-todos",
     "computer-status",
-    "city-radio",
     "fruit-slice",
     "fresh-fruit-slice",
     "touch-slice",

@@ -150,7 +150,7 @@ function gameInstallBlockedReason(component, usb) {
     return "这个组件的歌词模式需要更新固件，请先升级设备固件。";
   }
   if (component?.pcExtension && usb?.capabilities?.widgetMediaSurface !== "p4-media-surface-v1") {
-    return "当前固件不支持城市电台，请先升级固件";
+    return "当前固件不支持此媒体组件，请先升级固件";
   }
   if ((component?.mediaSource || component?.id === "music-player") && usb?.capabilities?.widgetMedia !== "p4-media-v1") {
     return "这个组件需要音乐播放能力，请先升级设备固件。";
@@ -518,7 +518,7 @@ export default function ComponentCenter({ active = true }) {
   const [libraryStatus,setLibraryStatus] = useState(()=>readCenterPreference('status','all'));
   const [centerTab,setCenterTab] = useState('local');
   useEffect(()=>{saveCenterPreference('kind',libraryKind);saveCenterPreference('query',libraryQuery);saveCenterPreference('status',libraryStatus);},[libraryKind,libraryQuery,libraryStatus]);
-  function openComponent(component) {setBindingOverrides(savedBindingOverrides);setPreviewComponent(component);}
+  function openComponent(component) {if(!isComponentVisible(component))return;setBindingOverrides(savedBindingOverrides);setPreviewComponent(component);}
   function closeComponent() {setBindingOverrides(savedBindingOverrides);setPreviewComponent(null);}
   const [globalExitBinding, setGlobalExitBinding] = useState({
     boardDeviceId: "",
@@ -966,7 +966,7 @@ export default function ComponentCenter({ active = true }) {
   }
 
   async function installSelectedComponent(component = previewComponent) {
-    if (!component) return false;
+    if (!component || !isComponentVisible(component)) return false;
     setPreviewComponent(null);
 
     /* Formal local components ship their own buttons.json + dashboard. Builtins
@@ -1693,7 +1693,7 @@ export default function ComponentCenter({ active = true }) {
       {/* ── modals ──────────────────────────────────────────────────────── */}
       {trashOpen&&<RemovedComponents onClose={()=>setTrashOpen(false)} onRestored={refreshComponentLibrary}/>}
 
-      {previewComponent && (
+      {previewComponent && isComponentVisible(previewComponent) && (
         <ComponentPreviewModal
           component={previewComponent}
           onSourceChange={openComponent}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion":1,
+  "engine":"pc-declarative-media-v1",
+  "permissions":{"networkHosts":["example.com"],"publicAudio":true,"storage":true},
+  "search":{
+    "endpoint":"https://example.com/catalog",
+    "queryParam":"name",
+    "browseQuery":"sample",
+    "params":{},
+    "itemsPath":"",
+    "fields":{"id":"/stationuuid","title":"/name","url":"/url_resolved","fallbackUrl":"/url","homepage":"/homepage","codec":"/codec","hls":"/hls","available":"/lastcheckok"}
+  },
+  "discovery":{
+    "endpoints":["https://example.com/catalog"],
+    "locationEndpoint":"https://example.com/location",
+    "cityField":"/city","countryField":"/country_code","country":"CN",
+    "aliases":{"Beijing":"北京"},
+    "stationRegion":"/state","popularity":"/clickcount","votes":"/votes",
+    "nationalCount":30,"localSupplement":10,"refreshSec":86400,"autoPlayOnEnter":true
+  },
+  "panel":{
+    "title":"Media fixture","description":"Offline contract test data; never a live directory.",
+    "searchPlaceholder":"Sample","attribution":"Test data","attributionUrl":"https://example.com/",
+    "sections":["volume","sleep","history"]
+  }
+}

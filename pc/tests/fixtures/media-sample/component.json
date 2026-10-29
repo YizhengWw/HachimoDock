@@ -1,0 +1,7 @@
+{
+  "id": "media-sample",
+  "name": "Media contract fixture",
+  "version": "1.0.0",
+  "kind": "tool",
+  "description": "Offline fixture for declarative media validation. Not a distributed component."
+}

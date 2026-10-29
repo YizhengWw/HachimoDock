@@ -26,7 +26,7 @@ def test_reopening_loaded_media_does_not_write_flash_or_reset_images(tmp_path):
 typedef struct {bool active,media;char widget_id[48];int retained;unsigned save_version;} miniapp_runtime_t;
 typedef struct {char widget_id[48];unsigned slot;bool media;} item_t;
 static miniapp_runtime_t g_runtime;
-static item_t g_catalog[]={{"city-radio",0,true},{"other-radio",1,true},{"game",2,false},{"music-player",3,true}};
+static item_t g_catalog[]={{"test-media",0,true},{"other-radio",1,true},{"game",2,false},{"music-player",3,true}};
 static size_t g_catalog_selected;
 static unsigned g_image_revision=10,loads,writes;
 static bool read_ok=true,write_ok=true;
@@ -44,7 +44,7 @@ static bool write_file_atomic(const char *tmp,const char *path,const void *data,
 ''' + source[start:end] + r'''
 int main(void){
   g_runtime=(miniapp_runtime_t){.active=true,.media=true,.retained=42};
-  strcpy(g_runtime.widget_id,"city-radio");g_catalog_selected=2;
+  strcpy(g_runtime.widget_id,"test-media");g_catalog_selected=2;
   for(int i=0;i<100;i++)assert(activate_catalog_index(0));
   assert(loads==0 && writes==0 && g_image_revision==10 && g_catalog_selected==0 && g_runtime.retained==42);
   assert(!activate_catalog_index(3) && !activate_catalog_index(99));

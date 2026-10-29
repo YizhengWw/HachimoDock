@@ -826,7 +826,7 @@ mod tests {
     }
     fn extension() -> Extension {
         parse(include_bytes!(
-            "../../builtin-clawpkgs/city-radio/pc/extension.json"
+            "../../tests/fixtures/media-sample/pc/extension.json"
         ))
         .unwrap()
     }
@@ -856,7 +856,7 @@ mod tests {
     #[test]
     fn surface_and_package_validation_reject_cross_owner_and_private_files() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../builtin-clawpkgs/city-radio");
+            .join("../tests/fixtures/media-sample");
         let valid = crate::clawpkg::validate_clawpkg_at_path(&root).unwrap();
         assert!(valid.ok, "{:?}", valid.errors);
         let temp = tempfile::tempdir().unwrap();
@@ -868,6 +868,8 @@ mod tests {
             "runtime/widget.json",
             "pc/extension.json",
             "assets/.keep",
+            "assets/checker.png",
+            "assets/stripe.png",
         ] {
             let path = temp.path().join(name);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -883,7 +885,7 @@ mod tests {
                 .unwrap()
                 .ok
         );
-        runtime["media"]["source"] = Value::String("pc.city-radio".into());
+        runtime["media"]["source"] = Value::String("pc.media-sample".into());
         runtime["surface"]["elements"][0]["x"] = Value::from(640);
         assert!(validate_surface(&runtime["surface"]).is_err());
         std::fs::copy(root.join("runtime/widget.json"), &path).unwrap();

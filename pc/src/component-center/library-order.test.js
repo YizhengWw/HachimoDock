@@ -12,6 +12,7 @@ import {
   sortComponentsByCreatedAt,
   mergeComponentCatalog,
   isComponentVisible,
+  isWithdrawnComponent,
   DEFAULT_COMPONENT_ORDER,
   sortComponentsByDefaultOrder,
 } from "./library-order.js";
@@ -42,14 +43,43 @@ test("release hides builtin and already-installed music without deleting records
   assert.ok(center.includes("isComponentVisible(item) && !catalogIds.has(item.id)"));
 });
 
+test("withdrawal hides old local, bundled and device copies without changing saved records", () => {
+  const cached = Object.freeze({id:"city-radio", name:"cached package", version:"1.3.0", isLocal:true});
+  const other = Object.freeze({id:"custom-radio", mediaSource:"radio.browser", pcExtension:{type:"media"}});
+  const builtins = Object.freeze([{id:"cloud-hop"}, cached]);
+  const local = Object.freeze([cached, other]);
+  assert.deepEqual(mergeComponentCatalog(local, builtins).map(item=>item.id), ["custom-radio", "cloud-hop"]);
+  assert.equal(isComponentVisible({...cached,isDeviceOnly:true}), false);
+  assert.equal(isComponentVisible(other), true);
+  assert.equal(isWithdrawnComponent({componentId:cached.id,recoveryId:"preserved"}), true);
+  assert.equal(isWithdrawnComponent({id:"other",name:"城市电台"}), false);
+  assert.equal(local[0], cached);
+  assert.equal(builtins[1], cached);
+});
+
+test("withdrawn packages cannot reappear through active, preview, restore or creator UI routes", () => {
+  const center=readFileSync(new URL("../ComponentCenter.jsx",import.meta.url),"utf8");
+  assert.match(center,/function openComponent\(component\) \{if\(!isComponentVisible\(component\)\)return/);
+  assert.match(center,/previewComponent && isComponentVisible\(previewComponent\) &&/);
+  assert.match(center,/if \(!component \|\| !isComponentVisible\(component\)\) return false/);
+  assert.match(center,/isComponentVisible\(activeComponentRecord\)/);
+  assert.match(center,/isComponentVisible\(item\) && !catalogIds.has\(item.id\)/);
+  const sidebar=readFileSync(new URL("../shell/ContextRail.jsx",import.meta.url),"utf8");
+  assert.match(sidebar,/isComponentVisible\(currentComponent\) && currentComponent\?\.name/);
+  const removed=readFileSync(new URL("./RemovedComponents.jsx",import.meta.url),"utf8");
+  assert.match(removed,/filter\(item=>!isWithdrawnComponent\(item\)\)/);
+  const community=readFileSync(new URL("./CommunityCenter.jsx",import.meta.url),"utf8");
+  assert.match(community,/items\?\.filter\(work => !isWithdrawnComponent\(work\)\)/);
+});
+
 test("PC and firmware share the curated default component order", () => {
   const factory = JSON.parse(readFileSync(new URL("../../../firmware/factory-config.json", import.meta.url)));
-  const firstTen=['city-radio','cloud-hop','stock-watchlist','wooden-fish','daily-news','book-pocket','block-combo','tomato-clock','fresh-fruit-slice','hachimi-sounds','snake-turn'];
-  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(0,11),firstTen);
+  const firstTen=['cloud-hop','stock-watchlist','wooden-fish','daily-news','book-pocket','block-combo','tomato-clock','fresh-fruit-slice','hachimi-sounds','snake-turn'];
+  assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(0,10),firstTen);
   assert.deepEqual(factory.components.ids,DEFAULT_COMPONENT_ORDER);
-  assert.equal(new Set(DEFAULT_COMPONENT_ORDER).size,29);
+  assert.equal(new Set(DEFAULT_COMPONENT_ORDER).size,28);
   assert.deepEqual(DEFAULT_COMPONENT_ORDER.slice(-3), ['decision-capsule','answer-book','hope-train']);
-  assert.equal(factory.components.defaultActiveId,'city-radio');
+  assert.equal(factory.components.defaultActiveId,'cloud-hop');
   assert.ok(!factory.components.ids.includes('music-player'));
   const items=[{id:'custom-b'},...firstTen.toReversed().map(id=>({id})),{id:'custom-a'}];
   const snapshot=[...items];
@@ -72,7 +102,7 @@ test("component library sorts mixed records by creation time newest first", () =
 });
 
 test("factory copies keep curated order after loading; actual user revisions stay recent",()=>{
-  const builtins=[{id:"city-radio",version:"1.0"},{id:"cloud-hop",version:"1.0"},{id:"wooden-fish",version:"1.0"}];
+  const builtins=[{id:"stock-watchlist",version:"1.0"},{id:"cloud-hop",version:"1.0"},{id:"wooden-fish",version:"1.0"}];
   const locals=[{...builtins[2],isBundledCopy:true},{...builtins[0],isBundledCopy:true},{...builtins[1],isBundledCopy:true}];
   assert.deepEqual(mergeComponentCatalog(locals,builtins).map(v=>v.id),mergeComponentCatalog([],builtins).map(v=>v.id));
   const custom={id:"wooden-fish",version:"2.0",isBundledCopy:false};

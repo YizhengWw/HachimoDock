@@ -16,6 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import { useDeviceContext } from "./DeviceContext.jsx";
+import { isComponentVisible } from "../component-center/library-order.js";
 
 export default function ContextRail({
   onOpenDevice,
@@ -63,7 +64,7 @@ export default function ContextRail({
       <button type="button" className="context-rail__row" onClick={onOpenComponent} title="打开组件中心">
         <Blocks size={14} />
         <span className="context-rail__primary">
-          {currentComponent?.name || "未选择组件"}
+          {(isComponentVisible(currentComponent) && currentComponent?.name) || "未选择组件"}
         </span>
       </button>
     </div>

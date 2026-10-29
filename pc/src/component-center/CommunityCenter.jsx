@@ -501,6 +501,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
 }
 
 import { navigateTabs } from "../lib/tab-navigation.js";
+import { isWithdrawnComponent } from "./library-order.js";
 export default function CommunityCenter({
   active = true,
   tab: controlledTab,
@@ -610,7 +611,7 @@ export default function CommunityCenter({
           </div>
           <Notice resource={created}>
             <div className="community-creations">
-              {created.data?.items?.map((work) => {
+              {created.data?.items?.filter(work => !isWithdrawnComponent(work)).map((work) => {
                 const local = publicationItems.find(
                   (item) => item.id === work.id && item.libraryPath,
                 );

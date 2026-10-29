@@ -199,7 +199,6 @@ for(const id of fs.readdirSync(source).sort()){
     swipe(next,previous);
   }
   if(id==="hachimi-break")swipe("next","previous");
-  if(id==="city-radio")r.input.repeat=["media.up","media.down"];
   if(id==="tomato-clock")Object.assign(r.surface.elements.find(n=>n.bind==="metricValue"),{y:232,h:78,font_size:48});
   for(const n of r.surface?.elements||[]){
     if(!n.action||!r.surface.graphics)continue;
