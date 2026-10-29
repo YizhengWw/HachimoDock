@@ -53,7 +53,15 @@ export function mergeComponentCatalog(publishedItems, builtins) {
   ].filter(isComponentVisible);
 }
 
-// Release availability, not deletion: keep packages and user data for future restoration.
+// A withdrawal also applies to packages cached by earlier releases. Match the
+// exact package identity, not shared media capabilities or user-authored names.
+const withdrawnComponentIds = new Set(["city-radio"]);
+export function isWithdrawnComponent(component) {
+  return withdrawnComponentIds.has(component?.id ?? component?.componentId);
+}
+
+// Release availability, not deletion: preserve local packages and user data.
 export function isComponentVisible(component) {
-  return component?.id !== "music-player" && component?.mediaSource !== "audio.player";
+  return !isWithdrawnComponent(component)
+    && component?.id !== "music-player" && component?.mediaSource !== "audio.player";
 }

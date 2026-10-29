@@ -41,6 +41,16 @@ test("favorites retain public metadata only and tolerate corrupt storage", () =>
   assert.deepEqual(readFavorites({ getItem: () => "not json" }), []);
   assert.deepEqual(readFavorites({ getItem: () => '[{"id":"../bad"}]' }), []);
 });
+test("old favorite entries are hidden after withdrawal without rewriting stored data", () => {
+  const saved='[{"id":"city-radio","name":"cached package"},{"id":"custom-radio","name":"user media"}]';
+  let writes=0;
+  const storage={getItem:()=>saved,setItem:()=>writes++};
+  assert.deepEqual(readFavorites(storage).map(item=>item.id),["custom-radio"]);
+  assert.equal(writes,0);
+  assert.equal(storage.getItem(),saved);
+  const entries=Object.freeze([{id:"custom-radio"}]);
+  assert.equal(updateFavorites(entries,{id:"city-radio"}),entries);
+});
 test("pending and rejected changes are not shown as published", () => {
   assert.equal(
     publicationStatus({ status: "pending", published: { available: true } }),

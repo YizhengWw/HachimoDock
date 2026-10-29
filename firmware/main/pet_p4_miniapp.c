@@ -350,6 +350,12 @@ static const char *const g_retired_builtin_ids[] = {
   "falling-catch",
 };
 
+/* Withdrawal is a view/install policy, not a storage migration: keep any old
+ * package slots and saves intact, but never expose or reactivate this entry. */
+static bool component_withdrawn(const char *widget_id) {
+  return widget_id && strcmp(widget_id, "city-radio") == 0;
+}
+
 static bool remove_file_if_present(const char *path);
 static bool parse_bounded_scene(
   miniapp_runtime_t *runtime,
@@ -4234,7 +4240,8 @@ static bool recover_catalog_items(miniapp_catalog_snapshot_t *latest,
 }
 
 static bool catalog_entry_visible(size_t index) {
-  return index < g_catalog_count && strcmp(g_catalog[index].widget_id, "music-player") != 0;
+  return index < g_catalog_count && !component_withdrawn(g_catalog[index].widget_id)
+    && strcmp(g_catalog[index].widget_id, "music-player") != 0;
 }
 
 static int catalog_visible_index(size_t visible_index) {
@@ -4602,6 +4609,10 @@ static bool transfer_matches(const cJSON *payload) {
 bool pet_p4_miniapp_install_begin(const cJSON *payload, char *error, size_t error_size) {
   const char *transfer_id = json_string(payload, "transferId");
   const char *widget_id = json_string(payload, "widgetId");
+  if (component_withdrawn(widget_id)) {
+    set_error(error, error_size, "component has been withdrawn");
+    return false;
+  }
   if (!g_builtin_sync_in_progress && strcmp(widget_id, "music-player") == 0) {
     set_error(error, error_size, "music player is unavailable in this release");
     return false;
@@ -4835,6 +4846,10 @@ bool pet_p4_miniapp_install_commit(const cJSON *payload, char *error, size_t err
     return false;
   }
   const char *widget_id = json_string(payload, "widgetId");
+  if (component_withdrawn(widget_id)) {
+    set_error(error, error_size, "component has been withdrawn");
+    return false;
+  }
   miniapp_runtime_t *next;
   miniapp_catalog_item_t *next_catalog __attribute__((cleanup(catalog_scratch_free))) = calloc(PET_P4_MINIAPP_CATALOG_MAX, sizeof(*next_catalog));
   if (!next_catalog) { set_error(error,error_size,"not enough memory for component catalog");return false; }

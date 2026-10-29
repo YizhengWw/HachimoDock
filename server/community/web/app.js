@@ -56,14 +56,14 @@ async function api(action,fields={}){
   for(let attempt=0;attempt<(body?1:2);attempt++){
     try{
       const response=await fetch(`/api/v1${path}?${params}`,{method:body?'POST':'GET',headers:{'X-Community-Client':clientToken,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,credentials:'omit',signal:AbortSignal.timeout(20000)});
-      const value=await response.json();if(!response.ok){const error=Error(value.error||'社区请求失败');error.retry=response.status>=500;throw error;}return value;
+      const value=await response.json();if(!response.ok){const error=Error(value.error||'社区请求失败');error.status=response.status;error.retry=response.status>=500;throw error;}return value;
     }catch(error){if(body||attempt||error.retry===false||(!error.retry&&!['TypeError','TimeoutError'].includes(error.name)))throw error;await new Promise(r=>setTimeout(r,450));}
   }
 }
 function image(hash,name){return /^[a-f0-9]{64}$/.test(hash||'')?node('img',{class:'cover',src:`/api/v1/images/${hash}`,alt:name,loading:'lazy',onError:e=>{e.target.removeAttribute('src');e.target.alt='封面暂不可用';}}):node('div',{class:'cover'});}
 function isSaved(id){return context.favorites.some(x=>x.id===id);}
 async function toggleFavorite(id,control){control.disabled=true;try{context.favorites=await api('favorite',{id});control.textContent=isSaved(id)?'已收藏':'收藏';control.setAttribute('aria-pressed',String(isSaved(id)));}catch(e){toast(e.message);}finally{control.disabled=false;}}
-function card(work){const bookmark=button(isSaved(work.id)?'已收藏':'收藏',()=>toggleFavorite(work.id,bookmark),'bookmark');bookmark.setAttribute('aria-pressed',String(isSaved(work.id)));bookmark.setAttribute('aria-label',`收藏 ${work.name}`);
+function card(work){if(!work||work.available===false)return null;const bookmark=button(isSaved(work.id)?'已收藏':'收藏',()=>toggleFavorite(work.id,bookmark),'bookmark');bookmark.setAttribute('aria-pressed',String(isSaved(work.id)));bookmark.setAttribute('aria-label',`收藏 ${work.name}`);
   return node('article',{class:'card'},node('button',{class:'card-open',onClick:()=>navigate(work.id)},image(work.covers?.[0],work.name),node('div',{class:'card-copy'},node('h3',{},work.name),node('p',{},work.summary||'这个玩法暂不可用'),node('span',{class:'muted'},`by ${work.author||'社区创作者'}`))),node('div',{class:'card-foot'},node('span',{},`↓ ${work.downloads||0}　♡ ${work.likes||0}`),bookmark));}
 function errorBox(error,retry){return node('div',{class:'error',role:'alert'},node('p',{},error.message||'暂时无法连接社区，本机组件仍可使用。'),button('重试',retry));}
 function confirmLeave(proceed){
@@ -74,14 +74,29 @@ function confirmLeave(proceed){
 function navigate(id=''){confirmLeave(()=>{setDirty(false);location.hash=id?`work=${encodeURIComponent(id)}`:state.view;});}
 function heading(title,subtitle){return node('header',{class:'heading'},node('div',{},node('span',{class:'eyebrow'},'SMALL WIDGETS, BIG DELIGHT'),node('h1',{},title,node('span',{class:'accent'},'。')),node('p',{class:'muted'},subtitle)),node('div',{class:'mark','aria-hidden':'true'},'✧'));}
 function shell(){const wrap=node('div',{class:'wrap'});root.replaceChildren(wrap);if(!embedded){const nav=node('nav',{class:'standalone-nav'},button('社区广场',()=>{state.view='discover';navigate();}),button('我的收藏',()=>{state.view='favorites';navigate();}));wrap.append(nav);}return wrap;}
+async function loadFavoritePage(favorites,offset){
+  let failedCount=0;
+  const items=await Promise.all(favorites.slice(offset,offset+18).map(async item=>{
+    try{const work=await api('detail',{id:item.id});return work?.available===false?null:work;}
+    catch(error){
+      // Older native bridges preserve the server's error text, but not HTTP status.
+      // Never rebuild an entry point from stale saved metadata, even when offline.
+      if(error.status!==404&&error.message!=='组件不存在或已下架')failedCount++;
+      return null;
+    }
+  }));
+  return {items:items.filter(Boolean),failedCount,nextOffset:offset+18<favorites.length?offset+18:null};
+}
 async function renderList(){const turn=++epoch,wrap=shell(),favorites=state.view==='favorites';wrap.append(heading(favorites?'留住喜欢的玩法':'给桌面，添点新玩法',favorites?'收藏保存在当前客户端或浏览器，不会自动安装。':'发现好玩的灵感，把喜欢的带回你的哈基米。'));
   const content=node('div'),grid=node('div',{class:'grid'}),rank=node('aside',{class:'panel'}),layout=node('div',{class:'layout'},content,rank);
   if(!favorites){const cats=node('div',{class:'categories'},categories.map(([id,label])=>{const b=button(label,()=>{state.category=id;state.offset=0;renderList();},state.category===id?'active':'');b.setAttribute('aria-pressed',String(state.category===id));return b;}));const search=node('input',{'aria-label':'搜索社区组件',placeholder:'搜索玩法或创作者',value:state.query,maxLength:80});const form=node('form',{class:'search',onSubmit:e=>{e.preventDefault();state.query=search.value.trim();state.offset=0;renderList();}},search,node('button',{type:'submit'},'搜索'));wrap.append(node('div',{class:'toolbar'},cats,form));}
   const select=node('select',{'aria-label':'作品排序',onChange:e=>{state.order=e.target.value;state.offset=0;renderList();}},node('option',{value:'featured'},'精选优先'),node('option',{value:'latest'},'最近更新'));select.value=state.order;
   content.append(node('div',{class:'title-row'},node('h3',{},favorites?'我的收藏':'社区新鲜玩法'),!favorites?select:null),grid);wrap.append(layout);grid.append(node('p',{class:'loading'},'正在加载…'));loadRank(rank,turn);
   try{
-    const result=favorites?{items:await Promise.all(context.favorites.slice(state.offset,state.offset+18).map(async item=>{try{return await api('detail',{id:item.id});}catch{return {...item,summary:'暂不可用或已下架',available:false};}})),nextOffset:state.offset+18<context.favorites.length?state.offset+18:null}:await api('browse',state);
-    if(turn!==epoch)return;grid.replaceChildren(...result.items.map(card));if(!result.items.length)grid.append(node('p',{class:'empty favorite-empty'},favorites?'还没有收藏，去广场发现喜欢的玩法吧。':'没有找到匹配的玩法，试试其他分类或关键词。'));
+    const result=favorites?await loadFavoritePage(context.favorites,state.offset):await api('browse',state);
+    if(turn!==epoch)return;grid.replaceChildren(...result.items.map(card).filter(Boolean));
+    if(result.failedCount)grid.append(errorBox(Error('部分收藏暂时无法加载，请稍后重试。收藏记录未更改。'),renderList));
+    if(!result.items.length&&!result.failedCount)grid.append(node('p',{class:'empty favorite-empty'},favorites?(context.favorites.length?'本页没有可展示的收藏；已下架作品不再显示，收藏记录未更改。':'还没有收藏，去广场发现喜欢的玩法吧。'):'没有找到匹配的玩法，试试其他分类或关键词。'));
     content.append(node('nav',{class:'pagination','aria-label':'组件分页'},state.offset>0?button('上一页',()=>{state.offset=Math.max(0,state.offset-18);renderList();}):null,result.nextOffset!=null?button('下一页',()=>{state.offset=result.nextOffset;renderList();}):null));
   }catch(e){if(turn===epoch)grid.replaceChildren(errorBox(e,renderList));}
 }

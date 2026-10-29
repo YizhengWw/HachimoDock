@@ -12,6 +12,7 @@ import {
   sortComponentsByCreatedAt,
   mergeComponentCatalog,
   isComponentVisible,
+  isWithdrawnComponent,
   DEFAULT_COMPONENT_ORDER,
   sortComponentsByDefaultOrder,
 } from "./library-order.js";
@@ -40,6 +41,35 @@ test("release hides builtin and already-installed music without deleting records
   const center=readFileSync(new URL("../ComponentCenter.jsx", import.meta.url),"utf8");
   assert.ok(center.includes("isComponentVisible(activeComponentRecord)"));
   assert.ok(center.includes("isComponentVisible(item) && !catalogIds.has(item.id)"));
+});
+
+test("withdrawal hides old local, bundled and device copies without changing saved records", () => {
+  const cached = Object.freeze({id:"city-radio", name:"cached package", version:"1.3.0", isLocal:true});
+  const other = Object.freeze({id:"custom-radio", mediaSource:"radio.browser", pcExtension:{type:"media"}});
+  const builtins = Object.freeze([{id:"cloud-hop"}, cached]);
+  const local = Object.freeze([cached, other]);
+  assert.deepEqual(mergeComponentCatalog(local, builtins).map(item=>item.id), ["custom-radio", "cloud-hop"]);
+  assert.equal(isComponentVisible({...cached,isDeviceOnly:true}), false);
+  assert.equal(isComponentVisible(other), true);
+  assert.equal(isWithdrawnComponent({componentId:cached.id,recoveryId:"preserved"}), true);
+  assert.equal(isWithdrawnComponent({id:"other",name:"城市电台"}), false);
+  assert.equal(local[0], cached);
+  assert.equal(builtins[1], cached);
+});
+
+test("withdrawn packages cannot reappear through active, preview, restore or creator UI routes", () => {
+  const center=readFileSync(new URL("../ComponentCenter.jsx",import.meta.url),"utf8");
+  assert.match(center,/function openComponent\(component\) \{if\(!isComponentVisible\(component\)\)return/);
+  assert.match(center,/previewComponent && isComponentVisible\(previewComponent\) &&/);
+  assert.match(center,/if \(!component \|\| !isComponentVisible\(component\)\) return false/);
+  assert.match(center,/isComponentVisible\(activeComponentRecord\)/);
+  assert.match(center,/isComponentVisible\(item\) && !catalogIds.has\(item.id\)/);
+  const sidebar=readFileSync(new URL("../shell/ContextRail.jsx",import.meta.url),"utf8");
+  assert.match(sidebar,/isComponentVisible\(currentComponent\) && currentComponent\?\.name/);
+  const removed=readFileSync(new URL("./RemovedComponents.jsx",import.meta.url),"utf8");
+  assert.match(removed,/filter\(item=>!isWithdrawnComponent\(item\)\)/);
+  const community=readFileSync(new URL("./CommunityCenter.jsx",import.meta.url),"utf8");
+  assert.match(community,/items\?\.filter\(work => !isWithdrawnComponent\(work\)\)/);
 });
 
 test("PC and firmware share the curated default component order", () => {
