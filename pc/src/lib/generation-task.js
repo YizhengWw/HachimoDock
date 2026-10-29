@@ -2,6 +2,7 @@
  * [Input] Wizard hands off `{ imageFile, providerConfig, ... }`; UI subscribes to state.
  * [Output] Module-level singleton that owns the current custom avatar-generation run so it
  *   survives navigation, distinguishes reference-image moderation and skipped actions,
+ *   identifies unavailable models by request stage and actual model ID,
  *   replaces conversion progress with a truthful terminal summary, and guards
  *   terminal-result acknowledgement by completion epoch.
  * [Pos] lib node in pc/src/lib
@@ -258,10 +259,17 @@ export function normalizeGenerationErrorMessage(error) {
   const primary = extractPrimaryError(raw);
   if (!primary) return "生成失败：未收到具体错误信息。";
 
-  if (/火山引擎模型未开通|ModelNotOpen|has not activated the model/i.test(primary)) {
-    return primary.includes("火山引擎模型未开通")
-      ? primary
-      : "火山引擎模型未开通：当前 Ark 账号还没有开通所选视频模型。请在 Ark 控制台开通模型服务，或先切换到已开通的 Seedance 1.5 模型。";
+  if (/模型未开通|模型不可用|ModelNotOpen|InvalidEndpointOrModel\.NotFound|has not activated the model/i.test(primary)) {
+    const requestModel = /(?:Ark image edit|thinking model|参考图检查|试片检查)\s*\(([^)\n]+)\)/i.exec(primary)?.[1];
+    const namedModel = /\b(?:doubao-[a-z0-9][a-z0-9._-]*|ep-[a-z0-9][a-z0-9_-]*)\b/i.exec(primary)?.[0];
+    const diagnosticModel = /"model"\s*:\s*"([^"\n]+)"/.exec(raw.split("\nVolcano payload summary:")[1] || "")?.[1];
+    const model = requestModel || namedModel || diagnosticModel || "模型 ID 未获取";
+    const stage = /Ark image edit|图片处理|seedream/i.test(primary) ? "图片处理"
+      : /参考图检查|试片检查|自动检查/.test(primary) ? "自动检查"
+      : /thinking model|图像理解/i.test(primary) ? "图像理解 / 提示词"
+      : /volcano (?:submit|task)|视频生成|视频模型|seedance/i.test(primary) ? "视频生成" : "形象生成";
+    const reason = /InvalidEndpointOrModel\.NotFound|模型不可用/i.test(primary) ? "模型不可用" : "模型未开通或无权限";
+    return `${stage}${reason}：${model}。请在 Ark 控制台确认该模型已开通、未下线，且当前 Key 有权调用。`;
   }
 
   if (/expected the height to be at least 300px/i.test(primary)) {

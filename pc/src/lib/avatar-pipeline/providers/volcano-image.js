@@ -1,6 +1,6 @@
 /**
  * [Input] source image data URL + Volcengine Ark API-key/base-url/model config.
- * [Output] Seedream-edited image bytes, or stage-specific input/output moderation guidance without retrying or substituting models.
+ * [Output] Seedream-edited image bytes, or stage-specific errors naming the actual submitted model without retrying or substituting models.
  * [Pos] image-edit provider node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update image-processing.js, run.js, provider-config.js, and pc/src/.folder.md.
  */
@@ -143,7 +143,7 @@ async function requestImageEdit({ apiKey, baseUrl, model, imageDataUrl, signal, 
         },
         body: JSON.stringify(payload),
       });
-      return readJsonOrThrow(response, `Ark image edit (${model})`);
+      return readJsonOrThrow(response, `Ark image edit (${payload.model})`);
     },
     { retries: 0, signal, shouldRetry: shouldRetryArkImageHttp },
   );

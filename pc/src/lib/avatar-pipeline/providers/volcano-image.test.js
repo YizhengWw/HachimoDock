@@ -1,6 +1,6 @@
 /**
  * [Input] Ark Seedream image-edit model configuration and representative API envelopes.
- * [Output] Node regression coverage for black-background payload shape, model compatibility, and response extraction.
+ * [Output] Node regression coverage for black-background payloads, actual submitted model IDs in errors, compatibility, and response extraction.
  * [Pos] test node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update pc/src/.folder.md.
  */
@@ -13,7 +13,28 @@ import {
   buildVolcanoImageEditPayload,
   extractVolcanoImageResult,
   getArkImageEditPolicyRejection,
+  editImageBackgroundWithArk,
 } from "./volcano-image.js";
+
+test("image access failures identify the submitted canonical model, without retrying", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, init) => {
+    calls++;
+    assert.equal(JSON.parse(init.body).model, "doubao-seedream-5-0-260128");
+    return Response.json({ error: { code: "ModelNotOpen", message: "model is not activated" } }, { status: 404 });
+  };
+  try {
+    await assert.rejects(editImageBackgroundWithArk({
+      apiKey: "fixture-only", model: "doubao-seedream-5-0-lite-260128", imageDataUrl: "data:image/png;base64,fixture",
+    }), error => {
+      assert.match(error.message, /Ark image edit \(doubao-seedream-5-0-260128\) HTTP 404/);
+      assert.equal(error.status, 404);
+      return true;
+    });
+    assert.equal(calls, 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
 
 test("image edit moderation distinguishes input, output and generic policy without inventing copyright", () => {
   const error=(code,message="rejected")=>`Ark image edit (fixture) HTTP 400: ${JSON.stringify({error:{code,message}})}`;
