@@ -31,10 +31,12 @@ test("DeviceStatusBar exposes a manual USB serial rescan button", () => {
   assert.match(source, /handleRescanUsb/);
 });
 
-test("DeviceStatusBar renders verified USB state without WiFi status", () => {
+test("DeviceStatusBar renders the verified link (USB or WiFi) from the backend transport", () => {
   assert.match(source, /usbChip/);
-  assert.match(source, /USB 直连/);
+  assert.match(source, /linkLabel\(usb\)/);
+  assert.match(source, /isWifiLink\(usb\)/);
   assert.match(source, /dashboard-status-bar__chips/);
+  // The chip reflects the link the backend verified; the bar never polls or guesses WiFi itself.
   assert.doesNotMatch(source, /wifiOnline|wifiChip|WiFi 在线|WiFi 离线/);
 });
 

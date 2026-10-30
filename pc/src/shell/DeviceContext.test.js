@@ -293,3 +293,13 @@ test("provider resolves currentComponent through the exact USB or SSH target", (
   assert.match(source, /transport: "ssh", sshHost/);
   assert.match(source, /readActiveComponentForTarget\(currentComponentTarget\)/);
 });
+
+test("USB status normalization carries the backend transport and treats it as a change", () => {
+  const base = { connected: true, portName: "COM3", boardDeviceId: "p4-a", capabilities: {} };
+  const usbLink = normalizeUsbStatusPayload(base);
+  const wifiLink = normalizeUsbStatusPayload({ ...base, portName: "wifi://192.168.1.9:38517", transport: "wifi" });
+  assert.equal(usbLink.transport, "usb");
+  assert.equal(normalizeUsbStatusPayload({ ...base, transport: "mqtt" }).transport, "usb");
+  assert.equal(wifiLink.transport, "wifi");
+  assert.equal(usbStatusSnapshotsEqual(usbLink, { ...wifiLink, portName: usbLink.portName }), false);
+});

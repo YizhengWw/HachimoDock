@@ -20,6 +20,8 @@ idf_component_register(
     "pet_p4_input.c"
     "pet_p4_input_core.c"
     "pet_p4_miniapp.c"
+    "pet_p4_net_core.c"
+    "pet_p4_network.c"
     "pet_p4_local_tools.c"
     "pet_p4_app_store.c"
     "pet_p4_app_host.c"
@@ -44,7 +46,13 @@ idf_component_register(
     "."
   REQUIRES
     esp_adc
+    esp_event
+    esp_netif
     esp_timer
+    esp_wifi
+    espressif__esp_hosted
+    espressif__esp_wifi_remote
+    lwip
     esp_driver_gpio
     esp_driver_jpeg
     esp_driver_ppa
@@ -66,7 +74,6 @@ idf_component_register(
     tinyusb
 )
 
-# Shared, OTA-updatable status cues live in the application, not appearance slots.
 # Retain compiler stack reports for the nested component/media render path.
 # Large snapshots belong to renderer-owned storage, not the 10 KiB main stack.
 set_source_files_properties("pet_p4_renderer.c" PROPERTIES COMPILE_OPTIONS "-fstack-usage;-Wframe-larger-than=4096")
@@ -87,15 +94,6 @@ execute_process(
 if(NOT PET_INSTRUMENT_PACK_STATUS EQUAL 0)
   message(FATAL_ERROR "Lossless instrument assets are stale; run tools/compress_instrument_assets.py")
 endif()
-file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/error.wav" PET_ERROR_CUE_SHA)
-file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/waiting_user.wav" PET_WAIT_CUE_SHA)
-if(NOT PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA)
-  message(FATAL_ERROR "Shared waiting/error cue changed: restore separate embedding before shipping")
-endif()
-foreach(cue done error)
-  set(cue_input "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/${cue}.wav")
-  target_add_binary_data(${COMPONENT_LIB} "${cue_input}" BINARY)
-endforeach()
 
 execute_process(
   COMMAND
@@ -130,6 +128,27 @@ idf_component_get_property(tusb_lib ${tinyusb_name} COMPONENT_LIB)
 target_include_directories(${tusb_lib} PUBLIC "${CMAKE_CURRENT_LIST_DIR}")
 # pet_p4_usb_descriptors.c is compiled in the main component and provides the
 # TinyUSB descriptor callbacks while this include path exposes tusb_config.h.
+
+# esp_hosted registers a boot-time constructor that brings up the C6 transport, resets the
+# co-processor and aborts on failure. Wrapping its only caller turns that into a no-op;
+# pet_p4_network.c calls __real_esp_hosted_init() on demand, after Wi-Fi was configured over USB.
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_hosted_init")
+
+# The co-processor drivers log every RPC at INFO; compiled out, those messages and their format
+# strings cost tens of KB of the OTA slot. Warnings and errors stay. The application's own logs
+# and ESP_ERROR_CHECK diagnostics are untouched.
+foreach(wifi_component espressif__esp_hosted espressif__esp_wifi_remote)
+  idf_component_get_property(wifi_lib ${wifi_component} COMPONENT_LIB)
+  target_compile_definitions(${wifi_lib} PRIVATE LOG_LOCAL_LEVEL=ESP_LOG_WARN)
+endforeach()
+
+# The project builds for speed (-O2), but this link only moves status, session and key-event JSON.
+# Optimizing the radio stack for size, as pet_p4_surface.c and pet_p4_miniapp.c already are, keeps
+# it from consuming the OTA headroom that audio, video and rendering never get back.
+foreach(wifi_component espressif__esp_hosted espressif__esp_wifi_remote lwip esp_netif esp_event sdmmc)
+  idf_component_get_property(wifi_lib ${wifi_component} COMPONENT_LIB)
+  target_compile_options(${wifi_lib} PRIVATE -Os)
+endforeach()
 
 cmake_policy(SET CMP0079 NEW)
 target_link_libraries(${tusb_lib} PRIVATE ${COMPONENT_LIB})

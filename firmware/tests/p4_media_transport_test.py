@@ -36,7 +36,20 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static SemaphoreHandle_t g_transport_mutex = &mutex;
 static bool g_transport_ready = true;
 static char g_transport_log_buffer[1024];
-typedef enum {PET_P4_TRANSPORT_BROADCAST, PET_P4_TRANSPORT_UART, PET_P4_TRANSPORT_USB_SERIAL_JTAG} pet_p4_transport_route_t;
+typedef enum {PET_P4_TRANSPORT_BROADCAST, PET_P4_TRANSPORT_UART, PET_P4_TRANSPORT_USB_SERIAL_JTAG, PET_P4_TRANSPORT_NETWORK} pet_p4_transport_route_t;
+static char net_queue[8192];
+static size_t net_used;
+static bool net_client = false;
+static bool pet_p4_network_client_ready(void) {return net_client;}
+static bool pet_p4_network_send_line(const char *line) {
+  size_t n=strlen(line);assert(net_used+n+1<sizeof(net_queue));
+  memcpy(net_queue+net_used,line,n);net_used+=n;net_queue[net_used++]='\n';return true;
+}
+static bool pet_p4_net_line_topic(const char *line,char *out,size_t size) {
+  const char *p=strstr(line,"\"topic\":\"");if(!p)return false;p+=9;
+  const char *q=strchr(p,'"');if(!q||(size_t)(q-p)>=size)return false;memcpy(out,p,(size_t)(q-p));out[q-p]=0;return true;
+}
+static bool pet_p4_net_broadcast_allowed(const char *topic) {return !strncmp(topic,"input/",6);}
 static char usb_queue[262144], uart_queue[262144];
 static size_t usb_used, uart_used;
 static int drains, console_writes;
@@ -83,7 +96,21 @@ int main(void) {
   transport_send_line(frame,NULL);assert(!strcmp(usb_queue+1023,"{\"topic\":\"media/status\",\"payload\":{\"ok\":true}}\n"));
   usb_seen=false;size_t prior=usb_used;log_line("uart only");assert(usb_used==prior);
   assert(drains==0&&console_writes==1);
-  puts("PASS actual TX: partial writes, 500 concurrent frames/logs, bounded diagnostics, no console bypass/drain");
+  // Wi-Fi delivery: only allowed broadcast topics reach an attached client; replies to a LAN request
+  // stay on the LAN; nothing is sent while no client is authenticated; logs never go to the network.
+  usb_used=uart_used=0;memset(usb_queue,0,sizeof(usb_queue));memset(uart_queue,0,sizeof(uart_queue));
+  const char *key="{\"topic\":\"input/event\",\"payload\":{}}",*pcm="{\"topic\":\"audio/chunk\",\"payload\":{}}";
+  transport_send_line(key,NULL);assert(net_used==0);
+  net_client=true;
+  transport_send_line(key,NULL);transport_send_line(pcm,NULL);
+  assert(!strcmp(net_queue,"{\"topic\":\"input/event\",\"payload\":{}}\n"));
+  net_used=0;memset(net_queue,0,sizeof(net_queue));usb_used=uart_used=0;
+  static const pet_p4_transport_route_t lan=PET_P4_TRANSPORT_NETWORK;
+  transport_send_line(frame,(void *)&lan);
+  assert(!strcmp(net_queue,"{\"topic\":\"media/status\",\"payload\":{\"ok\":true}}\n"));
+  assert(usb_used==0&&uart_used==0);
+  log_line("I never on the lan\n");assert(strstr(net_queue,"never")==NULL);
+  puts("PASS actual TX: partial writes, 500 concurrent frames/logs, bounded diagnostics, no console bypass/drain, Wi-Fi routing");
 }
 ''')
     exe = tmp_path / "transport"

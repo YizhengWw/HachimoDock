@@ -54,6 +54,48 @@ transport:
 {"topic":"<topic>","payload":{}}
 ```
 
+## Wi-Fi Transport (`pet-net-jsonl-v1`)
+
+Boards with the ESP32-C6 companion radio can carry the same JSON-per-line business protocol over the
+LAN. Wi-Fi is a **second link beside USB**, not a replacement: phase one synchronizes status,
+sessions and key events only.
+
+**Provisioning (USB only).** `network/config {ssid, password, secret, requestId}` stores the
+credentials and a 64-hex pairing secret in NVS; `network/clear` erases them; `network/query` reads
+state. Config and clear are refused on the LAN with `usb_required`. Replies are `network/status`
+(`requestId`, `ok`, `state` = `unconfigured|idle|starting|connecting|connected|failed`, `ssid`, `ip`,
+`rssi`, `port`, `client`, `lastError`, `disconnectReason`, `coprocessorVersion`). `lastError` is one of
+`ap_not_found`, `wrong_password`, `disconnected`, `connect_failed`, `c6_unavailable`, `crash_loop`.
+Credentials and the secret are never logged or echoed.
+
+**Lifecycle.** Without credentials the radio and the ESP-Hosted transport are never touched; the
+host component's boot-time initialization is wrapped to a no-op (`-Wl,--wrap=esp_hosted_init`) and
+runs only after configuration, 12 s after boot (past the OTA validation window). Three consecutive
+crashes during bring-up set `crash_loop` and disable the radio until the next `network/config`.
+
+**Connection.** TCP `38517`, one authenticated client. UDP `38517` answers
+`{"topic":"net/discover","payload":{"nonce"}}` with `net/announce {boardDeviceId, nonce, port, fw,
+paired}` (no secrets). Handshake: board sends `net/challenge {boardDeviceId, nonce}`; the desktop
+answers `net/auth {desktopDeviceId, nonce, proof}` with `proof = HMAC-SHA256(secret_hex_ascii,
+"pet-net-v1|client|<board>|<device nonce>|<client nonce>")`; the board verifies, replies
+`net/auth_ok {proof}` using role `server`, and the desktop verifies it before sending `bind`, which
+returns the Wi-Fi `hello`. Five failures within 60 s lock authentication for 30 s (`locked`). The board
+sends `net/keepalive` every 3 s and drops a client silent for 15 s; the desktop drops a link silent
+for 12 s and reconnects with a fresh `bind`/snapshot. The stream is **authenticated but not
+encrypted**: use trusted networks.
+
+**Allowed topics.** Desktop to board: `ack, bind, system/heartbeat, speech/text, session/current,
+control/screen-page, control/command, stats/update, runtime/stats, state/*, diagnostics/*, network/*`.
+Anything else is answered `protocol/ack {ok:false, code:"wifi_unsupported"}`. Board to desktop
+broadcasts: `input/*, session/*, protocol/*, diagnostics/*, network/*, button-config-ack`; audio,
+media, asset and firmware traffic never leaves over Wi-Fi even when a button starts it.
+
+**Hello over Wi-Fi.** `link:"wifi"`, `capabilities.transport = {kind:"wifi", usbOnly:false,
+operations:[state, session, inputEvents, diagnostics]}`, and asset/appearance/widget/audio/voice/
+screenshot/firmware capabilities reported false. Every hello carries `capabilities.network`
+(`wifi`, `protocol`, `port`, `provisioning:"usb"`, `configured`, `state`). Assets, audio, widgets and
+OTA keep their USB transactions. Only one link is the desktop's business channel at a time; USB wins.
+
 ## Handshake
 
 ### Duplex audio capability extension
@@ -1214,7 +1256,7 @@ Session-card overlays are likewise cached by queue content and selected index,
 with only animated working markers redrawn per frame.
 # 公共状态提示音（0.7.63+）
 
-设备能力 `appearance.systemCues: true` 表示默认完成、错误、等待用户音效由固件公共资源提供，不依赖形象内是否存在对应视频。完成音保持四组、每组三声。新形象 manifest 可声明 `systemCues: true`，默认不含 WAV；`families[].audioPath` 配合 `audioSource: "custom"` 表示专属音效，缺失/无效时公共音效兜底。旧 manifest 保持兼容，已知旧默认 WAV 按内容指纹迁移，不按文件名猜测用户音效。
+设备能力 `appearance.systemCues: true` 表示 manifest 可声明 `systemCues: true` 且不携带默认 WAV；该位只是 manifest 契约，保持为 `true` 以兼容桌面端校验。**固件不再内置默认完成、错误、等待用户音效**（为 WiFi 协议栈让出约 240 KB 的 OTA 空间）：没有专属音效的形象保持静音。`families[].audioPath` 配合 `audioSource: "custom"` 的专属音效照常播放；已知旧默认 WAV 仍按内容指纹识别并跳过（不再回退到公共音效），不按文件名猜测用户音效。
 
 内置形象切换使用现有 `asset/slot-query` 与 `asset/activate`：仅对设备声明 `builtinProtected` 的内置形象请求，选择有效 slot 0，并使用设备返回的 packId 激活；不要求与 PC 内置 packId 相等。槽位无效时停止并报错，不能回退成写入自定义槽位。普通自定义包仍严格校验 packId。
 # 原生敲击组件能力（0.7.70-p4）

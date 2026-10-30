@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
@@ -38,6 +39,8 @@
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
 #include "pet_p4_media.h"
+#include "pet_p4_net_core.h"
+#include "pet_p4_network.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_protocol.h"
 #include "pet_p4_transport_config.h"
@@ -85,16 +88,23 @@ typedef enum {
   PET_P4_TRANSPORT_BROADCAST = 0,
   PET_P4_TRANSPORT_UART,
   PET_P4_TRANSPORT_USB_SERIAL_JTAG,
+  PET_P4_TRANSPORT_NETWORK,
 } pet_p4_transport_route_t;
 
 typedef struct {
   char *line;
   pet_p4_send_line_fn send_line;
   void *reply_ctx;
+  pet_p4_link_t link;
 } pet_p4_protocol_request_t;
 
 static const pet_p4_transport_route_t g_uart_route = PET_P4_TRANSPORT_UART;
 static const pet_p4_transport_route_t g_usb_serial_jtag_route = PET_P4_TRANSPORT_USB_SERIAL_JTAG;
+static const pet_p4_transport_route_t g_network_route = PET_P4_TRANSPORT_NETWORK;
+#define PET_P4_NET_LINE_BUFFER_BYTES 16384
+// Owned by the network task only (bytes of the authenticated Wi-Fi client).
+static char *g_net_line_buffer;
+static size_t g_net_line_used;
 
 static void mark_usb_protocol_seen(void);
 static bool usb_protocol_seen(void);
@@ -238,6 +248,15 @@ static void transport_send_line_impl(const char *line, void *ctx, bool drain) {
     pet_p4_native_usb_send_json_line(line, NULL);
   }
   if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
+  // The LAN peer can be slow; never hold the UART/USB transport lock while sending to it.
+  if (route == PET_P4_TRANSPORT_NETWORK) {
+    (void) pet_p4_network_send_line(line);
+  } else if (route == PET_P4_TRANSPORT_BROADCAST && pet_p4_network_client_ready()) {
+    char topic[48];
+    if (pet_p4_net_line_topic(line, topic, sizeof(topic)) && pet_p4_net_broadcast_allowed(topic)) {
+      (void) pet_p4_network_send_line(line);
+    }
+  }
 }
 
 static void transport_send_line(const char *line, void *ctx) {
@@ -414,6 +433,10 @@ static bool enqueue_protocol_line(
     .line = line_copy,
     .send_line = send_line,
     .reply_ctx = reply_ctx,
+    .link = send_line == transport_send_line && reply_ctx
+        && *((const pet_p4_transport_route_t *) reply_ctx) == PET_P4_TRANSPORT_NETWORK
+      ? PET_P4_LINK_WIFI
+      : PET_P4_LINK_USB,
   };
   if (xQueueSend(g_protocol_queue, &request, pdMS_TO_TICKS(20)) == pdTRUE) {
     return true;
@@ -431,11 +454,15 @@ static void protocol_worker_task(void *arg) {
   pet_p4_protocol_request_t request;
   while (true) {
     if (xQueueReceive(g_protocol_queue, &request, portMAX_DELAY) != pdTRUE) continue;
+    // Screenshots stay off the LAN: the protocol layer answers them with wifi_unsupported.
     bool handled_debug = request.send_line == transport_send_line
+      && request.link == PET_P4_LINK_USB
       && maybe_handle_debug_line(request.line, request.reply_ctx);
     if (!handled_debug) {
       xSemaphoreTake(g_state_mutex, portMAX_DELAY);
+      g_state.request_link = request.link;
       pet_p4_handle_line(&g_state, request.line, request.send_line, request.reply_ctx);
+      g_state.request_link = PET_P4_LINK_USB;
       xSemaphoreGive(g_state_mutex);
     }
     free(request.line);
@@ -589,6 +616,33 @@ static void usb_rx_task(void *arg) {
   }
 }
 
+// Wi-Fi bytes are split into lines here instead of going through consume_transport_bytes: that
+// path consults the global raw-asset state, and a USB asset transfer must never swallow LAN bytes.
+static void network_rx(const uint8_t *data, size_t len, void *ctx) {
+  (void) ctx;
+  if (!g_net_line_buffer) return;
+  for (size_t i = 0; i < len; ++i) {
+    char ch = (char) data[i];
+    if (ch == '\r') continue;
+    if (ch == '\n') {
+      g_net_line_buffer[g_net_line_used] = '\0';
+      if (g_net_line_used > 0) {
+        (void) enqueue_protocol_line(g_net_line_buffer, transport_send_line, (void *) &g_network_route, NULL);
+      }
+      g_net_line_used = 0;
+    } else if (g_net_line_used + 1 < PET_P4_NET_LINE_BUFFER_BYTES) {
+      g_net_line_buffer[g_net_line_used++] = ch;
+    } else {
+      g_net_line_used = 0;
+    }
+  }
+}
+
+static void network_client(bool attached, void *ctx) {
+  (void) ctx;
+  if (attached) g_net_line_used = 0; // never splice a dead session's partial line into a new one
+}
+
 static void uart_rx_task(void *arg) {
   (void) arg;
   uint8_t buf[PET_P4_UART_READ_CHUNK_BYTES];
@@ -728,6 +782,19 @@ void app_main(void) {
   esp_err_t ota_err = pet_p4_ota_init(&g_state, transport_send_line, NULL);
   if (ota_err != ESP_OK) {
     ESP_LOGW(TAG, "A/B firmware OTA unavailable: %s", esp_err_to_name(ota_err));
+  }
+  g_net_line_buffer = heap_caps_calloc(1, PET_P4_NET_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  const esp_app_desc_t *app_desc = esp_app_get_description();
+  const pet_p4_network_config_t network_config = {
+    .board_device_id = g_state.board_device_id,
+    .firmware_version = app_desc ? app_desc->version : "",
+    .on_bytes = network_rx,
+    .on_client = network_client,
+  };
+  // Wi-Fi is optional: without stored credentials the radio and the co-processor are never touched.
+  esp_err_t network_err = g_net_line_buffer ? pet_p4_network_init(&network_config) : ESP_ERR_NO_MEM;
+  if (network_err != ESP_OK) {
+    ESP_LOGW(TAG, "Wi-Fi link unavailable, keeping USB transports alive: %s", esp_err_to_name(network_err));
   }
   esp_err_t native_usb_err = pet_p4_native_usb_init(
     &g_state,

@@ -1,6 +1,15 @@
 dependencies:
   espressif/esp-sr: "2.5.3"
+  # Pinned to the versions the audio frontend (AEC/NS/VAD) was validated with. Adding the radio
+  # components made the solver move these forward unprompted; DSP changes need their own review.
+  espressif/esp-dl: "3.3.11"
+  espressif/dl_fft: "0.7.0"
   espressif/esp_h264: "^1.3.6"
+  # P4 has no radio: the ESP32-C6 on the companion board provides Wi-Fi over
+  # SDIO. esp_wifi_remote 1.6.3 is the last release that pins esp_hosted < 3.0,
+  # matching the 2.x host/slave RPC contract of the stock co-processor image.
+  espressif/esp_wifi_remote: "1.6.3"
+  espressif/esp_hosted: "2.13.1"
   espressif/esp_lcd_st7701:
     override_path: ../components/esp_lcd_st7701
   espressif/esp_lvgl_adapter:

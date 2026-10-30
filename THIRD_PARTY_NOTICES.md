@@ -25,7 +25,7 @@ preserved in [Espressif ESP-SR LICENSE](licenses/Espressif-ESP-SR-LICENSE.txt).
 DSP and other transitive dependencies retain their upstream licenses and are
 pinned independently for each silicon family in the firmware lockfiles.
 
-The board support code in `firmware/components/esp32_p4_wifi6_touch_lcd_4_3/` and display driver in `firmware/components/esp_lcd_st7701/` preserve their Apache-2.0 licenses and original copyright headers. The local `esp_lvgl_adapter` directory is a project build shim. ESP-IDF, LVGL, TinyUSB and other downloaded components retain their respective licenses in their distributions; exact resolved versions are recorded in `firmware/dependencies.lock`.
+The board support code in `firmware/components/esp32_p4_wifi6_touch_lcd_4_3/` and display driver in `firmware/components/esp_lcd_st7701/` preserve their Apache-2.0 licenses and original copyright headers. The local `esp_lvgl_adapter` directory is a project build shim. ESP-IDF, LVGL, TinyUSB and other downloaded components retain their respective licenses in their distributions; exact resolved versions are recorded in `firmware/dependencies.lock`. Wi-Fi uses Espressif `esp_hosted` (ESP-Hosted-MCU 2.13.1) and `esp_wifi_remote` 1.6.3, both Apache-2.0, resolved in `firmware/dependencies.v3.lock`.
 
 Desktop npm and Rust dependency versions are recorded in package lockfiles and `pc/src-tauri/Cargo.lock`. Their licenses accompany the upstream packages and remain independent of HachimoDock's first-party license.
 

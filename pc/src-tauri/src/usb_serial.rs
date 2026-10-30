@@ -59,6 +59,8 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::network_transport;
+
 mod appearance_transaction;
 mod connection_handle;
 mod live_audio_pacing;
@@ -1586,7 +1588,31 @@ impl UsbSerialManager {
             cache_usb_status(&self.status_snapshot, conn.as_ref());
         }
         on_message(initial_hello.topic, initial_hello.payload);
+        self.spawn_reader(
+            reader_port,
+            connection_id,
+            cancel_reader,
+            capture_active,
+            None,
+            on_message,
+        );
+        Ok(())
+    }
 
+    /// Reader thread shared by serial and Wi-Fi links. `idle_timeout` is only set for Wi-Fi:
+    /// a powered-off peer never closes its TCP socket, so silence is the disconnect signal.
+    fn spawn_reader<R, F>(
+        &self,
+        reader_port: R,
+        connection_id: u64,
+        cancel_reader: Arc<AtomicBool>,
+        capture_active: Arc<AtomicBool>,
+        idle_timeout: Option<Duration>,
+        on_message: F,
+    ) where
+        R: Read + Send + 'static,
+        F: Fn(String, serde_json::Value) + Send + 'static,
+    {
         // Start reader thread
         let conn_ref = Arc::clone(&self.connection);
         let status_snapshot = Arc::clone(&self.status_snapshot);
@@ -1603,6 +1629,7 @@ impl UsbSerialManager {
             let mut line_buffer = Vec::with_capacity(32 * 1024);
             let mut read_failure=None;
             let mut last_hello_ack = None;
+            let mut last_rx = Instant::now();
             loop {
                 if cancel_reader.load(Ordering::SeqCst) {
                     break;
@@ -1618,6 +1645,10 @@ impl UsbSerialManager {
                         if cancel_reader.load(Ordering::SeqCst) {
                             break;
                         }
+                        if idle_timeout.is_some_and(|limit| last_rx.elapsed() > limit) {
+                            read_failure=Some(("net_idle_timeout","idle_timeout",None));
+                            break;
+                        }
                         if e.kind()!=std::io::ErrorKind::TimedOut {thread::sleep(Duration::from_millis(2));}
                         continue;
                     }
@@ -1628,6 +1659,7 @@ impl UsbSerialManager {
                     }
                 };
 
+                last_rx = Instant::now();
                 if line.trim().is_empty() {
                     continue;
                 }
@@ -1640,6 +1672,9 @@ impl UsbSerialManager {
                     }
                 };
 
+                if msg.topic == "net/keepalive" {
+                    continue;
+                }
                 resolve_asset_ack(&asset_ack_waiters, &msg.topic, &msg.payload);
                 observe_serial_capture(&capture_active, &msg.topic, &msg.payload);
                 resolve_widget_ack(&widget_ack_waiters, &msg.topic, &msg.payload);
@@ -1699,8 +1734,122 @@ impl UsbSerialManager {
                 }
             }
         });
+    }
 
+    /// Opens the authenticated Wi-Fi link to a board that was paired over USB. It occupies the
+    /// same single connection slot as USB, so exactly one business channel is ever active, and a
+    /// later USB connect (which has priority) replaces it.
+    pub fn connect_network<F>(
+        &self,
+        board_device_id: &str,
+        addr: std::net::SocketAddr,
+        secret: &str,
+        on_message: F,
+    ) -> Result<(), String>
+    where
+        F: Fn(String, serde_json::Value) + Send + 'static,
+    {
+        let _guard = self.connect_guard.lock().map_err(|e| e.to_string())?;
+        let port_name = network_transport::network_port_name(&addr);
+        {
+            let conn = self.connection.lock().map_err(|e| e.to_string())?;
+            if let Some(existing) = conn.as_ref() {
+                if existing.connected && existing.port_name == port_name {
+                    return Ok(());
+                }
+            }
+        }
+        {
+            let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
+            if let Some(existing) = conn.as_mut() {
+                existing.cancel_reader.store(true, Ordering::SeqCst);
+            }
+            *conn = None;
+            cache_usb_status(&self.status_snapshot, None);
+        }
+
+        let desktop_id = self
+            .desktop_device_id
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_default();
+        let link = network_transport::connect_authenticated(addr, secret, &desktop_id, board_device_id)
+            .inspect_err(|error| {
+                transfer_log::record(
+                    "connection",
+                    "failed",
+                    serde_json::json!({"port": port_name, "error": error}),
+                );
+            })?;
+        let mut hello = SerialMessage {
+            topic: "hello".to_string(),
+            payload: link.hello,
+        };
+        validate_hello_message(&mut hello)?;
+        let reader = link.stream.try_clone().map_err(|error| error.to_string())?;
+        transfer_log::record(
+            "connection",
+            "verified",
+            serde_json::json!({
+                "port": port_name, "transport": "wifi",
+                "firmware": first_json_string(&hello.payload, &["fw", "firmware", "version"]),
+            }),
+        );
+
+        let connection_id = self.next_connection_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let cancel_reader = Arc::new(AtomicBool::new(false));
+        let capture_active = Arc::new(AtomicBool::new(false));
+        let mut connection = UsbConnection {
+            connection_id,
+            port_name,
+            baud_rate: 0,
+            writer: Box::new(network_transport::LinkWriter(link.stream)),
+            board_device_id: String::new(),
+            runtime: String::new(),
+            device_model: String::new(),
+            firmware: String::new(),
+            build_id: String::new(),
+            git_sha: String::new(),
+            build_dirty: false,
+            protocol_schema: 0,
+            wire_protocol: String::new(),
+            capabilities: serde_json::Value::Null,
+            connected: true,
+            cancel_reader: Arc::clone(&cancel_reader),
+            capture_active: Arc::clone(&capture_active),
+        };
+        apply_hello_payload_to_connection(&mut connection, &hello.payload);
+        {
+            let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
+            *conn = Some(connection);
+            cache_usb_status(&self.status_snapshot, conn.as_ref());
+        }
+        on_message(hello.topic, hello.payload);
+        self.spawn_reader(
+            reader,
+            connection_id,
+            cancel_reader,
+            capture_active,
+            Some(network_transport::NETWORK_IDLE_TIMEOUT),
+            on_message,
+        );
         Ok(())
+    }
+
+    /// Wi-Fi carries status, sessions and key events only. Assets, audio, widgets and firmware
+    /// keep their USB transactions, so those entry points fail fast with an actionable message
+    /// instead of encoding media first and discovering the limit at the first packet.
+    pub(crate) fn require_usb_link(&self, operation: &str) -> Result<(), String> {
+        let conn = self.connection.lock().map_err(|e| e.to_string())?;
+        match conn.as_ref() {
+            Some(existing)
+                if existing.connected
+                    && network_transport::is_network_port_name(&existing.port_name) =>
+            {
+                Err(format!("{operation}需要 USB 连接：WiFi 暂只同步状态、会话和按键事件，请用 USB 线连接设备后重试"))
+            }
+            _ => Ok(()),
+        }
     }
 
     /// Disconnect from USB serial device
@@ -1799,6 +1948,11 @@ impl UsbSerialManager {
 
         if !conn.connected {
             return Err("Connection lost".to_string());
+        }
+        if network_transport::is_network_port_name(&conn.port_name)
+            && !network_transport::topic_allowed_over_network(topic)
+        {
+            return Err(format!("WiFi 连接暂不支持 {topic}，请使用 USB 连接"));
         }
         if let Some(expected_connection_id) = expected_connection_id {
             if conn.connection_id != expected_connection_id {
@@ -2008,6 +2162,37 @@ impl UsbSerialManager {
         request_topic: &str,
         response_topic: &str,
     ) -> Result<serde_json::Value, String> {
+        self.send_device_request_with_payload_and_wait(
+            expected_board_device_id,
+            request_topic,
+            response_topic,
+            serde_json::Map::new(),
+        )
+    }
+
+    /// Wi-Fi provisioning and status queries (`network/*`). The request payload is never
+    /// logged; it may carry the Wi-Fi password and pairing secret.
+    pub(crate) fn network_request(
+        &self,
+        expected_board_device_id: &str,
+        request_topic: &str,
+        fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        self.send_device_request_with_payload_and_wait(
+            expected_board_device_id,
+            request_topic,
+            "network/status",
+            fields,
+        )
+    }
+
+    fn send_device_request_with_payload_and_wait(
+        &self,
+        expected_board_device_id: &str,
+        request_topic: &str,
+        response_topic: &str,
+        mut fields: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
         let expected_board_device_id = validate_expected_board_device_id(expected_board_device_id)?;
         let request_id = format!("device-request-{}", uuid::Uuid::new_v4());
         let (sender, receiver) = mpsc::channel();
@@ -2019,10 +2204,11 @@ impl UsbSerialManager {
                 response_topic: response_topic.to_string(),
                 sender,
             });
+        fields.insert("requestId".to_string(), serde_json::json!(request_id));
         if let Err(error) = self.send_to_board(
             expected_board_device_id,
             request_topic,
-            &serde_json::json!({ "requestId": request_id }),
+            &serde_json::Value::Object(fields),
         ) {
             self.remove_device_response_waiter(&request_id, response_topic);
             return Err(error);
@@ -2207,6 +2393,7 @@ impl UsbSerialManager {
         F: Fn(u64, u64, &str),
         R: FnMut() -> Result<(), String>,
     {
+        self.require_usb_link("固件更新")?;
         let expected_board_device_id =
             validate_expected_board_device_id(expected_board_device_id)?.to_string();
         let _transfer_guard = self
@@ -2692,7 +2879,7 @@ impl UsbSerialManager {
                 port_name: conn.port_name.clone(),
                 baud_rate: conn.baud_rate,
                 board_device_id: conn.board_device_id.clone(),
-                transport: "usb".to_string(),
+                transport: link_transport(&conn.port_name).to_string(),
                 runtime: conn.runtime.clone(),
                 device_model: conn.device_model.clone(),
                 firmware: conn.firmware.clone(),
@@ -3995,6 +4182,7 @@ impl UsbSerialManager {
         binding_overrides:&std::collections::HashMap<String,String>,on_progress:F,repair_resources:bool,
     )->Result<(u32,u64),String> where F:Fn(u32,u32,u64) {
         use base64::Engine;
+        self.require_usb_link("组件安装")?;
         let _transfer_guard = self
             .asset_transfer_guard
             .lock()
@@ -4272,6 +4460,7 @@ impl UsbSerialManager {
     where
         F: Fn(u32, u32, u64, u64),
     {
+        self.require_usb_link("形象同步")?;
         let _asset_transfer_guard = self
             .asset_transfer_guard
             .lock()
@@ -4518,6 +4707,7 @@ impl UsbSerialManager {
         F: Fn(u32, u32, u64, u64),
         S: Fn(&'static str),
     {
+        self.require_usb_link("形象同步")?;
         let sync_started = Instant::now();
         let stage = |name: &'static str| {
             transfer_log::record(
@@ -4930,6 +5120,7 @@ impl UsbSerialManager {
     where
         F: Fn(u32, u32, u64, u64),
     {
+        self.require_usb_link("形象同步")?;
         let _asset_transfer_guard = self
             .asset_transfer_guard
             .lock()
@@ -5088,13 +5279,22 @@ impl UsbSerialManager {
     }
 }
 
+/// `"wifi"` for links opened by `connect_network`, `"usb"` for every serial/native-USB link.
+fn link_transport(port_name: &str) -> &'static str {
+    if network_transport::is_network_port_name(port_name) {
+        "wifi"
+    } else {
+        "usb"
+    }
+}
+
 fn usb_connection_status(connection: &UsbConnection) -> UsbConnectionStatus {
     UsbConnectionStatus {
         connected: connection.connected,
         port_name: connection.port_name.clone(),
         baud_rate: connection.baud_rate,
         board_device_id: connection.board_device_id.clone(),
-        transport: "usb".to_string(),
+        transport: link_transport(&connection.port_name).to_string(),
         runtime: connection.runtime.clone(),
         device_model: connection.device_model.clone(),
         firmware: connection.firmware.clone(),
@@ -6520,6 +6720,12 @@ fn usb_device_auto_connect_priority(device: &UsbDeviceInfo) -> u8 {
         (0x1a86, _) => 4,
         _ => 5,
     }
+}
+
+/// Espressif native/JTAG USB or the board's CH343 bridge; used to decide whether a plugged-in
+/// serial device may displace a working Wi-Fi link.
+pub(crate) fn usb_device_looks_like_p4(device: &UsbDeviceInfo) -> bool {
+    usb_device_auto_connect_priority(device) <= 1
 }
 
 fn serial_port_priority(port_name: &str) -> u8 {

@@ -48,6 +48,7 @@ import { buildUsageHelp } from "./lib/usage-help.js";
 import PersonaVoiceModal from "./PersonaVoiceModal.jsx";
 import { useToast } from "./shell/ToastStack.jsx";
 import DeviceStatusBar from "./dashboard/DeviceStatusBar.jsx";
+import WifiLinkCard from "./dashboard/WifiLinkCard.jsx";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
@@ -1498,6 +1499,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       <Card>
         <DeviceStatusBar />
       </Card>
+
+      <WifiLinkCard />
 
       {realtimeChat?.error && !isRecoveringAsr(realtimeChat) && <div role="alert" className="message-banner message-banner--error">
         实时对话失败：{realtimeChat.error}。详情与诊断日志见下方「实时对话」。

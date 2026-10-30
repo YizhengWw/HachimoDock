@@ -53,6 +53,7 @@
  */
 
 mod clawpkg;
+mod network_transport;
 mod widget_data;
 mod stock_quotes;
 mod todos;
@@ -6369,6 +6370,263 @@ async fn usb_disconnect(
     Ok(())
 }
 
+// --- Wi-Fi (authenticated TCP JSONL) commands ---
+//
+// Provisioning always happens over USB: the Wi-Fi password and the pairing secret travel on the
+// cable once and are never logged. Afterwards the desktop reconnects over the LAN with an
+// HMAC challenge/response, and Wi-Fi carries status, sessions and key events only.
+
+const NETWORK_DISCOVERY_WINDOW: Duration = Duration::from_millis(1500);
+
+fn network_validate_credentials(ssid: &str, password: &str) -> Result<(), String> {
+    if ssid.is_empty() || ssid.len() > 32 {
+        return Err("WiFi 名称需为 1–32 字节".to_string());
+    }
+    let hex_key = password.len() == 64 && password.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !password.is_empty() && !hex_key && !(8..=63).contains(&password.len()) {
+        return Err("WiFi 密码需为 8–63 个字符（开放网络可留空）".to_string());
+    }
+    Ok(())
+}
+
+fn network_supported(status: &usb_serial::UsbConnectionStatus) -> bool {
+    status.capabilities["network"]["wifi"].as_bool().unwrap_or(false)
+}
+
+fn network_require_usb(status: &usb_serial::UsbConnectionStatus) -> Result<(), String> {
+    if !status.connected || status.board_device_id.trim().is_empty() {
+        return Err("请先用 USB 连接设备再配置 WiFi".to_string());
+    }
+    if status.transport != "usb" {
+        return Err("配置 WiFi 需要 USB 连接：请用 USB 线连接设备".to_string());
+    }
+    if !network_supported(status) {
+        return Err("当前固件不支持 WiFi，请先升级设备固件".to_string());
+    }
+    Ok(())
+}
+
+fn network_status_view(
+    mut reply: serde_json::Value,
+    board: &str,
+    link: &str,
+) -> serde_json::Value {
+    let desktop_paired = network_transport::with_registry(|registry| registry.secret(board))
+        .ok()
+        .flatten()
+        .is_some();
+    if let Some(object) = reply.as_object_mut() {
+        object.insert("supported".to_string(), serde_json::json!(true));
+        object.insert("desktopPaired".to_string(), serde_json::json!(desktop_paired));
+        object.insert("link".to_string(), serde_json::json!(link));
+    }
+    reply
+}
+
+fn remember_reported_endpoint(board: &str, reply: &serde_json::Value, link: &str) {
+    // Only trust the address a board reports over the cable it is plugged into.
+    if link != "usb" || reply["state"] != "connected" {
+        return;
+    }
+    let (Some(ip), port) = (
+        reply["ip"].as_str().filter(|ip| !ip.is_empty()),
+        reply["port"].as_u64().and_then(|port| u16::try_from(port).ok()),
+    ) else {
+        return;
+    };
+    let port = port.unwrap_or(network_transport::NETWORK_PORT);
+    if let Err(error) = network_transport::with_registry(|registry| registry.remember_endpoint(board, ip, port)) {
+        eprintln!("[network] could not remember endpoint for {board}: {error}");
+    }
+}
+
+#[tauri::command]
+async fn network_provision_wifi(
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    ssid: String,
+    password: String,
+) -> Result<serde_json::Value, String> {
+    let status = usb_manager.status();
+    network_require_usb(&status)?;
+    network_validate_credentials(&ssid, &password)?;
+    let board = status.board_device_id.clone();
+    let secret = network_transport::with_registry(|registry| registry.ensure_secret(&board))?;
+    let manager = usb_manager.inner().clone();
+    let request_board = board.clone();
+    let reply = tauri::async_runtime::spawn_blocking(move || {
+        let mut fields = serde_json::Map::new();
+        fields.insert("ssid".to_string(), serde_json::json!(ssid));
+        fields.insert("password".to_string(), serde_json::json!(password));
+        fields.insert("secret".to_string(), serde_json::json!(secret));
+        manager.network_request(&request_board, "network/config", fields)
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(network_status_view(reply, &board, "usb"))
+}
+
+#[tauri::command]
+async fn network_clear_wifi(
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+) -> Result<serde_json::Value, String> {
+    let status = usb_manager.status();
+    network_require_usb(&status)?;
+    let board = status.board_device_id.clone();
+    let manager = usb_manager.inner().clone();
+    let request_board = board.clone();
+    let reply = tauri::async_runtime::spawn_blocking(move || {
+        manager.network_request(&request_board, "network/clear", serde_json::Map::new())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    // The board erased its credentials; drop this desktop's half of the pairing as well.
+    network_transport::with_registry(|registry| registry.forget(&board))?;
+    Ok(network_status_view(reply, &board, "usb"))
+}
+
+#[tauri::command]
+async fn network_get_status(
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+) -> Result<serde_json::Value, String> {
+    let status = usb_manager.status();
+    if !status.connected || status.board_device_id.trim().is_empty() {
+        return Err("设备未连接".to_string());
+    }
+    if !network_supported(&status) {
+        return Ok(serde_json::json!({"supported": false, "link": status.transport}));
+    }
+    let board = status.board_device_id.clone();
+    let link = status.transport.clone();
+    let manager = usb_manager.inner().clone();
+    let request_board = board.clone();
+    let reply = tauri::async_runtime::spawn_blocking(move || {
+        manager.network_request(&request_board, "network/query", serde_json::Map::new())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    remember_reported_endpoint(&board, &reply, &link);
+    Ok(network_status_view(reply, &board, &link))
+}
+
+#[tauri::command]
+async fn network_list_devices() -> Result<serde_json::Value, String> {
+    let discovered = tauri::async_runtime::spawn_blocking(|| network_transport::discover(NETWORK_DISCOVERY_WINDOW))
+        .await
+        .map_err(|error| error.to_string())??;
+    let paired = network_transport::with_registry(|registry| Ok(registry.connectable()))?;
+    let mut devices: Vec<serde_json::Value> = discovered
+        .iter()
+        .map(|device| {
+            serde_json::json!({
+                "boardDeviceId": device.board_device_id,
+                "host": device.host,
+                "port": device.port,
+                "firmware": device.firmware,
+                "online": true,
+                "desktopPaired": paired.iter().any(|(known, _)| known.board_device_id == device.board_device_id),
+            })
+        })
+        .collect();
+    for (known, _) in &paired {
+        if !discovered.iter().any(|device| device.board_device_id == known.board_device_id) {
+            devices.push(serde_json::json!({
+                "boardDeviceId": known.board_device_id,
+                "host": known.host,
+                "port": known.port,
+                "firmware": "",
+                "online": false,
+                "desktopPaired": true,
+            }));
+        }
+    }
+    Ok(serde_json::Value::Array(devices))
+}
+
+fn persist_connected_network_binding(host: &str, board_device_id: &str) -> Result<(), String> {
+    let board_device_id = board_device_id.trim();
+    if board_device_id.is_empty() {
+        return Err("WiFi handshake did not provide a board device id".to_string());
+    }
+    let desktop_device_id = get_or_create_desktop_device_id_inner()?;
+    save_device_binding(DeviceBinding {
+        board_device_id: board_device_id.to_string(),
+        desktop_device_id,
+        wifi_ssid: format!("WiFi({})", host.trim()),
+        bound_at: current_timestamp_ms(),
+    })
+    .map(|_| ())
+}
+
+/// Opens the Wi-Fi link to a board paired over USB. `manual_host` overrides the saved address;
+/// without it, a stale address (DHCP lease change) is repaired through LAN discovery once.
+fn connect_network_board(
+    app_handle: &tauri::AppHandle,
+    usb_manager: &usb_serial::UsbSerialManager,
+    board_device_id: &str,
+    manual_host: Option<&str>,
+) -> Result<usb_serial::UsbConnectionStatus, String> {
+    let board_device_id = board_device_id.trim();
+    let secret = network_transport::with_registry(|registry| registry.secret(board_device_id))?
+        .ok_or_else(|| "该设备尚未配对：请先用 USB 连接并配置 WiFi".to_string())?;
+    let saved = network_transport::with_registry(|registry| {
+        Ok(registry.list().into_iter().find(|device| device.board_device_id == board_device_id))
+    })?;
+    let manual_host = manual_host.map(str::trim).filter(|host| !host.is_empty());
+    let (host, port) = match (manual_host, &saved) {
+        (Some(host), _) => (host.to_string(), network_transport::NETWORK_PORT),
+        (None, Some(known)) => (known.host.clone(), known.port),
+        (None, None) => {
+            return Err("尚未记录设备地址：请手动输入 IP，或先用 USB 查看 WiFi 状态".to_string())
+        }
+    };
+    let attempt = |host: &str, port: u16| -> Result<SocketAddr, String> {
+        let addr = network_transport::resolve_endpoint(host, port)?;
+        let emitter = app_handle.clone();
+        usb_manager.connect_network(board_device_id, addr, &secret, move |topic, payload| {
+            handle_incoming_usb_message(&emitter, topic, payload);
+        })?;
+        Ok(addr)
+    };
+    let addr = match attempt(&host, port) {
+        Ok(addr) => addr,
+        Err(first_error) if manual_host.is_none() => {
+            let found = network_transport::discover(NETWORK_DISCOVERY_WINDOW)
+                .ok()
+                .and_then(|devices| devices.into_iter().find(|device| device.board_device_id == board_device_id));
+            match found {
+                Some(device) if device.host != host => attempt(&device.host, device.port)?,
+                _ => return Err(first_error),
+            }
+        }
+        Err(error) => return Err(error),
+    };
+    network_transport::with_registry(|registry| {
+        registry.remember_endpoint(board_device_id, &addr.ip().to_string(), addr.port())
+    })?;
+    if let Err(error) = persist_connected_network_binding(&addr.ip().to_string(), board_device_id) {
+        eprintln!("[network] failed to refresh binding for {board_device_id}: {error}");
+    }
+    if let Err(error) = forward_current_state_after_usb_connect(usb_manager) {
+        eprintln!("[network] failed to replay bridge state after connect: {error}");
+    }
+    Ok(usb_manager.status())
+}
+
+#[tauri::command]
+async fn network_connect(
+    app_handle: tauri::AppHandle,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    board_device_id: String,
+    host: Option<String>,
+) -> Result<usb_serial::UsbConnectionStatus, String> {
+    let manager = usb_manager.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        connect_network_board(&app_handle, &manager, &board_device_id, host.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn usb_send_state(
     usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
@@ -10067,20 +10325,57 @@ fn usb_auto_retry_delay(failure_count: u32) -> Duration {
     Duration::from_secs(seconds)
 }
 
+/// Fallback after the USB pass found nothing: reconnect to boards paired for Wi-Fi.
+fn network_auto_connect_step(
+    usb_manager: &usb_serial::UsbSerialManager,
+    app_handle: &tauri::AppHandle,
+    failed: &mut HashMap<String, (u32, Instant)>,
+) {
+    let Ok(candidates) = network_transport::with_registry(|registry| Ok(registry.connectable())) else {
+        return;
+    };
+    failed.retain(|board, _| candidates.iter().any(|(device, _)| &device.board_device_id == board));
+    for (device, _) in candidates {
+        let board = device.board_device_id;
+        if failed.get(&board).is_some_and(|(_, retry_at)| Instant::now() < *retry_at) {
+            continue;
+        }
+        match connect_network_board(app_handle, usb_manager, &board, None) {
+            Ok(status) => {
+                failed.remove(&board);
+                eprintln!("[network-auto] connected to {} over {}", board, status.port_name);
+                return;
+            }
+            Err(error) => {
+                let count = failed.get(&board).map(|(count, _)| count.saturating_add(1)).unwrap_or(1);
+                failed.insert(board.clone(), (count, Instant::now() + usb_auto_retry_delay(count)));
+                eprintln!("[network-auto] {} unavailable: {}", board, error);
+            }
+        }
+    }
+}
+
 /// Background thread: auto-connect USB serial on startup and reconnect on disconnect.
 fn start_usb_auto_connect(usb_manager: usb_serial::UsbSerialManager, app_handle: tauri::AppHandle) {
     thread::spawn(move || {
         let mut failed_probes: HashMap<String, (u32, Instant)> = HashMap::new();
+        let mut failed_network: HashMap<String, (u32, Instant)> = HashMap::new();
         // Wait for app to initialize
         thread::sleep(Duration::from_secs(2));
         loop {
             let status = usb_manager.status();
-            if !status.connected {
+            // USB has priority: a Wi-Fi link yields to a plugged-in P4 candidate, but an
+            // unrelated serial adapter must not knock a working Wi-Fi link down.
+            if !status.connected || status.transport == "wifi" {
+                let wifi_active = status.connected;
                 let devices = usb_manager.scan_devices();
                 let present_keys: HashSet<String> =
                     devices.iter().map(usb_auto_probe_key).collect();
                 failed_probes.retain(|key, _| present_keys.contains(key));
                 for dev in devices {
+                    if wifi_active && !usb_serial::usb_device_looks_like_p4(&dev) {
+                        continue;
+                    }
                     let probe_key = usb_auto_probe_key(&dev);
                     if failed_probes
                         .get(&probe_key)
@@ -10134,6 +10429,9 @@ fn start_usb_auto_connect(usb_manager: usb_serial::UsbSerialManager, app_handle:
                     }
                 }
             }
+            if !usb_manager.status().connected {
+                network_auto_connect_step(&usb_manager, &app_handle, &mut failed_network);
+            }
             thread::sleep(Duration::from_secs(3));
         }
     });
@@ -10186,6 +10484,7 @@ pub fn run() {
                 eprintln!("[stocks] {error}");
             }
             stock_quotes::start(usb_for_auto.clone());
+            network_transport::configure(&app.path().app_data_dir()?);
             todos::configure(app.path().app_data_dir()?);
             local_widget_data::start(usb_for_auto.clone());
             music_player::configure(app.path().app_data_dir()?,usb_for_auto.clone());
@@ -10310,6 +10609,11 @@ pub fn run() {
             usb_scan_devices,
             usb_connect,
             usb_disconnect,
+            network_provision_wifi,
+            network_clear_wifi,
+            network_get_status,
+            network_list_devices,
+            network_connect,
             usb_send_state,
             usb_send_speech,
             usb_send_command,

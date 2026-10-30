@@ -29,6 +29,8 @@
 #include "mbedtls/base64.h"
 #include "bsp/display.h"
 #include "esp_app_desc.h"
+#include "pet_p4_net_core.h"
+#include "pet_p4_network.h"
 #include "esp_chip_info.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
@@ -1735,8 +1737,61 @@ static void send_miniapp_state(pet_p4_send_line_fn send_line, void *ctx) {
   send_topic_payload(send_line, ctx, "miniapp/state", payload);
 }
 
+/* Capabilities the Wi-Fi link does not carry are reported false/absent so the desktop never infers
+ * that a USB transaction became wireless just because hello arrived over the LAN. */
+static void limit_capabilities_for_wifi(cJSON *capabilities) {
+  static const char *const k_unsupported[] = {
+    "usbOnly", "nativeUsb", "bulk", "appearanceSlotReuse", "rawAppearanceSlot0", "rawAppearanceSlot1",
+    "widgets", "widgetDelete", "widgetInventory", "componentCatalogGeneration", "voice", "audio",
+    "inputConfig", "firmwareOta", "screenshot",
+  };
+  for (size_t i = 0; i < sizeof(k_unsupported) / sizeof(k_unsupported[0]); ++i) {
+    if (cJSON_GetObjectItemCaseSensitive(capabilities, k_unsupported[i])) {
+      cJSON_ReplaceItemInObjectCaseSensitive(capabilities, k_unsupported[i], cJSON_CreateFalse());
+    }
+  }
+  cJSON *features = cJSON_GetObjectItemCaseSensitive(capabilities, "features");
+  static const char *const k_unsupported_features[] = {
+    "widgets", "widgetDelete", "widgetInventory", "voiceCapture", "audioPlayback", "firmwareOta",
+    "screenshot", "componentCenter", "miniAppPage", "miniAppState",
+  };
+  for (size_t i = 0; features && i < sizeof(k_unsupported_features) / sizeof(k_unsupported_features[0]); ++i) {
+    if (cJSON_GetObjectItemCaseSensitive(features, k_unsupported_features[i])) {
+      cJSON_ReplaceItemInObjectCaseSensitive(features, k_unsupported_features[i], cJSON_CreateFalse());
+    }
+  }
+  cJSON *none = cJSON_CreateObject();
+  if (none) {
+    cJSON_AddBoolToObject(none, "supported", false);
+    cJSON_ReplaceItemInObjectCaseSensitive(capabilities, "firmwareUpdate", none);
+  }
+  none = cJSON_CreateObject();
+  if (none) {
+    cJSON_AddBoolToObject(none, "supported", false);
+    cJSON_ReplaceItemInObjectCaseSensitive(capabilities, "appearance", none);
+  }
+  cJSON_ReplaceItemInObjectCaseSensitive(capabilities, "assetFormats", cJSON_CreateArray());
+  cJSON_DeleteItemFromObjectCaseSensitive(capabilities, "audioCapture");
+  cJSON *transport = cJSON_CreateObject();
+  if (transport) {
+    cJSON *operations = cJSON_AddArrayToObject(transport, "operations");
+    cJSON_AddStringToObject(transport, "kind", "wifi");
+    cJSON_AddStringToObject(transport, "wireProtocol", PET_P4_NET_WIRE_PROTOCOL);
+    cJSON_AddBoolToObject(transport, "usbOnly", false);
+    cJSON_AddBoolToObject(transport, "rawAssetChunks", false);
+    if (operations) {
+      cJSON_AddItemToArray(operations, cJSON_CreateString("state"));
+      cJSON_AddItemToArray(operations, cJSON_CreateString("session"));
+      cJSON_AddItemToArray(operations, cJSON_CreateString("inputEvents"));
+      cJSON_AddItemToArray(operations, cJSON_CreateString("diagnostics"));
+    }
+    cJSON_ReplaceItemInObjectCaseSensitive(capabilities, "transport", transport);
+  }
+}
+
 void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn send_line, void *ctx) {
   const esp_app_desc_t *app = esp_app_get_description();
+  const bool wifi_link = state && state->request_link == PET_P4_LINK_WIFI;
   cJSON *payload = cJSON_CreateObject();
   cJSON *capabilities = cJSON_CreateObject();
   cJSON *display = cJSON_CreateObject();
@@ -1997,7 +2052,10 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToArray(screen_pages, cJSON_CreateString("components"));
   cJSON_AddItemToArray(screen_pages, cJSON_CreateString("app"));
   cJSON_AddItemToObject(capabilities, "screenPages", screen_pages);
+  pet_p4_network_describe(capabilities);
+  if (wifi_link) limit_capabilities_for_wifi(capabilities);
   cJSON_AddItemToObject(payload, "capabilities", capabilities);
+  cJSON_AddStringToObject(payload, "link", wifi_link ? "wifi" : "usb");
 
   send_topic_payload(send_line, ctx, "hello", payload);
 }
@@ -2394,6 +2452,14 @@ bool pet_p4_handle_line(
     state,
     (unsigned long long) (esp_timer_get_time() / 1000ULL)
   );
+  if (state->request_link == PET_P4_LINK_WIFI && !pet_p4_net_topic_allowed(topic)) {
+    send_protocol_ack(
+      send_line, ctx, topic, payload, false, "wifi_unsupported",
+      "this operation requires a USB connection"
+    );
+    cJSON_Delete(root);
+    return false;
+  }
 
   if (strcmp(topic, "ack") == 0 || strcmp(topic, "bind") == 0) {
     copy_text(state->desktop_device_id, sizeof(state->desktop_device_id), json_string(payload, "desktopDeviceId"));
@@ -2592,6 +2658,9 @@ bool pet_p4_handle_line(
     bool failed = strcmp(state->conversation_state, "error") == 0;
     if (accepted && phase_changed) pet_p4_audio_diagnostic(failed ? "conversation_failed" : "conversation_state", json_string(payload, "sessionId"), 0, !failed);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (pet_p4_network_handle_topic(
+      topic, payload, send_line, ctx, state->request_link == PET_P4_LINK_WIFI)) {
+    state->last_update_ms += 1;
   } else if (strcmp(topic, "system/heartbeat") == 0) {
     const cJSON *clock=cJSON_GetObjectItemCaseSensitive(payload,"clock");
     if(clock)pet_p4_miniapp_clock_sync(clock,esp_timer_get_time()/1000ULL);
