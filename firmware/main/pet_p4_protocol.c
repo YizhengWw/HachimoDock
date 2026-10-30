@@ -45,6 +45,7 @@
 #include "pet_p4_app_host.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_raw_assets.h"
+#include "pet_p4_bubble_pixels.h"
 #include "pet_p4_touch.h"
 
 #define PET_P4_WIRE_PROTOCOL "pet-usb-jsonl-v3"
@@ -1904,6 +1905,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddNumberToObject(firmware_update, "validationMs", 8000);
   cJSON_AddItemToObject(capabilities, "firmwareUpdate", firmware_update);
   cJSON_AddBoolToObject(capabilities, "protocolAck", true);
+  cJSON_AddStringToObject(capabilities, "bubblePixels", "p4-text-alpha-v1");
   cJSON_AddBoolToObject(capabilities, "screenshot", true);
   cJSON_AddNumberToObject(display, "width", 640);
   cJSON_AddNumberToObject(display, "height", 480);
@@ -2390,6 +2392,12 @@ bool pet_p4_handle_line(
     cJSON_Delete(root);
     return false;
   }
+  if (!strncmp(topic, "state/", 6) || !strcmp(topic, "speech/text")
+      || !strcmp(topic, "session/current") || !strcmp(topic, "ui/conversation")
+      || !strcmp(topic, "audio/play_subtitle")) {
+    pet_bubble_pixels_expect(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "textPixels")),
+      (uint64_t)(esp_timer_get_time() / 1000));
+  }
   pet_p4_state_note_host_activity(
     state,
     (unsigned long long) (esp_timer_get_time() / 1000ULL)
@@ -2401,6 +2409,16 @@ bool pet_p4_handle_line(
   } else if (strncmp(topic, "state/", 6) == 0) {
     handle_state_topic(state, topic, payload);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "ui/text-pixels") == 0) {
+    char error[96] = {0};
+    bool ok = pet_bubble_pixels_handle(payload, error, sizeof(error));
+    if (!strcmp(json_string(payload, "phase"), "end")) {
+      cJSON *reply = cJSON_CreateObject();
+      cJSON_AddStringToObject(reply, "requestId", json_string(payload, "requestId"));
+      cJSON_AddBoolToObject(reply, "ok", ok);
+      if (!ok) cJSON_AddStringToObject(reply, "error", error);
+      send_topic_payload(send_line, ctx, "ui/text-pixels/status", reply);
+    }
   } else if (strcmp(topic, "speech/text") == 0) {
     handle_speech(state, payload);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);

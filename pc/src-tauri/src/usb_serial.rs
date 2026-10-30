@@ -74,6 +74,8 @@ mod native_usb_protocol;
 mod transaction_waiters;
 mod transfer_log;
 mod widget_transaction;
+mod bubble_pixels;
+pub(crate) use bubble_pixels::BubbleFrame;
 
 use appearance_transaction::{
     asset_checksum_hex, build_asset_file_commit_payload, compute_p4_pack_id,
@@ -1269,6 +1271,8 @@ fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Resu
 
 #[derive(Clone)]
 pub struct UsbSerialManager {
+    bubble_renderer: Arc<Mutex<bubble_pixels::RenderBridge>>,
+    bubble_pixels_ready: Arc<AtomicBool>,
     last_serial_baud: Arc<Mutex<Option<(String, u32)>>>,
     connection: Arc<Mutex<Option<UsbConnection>>>,
     status_snapshot: Arc<Mutex<UsbConnectionStatus>>,
@@ -1349,6 +1353,8 @@ fn validate_expected_board_device_id(expected_board_device_id: &str) -> Result<&
 impl UsbSerialManager {
     pub fn new() -> Self {
         Self {
+            bubble_renderer: Arc::new(Mutex::new(bubble_pixels::RenderBridge::default())),
+            bubble_pixels_ready: Arc::new(AtomicBool::new(false)),
             last_serial_baud: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(None)),
             status_snapshot: Arc::new(Mutex::new(disconnected_usb_status())),
@@ -1721,6 +1727,45 @@ impl UsbSerialManager {
         self.send_inner(topic, payload, true, None, None, None)
     }
 
+    pub(crate) fn set_bubble_renderer(&self, sink: Option<Arc<dyn Fn(serde_json::Value) + Send + Sync>>) {
+        self.bubble_pixels_ready.store(sink.is_some(), Ordering::Release);
+        if let Ok(mut renderer) = self.bubble_renderer.lock() { renderer.set_sink(sink); }
+    }
+
+    pub(crate) fn send_bubble_pixels(&self, frame: BubbleFrame) -> Result<(), String> {
+        if frame.data.len() > 176000 { return Err("Bubble image exceeds limit".into()); }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&frame.data).map_err(|e| e.to_string())?;
+        bubble_pixels::validate_frame(&frame, &bytes)?;
+        let status = self.status();
+        if status.capabilities["bubblePixels"] != "p4-text-alpha-v1" { return Err("Device does not support text images".into()); }
+        if self.media_requests_pending.load(Ordering::SeqCst) != 0 { return Err("Device media busy".into()); }
+        let _guard = self.asset_transfer_guard.try_lock().map_err(|_| "Device transfer busy")?;
+        let send = |payload: &serde_json::Value| self.send_inner("ui/text-pixels", payload, false,
+            Some(&frame.board_device_id), Some(frame.connection_id), None);
+        send(&serde_json::json!({"phase":"begin","id":frame.id,"style":frame.style,
+            "pageSizes":frame.page_sizes,"checksum":frame.checksum,"totalBytes":bytes.len()}))?;
+        for (index, chunk) in bytes.chunks(1024).enumerate() {
+            send(&serde_json::json!({"phase":"chunk","id":frame.id,"offset":index*1024,
+                "data":base64::engine::general_purpose::STANDARD.encode(chunk)}))?;
+            thread::yield_now();
+        }
+        let request_id = format!("bubble-{}", uuid::Uuid::new_v4());
+        let (sender, receiver) = mpsc::channel();
+        self.device_response_waiters.lock().map_err(|e| e.to_string())?
+            .push(DeviceResponseWaiter { request_id: request_id.clone(),
+                response_topic: "ui/text-pixels/status".into(), sender });
+        let end_result = send(&serde_json::json!({"phase":"end","id":frame.id,"requestId":request_id}));
+        drop(_guard);
+        let result = (|| {
+            end_result?;
+            let response = receiver.recv_timeout(Duration::from_secs(3)).map_err(|_| "Text image acknowledgement timed out")?;
+            if response["ok"] != true { return Err("Device rejected text image".to_string()); }
+            Ok(())
+        })();
+        self.remove_device_response_waiter(&request_id, "ui/text-pixels/status");
+        result
+    }
+
     /// Low-priority snapshots never interleave with firmware/widget/appearance transfers.
     pub(crate) fn send_widget_data(&self, board: &str, payload: &serde_json::Value) -> Result<(), String> {
         if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
@@ -1794,8 +1839,8 @@ impl UsbSerialManager {
         expected_connection_id: Option<u64>,
         write_slice_bytes: Option<usize>,
     ) -> Result<(), String> {
-        let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
-        let conn = conn.as_mut().ok_or("Not connected")?;
+        let mut connection_guard = self.connection.lock().map_err(|e| e.to_string())?;
+        let conn = connection_guard.as_mut().ok_or("Not connected")?;
 
         if !conn.connected {
             return Err("Connection lost".to_string());
@@ -1828,6 +1873,10 @@ impl UsbSerialManager {
             return Err("语音通道使用中，稍后更新组件数据".into());
         }
         let mut payload = payload.clone();
+        if conn.capabilities["bubblePixels"] == "p4-text-alpha-v1"
+            && bubble_pixels::is_text_topic(topic) && payload.is_object() {
+            payload["textPixels"] = serde_json::Value::Bool(self.bubble_pixels_ready.load(Ordering::Acquire));
+        }
         if topic == "system/heartbeat" && conn.capabilities["widgetLocalTools"] == "p4-local-tools-v1" && payload.is_object() {
             let now=chrono::Local::now();
             payload["clock"]=serde_json::json!({"unixSeconds":now.timestamp(),"utcOffsetMinutes":now.offset().local_minus_utc()/60});
@@ -1859,7 +1908,7 @@ impl UsbSerialManager {
         // Replaceable widget snapshots share the audio-safe paced path. A
         // driver's blocking drain can otherwise hold the mutex indefinitely
         // even after media itself stopped using flush()/tcdrain().
-        let live_frame = audio_frame || topic == "widget/data" || topic == "app/snapshot"
+        let live_frame = audio_frame || topic == "widget/data" || topic == "app/snapshot" || topic == "ui/text-pixels"
             || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
         let write_result = {
             let _pause = (!live_frame).then(|| SerialReaderPause::new(&self.serial_body_write_active));
@@ -1911,6 +1960,16 @@ impl UsbSerialManager {
             conn.connected = false;
             cache_usb_status(&self.status_snapshot, Some(conn));
             return Err(error);
+        }
+
+        let text_target = (conn.capabilities["bubblePixels"] == "p4-text-alpha-v1"
+            && bubble_pixels::is_text_topic(topic))
+            .then(|| (conn.connection_id, conn.board_device_id.clone()));
+        drop(connection_guard);
+        if let Some((generation, board)) = text_target {
+            if let Ok(mut renderer) = self.bubble_renderer.lock() {
+                renderer.observe(topic, &payload, generation, &board);
+            }
         }
 
         Ok(())

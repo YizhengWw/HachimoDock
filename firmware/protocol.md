@@ -1,5 +1,9 @@
 # ESP-P4 USB Protocol
 
+可选气泡像素能力：`capabilities.bubblePixels=p4-text-alpha-v1`。PC 在现有文字消息之外下发原生字号的透明度图；设备按文字与样式的 FNV-1a-64 键匹配。渲染服务就绪时，PC 在文字消息中附带 `textPixels:true`：设备保留同一会话上一对文字，标题与正文图片都就绪后一起切换，首次显示可暂留空；等待超过 3 秒才回退字库，流式更新不重置首个等待期限。原有状态、动画和语音处理不等待图片，缺少该标记的旧客户端立即按原流程显示。样式 1 为标题（474×38，32px），2 为正文（496×54，24px、两行、最多 16 页），3 为紧凑气泡（348×38，32px），4 为两行截断的 Agent 正文（496×54，24px、超长加省略号）。图中每字节高四位为 alpha（0～15），低四位为重复像素数减一（1～16），每页连续行优先排列。
+
+`ui/text-pixels` 使用 `begin/chunk/end`：begin 包含 16 位小写十六进制 `id`、`style`、`pageSizes`、`totalBytes` 和压缩数据的 8 位 FNV-1a-32 `checksum`；chunk 包含 `id/offset/data`，data 是最多 1024 字节的 Base64 分块，offset 必须顺序匹配。end 携带 `id/requestId`，设备回复 `ui/text-pixels/status`（`requestId/ok/error`）。单张压缩图不超过 128 KiB，32 个内存缓存槽合计不超过 1 MiB，不写 Flash；完整校验后才提交并刷新气泡缓存。PC 合并流式更新，按设备连接代次发送，只有提交回执成功才记为已发送。能力未声明时不发送像素消息，原有文字、字幕时序和本机操作保持可用。
+
 0.7.103-p4：内置清单、启动器图片及完整出厂资源统一为 29 项。末尾追加 `decision-capsule`、`answer-book`、`hope-train`；通用 `widgetLocalTools=p4-local-tools-v1` 契约保持不变。OTA 仍保留轻量资源引导与现有用户存档，完整出厂镜像才携带全部图片。
 
 0.7.100-p4：新增 `widgetMediaQueueMax=128` 与 `widgetMediaLifecycle=p4-media-lifecycle-v1`。媒体队列超过 20 项时，key 至多 80 UTF-8 字节、标题至多 90 字节；上限 128，刷新按 key 保留选中项，不修改音频会话。`media/event` 新增 `operation=visibility`，包含 `source/boot/epoch/visible`；进入或离开递增 epoch，可见时每 2 秒发送心跳。宿主只有资源包声明自动播放、当前可见且新的进入事件时才准备播放，停止/离开取消未开始的播放；目录刷新不重新触发播放。能力与配置为通用媒体机制，不绑定特定组件 ID。

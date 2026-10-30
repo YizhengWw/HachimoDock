@@ -85,6 +85,8 @@
           "usb_disconnect",
           "usb_send_state",
           "usb_send_speech",
+          "usb_bubble_pixels_ready",
+          "usb_send_bubble_pixels",
           "usb_send_command",
           "usb_audio_capture_control",
           "usb_get_status",

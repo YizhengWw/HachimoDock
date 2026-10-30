@@ -258,7 +258,13 @@ Windows 也可使用 `.\tools\p4.ps1 test`，再运行 `build`。源代码测试
 
 ## 字体与许可
 
-设备界面使用 MiSans Medium，来自[小米澎湃 OS 官方字体网站](https://hyperos.mi.com/font/zh/)，遵循 MiSans 字体知识产权许可协议。仓库不分发原始 OTF 文件，包含为设备生成的 16 px、1 bpp 中文字形数据。
+设备界面使用 MiSans Medium，来自[小米澎湃 OS 官方字体网站](https://hyperos.mi.com/font/zh/)，遵循 MiSans 字体知识产权许可协议。仓库不分发原始 OTF 文件，包含 16 px、未压缩 2 bpp 字库：GB2312 的 6763 个汉字、固件界面用字及原有英数标点，当前共 6994 个字形。保留原有字宽、字距和行高；未收录的生僻字按现有缺字占位方式显示。
+
+另含用于 32 px 标题和紧凑气泡的原生 2 bpp 小字库，覆盖内置组件名称、“组件中心”、“休息中”、对话标题“你／宠物”和可打印 ASCII；正文提示词仍按 24 px 路径绘制，不因加入 32 px 字库而改变。未收录的字继续放大 16 px 字形。沿用原有字宽和字距，不改变换行布局。
+
+与支持 `p4-text-alpha-v1` 的新版 PC 客户端连接时，气泡优先显示由 PC 按 32 px 标题、24 px 正文渲染的 16 级灰度文字层。PC 使用系统中文字体，解析 Markdown 加粗并简化标题、列表、链接和代码标记。文字图片到齐后成对切换，等待期间保留同一会话上一画面，超过 3 秒才回退本机字库；状态与动画立即更新。设备缓存并混合像素，本机字库继续用于回退及其他设备界面。此功能需 PC 客户端和固件配套更新，完整协议见 [protocol.md](protocol.md)。
+
+重新生成需自行取得 MiSans-Medium.otf，并安装 `lv_font_conv@1.5.3`，随后在仓库根目录运行 `node firmware/tools/generate_p4_font.cjs --font <OTF路径> --converter <lv_font_conv包目录>`，同时生成两种字号。原始字体和转换器可放在 Git 已忽略的 `.tooling/` 中；生成后运行 `node pc/scripts/export-p4-text-metrics.mjs --check` 核对 PC 字宽数据。
 
 项目自有源码采用根目录 [HachimoDock 项目许可证](../LICENSE)，仅限许可范围内的非商业用途；第三方驱动、字体与依赖继续遵循各自许可证，见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 
