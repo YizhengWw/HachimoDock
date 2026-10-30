@@ -1142,11 +1142,11 @@ def test_p4_conversation_queue_is_synced_and_rendered_with_pixel_ellipsis():
     assert "fill_round_rect(x + 4, y + 4, w - 8, h - 8" in renderer
     assert "is_selected ? 7 : 4" in renderer
     assert "rgb565(255, 255, 255)" in renderer
-    assert "draw_text_line_vcenter(item->title, x + 30, y + 10, 38, w - 82, ink, 2, true)" in renderer
+    assert "draw_text_line_vcenter(text.title, x + 30, y + 10, 38, w - 82, ink, 2, true)" in renderer
     assert "static void draw_card_body_lines(" in renderer
     assert "const char *second_line = draw_text_line_medium_vcenter(" in renderer
     assert "first_line_y + 27, 27" in renderer
-    assert "draw_card_body_lines(body, x + 30, y + 50, w - 60, muted)" in renderer
+    assert "draw_card_body_lines(text.body, x + 30, y + 50, w - 60, muted, text.pixels)" in renderer
     assert "static const char *draw_text_line_medium(" in renderer
     assert "static const char *draw_text_line_medium_vcenter(" in renderer
     assert "pet_p4_view_status_t marker_status = session_view_status(item->state)" in renderer
@@ -1675,7 +1675,7 @@ def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
     assert "PET_P4_ASSET_DECODE_BACKOFF_MS 500ULL" in renderer
     assert "g_framebuffer_initialized" in renderer
     assert "if (!g_framebuffer_initialized)" in renderer
-    assert "draw_bubble(view, now_ms)" in renderer
+    assert "draw_bubble(state, view, now_ms)" in renderer
     assert "draw_boot_diagnostic(now_ms)" in renderer
 
 

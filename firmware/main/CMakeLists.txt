@@ -16,6 +16,8 @@ idf_component_register(
     "pet_p4_conversation.c"
     "pet_p4_diagnostics.c"
     "pet_p4_font_cn.c"
+    "pet_p4_font_cn_32.c"
+    "pet_p4_bubble_pixels.c"
     "pet_p4_game.c"
     "pet_p4_input.c"
     "pet_p4_input_core.c"

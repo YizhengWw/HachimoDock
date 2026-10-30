@@ -40,6 +40,7 @@
 #include "pet_p4_media.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_protocol.h"
+#include "pet_p4_bubble_pixels.h"
 #include "pet_p4_transport_config.h"
 #include "pet_p4_renderer.h"
 #include "pet_p4_touch.h"
@@ -652,6 +653,7 @@ void app_main(void) {
     ESP_LOGE(TAG, "base MAC unavailable; using degraded device id: %s", esp_err_to_name(device_id_err));
   }
   pet_p4_state_init(&g_state, board_device_id);
+  (void) pet_bubble_pixels_init();
   g_render_state = (pet_p4_runtime_state_t *) heap_caps_calloc(
     1,
     sizeof(*g_render_state),
