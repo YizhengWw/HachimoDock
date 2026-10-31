@@ -70,12 +70,23 @@ fn request(provider: Provider, cfg: &LlmConfig, query: &str) -> (&'static str, V
     }
 }
 
-pub async fn search(cfg: &LlmConfig, query: &str) -> Result<SearchResult,String> {
-    search_with_budget(cfg,query,1000,DEADLINE).await
+/// DeepSeek's Anthropic-compatible native search returns the final answer plus
+/// two server-side search rounds; a 1000-token cap truncates it and previously
+/// surfaced as a misleading "check model/permission/quota" error.
+fn realtime_search_budget(kind: Provider) -> u32 {
+    match kind {
+        Provider::DeepSeek => 4000,
+        _ => 1000,
+    }
 }
 
-/// Multi-story briefings need room for three distinct citations and facts.
-/// Keep the smaller realtime-answer budget unchanged.
+pub async fn search(cfg: &LlmConfig, query: &str) -> Result<SearchResult,String> {
+    let budget = provider(cfg).map(realtime_search_budget).unwrap_or(1000);
+    search_with_budget(cfg,query,budget,DEADLINE).await
+}
+
+/// Multi-story briefings need room for three distinct citations and facts;
+/// the realtime answer path keeps its own per-provider budget.
 pub async fn search_news(cfg: &LlmConfig, query: &str) -> Result<SearchResult,String> {
     search_with_budget(cfg,query,4000,NEWS_DEADLINE).await
 }
@@ -262,9 +273,15 @@ fn parse_result_with_limit(provider: Provider, value: &Value, limit:usize) -> Re
     parse_result_with_sources(provider,value,limit,&[])
 }
 fn parse_result_with_sources(provider:Provider,value:&Value,limit:usize,inherited:&[Source])->Result<SearchResult,String>{
-    if value.get("error").is_some() || value["status"]=="failed" || value["status"]=="incomplete"
-        || value.pointer("/choices/0/finish_reason").is_some_and(|v|v=="length") || value["stop_reason"]=="max_tokens" {
-        return Err("联网服务未完成检索，请检查模型、权限或额度".into());
+    let truncated = value["status"]=="incomplete"
+        || value.pointer("/choices/0/finish_reason").is_some_and(|v|v=="length")
+        || value["stop_reason"]=="max_tokens";
+    if value.get("error").is_some() || value["status"]=="failed" || truncated {
+        return Err(if truncated {
+            "联网检索结果被截断（输出 token 预算不足），请缩短问题后重试".to_string()
+        } else {
+            "联网服务未完成检索，请检查模型、权限或额度".to_string()
+        });
     }
     let mut text=String::new();
     match provider {
@@ -375,6 +392,36 @@ mod tests {
         assert_eq!(provider(&config("https://api.deepseek.com")),Some(Provider::DeepSeek));
         let mut cfg=config("https://api.xiaomimimo.com/v1"); cfg.web_search=false; assert_eq!(provider(&cfg),None);
     }
+    #[test]
+    fn deepseek_realtime_search_uses_larger_output_budget() {
+        assert_eq!(realtime_search_budget(Provider::DeepSeek), 4000);
+        assert_eq!(realtime_search_budget(Provider::Doubao), 1000);
+        assert_eq!(realtime_search_budget(Provider::Mimo), 1000);
+        let cfg = config("https://api.deepseek.com");
+        assert_eq!(provider(&cfg), Some(Provider::DeepSeek));
+        let (_, body) = budgeted_request(
+            Provider::DeepSeek,
+            &cfg,
+            "今天的公开新闻",
+            realtime_search_budget(Provider::DeepSeek),
+        );
+        assert_eq!(body["max_tokens"], 4000);
+    }
+
+    #[test]
+    fn truncated_search_reports_budget_not_quota() {
+        let response = json!({
+            "stop_reason":"max_tokens",
+            "content":[
+                {"type":"text","text":"摘要"},
+                {"type":"web_search_tool_result","content":[{"type":"web_search_result","url":"https://example.com/news","title":"标题"}]}
+            ]
+        });
+        let error = parse_result(Provider::DeepSeek, &response).unwrap_err();
+        assert!(error.contains("截断"), "{error}");
+        assert!(!error.contains("权限"), "{error}");
+    }
+
     #[test]
     fn native_requests_are_bounded_and_do_not_include_other_context() {
         assert_eq!(DEADLINE,Duration::from_secs(30));
