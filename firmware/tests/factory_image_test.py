@@ -288,8 +288,8 @@ def test_factory_platformio_targets_and_partition_contract():
     offset, size = factory.partition_entry(
         RUNTIME / "partitions.csv", config["spiffs"]["partitionLabel"]
     )
-    assert offset == 0x520000
-    assert size == 0x6E0000
+    assert offset == 0x720000
+    assert size == 0x4E0000
     builtin_offset, builtin_size = factory.partition_entry(
         RUNTIME / "partitions.csv", factory.BUILTIN_APPEARANCE_PARTITION_LABEL
     )

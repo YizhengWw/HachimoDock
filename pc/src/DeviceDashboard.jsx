@@ -34,7 +34,7 @@
 
 import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import DeviceGuideModal from "./DeviceGuideModal.jsx";
 import {
   ONBOARDING_PAGE_IDS,
@@ -60,6 +60,7 @@ import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
 import DashboardActionsMenu from "./dashboard/DashboardActionsMenu.jsx";
 import FirmwareUpdateModal from "./dashboard/FirmwareUpdateModal.jsx";
 import DeviceDiagnosticsModal from "./dashboard/DeviceDiagnosticsModal.jsx";
+import WifiSettings from "./WifiSettings.jsx";
 import { ACTIVE_APPEARANCE_KEY } from "./lib/desktop-pet-assignment.js";
 import { BUILTIN_TERRIER_APPEARANCE_ID } from "./lib/builtin-appearances.js";
 import { ensureBridgeRuntime } from "./lib/bridge-runtime.js";
@@ -798,9 +799,12 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const [diagnosticsModalOpen, setDiagnosticsModalOpen] = useState(false);
   const [firmwareTargetBoardDeviceId, setFirmwareTargetBoardDeviceId] = useState("");
   const [diagnosticsTargetBoardDeviceId, setDiagnosticsTargetBoardDeviceId] = useState("");
+  const [wifiModalOpen, setWifiModalOpen] = useState(false);
   const [dismissedP4Sessions, setDismissedP4Sessions] = useState({});
   const buttonConfigRevisionRef = useRef(0);
   const buttonConfigQueryTokenRef = useRef(0);
+  const buttonConfigUserEditRef = useRef(false);
+  const buttonConfigAutoTimerRef = useRef(null);
   const isP4Runtime = String(usb.runtime || "").toLowerCase() === P4_RUNTIME_ID;
   const hasKnownRuntime = buttonControlRowsForRuntime(usb.runtime).length > 0;
   const p4VoiceRow = isP4Runtime
@@ -1126,7 +1130,14 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       }
       saveVoiceConfigToStorage(next);
       setVoiceConfigDirty(true);
-      setVoiceConfigOtaState({ pending: false, tone: "warning", message: "修改已保存在电脑上，点击「同步到设备」后生效。" });
+      buttonConfigUserEditRef.current = true;
+      setVoiceConfigOtaState({
+        pending: false,
+        tone: usb.connected ? "" : "warning",
+        message: usb.connected
+          ? "修改已保存在电脑上，正在自动同步到设备…"
+          : "修改已保存在电脑上；连接 USB 后会自动同步到设备。",
+      });
       return next;
     });
   }, [isP4Runtime]);
@@ -1209,6 +1220,31 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       setVoiceConfigOtaState({ pending: false, tone: "error", message: `按钮配置下发失败: ${err}` });
     }
   }, [binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId, usb.connected, usb.runtime, voiceConfig, voiceState.audioBridgeEnabled]);
+
+  // Button mappings are drafts while the user is changing selects; debounce and
+  // write them automatically so a missed "同步到设备" click cannot leave the
+  // board on old behavior. Manual sync remains available as an immediate retry.
+  useEffect(() => {
+    if (
+      !buttonConfigUserEditRef.current
+      || !usb.connected
+      || !voiceConfigDirty
+      || voiceConfigOtaState.pending
+    ) return undefined;
+    const timer = setTimeout(() => {
+      if (!buttonConfigUserEditRef.current) return;
+      buttonConfigUserEditRef.current = false;
+      buttonConfigAutoTimerRef.current = null;
+      applyVoiceConfigOverUsb(voiceConfig);
+    }, 800);
+    buttonConfigAutoTimerRef.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (buttonConfigAutoTimerRef.current === timer) {
+        buttonConfigAutoTimerRef.current = null;
+      }
+    };
+  }, [applyVoiceConfigOverUsb, usb.connected, voiceConfig, voiceConfigDirty, voiceConfigOtaState.pending]);
 
   const updateVoiceTrigger = useCallback(async (trigger) => {
     buttonConfigRevisionRef.current += 1;
@@ -1496,7 +1532,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       }
     >
       <Card>
-        <DeviceStatusBar />
+        <DeviceStatusBar onOpenWifi={() => setWifiModalOpen(true)} />
       </Card>
 
       {realtimeChat?.error && !isRecoveringAsr(realtimeChat) && <div role="alert" className="message-banner message-banner--error">
@@ -1599,6 +1635,30 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         onInputConfigReset={onInputConfigReset}
         expectedBoardDeviceId={diagnosticsTargetBoardDeviceId}
       />
+      {wifiModalOpen && (
+        <div className="modal-backdrop" onClick={() => setWifiModalOpen(false)}>
+          <section
+            className="modal-card modal-card--wide wifi-connect-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="wifi-connect-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h3 id="wifi-connect-title" className="modal-title">通过 Wi-Fi 连接</h3>
+                <p className="modal-subtitle">配置设备的 2.4GHz Wi-Fi，并建立电脑到设备的 TCP 通道。</p>
+              </div>
+              <button type="button" className="icon-btn" aria-label="关闭 Wi-Fi 连接" onClick={() => setWifiModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <WifiSettings />
+            </div>
+          </section>
+        </div>
+      )}
     </PageShell>}
     {editingPersona && <div hidden={!active}><PersonaVoiceModal
       appearance={editingPersona} onClose={() => setEditingPersona(null)}

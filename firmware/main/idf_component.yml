@@ -6,5 +6,7 @@ dependencies:
   espressif/esp_lvgl_adapter:
     override_path: ../components/esp_lvgl_adapter
   espressif/tinyusb: "*"
+  espressif/esp_hosted: "2.12.11"
+  espressif/esp_wifi_remote: "1.6.3"
   waveshare/esp32_p4_wifi6_touch_lcd_4_3:
     override_path: ../components/esp32_p4_wifi6_touch_lcd_4_3

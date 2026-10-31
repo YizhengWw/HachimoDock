@@ -167,10 +167,10 @@ cd firmware
 | --- | --- | --- | --- |
 | `nvs` | `0x009000` | 24 KiB | 设备与输入配置 |
 | `phy_init` | `0x00F000` | 4 KiB | PHY 初始化数据 |
-| `ota_0` | `0x010000` | 2.5 MiB | A/B 应用镜像 |
-| `ota_1` | `0x290000` | 2.5 MiB | A/B 应用镜像 |
-| `otadata` | `0x510000` | 8 KiB | A/B 启动选择元数据 |
-| `storage` | `0x520000` | 6.875 MiB | SPIFFS 清单、音效、组件及元数据 |
+| `ota_0` | `0x010000` | 3.5 MiB | A/B 应用镜像 |
+| `ota_1` | `0x390000` | 3.5 MiB | A/B 应用镜像 |
+| `otadata` | `0x710000` | 8 KiB | A/B 启动选择元数据 |
+| `storage` | `0x720000` | 5 MiB | SPIFFS 清单、音效、组件及元数据 |
 | `appearance0` | `0xC00000` | 10 MiB | 受保护的西高地内置动画 |
 | `appearance1` | `0x1600000` | 10 MiB | 可替换的自定义动画 |
 

@@ -219,6 +219,8 @@ def test_firmware_contract_accepts_p4_assets_and_rejects_linux_mp4_ota():
     assert 'cJSON_AddStringToObject(hardware, "psram", "32MB In-package stacked")' in source
     assert 'cJSON_AddStringToObject(hardware, "flash", "32MB QSPI NOR Flash")' in source
     assert 'cJSON_AddBoolToObject(capabilities, "usbOnly", true)' in source
+    assert 'cJSON_AddStringToObject(capabilities, "c6Firmware", c6_version)' in source
+    assert 'cJSON_AddBoolToObject(capabilities, "wifiTcpCompatible", pet_p4_wifi_tcp_compatible())' in source
     assert 'cJSON_AddBoolToObject(capabilities, "mp4", false)' in source
     assert 'cJSON_AddNumberToObject(capabilities, "version", 1)' in source
     assert 'cJSON_AddBoolToObject(capabilities, "widgets", true)' in source
@@ -1698,10 +1700,10 @@ def test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash():
     desktop = read_usb_serial_contract()
 
     assert "nvs,      data, nvs,     0x9000,   0x6000," in partitions
-    assert "ota_0,    app,  ota_0,   0x10000,  0x280000," in partitions
-    assert "ota_1,    app,  ota_1,   0x290000, 0x280000," in partitions
-    assert "otadata,  data, ota,     0x510000, 0x2000," in partitions
-    assert "storage,  data, spiffs,  0x520000, 0x6E0000," in partitions
+    assert "ota_0,    app,  ota_0,   0x10000,  0x380000," in partitions
+    assert "ota_1,    app,  ota_1,   0x390000, 0x380000," in partitions
+    assert "otadata,  data, ota,     0x710000, 0x2000," in partitions
+    assert "storage,  data, spiffs,  0x720000, 0x4E0000," in partitions
     assert "appearance0,data, 0x40,   0xC00000, 0xA00000," in partitions
     assert "appearance1,data, 0x41,   0x1600000,0xA00000," in partitions
     assert "board_build.flash_size = 32MB" in platformio
@@ -1715,14 +1717,14 @@ def test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash():
     assert "factory-flash -Port $Port -FactoryReset" in migration
     assert "Get-FileHash" in migration
     assert "device already uses an A/B partition table" in migration
-    assert "P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000" in desktop
-    assert "| `ota_0` | `0x010000` | 2.5 MiB |" in runtime_readme
-    assert "| `ota_1` | `0x290000` | 2.5 MiB |" in runtime_readme
-    assert "| `storage` | `0x520000` | 6.875 MiB |" in runtime_readme
+    assert "P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x380000" in desktop
+    assert "| `ota_0` | `0x010000` | 3.5 MiB |" in runtime_readme
+    assert "| `ota_1` | `0x390000` | 3.5 MiB |" in runtime_readme
+    assert "| `storage` | `0x720000` | 5 MiB |" in runtime_readme
     assert "| `appearance0` | `0xC00000` | 10 MiB |" in runtime_readme
     assert "| `appearance1` | `0x1600000` | 10 MiB |" in runtime_readme
     assert ".\\tools\\migrate_to_ab.ps1 -Port COM5 -FactoryReset" in runtime_readme
-    assert "inactive 2.5MiB OTA slot" in protocol_doc
+    assert "inactive 3.5MiB OTA slot" in protocol_doc
     assert "two 4MB OTA slots" not in runtime_readme
     assert "two 4MiB OTA slots" not in runtime_readme
     assert "16MB SPIFFS volume" not in runtime_readme

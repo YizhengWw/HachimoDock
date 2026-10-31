@@ -11,10 +11,10 @@ spec.loader.exec_module(budget)
 def test_headroom_and_internal_budget():
     sections = {'.iram0.text': 110000, '.dram0.data': 25000, '.dram0.bss': 210000,
                 '.ext_ram.bss': 1600000}
-    result = budget.evaluate(2350000, 0x280000, sections)
-    assert result['otaHeadroomBytes'] == 271440
+    result = budget.evaluate(2350000, 0x380000, sections)
+    assert result['otaHeadroomBytes'] == 1320016
     assert result['internalStaticBytes'] == 345000
     with pytest.raises(ValueError, match='OTA headroom'):
-        budget.evaluate(0x280000 - 100, 0x280000, sections)
+        budget.evaluate(0x380000 - 100, 0x380000, sections)
     with pytest.raises(ValueError, match='Internal static'):
-        budget.evaluate(2350000, 0x280000, {'.dram0.bss': 400000})
+        budget.evaluate(2350000, 0x380000, {'.dram0.bss': 400000})

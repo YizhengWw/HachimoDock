@@ -14,7 +14,7 @@
 
 /* DeskBot V2's microphone/reference topology and cancel boundaries, adapted to
  * ESP-IDF P4 codecs. Standalone ESP-SR DSP avoids unused neural/offline models
- * that do not fit the existing 2.5 MiB OTA application slot. */
+ * that do not fit the existing 3.5 MiB OTA application slot. */
 #define FRAME 320
 #define NS_FRAME 160 /* The linked ESP-SR NS implementation requires 10 ms. */
 #define MAX_CHUNK 1024

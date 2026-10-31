@@ -49,3 +49,10 @@ test("DeviceStatusBar uses the documented class names", () => {
   assert.match(source, /dashboard-status-bar__chip/);
   assert.match(source, /dashboard-status-bar__scan-btn/);
 });
+
+test("DeviceStatusBar exposes a Wi-Fi connect entry next to USB rescan", () => {
+  assert.match(source, /通过 Wi-Fi 连接/);
+  assert.match(source, /onOpenWifi/);
+  assert.match(source, /dashboard-status-bar__wifi-btn/);
+  assert.match(source, /<Wifi size=\{14\} \/>/);
+});

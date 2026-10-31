@@ -580,7 +580,7 @@ PC to board:
   readable for compatibility; Linux `videos/*.mp4` or `videos/*.wav` assets
   are rejected explicitly.
 - `firmware/begin`, `firmware/chunk`, `firmware/commit`, `firmware/abort`:
-  writes a SHA-256-verified ESP-IDF image to the inactive 2.5MiB OTA slot. The
+  writes a SHA-256-verified ESP-IDF image to the inactive 3.5MiB OTA slot. The
   desktop uses 4092-byte padding-free decoded chunks when schema 5 and the
   advertised 4KiB receiver are both present, otherwise it starts at the legacy
   2046-byte size. A transient Base64 rejection retries the same sequence at the
@@ -1292,3 +1292,17 @@ begin/commit 遇到录音、对话或播放则拒绝；客户端每次连接仅�
 修复其他组件不切换当前页面。已存在完整图片资源时拒绝已知无图启动包覆盖。
 无有效备用包时设备明确提示需要恢复，完整美术仍来自 PC/出厂资源区，不占应用 OTA 两份空间。
 
+
+## Optional Wi-Fi transport
+
+Firmware may expose an optional Wi-Fi transport over TCP port `3232` when NVS contains
+credentials (`pet_wifi` namespace). The wire format is the same JSONL/raw-asset stream as
+USB/UART. New topics:
+
+- `wifi/config`: payload `{ "ssid": string, "password": string }`; persists credentials,
+  starts/reconnects STA; reply `wifi/config_result`.
+- `wifi/status`: reply `wifi/status_result` with `connected`, `clientConnected`, `ip`, `rssi`.
+
+The Wi-Fi transport is additive; USB/UART remain available for provisioning, OTA and
+fallback. Partition layout uses 3.5 MiB OTA slots and a 5 MiB storage partition; factory
+reset is required when moving from the legacy 2.5 MiB layout.

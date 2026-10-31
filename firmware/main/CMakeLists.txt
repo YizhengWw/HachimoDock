@@ -37,6 +37,7 @@ idf_component_register(
     "pet_p4_slice_core.c"
     "pet_p4_fruit_core.c"
     "pet_p4_usb_native.c"
+    "pet_p4_wifi.c"
     "pet_p4_usb_descriptors.c"
     "pet_p4_renderer.c"
     "pet_p4_view.c"
@@ -64,6 +65,12 @@ idf_component_register(
     nvs_flash
     spiffs
     tinyusb
+    esp_wifi
+    esp_netif
+    esp_event
+    lwip
+    espressif__esp_hosted
+    espressif__esp_wifi_remote
 )
 
 # Shared, OTA-updatable status cues live in the application, not appearance slots.

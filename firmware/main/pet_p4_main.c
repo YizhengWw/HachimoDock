@@ -46,6 +46,7 @@
 #include "pet_p4_conversation.h"
 #include "pet_p4_usb_native.h"
 #include "pet_p4_view.h"
+#include "pet_p4_wifi.h"
 
 static const char *TAG = "pet-p4";
 
@@ -66,6 +67,9 @@ static char *g_line_buffer;
 static size_t g_line_used;
 static char *g_uart_line_buffer;
 static size_t g_uart_line_used;
+static char *g_wifi_line_buffer;
+static size_t g_wifi_line_used;
+static bool g_wifi_raw_mode;
 static SemaphoreHandle_t g_render_mutex;
 static SemaphoreHandle_t g_transport_mutex;
 static bool g_transport_ready;
@@ -85,6 +89,7 @@ typedef enum {
   PET_P4_TRANSPORT_BROADCAST = 0,
   PET_P4_TRANSPORT_UART,
   PET_P4_TRANSPORT_USB_SERIAL_JTAG,
+  PET_P4_TRANSPORT_WIFI,
 } pet_p4_transport_route_t;
 
 typedef struct {
@@ -95,6 +100,7 @@ typedef struct {
 
 static const pet_p4_transport_route_t g_uart_route = PET_P4_TRANSPORT_UART;
 static const pet_p4_transport_route_t g_usb_serial_jtag_route = PET_P4_TRANSPORT_USB_SERIAL_JTAG;
+static const pet_p4_transport_route_t g_wifi_route = PET_P4_TRANSPORT_WIFI;
 
 static void mark_usb_protocol_seen(void);
 static bool usb_protocol_seen(void);
@@ -234,6 +240,10 @@ static void transport_send_line_impl(const char *line, void *ctx, bool drain) {
       usb_queue_all("\n", 1);
     }
   }
+  if (route == PET_P4_TRANSPORT_WIFI
+      || (route == PET_P4_TRANSPORT_BROADCAST && pet_p4_wifi_client_connected())) {
+    pet_p4_wifi_send_line(line);
+  }
   if (route == PET_P4_TRANSPORT_BROADCAST) {
     pet_p4_native_usb_send_json_line(line, NULL);
   }
@@ -294,6 +304,12 @@ static void send_screenshot_chunk(
     usb_write_all(header, strlen(header));
     usb_write_all(b64, b64_len);
     usb_write_all("\"}}\n", 4);
+  }
+  if (route == PET_P4_TRANSPORT_WIFI
+      || (route == PET_P4_TRANSPORT_BROADCAST && pet_p4_wifi_client_connected())) {
+    pet_p4_wifi_send_bytes(header, strlen(header));
+    pet_p4_wifi_send_bytes(b64, b64_len);
+    pet_p4_wifi_send_bytes("\"}}\n", 4);
   }
   if (g_transport_mutex) xSemaphoreGive(g_transport_mutex);
 }
@@ -431,6 +447,10 @@ static void protocol_worker_task(void *arg) {
   pet_p4_protocol_request_t request;
   while (true) {
     if (xQueueReceive(g_protocol_queue, &request, portMAX_DELAY) != pdTRUE) continue;
+    if (pet_p4_wifi_handle_command(request.line, request.send_line, request.reply_ctx)) {
+      free(request.line);
+      continue;
+    }
     bool handled_debug = request.send_line == transport_send_line
       && maybe_handle_debug_line(request.line, request.reply_ctx);
     if (!handled_debug) {
@@ -519,6 +539,28 @@ static void consume_transport_bytes(
     }
     offset += 1;
   }
+}
+
+static void wifi_rx_bytes(const uint8_t *data, size_t len, void *ctx) {
+  (void) ctx;
+  consume_transport_bytes(
+    data,
+    len,
+    g_wifi_line_buffer,
+    &g_wifi_line_used,
+    PET_P4_PROTOCOL_LINE_BUFFER_BYTES,
+    &g_wifi_raw_mode,
+    (void *) &g_wifi_route
+  );
+}
+
+static void wifi_client_connected(void *ctx) {
+  (void) ctx;
+  g_wifi_line_used = 0;
+  g_wifi_raw_mode = false;
+  // Do not build/send the large hello from the Wi-Fi server task. The main
+  // loop broadcasts hello to connected Wi-Fi clients, keeping this task free
+  // to enter recv immediately and avoiding state-lock/stack coupling.
 }
 
 static esp_err_t init_storage(void) {
@@ -629,7 +671,8 @@ void app_main(void) {
   ESP_ERROR_CHECK(nvs_flash_init());
   g_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   g_uart_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  ESP_ERROR_CHECK(g_line_buffer && g_uart_line_buffer ? ESP_OK : ESP_ERR_NO_MEM);
+  g_wifi_line_buffer = heap_caps_calloc(1, PET_P4_PROTOCOL_LINE_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  ESP_ERROR_CHECK(g_line_buffer && g_uart_line_buffer && g_wifi_line_buffer ? ESP_OK : ESP_ERR_NO_MEM);
   g_render_mutex = xSemaphoreCreateMutex();
   ESP_ERROR_CHECK(g_render_mutex ? ESP_OK : ESP_ERR_NO_MEM);
   g_transport_mutex = xSemaphoreCreateMutex();
@@ -687,6 +730,15 @@ void app_main(void) {
   pet_p4_load_asset_manifest(&g_state);
   ESP_ERROR_CHECK(init_usb());
   ESP_ERROR_CHECK(init_uart());
+  pet_p4_wifi_callbacks_t wifi_callbacks = {
+    .on_bytes = wifi_rx_bytes,
+    .on_client_connected = wifi_client_connected,
+    .ctx = NULL,
+  };
+  esp_err_t wifi_err = pet_p4_wifi_init(&wifi_callbacks);
+  if (wifi_err != ESP_OK) {
+    ESP_LOGW(TAG, "Wi-Fi transport unavailable: %s", esp_err_to_name(wifi_err));
+  }
   xSemaphoreTake(g_transport_mutex, portMAX_DELAY);
   g_transport_ready = true;
   xSemaphoreGive(g_transport_mutex);

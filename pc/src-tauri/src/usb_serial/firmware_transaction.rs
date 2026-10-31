@@ -26,7 +26,7 @@ pub(super) const P4_FIRMWARE_IDLE_CLOCK_BUG_SCHEMA: u32 = 5;
 pub(super) const P4_FIRMWARE_IDLE_CLOCK_RECOVERY_ATTEMPTS: usize = 20;
 pub(super) const P4_FIRMWARE_CORRUPTION_RETRIES_BEFORE_FALLBACK: usize = 3;
 pub(super) const P4_FIRMWARE_RECOVERY_SUCCESS_STREAK: usize = 32;
-pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000;
+pub(super) const P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x380000;
 pub(super) const P4_FIRMWARE_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 // A healthy 4 Mbaud board ACK arrives within a few milliseconds. A longer
 // timeout only lets a lost/corrupted ACK consume the old firmware's bounded

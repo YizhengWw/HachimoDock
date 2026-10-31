@@ -6,11 +6,11 @@
  */
 
 import React, { useState } from "react";
-import { Monitor, RefreshCw, Usb } from "lucide-react";
+import { Monitor, RefreshCw, Usb, Wifi } from "lucide-react";
 import { useDeviceContext } from "../shell/DeviceContext.jsx";
 import { useToast } from "../shell/ToastStack.jsx";
 
-export default function DeviceStatusBar() {
+export default function DeviceStatusBar({ onOpenWifi }) {
   const { binding, usb, rescanUsbDevices } = useDeviceContext();
   const { push } = useToast();
   const [scanningUsb, setScanningUsb] = useState(false);
@@ -76,6 +76,16 @@ export default function DeviceStatusBar() {
           {usbChip.label}
         </span>
       </div>
+      <button
+        type="button"
+        className="dashboard-status-bar__scan-btn dashboard-status-bar__wifi-btn"
+        onClick={onOpenWifi}
+        disabled={!onOpenWifi}
+        title="通过 Wi-Fi 连接设备"
+      >
+        <Wifi size={14} />
+        通过 Wi-Fi 连接
+      </button>
       <button
         type="button"
         className="dashboard-status-bar__scan-btn"

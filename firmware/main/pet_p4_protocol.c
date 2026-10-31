@@ -15,6 +15,7 @@
  */
 
 #include "pet_p4_protocol.h"
+#include "pet_p4_wifi.h"
 #include "pet_p4_conversation.h"
 #include "pet_p4_transport_config.h"
 
@@ -1775,6 +1776,15 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
 
   cJSON_AddNumberToObject(capabilities, "version", 1);
   cJSON_AddBoolToObject(capabilities, "usbOnly", true);
+  // Optional Wi-Fi transport: kept alongside usbOnly until the PC app learns
+  // to select transports; USB/UART remain the provisioning and fallback path.
+  cJSON_AddBoolToObject(capabilities, "wifiSupported", true);
+  cJSON_AddNumberToObject(capabilities, "wifiTcpPort", 3232);
+  cJSON_AddStringToObject(capabilities, "wifiProvisioning", "nvs-v1");
+  char c6_version[16] = "unknown";
+  pet_p4_wifi_c6_version(c6_version, sizeof(c6_version));
+  cJSON_AddStringToObject(capabilities, "c6Firmware", c6_version);
+  cJSON_AddBoolToObject(capabilities, "wifiTcpCompatible", pet_p4_wifi_tcp_compatible());
   cJSON_AddBoolToObject(capabilities, "nativeUsb", true);
   cJSON_AddBoolToObject(capabilities, "bulk", true);
   cJSON_AddNumberToObject(capabilities, "maxAppearanceSlots", 2);
@@ -1893,7 +1903,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(capabilities, "firmwareOta", true);
   cJSON_AddStringToObject(firmware_update, "transport", "usb-jsonl-ota-v1");
   cJSON_AddNumberToObject(firmware_update, "slots", 2);
-  cJSON_AddNumberToObject(firmware_update, "maxImageBytes", 0x280000);
+  cJSON_AddNumberToObject(firmware_update, "maxImageBytes", 0x380000);
   cJSON_AddNumberToObject(firmware_update, "chunkBytes", 4 * 1024);
   cJSON_AddStringToObject(firmware_update, "checksum", "sha256");
   cJSON_AddStringToObject(firmware_update, "projectName", "pet_manager_p4_runtime");
@@ -1917,6 +1927,11 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToObject(capabilities, "assetFormats", asset_formats);
 
   cJSON_AddBoolToObject(transport, "usbOnly", true);
+  cJSON_AddBoolToObject(transport, "wifi", true);
+  cJSON_AddNumberToObject(transport, "wifiTcpPort", 3232);
+  cJSON_AddStringToObject(transport, "wifiProvisioning", "nvs-v1");
+  cJSON_AddStringToObject(transport, "c6Firmware", c6_version);
+  cJSON_AddBoolToObject(transport, "wifiTcpCompatible", pet_p4_wifi_tcp_compatible());
   cJSON_AddBoolToObject(transport, "usbUart", true);
   cJSON_AddNumberToObject(transport, "usbUartBaud", PET_P4_UART_BAUD);
   cJSON_AddBoolToObject(transport, "rawAssetChunks", true);

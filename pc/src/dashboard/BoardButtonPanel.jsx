@@ -232,7 +232,7 @@ export default function BoardButtonPanel({
       )}
 
       <div className="usage-help">
-        <p>为按键和摇杆选择功能，修改后点击「同步到设备」生效。同一个按键可以分别设置短按和长按。</p>
+        <p>为按键和摇杆选择功能，修改后会自动同步到设备；也可点击「同步到设备」立即应用。同一个按键可以分别设置短按和长按。</p>
         <details open>
           <summary>常用操作 · 按当前配置显示{voiceConfigDirty ? "（待同步）" : ""}</summary>
           <dl className="usage-help__operations">

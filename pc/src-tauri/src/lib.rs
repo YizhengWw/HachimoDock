@@ -110,6 +110,7 @@ mod reference_image;
 mod realtime_chat_log;
 mod usb_audio;
 mod usb_serial;
+mod wifi_transport;
 mod voice_chat_settings;
 mod volcengine_asr;
 
@@ -2529,6 +2530,15 @@ fn handle_incoming_usb_message(
     topic: String,
     payload: serde_json::Value,
 ) {
+    handle_incoming_device_message(emitter, topic, payload, "usb");
+}
+
+fn handle_incoming_device_message(
+    emitter: &tauri::AppHandle,
+    topic: String,
+    payload: serde_json::Value,
+    transport: &str,
+) {
     resolve_button_config_ack(&topic, &payload);
     if topic=="app/event"{component_app::device_event(&payload);return;}
     music_player::observe_capture(&topic,&payload);
@@ -2568,7 +2578,7 @@ fn handle_incoming_usb_message(
         if topic != "audio/chunk" {
             let _ = emitter.emit(
                 "usb-message",
-                serde_json::json!({"topic": topic, "payload": payload}),
+                serde_json::json!({"topic": topic, "payload": payload, "transport": transport}),
             );
         }
         if let Some(event) = relay_event {
@@ -2672,7 +2682,7 @@ fn handle_incoming_usb_message(
 
     let _ = emitter.emit(
         "usb-message",
-        serde_json::json!({"topic": topic, "payload": payload}),
+        serde_json::json!({"topic": topic, "payload": payload, "transport": transport}),
     );
 
     if confirm_pending_device_voice_draft(&topic, &payload) {
@@ -5980,6 +5990,34 @@ fn detect_codex() -> DetectedAgent {
     }
 }
 
+fn classify_openclaw_agent(cli_path: Option<&str>, has_config: bool) -> (bool, String, String) {
+    match (cli_path, has_config) {
+        (Some(path), true) => (
+            true,
+            "ready".to_string(),
+            format!("已检测到 OpenClaw CLI 与 Gateway: {}", path),
+        ),
+        (Some(path), false) => (
+            true,
+            "ready".to_string(),
+            format!("已检测到 OpenClaw CLI（等待 Gateway 配置）: {}", path),
+        ),
+        // A leftover ~/.status-bridge/openclaw-device.json from an old
+        // OpenClaw install is not proof that OpenClaw is still present.
+        // Require the CLI entry point; keep the stale config path for cleanup.
+        (None, true) => (
+            false,
+            "not_found".to_string(),
+            "仅发现旧的 OpenClaw Gateway 配置，未检测到 OpenClaw CLI（可能已卸载）".to_string(),
+        ),
+        (None, false) => (
+            false,
+            "not_found".to_string(),
+            "未检测到 OpenClaw CLI 或 Gateway".to_string(),
+        ),
+    }
+}
+
 fn detect_openclaw() -> DetectedAgent {
     let home = get_home_dir().ok();
     let cli_path = find_agent_executable(
@@ -5998,29 +6036,8 @@ fn detect_openclaw() -> DetectedAgent {
         })
         .unwrap_or_default();
     let has_config = !config_path.is_empty() && Path::new(&config_path).exists();
-
-    let (detected, status, detail) = match (&cli_path, has_config) {
-        (Some(path), true) => (
-            true,
-            "ready".to_string(),
-            format!("已检测到 OpenClaw CLI 与 Gateway: {}", path),
-        ),
-        (Some(path), false) => (
-            true,
-            "ready".to_string(),
-            format!("已检测到 OpenClaw CLI（等待 Gateway 配置）: {}", path),
-        ),
-        (None, true) => (
-            true,
-            "ready".to_string(),
-            "OpenClaw Gateway 已配置（未发现 CLI 入口）".to_string(),
-        ),
-        (None, false) => (
-            false,
-            "not_found".to_string(),
-            "未检测到 OpenClaw CLI 或 Gateway".to_string(),
-        ),
-    };
+    let (detected, status, detail) =
+        classify_openclaw_agent(cli_path.as_deref(), has_config);
 
     DetectedAgent {
         id: "openclaw".to_string(),
@@ -6376,6 +6393,61 @@ async fn usb_send_state(
     payload: serde_json::Value,
 ) -> Result<(), String> {
     usb_manager.send_state(&source, &payload)
+}
+
+/// Send an arbitrary JSON topic to the connected board. Used by the optional
+/// Wi-Fi provisioning/status panel; USB remains the provisioning path.
+#[tauri::command]
+async fn usb_send_topic(
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    topic: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    usb_manager.send(&topic, &payload)
+}
+
+/// Optional PC-side Wi-Fi TCP transport. The firmware sends a hello line on
+/// connect; this layer keeps the TCP socket alive and forwards JSONL messages
+/// through the same `usb-message` event shape used by the USB bridge.
+#[tauri::command]
+async fn wifi_tcp_connect(
+    app: tauri::AppHandle,
+    transport: tauri::State<'_, wifi_transport::WifiTransport>,
+    ip: String,
+    port: Option<u16>,
+) -> Result<wifi_transport::WifiConnectionStatus, String> {
+    let emitter = app.clone();
+    let handler: wifi_transport::WifiMessageHandler =
+        std::sync::Arc::new(move |topic: &str, payload: &serde_json::Value| {
+            // Reuse the shared device pipeline so session/state listeners see
+            // Wi-Fi messages, tagged with their actual transport.
+            handle_incoming_device_message(&emitter, topic.to_string(), payload.clone(), "wifi");
+        });
+    transport.connect(&ip, port.unwrap_or(3232), handler)
+}
+
+#[tauri::command]
+async fn wifi_tcp_disconnect(
+    transport: tauri::State<'_, wifi_transport::WifiTransport>,
+) -> Result<(), String> {
+    transport.disconnect();
+    Ok(())
+}
+
+#[tauri::command]
+async fn wifi_tcp_status(
+    transport: tauri::State<'_, wifi_transport::WifiTransport>,
+) -> Result<wifi_transport::WifiConnectionStatus, String> {
+    Ok(transport.status())
+}
+
+#[tauri::command]
+async fn wifi_tcp_send(
+    transport: tauri::State<'_, wifi_transport::WifiTransport>,
+    topic: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    transport.send(&topic, &payload)
 }
 
 #[tauri::command]
@@ -10232,6 +10304,7 @@ pub fn run() {
             Ok(())
         })
         .manage(usb_manager)
+        .manage(wifi_transport::WifiTransport::new())
         .invoke_handler(tauri::generate_handler![
             reference_image::reference_image_mount,
             reference_image::reference_image_action,
@@ -10311,6 +10384,11 @@ pub fn run() {
             usb_connect,
             usb_disconnect,
             usb_send_state,
+            usb_send_topic,
+            wifi_tcp_connect,
+            wifi_tcp_disconnect,
+            wifi_tcp_status,
+            wifi_tcp_send,
             usb_send_speech,
             usb_send_command,
             usb_audio_capture_control,
@@ -13886,4 +13964,20 @@ mod tests {
         assert_eq!(read_live_managed_pid(&pid_path), None);
         assert!(!pid_path.exists());
     }
+    #[test]
+    fn openclaw_stale_gateway_config_without_cli_is_not_detected() {
+        let (detected, status, detail) = classify_openclaw_agent(None, true);
+        assert!(!detected);
+        assert_eq!(status, "not_found");
+        assert!(detail.contains("旧的 OpenClaw Gateway 配置"));
+    }
+
+    #[test]
+    fn openclaw_cli_is_detected_even_before_gateway_config() {
+        let (detected, status, detail) = classify_openclaw_agent(Some("/tmp/openclaw"), false);
+        assert!(detected);
+        assert_eq!(status, "ready");
+        assert!(detail.contains("OpenClaw CLI"));
+    }
+
 }

@@ -8680,7 +8680,7 @@ mod tests {
 
     #[test]
     fn firmware_image_limit_matches_the_current_ota_partition() {
-        assert_eq!(P4_FIRMWARE_MAX_IMAGE_SIZE, 0x280000);
+        assert_eq!(P4_FIRMWARE_MAX_IMAGE_SIZE, 0x380000);
     }
 
     #[test]

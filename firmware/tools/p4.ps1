@@ -112,9 +112,9 @@ function Get-DevicePartitionLayout {
 function Assert-CurrentAbLayout {
     param([Parameter(Mandatory = $true)][string]$Layout)
 
-    $hasOta0 = $Layout -match "(?m)^ota_0,app,ota_0,0x10000,(2560K|0x280000),"
-    $hasOta1 = $Layout -match "(?m)^ota_1,app,ota_1,0x290000,(2560K|0x280000),"
-    $hasStorage = $Layout -match "(?m)^storage,data,spiffs,0x520000,(7040K|0x6E0000),"
+    $hasOta0 = $Layout -match "(?m)^ota_0,app,ota_0,0x10000,(3584K|0x380000),"
+    $hasOta1 = $Layout -match "(?m)^ota_1,app,ota_1,0x390000,(3584K|0x380000),"
+    $hasStorage = $Layout -match "(?m)^storage,data,spiffs,0x720000,(5120K|0x4E0000),"
     $hasAppearance0 = $Layout -match "(?m)^appearance0,data,64,0xc00000,(10M|0xA00000),"
     $hasAppearance1 = $Layout -match "(?m)^appearance1,data,65,0x1600000,(10M|0xA00000),"
     if (-not ($hasOta0 -and $hasOta1 -and $hasStorage -and $hasAppearance0 -and $hasAppearance1)) {
