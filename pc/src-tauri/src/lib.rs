@@ -12327,7 +12327,7 @@ mod tests {
     fn openclaw_cli_detection_stays_ready_with_or_without_bridge_identity() {
         for has_status_bridge_identity in [true, false] {
             let (detected, status, _) =
-                openclaw_detection(Some("/usr/local/bin/openclaw"), has_status_bridge_identity);
+                openclaw_detection(Some("/tmp/openclaw"), has_status_bridge_identity);
             assert!(detected);
             assert_eq!(status, "ready");
         }
