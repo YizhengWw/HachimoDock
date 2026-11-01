@@ -176,5 +176,7 @@ test("DSH row exposes a persisted approval timeout selector", () => {
   assert.match(source, /agent\.id === "deepseek-harness"/);
   assert.match(source, /审批超时/);
   assert.match(source, /永不超时/);
-  assert.match(extractCssRule(styles, ".channel-row__approval-timeout select"), /border-radius:\s*var\(--radius-md\)/);
+  assert.match(extractCssRule(styles, ".channel-row__approval-timeout-trigger"), /border-radius:\s*var\(--radius-md\)/);
+  assert.match(source, /channel-row__approval-timeout-menu/);
+  assert.match(source, /channel-row__approval-timeout-option/);
 });

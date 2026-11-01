@@ -101,6 +101,7 @@ export default function ChannelMatrixCard() {
   const [pendingFollow, setPendingFollow] = useState(null); // { agentId, appearance }
   const [dshApprovalTimeoutMs, setDshApprovalTimeoutMs] = useState(30000);
   const [dshApprovalTimeoutSaving, setDshApprovalTimeoutSaving] = useState(false);
+  const [dshApprovalTimeoutOpen, setDshApprovalTimeoutOpen] = useState(false);
   const syncing = appearanceSync?.pending === true;
   const syncProgress = appearanceSync?.progress
     ? normalizeSyncProgress(appearanceSync.progress)
@@ -129,9 +130,21 @@ export default function ChannelMatrixCard() {
     return () => { disposed = true; };
   }, []);
 
+  useEffect(() => {
+    if (!dshApprovalTimeoutOpen) return undefined;
+    const close = (event) => {
+      if (!event.target.closest?.('.channel-row__approval-timeout-control')) {
+        setDshApprovalTimeoutOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [dshApprovalTimeoutOpen]);
+
   const updateDshApprovalTimeout = useCallback(async (nextValue) => {
     const timeoutMs = Number(nextValue);
     const previous = dshApprovalTimeoutMs;
+    setDshApprovalTimeoutOpen(false);
     setDshApprovalTimeoutMs(timeoutMs);
     setDshApprovalTimeoutSaving(true);
     try {
@@ -139,7 +152,7 @@ export default function ChannelMatrixCard() {
       const timeoutLabel = timeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
         ? "永不超时"
         : DSH_APPROVAL_TIMEOUT_OPTIONS.find((item) => item.value === timeoutMs)?.label
-          || `${Math.round(timeoutMs / 1000)} 秒`;
+          || "已保存";
       push({
         tone: "success",
         title: timeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
@@ -341,18 +354,38 @@ export default function ChannelMatrixCard() {
                       {agent.id === "deepseek-harness" && (
                         <label className="channel-row__approval-timeout">
                           <span>审批超时</span>
-                          <span className="channel-row__approval-timeout-select">
-                            <select
-                              value={dshApprovalTimeoutMs}
-                              onChange={(event) => updateDshApprovalTimeout(event.target.value)}
+                          <span className="channel-row__approval-timeout-control">
+                            <button
+                              type="button"
+                              className="btn-secondary btn-sm channel-row__approval-timeout-trigger"
+                              onClick={() => setDshApprovalTimeoutOpen((open) => !open)}
                               disabled={dshApprovalTimeoutSaving || syncing}
+                              aria-haspopup="listbox"
+                              aria-expanded={dshApprovalTimeoutOpen}
                               aria-label="DeepSeek Harness 审批超时时间"
                             >
-                              {DSH_APPROVAL_TIMEOUT_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
-                            <ChevronDown size={14} aria-hidden="true" />
+                              <ChevronDown size={14} aria-hidden="true" />
+                              {dshApprovalTimeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
+                                ? "永不超时"
+                                : DSH_APPROVAL_TIMEOUT_OPTIONS.find((option) => option.value === dshApprovalTimeoutMs)?.label
+                                  || "30 秒"}
+                            </button>
+                            {dshApprovalTimeoutOpen && (
+                              <div className="channel-row__approval-timeout-menu" role="listbox" aria-label="选择审批超时时间">
+                                {DSH_APPROVAL_TIMEOUT_OPTIONS.map((option) => (
+                                  <button
+                                    type="button"
+                                    key={option.value}
+                                    role="option"
+                                    aria-selected={option.value === dshApprovalTimeoutMs}
+                                    className={`channel-row__approval-timeout-option${option.value === dshApprovalTimeoutMs ? " is-selected" : ""}`}
+                                    onClick={() => updateDshApprovalTimeout(option.value)}
+                                  >
+                                    {option.label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </span>
                         </label>
                       )}

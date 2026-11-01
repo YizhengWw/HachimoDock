@@ -5262,14 +5262,20 @@ static void draw_approval_overlay(
                           PET_P4_APPROVAL_CARD_WIDTH, PET_P4_APPROVAL_CARD_HEIGHT,
                           PET_P4_APPROVAL_CARD_RADIUS, card, outline);
   draw_text_line("需要授权", content_x, card_y + 28, 220, ivory, 2, false);
-  remaining_ms = state->approval_expires_ms > now_ms
-    ? state->approval_expires_ms - now_ms
-    : 0;
-  if (remaining_ms > 999000ULL) remaining_ms = 999000ULL;
-  seconds = (unsigned int) ((remaining_ms + 999ULL) / 1000ULL);
-  snprintf(countdown, sizeof(countdown), "剩余 %u 秒", seconds);
-  draw_text_right(countdown, card_x + PET_P4_APPROVAL_CARD_WIDTH - 26,
-                  card_y + 30, 210, outline, 2);
+  if (state->approval_expires_ms == 0) {
+    /* A zero deadline is the explicit never-expire mode; do not render 0 s. */
+    draw_text_right("不超时", card_x + PET_P4_APPROVAL_CARD_WIDTH - 26,
+                    card_y + 30, 210, outline, 2);
+  } else {
+    remaining_ms = state->approval_expires_ms > now_ms
+      ? state->approval_expires_ms - now_ms
+      : 0;
+    if (remaining_ms > 999000ULL) remaining_ms = 999000ULL;
+    seconds = (unsigned int) ((remaining_ms + 999ULL) / 1000ULL);
+    snprintf(countdown, sizeof(countdown), "剩余 %u 秒", seconds);
+    draw_text_right(countdown, card_x + PET_P4_APPROVAL_CARD_WIDTH - 26,
+                    card_y + 30, 210, outline, 2);
+  }
   fill_rect(content_x, card_y + 82, content_w, 1, divider);
   draw_text_line_vcenter("来源", content_x, card_y + 92, 40, 64, muted, 1, false);
   draw_text_line_vcenter(
