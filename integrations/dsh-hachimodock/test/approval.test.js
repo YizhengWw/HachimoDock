@@ -247,8 +247,9 @@ test('a finite timeout emits approval-expired after the prompt', async (t) => {
   assert.equal(await outcome, 'unavailable')
 })
 
-test('timeout 0 never expires and still accepts a decision', async (t) => {
-  const { ctx, session, sse, url } = await fixtures(t, { approvalTimeoutMs: 0 })
+test('the large never sentinel never expires and still accepts a decision', async (t) => {
+  const NEVER = 99999
+  const { ctx, session, sse, url } = await fixtures(t, { approvalTimeoutMs: NEVER })
   const outcome = answer(ctx, createApprovalRequest(session))
   const prompt = await sse.next()
   assert.equal(prompt.data.neverExpires, true)

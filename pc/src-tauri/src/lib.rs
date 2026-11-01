@@ -4830,19 +4830,21 @@ fn save_bridge_profile(input: BridgeProfileInput) -> Result<BridgeProfileRespons
 
 const DEFAULT_DSH_APPROVAL_TIMEOUT_MS: u64 = 30_000;
 const MAX_DSH_APPROVAL_TIMEOUT_MS: u64 = 3_600_000;
+const DSH_APPROVAL_NEVER_TIMEOUT_MS: u64 = 99_999;
 
 #[tauri::command]
 fn load_dsh_approval_timeout() -> Result<u64, String> {
     let config_path = get_bridge_profile_path()?;
     let profile = read_bridge_profile(&config_path)?.unwrap_or_default();
-    Ok(profile
-        .dsh_approval_timeout_ms
-        .unwrap_or(DEFAULT_DSH_APPROVAL_TIMEOUT_MS))
+    Ok(match profile.dsh_approval_timeout_ms {
+        Some(value) if value > 0 => value,
+        _ => DEFAULT_DSH_APPROVAL_TIMEOUT_MS,
+    })
 }
 
 #[tauri::command]
 fn save_dsh_approval_timeout(timeout_ms: u64) -> Result<u64, String> {
-    if timeout_ms != 0
+    if timeout_ms != DSH_APPROVAL_NEVER_TIMEOUT_MS
         && (!(5_000..=MAX_DSH_APPROVAL_TIMEOUT_MS).contains(&timeout_ms))
     {
         return Err("审批超时必须在 5 秒到 1 小时之间，或选择永不超时。".to_string());

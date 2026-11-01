@@ -43,13 +43,14 @@ const AGENT_ICONS = {
   "deepseek-harness": Braces,
 };
 
+export const DSH_APPROVAL_NEVER_TIMEOUT_MS = 99999;
 const DSH_APPROVAL_TIMEOUT_OPTIONS = [
   { value: 10000, label: "10 秒" },
   { value: 30000, label: "30 秒" },
   { value: 60000, label: "1 分钟" },
   { value: 300000, label: "5 分钟" },
   { value: 600000, label: "10 分钟" },
-  { value: 0, label: "永不超时" },
+  { value: DSH_APPROVAL_NEVER_TIMEOUT_MS, label: "永不超时" },
 ];
 
 function appearanceKindLabel(appearance) {
@@ -137,7 +138,7 @@ export default function ChannelMatrixCard() {
       await invoke("save_dsh_approval_timeout", { timeoutMs });
       push({
         tone: "success",
-        title: timeoutMs === 0
+        title: timeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
           ? "DSH 审批将永不超时"
           : `DSH 审批超时已设为 ${DSH_APPROVAL_TIMEOUT_OPTIONS.find((item) => item.value === timeoutMs)?.label || `${Math.round(timeoutMs / 1000)} 秒`}`,
       });

@@ -33,6 +33,8 @@ const PROTOCOL_VERSION = 1
 const DEFAULT_PORT = 17892
 /** Default approval wait before failing closed. */
 const DEFAULT_APPROVAL_TIMEOUT_MS = 30000
+/** Sentinel used by the UI for 'never'; still a concrete large timeout. */
+const NEVER_APPROVAL_TIMEOUT_MS = 99999
 /** Largest accepted JSON request body (contract: body limit 64KB). */
 const MAX_BODY_BYTES = 64 * 1024
 /** Hard cap on `/inject` text after JSON decoding. */
@@ -367,8 +369,10 @@ class BridgeServer {
   requestApproval(request) {
     const requestId = this.createRequestId()
     const timeoutMs =
-      Number.isSafeInteger(request.timeoutMs) && request.timeoutMs > 0 ? request.timeoutMs : this.approvalTimeoutMs
-    const neverExpires = timeoutMs === 0
+      Number.isSafeInteger(request.timeoutMs) && request.timeoutMs > 0
+        ? request.timeoutMs
+        : this.approvalTimeoutMs
+    const neverExpires = timeoutMs === NEVER_APPROVAL_TIMEOUT_MS
     const expiresAtMs = neverExpires ? 0 : this.now() + timeoutMs
     /** @type {Promise<string>} */
     const outcome = new Promise((resolve) => {

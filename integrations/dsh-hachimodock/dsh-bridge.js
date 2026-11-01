@@ -38,6 +38,7 @@ const os = require('node:os')
 const path = require('node:path')
 const { BridgeServer, DEFAULT_PORT, DEFAULT_APPROVAL_TIMEOUT_MS, boundString } = require('./server')
 const DEFAULT_BRIDGE_PROFILE = path.join(os.homedir(), '.claw-pet', 'pet-bridge.json')
+const NEVER_APPROVAL_TIMEOUT_MS = 99999
 
 /** Agent identity reported to HachimoDock; fixed by the v0 contract. */
 const AGENT_ID = 'deepseek-harness'
@@ -76,12 +77,9 @@ function normalizeOptions(config = {}) {
   const port =
     positiveIntFromEnv(process.env.HACHIMODOCK_DSH_PORT) ??
     (Number.isSafeInteger(options.port) && options.port > 0 ? options.port : DEFAULT_PORT)
-  const envApprovalTimeout = Number(process.env.HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS)
   const approvalTimeoutMs =
-    (Number.isSafeInteger(envApprovalTimeout) && envApprovalTimeout >= 0
-      ? envApprovalTimeout
-      : undefined) ??
-    (Number.isSafeInteger(options.approvalTimeoutMs) && options.approvalTimeoutMs >= 0
+    positiveIntFromEnv(process.env.HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS) ??
+    (Number.isSafeInteger(options.approvalTimeoutMs) && options.approvalTimeoutMs > 0
       ? options.approvalTimeoutMs
       : DEFAULT_APPROVAL_TIMEOUT_MS)
   const fallback =
@@ -641,7 +639,7 @@ function resolveApprovalTimeoutMs(bridge) {
     const profilePath = process.env.HACHIMODOCK_BRIDGE_PROFILE || DEFAULT_BRIDGE_PROFILE
     const raw = JSON.parse(fs.readFileSync(profilePath, 'utf8'))
     const value = raw?.dshApprovalTimeoutMs
-    if (Number.isSafeInteger(value) && value >= 0) return value
+    if (Number.isSafeInteger(value) && value > 0) return value
   } catch {
     /* profile missing or unreadable: use the plugin default */
   }

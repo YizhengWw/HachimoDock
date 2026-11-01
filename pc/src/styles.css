@@ -13843,7 +13843,8 @@ select:focus-visible {
 .channel-row__formosa-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px 10px;
   min-width: 0;
 }
 
@@ -13885,21 +13886,35 @@ select:focus-visible {
 .channel-row__approval-timeout {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-2);
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  color: var(--text-soft);
   white-space: nowrap;
 }
 
 .channel-row__approval-timeout select {
-  min-height: 26px;
-  padding: 0 22px 0 8px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-pill);
+  min-height: var(--control-height-sm);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--text);
-  font-size: 11px;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.channel-row__approval-timeout select:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-muted);
+}
+
+.channel-row__approval-timeout select:disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
 }
 
 .channel-row__follow {
