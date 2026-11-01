@@ -392,6 +392,9 @@ function normalizeSession(row) {
     summary: title,
   };
   if (typeof row.cwd === "string" && row.cwd) session.cwd = row.cwd;
+  if (typeof row.displayContent === "string" && row.displayContent.trim()) {
+    session.displayContent = row.displayContent.trim();
+  }
   if (typeof row.state === "string" && row.state.trim()) session.state = row.state.trim().toLowerCase();
   if (Number.isFinite(Number(row.transitionRevision)) && Number(row.transitionRevision) > 0) {
     session.transitionRevision = Number(row.transitionRevision);

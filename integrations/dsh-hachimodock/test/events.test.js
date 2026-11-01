@@ -237,3 +237,28 @@ test('tool/call publishes tool_running and tool/result returns to working', asyn
   assert.equal(body.sessions[0].state, 'working')
   assert.ok(body.sessions[0].transitionRevision > toolRevision)
 })
+
+test('assistant text is exposed as bounded displayContent for the P4 body', async (t) => {
+  const session = createFakeSession('session-assistant-text', { cwd: '/tmp/text' })
+  const ctx = createFakeCtx({ sessions: [session] })
+  const { url } = await startTestBridge(t, ctx)
+  ctx.dispatchSync('session/event', session, {
+    type: 'assistant/message',
+    time: 5000,
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'hidden reasoning' },
+          { type: 'text', text: '### 标题\n**粗体**\n- 列表' },
+          { type: 'tool-call', id: 'call-text', name: 'bash', arguments: '{}' },
+        ],
+      },
+    },
+  })
+  const { body } = await requestJson(`${url}/sessions`)
+  assert.equal(body.sessions[0].displayContent, '### 标题\n**粗体**\n- 列表')
+  assert.equal(body.sessions[0].displayContent.includes('hidden reasoning'), false)
+})

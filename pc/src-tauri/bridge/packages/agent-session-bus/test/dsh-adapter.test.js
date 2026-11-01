@@ -130,6 +130,7 @@ test("listSessions maps /sessions payloads newest-first", async () => {
           cwd: "/tmp/new",
           lastModified: 200,
           status: "running",
+          displayContent: "### 标题\n**粗体**",
           agentId: "deepseek-harness",
         },
         { id: "", title: "missing id is ignored" },
@@ -144,6 +145,7 @@ test("listSessions maps /sessions payloads newest-first", async () => {
         lastModified: 200,
         name: "新会话",
         summary: "新会话",
+        displayContent: "### 标题\n**粗体**",
         cwd: "/tmp/new",
       },
       {

@@ -252,6 +252,7 @@ function summarizeSession(bridge, session) {
     status: agent?.status === 'running' ? 'running' : 'idle',
     state: bridge.sessionStates.get(String(session.id))?.state
       || (agent?.status === 'running' ? 'working' : 'idle'),
+    displayContent: bridge.sessionText.get(String(session.id)) || '',
     transitionRevision: bridge.sessionStates.get(String(session.id))?.revision || 0,
     agentId: AGENT_ID,
   }
@@ -294,6 +295,32 @@ function publishSessionSummary(bridge, session) {
  * @param {object} event - committed DSH session event.
  * @returns {void}
  */
+/**
+ * Extract the final assistant text blocks from one `assistant/message` payload.
+ * Tool-call/reasoning blocks are intentionally excluded from the device body.
+ * @param {object} message - DSH assistant message.
+ * @returns {string} bounded plain text, or an empty string.
+ */
+function assistantMessageText(message) {
+  const content = Array.isArray(message?.content) ? message.content : []
+  const parts = []
+  for (const block of content) {
+    if (block && block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
+      parts.push(block.text.trim())
+    }
+  }
+  return boundString(parts.join('\n'), 383) ?? ''
+}
+
+function rememberSessionText(bridge, sessionId, text) {
+  if (!text) return
+  bridge.sessionText.set(sessionId, text)
+  if (bridge.sessionText.size > CACHE_LIMIT) {
+    const oldest = bridge.sessionText.keys().next()
+    if (!oldest.done) bridge.sessionText.delete(oldest.value)
+  }
+}
+
 function forwardSessionEvent(bridge, session, event) {
   if (!session || typeof session.id !== 'string' || !event || typeof event.type !== 'string') return
   const sessionId = session.id
@@ -319,6 +346,14 @@ function forwardSessionEvent(bridge, session, event) {
         turn: Number.isSafeInteger(data.turn) ? data.turn : undefined,
       })
       return
+    case 'assistant/message': {
+      const text = assistantMessageText(data.message)
+      if (text) {
+        rememberSessionText(bridge, sessionId, text)
+        publishSessionSummary(bridge, session)
+      }
+      return
+    }
     case 'turn/end':
       rememberSessionState(bridge, sessionId, 'done')
       bridge.server.publish('turn', {
@@ -747,6 +782,7 @@ function createBridge(ctx, config = {}) {
     titleMap: new Map(),
     lastModified: new Map(),
     sessionStates: new Map(),
+    sessionText: new Map(),
     toolNames: new Map(),
     askedApprovals: new Map(),
     approvalLinks: new Map(),
