@@ -299,6 +299,16 @@ export function reconcileDeviceSessionQueue(
   for (const session of incoming) {
     if (isActiveDeviceSession(session)) {
       append(withTransitionMetadata(null, session, currentTime));
+    } else if (normalizedSessionState(session) === "stopped") {
+      /* A user stop is an explicit terminal transition even when this reducer
+       * did not previously retain the same Session as an active card. Keep it
+       * as a stopped card for the normal terminal hold instead of dropping it. */
+      append(withTransitionMetadata(
+        null,
+        { ...session, state: "stopped" },
+        currentTime,
+        currentTime + DEVICE_SESSION_TERMINAL_HOLD_MS,
+      ));
     }
   }
 

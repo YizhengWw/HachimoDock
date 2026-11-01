@@ -434,3 +434,16 @@ test("deduplicates title-only cards using the lifecycle text rendered by firmwar
   assert.equal(next.length, 1);
   assert.equal(next[0].id, "event-id");
 });
+
+test("an explicit stopped snapshot is admitted without a previous active card", () => {
+  const now = 1_000_000;
+  const queue = reconcileDeviceSessionQueue(
+    [],
+    [{ id: "stopped-new", name: "Stopped task", state: "stopped" }],
+    now,
+  );
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].id, "stopped-new");
+  assert.equal(queue[0].state, "stopped");
+  assert.ok(deviceSessionTerminalRemainingMs(queue[0], now) > 0);
+});

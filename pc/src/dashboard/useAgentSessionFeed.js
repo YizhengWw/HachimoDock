@@ -27,6 +27,7 @@ const TERMINAL_SESSION_STATES = new Set([
   "failed",
   "complete",
   "completed",
+  "stopped",
 ]);
 const EMPTY_SESSIONS = Object.freeze([]);
 
