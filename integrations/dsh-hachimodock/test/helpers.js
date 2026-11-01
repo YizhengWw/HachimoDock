@@ -382,6 +382,8 @@ async function startTestServer(t, options = {}) {
  * @returns {Promise<{bridge: object, url: string}>} started bridge and base URL.
  */
 async function startTestBridge(t, ctx, config = {}) {
+  // Unit tests must not inherit the developer's real pet-bridge.json timeout.
+  process.env.HACHIMODOCK_BRIDGE_PROFILE = '/nonexistent/hachimodock-test-profile.json'
   const { createBridge } = require('../dsh-bridge')
   const bridge = createBridge(ctx, { port: 0, ...config })
   await bridge.server.listen(0)
