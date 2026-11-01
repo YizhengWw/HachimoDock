@@ -915,6 +915,9 @@ void pet_p4_audio_process(
    * Those cues also gate half-duplex capture and can suppress an entire user utterance. */
   if (atomic_load(&g_instrument_enabled) || pet_p4_audio_conversation_active()
       || atomic_load_explicit(&g_stream_active, memory_order_acquire)) return;
+  /* Never replace an event cue (for example session_terminated) with an
+   * inferred lifecycle cue while the event cue is still playing. */
+  if (pet_p4_audio_playback_active()) return;
   const char *lifecycle = pet_p4_canonical_lifecycle(pet_p4_state_effective_lifecycle(state, now_ms));
   const pet_p4_session_queue_item_t *current_session = NULL;
   for (unsigned i = 0; i < state->session_queue_count && i < PET_P4_SESSION_QUEUE_MAX; i += 1) {
