@@ -404,8 +404,52 @@ PC to board:
 {"topic":"ack","payload":{"desktopDeviceId":"desktop-..."}}
 ```
 
+## DSH 审批上屏（R5 设备侧 v0）
+
+DSH 审批卡片由 PC bridge 转发到设备；设备只负责显示并回传一次决定，
+不实现审批策略、不访问网络，也不改变审批未激活时的原有页面渲染与键位绑定。
+
+PC → P4：
+
+```json
+{"topic":"approval/request","payload":{"requestId":"req-1","agent":"DeepSeek Harness","tool":"bash","reason":"列出当前目录","sessionId":"session-...","expiresAtMs":1790000000000}}
+```
+
+- `requestId` 必填，最长 95 个 UTF-8 字节；缺失时回 `protocol/ack` 失败
+  `invalid_approval_request`。
+- `agent`（最长 64 字节）、`tool`（64）、`reason`（192）可选，超长按 UTF-8
+  边界截断；缺失时卡片分别显示 `未知 Agent`、`未知工具`、`无说明`。
+- `expiresAtMs` 可选，毫秒单位。DSH 插件/PC bridge 使用 Unix epoch 毫秒
+  （如 `1790000000000`），设备用最近一次 `system/heartbeat.tsMs` 锚点换算成
+  单调时钟；尚未收到心跳锚点或发送端直接给设备单调毫秒时，使用收到的值，
+  缺省为收到时刻 + 30 秒（`PET_P4_APPROVAL_TIMEOUT_MS`）。换算后的设备侧
+  pending 最长保留 5 分钟（`PET_P4_APPROVAL_MAX_HOLD_MS`，防御异常时钟）。
+  到达时已过期的请求直接忽略（fail closed，回 `approval_expired`），不会弹窗。
+- 同一时刻只保留一个 pending 请求：新请求覆盖旧请求；已回复过的同一
+  `requestId` 重发会被去重（回 `approval_already_decided`），不会再次弹窗。
+- 成功接收回 `protocol/ack`（`requestTopic:"approval/request"`、`ok:true`、
+  `requestId` 原样回传）。桥接端可据此确认设备在线，无需自行等待 UI。
+
+P4 → PC：
+
+```json
+{"topic":"approval/decision","payload":{"requestId":"req-1","decision":"allow","source":"esp32"}}
+```
+
+- 卡片显示期间 SW1 短按 = `allow`，SW3 短按 = `deny`；decision 入队后立即
+  清除 pending，因此同一请求只会产生一条 decision（幂等）。
+- 卡片显示期间其余按键、长按、HOLD、摇杆/旋钮事件全部被吞掉，不会落到原有
+  键位绑定，也不会误触允许/拒绝。
+- 换算后的设备侧 deadline 到期时设备自行清除 pending 且不发送任何 decision；
+  审批超时仍由 DSH 插件（默认 30 秒，fail closed）负责。
+- 界面为覆盖当前页面的深色模态卡片：标题 `需要授权`、来源/工具行、最多两行
+  省略理由、剩余秒数，底部 `确认键允许` / `取消键拒绝`。卡片只叠加在普通帧上；
+  固件/形象传输状态帧期间到达的请求会在传输界面结束后显示（其超时同样生效）。
+
 ## Supported Input Topics
 
+- `approval/request`: shows the modal DSH approval card (see above) and becomes
+  the only accepted input context until a decision or expiry clears it.
 - `state/<agent>`: updates current lifecycle state, event, and status marker.
 - `speech/text`: updates the speech bubble title, body, status, and status text.
   A terminal `done` lifecycle remains visible on the device for 60 seconds

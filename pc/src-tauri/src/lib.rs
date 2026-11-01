@@ -52,6 +52,7 @@
  * [Sync] If this file changes, update `pc/.folder.md`.
  */
 
+mod dsh_approval;
 mod clawpkg;
 mod widget_data;
 mod stock_quotes;
@@ -1184,6 +1185,48 @@ fn release_completed_voice_for_desktop_task(board: &str) -> Result<(), &'static 
     supersede_device_voice_context(&context).map_err(|_| "voice_release_failed")
 }
 
+const DSH_BRIDGE_URL: &str = "http://127.0.0.1:17892";
+
+fn dsh_voice_post(path: &str, body: &serde_json::Value) -> Result<(), String> {
+    use std::io::{Read, Write};
+    use std::net::{TcpStream, ToSocketAddrs};
+    const DSH_PORT: u16 = 17892;
+    let payload = body.to_string();
+    let address = ("127.0.0.1", DSH_PORT)
+        .to_socket_addrs()
+        .map_err(|error| format!("DSH voice address failed: {error}"))?
+        .next()
+        .ok_or_else(|| "DSH voice address unavailable".to_string())?;
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(800))
+        .map_err(|error| format!("DSH voice connect failed: {error}"))?;
+    stream.set_read_timeout(Some(Duration::from_millis(800))).ok();
+    stream.set_write_timeout(Some(Duration::from_millis(800))).ok();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{DSH_PORT}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        payload.len(),
+        payload
+    );
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("DSH voice write failed: {error}"))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|error| format!("DSH voice read failed: {error}"))?;
+    if !response.starts_with("HTTP/1.1 200") && !response.starts_with("HTTP/1.0 200") {
+        return Err(format!("DSH voice HTTP failed: {}", response.lines().next().unwrap_or("empty")));
+    }
+    Ok(())
+}
+
+fn insert_dsh_voice_draft(text: &str) -> Result<(), String> {
+    dsh_voice_post("/voice/draft", &serde_json::json!({ "text": text }))
+}
+
+fn submit_dsh_voice_composer(session_id: &str) -> Result<(), String> {
+    dsh_voice_post("/voice/submit", &serde_json::json!({ "sessionId": session_id }))
+}
+
 fn submit_device_voice_via_agent_bus(context: Arc<DeviceVoiceContext>, text: String) {
     if !device_voice_target_is_current(&context) {
         cancel_device_voice_context(&context, "voice target changed before final submission");
@@ -1415,6 +1458,19 @@ fn stage_device_voice_final(
         } else {
             context.draft_ready.store(true, Ordering::SeqCst);
             emit_device_voice_transcript(&context, "draft_ready", revision, &text, true, true, "");
+            if context.target.agent_id == "deepseek-harness" {
+                if let Err(error) = insert_dsh_voice_draft(&text) {
+                    report_device_voice_delivery_failure(
+                        &context,
+                        revision,
+                        &text,
+                        &error,
+                        "DSH 输入框草稿插入失败",
+                        "DSH_COMPOSER_DRAFT_FAILED",
+                    );
+                    return;
+                }
+            }
         }
         return;
     };
@@ -1595,6 +1651,41 @@ fn confirm_pending_device_voice_draft(topic: &str, payload: &serde_json::Value) 
     }
 
     if !agent_uses_visible_composer(&context.target.agent_id) {
+        if context.target.agent_id == "deepseek-harness" {
+            if !device_voice_target_is_current(&context) {
+                cancel_device_voice_context(&context, "DSH voice target changed before submit");
+                return true;
+            }
+            if let Err(error) = submit_dsh_voice_composer(&device_voice_session_id(&context)) {
+                report_device_voice_delivery_failure(
+                    &context,
+                    revision,
+                    &text,
+                    &error,
+                    "DSH 输入框提交失败，语音文字未发送",
+                    "DSH_COMPOSER_SUBMIT_FAILED",
+                );
+                return true;
+            }
+            emit_device_voice_transcript(&context, "submitted", revision, &text, true, true, "");
+            let _ = context.emitter.emit(
+                "usb-input-action-result",
+                serde_json::json!({
+                    "ok": true,
+                    "pending": false,
+                    "view": "voice_input",
+                    "utteranceId": context.utterance_id,
+                    "text": text,
+                    "agentId": context.target.agent_id,
+                    "sessionId": device_voice_session_id(&context),
+                    "message": "已提交 DSH 输入框中的语音草稿",
+                    "composerMode": "dsh-composer",
+                    "composerError": "",
+                }),
+            );
+            complete_device_voice_context(&context);
+            return true;
+        }
         submit_device_voice_via_agent_bus(context, text);
         return true;
     }
@@ -2139,7 +2230,12 @@ fn usb_session_binding_allows(
 
 fn resolve_usb_inject_target(board_device_id: &str) -> (String, String) {
     if let Some(binding) = p4_session_binding_for_board(board_device_id) {
-        return (binding.agent_id, binding.session_id);
+        // A board connection can publish a binding row before the agent sync
+        // fills agentId. An empty agent here used to produce an untargeted
+        // device-voice context, so fall back to the selected bridge agent.
+        if !binding.agent_id.trim().is_empty() {
+            return (binding.agent_id, binding.session_id);
+        }
     }
     (resolve_usb_inject_agent_id(), "auto".to_string())
 }
@@ -2530,6 +2626,10 @@ fn handle_incoming_usb_message(
     payload: serde_json::Value,
 ) {
     resolve_button_config_ack(&topic, &payload);
+    if topic == "approval/decision" {
+        dsh_approval::handle_device_decision(&payload);
+        return;
+    }
     if topic=="app/event"{component_app::device_event(&payload);return;}
     music_player::observe_capture(&topic,&payload);
     component_media::observe_capture(&topic,&payload);
@@ -2873,7 +2973,14 @@ const BRIDGE_LAUNCH_AGENT_LABEL: &str = "com.petmanager.status-bridge";
 const BRIDGE_WINDOWS_STARTUP_SCRIPT_NAME: &str = "Pet Manager Status Bridge.cmd";
 const USB_STATE_MAX_AGE_MS: u64 = 10 * 60 * 1000;
 const USB_BRIDGE_SCAN_MAX_FILES: usize = 64;
-const KNOWN_USB_STATE_SOURCES: [&str; 5] = ["claude-code", "codex", "openclaw", "mimocode", "workbuddy"];
+const KNOWN_USB_STATE_SOURCES: [&str; 6] = [
+    "claude-code",
+    "codex",
+    "openclaw",
+    "mimocode",
+    "deepseek-harness",
+    "workbuddy",
+];
 #[cfg(windows)]
 const CREATE_NO_WINDOW_FLAG: u32 = 0x08000000;
 
@@ -6138,6 +6245,198 @@ fn detect_workbuddy() -> DetectedAgent {
     }
 }
 
+// ── DeepSeek Harness (DSH) ──
+
+#[cfg(target_os = "macos")]
+const DSH_APP_BUNDLE_NAME: &str = "DeepSeek Harness.app";
+#[cfg(target_os = "macos")]
+const DSH_BUNDLE_IDENTIFIER: &str = "com.deepseek.dsh";
+const DSH_BUNDLED_CLI_RELATIVE_PATH: &str = "Contents/Resources/runtime/cli/bin/dsh";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DshDetection {
+    detected: bool,
+    ready: bool,
+    status: String,
+    detail: String,
+}
+
+/// Location of the CLI shipped inside the macOS application bundle.
+fn dsh_bundled_cli_path(app_path: &Path) -> PathBuf {
+    DSH_BUNDLED_CLI_RELATIVE_PATH
+        .split('/')
+        .fold(app_path.to_path_buf(), |path, segment| path.join(segment))
+}
+
+/// Classify an already-probed DSH install. All detected locations are injected
+/// so present/absent cases stay unit-testable without touching the real host.
+fn classify_dsh_detection(
+    app_path: Option<&Path>,
+    cli_path: Option<&Path>,
+    profile_path: Option<&Path>,
+    version: Option<&str>,
+) -> DshDetection {
+    let detected = app_path.is_some() || cli_path.is_some() || profile_path.is_some();
+    if !detected {
+        return DshDetection {
+            detected: false,
+            ready: false,
+            status: "not_found".to_string(),
+            detail: "未检测到 DeepSeek Harness 应用、CLI 或桌面配置".to_string(),
+        };
+    }
+
+    let mut sources = Vec::new();
+    if let Some(path) = app_path {
+        sources.push(format!("应用 {}", path.display()));
+    }
+    if let Some(path) = cli_path {
+        sources.push(format!("CLI {}", path.display()));
+    }
+    if let Some(path) = profile_path {
+        sources.push(format!("配置 {}", path.display()));
+    }
+    let version = version
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" v{value}"))
+        .unwrap_or_default();
+
+    DshDetection {
+        detected: true,
+        ready: true,
+        status: "ready".to_string(),
+        detail: format!(
+            "已检测到 DeepSeek Harness{version}（{}）",
+            sources.join("；")
+        ),
+    }
+}
+
+/// Cheap version lookup: read CFBundleShortVersionString out of the bundle's
+/// text Info.plist instead of spawning the Electron-backed CLI. Binary plists
+/// simply fail the UTF-8 read and fall back to no version.
+fn parse_dsh_plist_version(plist: &str) -> Option<String> {
+    let key_index = plist.find("CFBundleShortVersionString")?;
+    let after_key = &plist[key_index..];
+    let value_start = after_key.find("<string>")? + "<string>".len();
+    let value_end = after_key[value_start..].find("</string>")? + value_start;
+    let version = after_key[value_start..value_end].trim();
+    (!version.is_empty()).then(|| version.to_string())
+}
+
+fn read_dsh_bundle_version(app_path: Option<&Path>) -> Option<String> {
+    let plist_path = app_path?.join("Contents").join("Info.plist");
+    parse_dsh_plist_version(&fs::read_to_string(plist_path).ok()?)
+}
+
+fn find_dsh_app_bundle(home: Option<&Path>) -> Option<PathBuf> {
+    #[cfg(not(target_os = "macos"))]
+    let _ = home;
+
+    #[cfg(target_os = "macos")]
+    {
+        for candidate in macos_app_bundle_candidates(
+            home,
+            &[DSH_APP_BUNDLE_NAME],
+            &[DSH_BUNDLE_IDENTIFIER],
+        ) {
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let mut candidates = Vec::new();
+        if let Some(local_app_data) = env::var_os("LOCALAPPDATA") {
+            push_unique_path(
+                &mut candidates,
+                PathBuf::from(local_app_data)
+                    .join("Programs")
+                    .join("DeepSeek Harness")
+                    .join("DeepSeek Harness.exe"),
+            );
+        }
+        if let Some(program_files) = env::var_os("ProgramFiles") {
+            push_unique_path(
+                &mut candidates,
+                PathBuf::from(program_files)
+                    .join("DeepSeek Harness")
+                    .join("DeepSeek Harness.exe"),
+            );
+        }
+        for candidate in candidates {
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn find_dsh_cli(home: Option<&Path>, app_path: Option<&Path>) -> Option<PathBuf> {
+    if let Some(app_path) = app_path {
+        let bundled = dsh_bundled_cli_path(app_path);
+        if bundled.is_file() {
+            return Some(bundled);
+        }
+    }
+    find_agent_executable(
+        "dsh",
+        home,
+        &[".dsh/bin/dsh", ".local/bin/dsh"],
+        "dsh.exe",
+    )
+    .map(PathBuf::from)
+}
+
+fn find_dsh_profile_dir(home: Option<&Path>) -> Option<PathBuf> {
+    let profile = home?.join(".dsh").join("profiles").join("desktop");
+    profile.is_dir().then_some(profile)
+}
+
+fn detect_dsh() -> DetectedAgent {
+    detect_dsh_with_home(get_home_dir().ok().as_deref())
+}
+
+fn detect_dsh_with_home(home: Option<&Path>) -> DetectedAgent {
+    let app_path = find_dsh_app_bundle(home);
+    let cli_path = find_dsh_cli(home, app_path.as_deref());
+    let profile_path = find_dsh_profile_dir(home);
+    let version = read_dsh_bundle_version(app_path.as_deref());
+    let detection = classify_dsh_detection(
+        app_path.as_deref(),
+        cli_path.as_deref(),
+        profile_path.as_deref(),
+        version.as_deref(),
+    );
+
+    DetectedAgent {
+        id: "deepseek-harness".to_string(),
+        label: "DeepSeek Harness".to_string(),
+        detected: detection.detected,
+        ready: detection.ready,
+        status: detection.status,
+        detail: detection.detail,
+        command_path: cli_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        config_path: profile_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        activity_path: app_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        can_sync_hook: false,
+    }
+}
+
 fn detect_local_agents_inner() -> Result<AgentDiscoveryResponse, String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -6149,6 +6448,7 @@ fn detect_local_agents_inner() -> Result<AgentDiscoveryResponse, String> {
         detect_codex(),
         detect_openclaw(),
         detect_mimocode(),
+        detect_dsh(),
         detect_workbuddy(),
     ];
 
@@ -8792,6 +9092,7 @@ fn normalize_agent_id(value: &str) -> Option<String> {
         "claude" | "claude-code" => Some("claude-code".to_string()),
         "openclaw" => Some("openclaw".to_string()),
         "mimo" | "mimo-code" | "mimocode" => Some("mimocode".to_string()),
+        "deepseek-harness" | "deepseek" | "dsh" => Some("deepseek-harness".to_string()),
         "workbuddy" | "work-buddy" => Some("workbuddy".to_string()),
         "copilot" | "copilot-cli" => Some("copilot-cli".to_string()),
         "gemini" | "gemini-cli" => Some("gemini-cli".to_string()),
@@ -9259,7 +9560,12 @@ fn score_usb_state(state: &str) -> i32 {
 
 fn score_usb_source(source: &str) -> i32 {
     match source {
+        // Codex keeps the long-standing top slot. DeepSeek Harness is a
+        // first-class local agent routed through the same session bus, so it
+        // sits just below Codex and above the other integrations; this only
+        // breaks exact state/ts ties between sources.
         "codex" => 30,
+        "deepseek-harness" => 25,
         "claude-code" => 20,
         "mimocode" => 15,
         "workbuddy" => 15,
@@ -9314,6 +9620,7 @@ fn usb_source_display_name(source: &str) -> String {
         "claude" | "claude-code" => "Claude".to_string(),
         "openclaw" => "OpenClaw".to_string(),
         "mimo" | "mimo-code" | "mimocode" => "MiMoCode".to_string(),
+        "deepseek-harness" | "deepseek" | "dsh" => "DeepSeek Harness".to_string(),
         "workbuddy" | "work-buddy" => "WorkBuddy".to_string(),
         other if !other.is_empty() => other.to_string(),
         _ => "桌宠".to_string(),
@@ -10147,6 +10454,7 @@ pub fn run() {
     }
     start_usb_host_heartbeat(usb_manager.clone());
     start_usb_state_forwarder(usb_manager.clone());
+    dsh_approval::start(usb_manager.clone());
     }
 
     let usb_for_auto = usb_manager.clone();
@@ -10619,6 +10927,7 @@ fn selected_agent_to_channel_id(value: &str) -> String {
         "codex" => "codex".to_string(),
         "openclaw" => "openclaw".to_string(),
         "mimocode" => "mimocode".to_string(),
+        "deepseek-harness" => "deepseek-harness".to_string(),
         "workbuddy" => "workbuddy".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
     }
@@ -10630,6 +10939,7 @@ fn normalize_pet_channel_id(value: String) -> String {
         "claude" => "claude".to_string(),
         "openclaw" => "openclaw".to_string(),
         "mimocode" => "mimocode".to_string(),
+        "deepseek-harness" | "deepseek" | "dsh" => "deepseek-harness".to_string(),
         "workbuddy" => "workbuddy".to_string(),
         "cursor" => "cursor".to_string(),
         _ => DEFAULT_PET_CHANNEL_ID.to_string(),
@@ -12300,6 +12610,60 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_harness_aliases_route_through_the_agent_bus_instead_of_a_composer() {
+        assert_eq!(
+            normalize_agent_id("DeepSeek-Harness").as_deref(),
+            Some("deepseek-harness")
+        );
+        assert_eq!(
+            normalize_agent_id("deepseek").as_deref(),
+            Some("deepseek-harness")
+        );
+        assert_eq!(normalize_agent_id("DSH").as_deref(), Some("deepseek-harness"));
+        assert_eq!(
+            selected_agent_to_channel_id("deepseek-harness"),
+            "deepseek-harness"
+        );
+        assert_eq!(
+            normalize_pet_channel_id("DSH".into()),
+            "deepseek-harness"
+        );
+        assert_eq!(
+            usb_source_display_name("deepseek-harness"),
+            "DeepSeek Harness"
+        );
+        assert_eq!(usb_source_display_name("dsh"), "DeepSeek Harness");
+        assert!(KNOWN_USB_STATE_SOURCES.contains(&"deepseek-harness"));
+        // DSH text injection goes through agent-session-bus, never through an
+        // Accessibility composer, so the visible-composer branches stay off.
+        assert!(!agent_uses_visible_composer("deepseek-harness"));
+        assert!(!agent_streams_voice_draft("deepseek-harness"));
+        assert!(!should_locate_desktop_session(true, "deepseek-harness"));
+        assert!(device_voice_platform_block_reason("deepseek-harness", false).is_none());
+        assert!(device_voice_platform_block_reason("deepseek-harness", true).is_none());
+    }
+
+    #[test]
+    fn deepseek_harness_usb_source_ranks_between_codex_and_claude() {
+        let dsh_score = score_usb_source("deepseek-harness");
+        assert!(dsh_score < score_usb_source("codex"));
+        assert!(dsh_score > score_usb_source("claude-code"));
+        assert!(dsh_score > score_usb_source("openclaw"));
+
+        let enabled = HashSet::from([
+            "deepseek-harness".to_string(),
+            "codex".to_string(),
+        ]);
+        let selected = Some("deepseek-harness".to_string());
+        assert!(usb_source_allowed_by_follow(
+            "deepseek-harness",
+            &selected,
+            &enabled
+        ));
+        assert!(!usb_source_allowed_by_follow("codex", &selected, &enabled));
+    }
+
+    #[test]
     fn default_audio_cues_refresh_without_overwriting_uploaded_cues() {
         let temp = tempfile::tempdir().unwrap();
         let appearance = temp.path().join("appearance");
@@ -12385,6 +12749,95 @@ mod tests {
             find_claude_desktop_install(Some(home.path())).as_deref(),
             app.to_str()
         );
+    }
+
+    #[test]
+    fn dsh_detection_classifies_present_install() {
+        let detection = classify_dsh_detection(
+            Some(Path::new("DeepSeek Harness.app")),
+            Some(Path::new("dsh-cli")),
+            Some(Path::new("profile")),
+            Some("0.2.1-rc.5"),
+        );
+        assert!(detection.detected);
+        assert!(detection.ready);
+        assert_eq!(detection.status, "ready");
+        assert!(detection.detail.contains("DeepSeek Harness"));
+        assert!(detection.detail.contains("v0.2.1-rc.5"));
+        assert!(detection.detail.contains("dsh-cli"));
+    }
+
+    #[test]
+    fn dsh_detection_classifies_absent_install() {
+        let detection = classify_dsh_detection(None, None, None, None);
+        assert!(!detection.detected);
+        assert!(!detection.ready);
+        assert_eq!(detection.status, "not_found");
+        assert!(detection.detail.contains("未检测到 DeepSeek Harness"));
+    }
+
+    #[test]
+    fn dsh_detection_accepts_cli_or_profile_only_hosts() {
+        let cli_only = classify_dsh_detection(None, Some(Path::new("dsh-cli")), None, None);
+        assert!(cli_only.detected);
+        assert!(cli_only.detail.contains("CLI"));
+        assert!(cli_only.detail.contains("dsh-cli"));
+
+        let profile_only = classify_dsh_detection(None, None, Some(Path::new("profile")), None);
+        assert!(profile_only.detected);
+        assert!(profile_only.detail.contains("配置"));
+    }
+
+    #[test]
+    fn dsh_bundle_version_is_read_from_text_info_plist() {
+        let plist = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+  <dict>
+    <key>CFBundleShortVersionString</key>
+    <string>0.2.1-rc.5</string>
+  </dict>
+</plist>"#;
+        assert_eq!(parse_dsh_plist_version(plist).as_deref(), Some("0.2.1-rc.5"));
+        assert_eq!(
+            parse_dsh_plist_version(r#"<plist version="1.0"><dict/></plist>"#),
+            None
+        );
+    }
+
+    #[test]
+    fn dsh_bundled_cli_lives_inside_app_bundle_resources() {
+        let cli = dsh_bundled_cli_path(Path::new("DeepSeek Harness.app"));
+        assert!(cli.ends_with(Path::new("Contents/Resources/runtime/cli/bin/dsh")));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_dsh_detection_uses_app_bundle_cli_and_desktop_profile() {
+        let home = tempfile::tempdir().unwrap();
+        let app = home.path().join("Applications").join("DeepSeek Harness.app");
+        let bundled_cli = dsh_bundled_cli_path(&app);
+        fs::create_dir_all(bundled_cli.parent().unwrap()).unwrap();
+        fs::write(&bundled_cli, b"#!/bin/sh\n").unwrap();
+        fs::write(
+            app.join("Contents").join("Info.plist"),
+            br#"<plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>9.9.9</string></dict></plist>"#,
+        )
+        .unwrap();
+        let profile = home.path().join(".dsh").join("profiles").join("desktop");
+        fs::create_dir_all(&profile).unwrap();
+
+        let detected = detect_dsh_with_home(Some(home.path()));
+        assert_eq!(detected.id, "deepseek-harness");
+        assert_eq!(detected.label, "DeepSeek Harness");
+        assert!(detected.detected);
+        assert!(detected.ready);
+        assert_eq!(
+            detected.command_path,
+            bundled_cli.to_string_lossy().into_owned()
+        );
+        assert_eq!(detected.config_path, profile.to_string_lossy().into_owned());
+        assert_eq!(detected.activity_path, app.to_string_lossy().into_owned());
+        assert!(detected.detail.contains("9.9.9"));
     }
 
     #[test]
@@ -13461,6 +13914,7 @@ mod tests {
             disabled,
             vec![
                 "codex".to_string(),
+                "deepseek-harness".to_string(),
                 "mimocode".to_string(),
                 "openclaw".to_string(),
                 "workbuddy".to_string()

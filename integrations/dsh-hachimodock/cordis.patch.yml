@@ -1,0 +1,21 @@
+# HachimoDock bridge bundle patch.
+#
+# Installing this package as a DSH bundle mounts one Host plugin row:
+#   - a localhost-only HTTP/SSE bridge on 127.0.0.1:17892 for the
+#     HachimoDock PC bridge (session list, prompt injection, approvals),
+#   - an `approval/request` answerer that mirrors DSH permission prompts to
+#     the device and applies its one-shot decision.
+#
+# Environment variables (read at mount time, override the config below):
+#   HACHIMODOCK_DSH_PORT               default 17892
+#   HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS default 30000
+#   HACHIMODOCK_DSH_APPROVAL_FALLBACK  `unavailable` (default, fail closed) or `delegate`
+- insert:
+    - id: hachimodock-bridge
+      name: '@hachimodock/dsh-bridge'
+      config:
+        port: 17892
+        approvalTimeoutMs: 30000
+        # HachimoDock's USB relay attaches /events only while a P4 is connected.
+        # Without it, keep the normal DSH Desktop approval UI as the answerer.
+        approvalFallback: delegate

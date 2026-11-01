@@ -435,7 +435,10 @@ def test_p4_token_widget_uses_bounded_stats_instead_of_host_readers():
     ]:
         assert f'set_string_var(&g_runtime, "{variable}"' in miniapp
     assert protocol.count("pet_p4_miniapp_sync_stats(&state->stats)") >= 3
-    activation = input_runtime[input_runtime.index('strcmp(binding->action, "page_enter") == 0') :]
+    # Start from the local-action dispatcher; the approval helper also compares
+    # configured page_enter/page_back actions earlier in the file.
+    activation = input_runtime[input_runtime.index("static bool apply_local_action(") :]
+    activation = activation[activation.index('strcmp(binding->action, "page_enter") == 0') :]
     activation = activation[: activation.index('strcmp(binding->action, "page_back") == 0')]
     assert "pet_p4_miniapp_catalog_activate_selected()" in activation
     assert "pet_p4_miniapp_sync_stats(&state->stats)" in activation
@@ -2455,6 +2458,182 @@ def test_windows_tooling_forces_utf8_and_ascii_paths():
     assert '$env:USERPROFILE\\.platformio' not in root_readme
     assert '.tooling/' in gitignore
 
+def test_p4_dsh_state_is_not_replaced_by_session_card_fallback():
+    """DSH 没有 P4 会话队列快照；state/deepseek-harness 到达后不能被
+    should_wait_for_session_card 改写成“休息中”。"""
+    view = read_required("main/pet_p4_view.c")
+    assert 'strcmp(state->active_agent, "deepseek-harness") == 0' in view
+    assert 'return false;' in view
+    protocol = read_required("main/pet_p4_protocol.c")
+    restore = protocol[protocol.index("static void restore_idle_session_view("):]
+    restore = restore[:restore.index("static void mark_current_session_terminal(")]
+    assert 'strcmp(state->active_agent, "deepseek-harness") == 0' in restore
+    assert 'strncmp(state->current_event, "tool/", 5) == 0' in restore
+    state_topic = protocol[protocol.index("static void handle_state_topic("):]
+    state_topic = state_topic[:state_topic.index("static void handle_speech(")]
+    assert "state->current_speech[0]" in state_topic
+    assert "state->current_title[0]" in state_topic
+    runner = read_required("tests/protocol_contract_test.py")
+    assert "test_p4_dsh_state_is_not_replaced_by_session_card_fallback" in runner
+
+
+def test_p4_dsh_approval_modal_is_single_shot_and_bounded():
+    """R5 DSH 审批上屏：PC 下发 approval/request，设备只显示模态卡片并通过
+    配置的确认/取消键回传一次 approval/decision；过期 fail-closed，重复 requestId 去重。"""
+    header = read_required("main/pet_p4_protocol.h")
+    protocol = read_required("main/pet_p4_protocol.c")
+    renderer = read_required("main/pet_p4_renderer.c")
+    input_source = read_required("main/pet_p4_input.c")
+    doc = read("protocol.md")
+
+    # Bounded pending state plus the public state helpers.
+    assert "#define PET_P4_APPROVAL_REQUEST_ID_MAX 96" in header
+    assert "#define PET_P4_APPROVAL_AGENT_MAX 64" in header
+    assert "#define PET_P4_APPROVAL_TOOL_MAX 64" in header
+    assert "#define PET_P4_APPROVAL_REASON_MAX 192" in header
+    assert "#define PET_P4_APPROVAL_TIMEOUT_MS 30000ULL" in header
+    assert "bool approval_active;" in header
+    assert "char approval_request_id[PET_P4_APPROVAL_REQUEST_ID_MAX];" in header
+    assert "char approval_agent[PET_P4_APPROVAL_AGENT_MAX];" in header
+    assert "char approval_tool[PET_P4_APPROVAL_TOOL_MAX];" in header
+    assert "char approval_reason[PET_P4_APPROVAL_REASON_MAX];" in header
+    assert "unsigned long long approval_expires_ms;" in header
+    assert "char approval_last_decided_id[PET_P4_APPROVAL_REQUEST_ID_MAX];" in header
+    for helper in (
+        "void pet_p4_state_clear_approval(",
+        "bool pet_p4_state_approval_pending(",
+        "bool pet_p4_state_begin_approval(",
+        "bool pet_p4_state_decide_approval(",
+    ):
+        assert helper in header and helper in protocol
+
+    # Inbound request: optional strings, default 30 s deadline, expired requests
+    # ignored, decided request IDs deduplicated, exactly one pending slot.
+    assert 'strcmp(topic, "approval/request") == 0' in protocol
+    assert "handle_approval_request(state, payload, send_line, ctx)" in protocol
+    approval_handler = protocol[
+        protocol.index("static bool handle_approval_request("):
+        protocol.index("static void handle_stats_update(")
+    ]
+    for field in ("requestId", "agent", "tool", "reason"):
+        assert f'json_string(payload, "{field}")' in approval_handler
+    assert '"expiresAtMs"' in approval_handler
+    assert "json_bounded_u64(" in approval_handler
+    assert '"invalid_approval_request"' in approval_handler
+    assert '"approval_expired"' in approval_handler
+    assert '"approval_already_decided"' in approval_handler
+    assert "strcmp(request_id, state->approval_last_decided_id) == 0" in approval_handler
+    # Epoch-ms deadlines from the plugin/bridge are translated into the device
+    # monotonic base through the heartbeat wall-clock anchor.
+    assert "deadline_ms = approval_deadline_ms(expires_ms, now_ms, &expired);" in approval_handler
+    assert "if (expired) {" in approval_handler
+    assert (
+        "pet_p4_state_begin_approval(state, request_id, agent, tool, reason, deadline_ms)"
+        in approval_handler
+    )
+    assert 'send_protocol_ack(send_line, ctx, "approval/request"' in approval_handler
+    deadline_source = protocol[
+        protocol.index("static unsigned long long approval_deadline_ms("):
+        protocol.index("static void send_topic_payload(")
+    ]
+    assert "#define PET_P4_WALL_CLOCK_EPOCH_MIN_MS 1577836800000ULL" in protocol
+    assert "#define PET_P4_APPROVAL_MAX_HOLD_MS 300000ULL" in protocol
+    assert "static unsigned long long host_wall_clock_estimate_ms(" in protocol
+    assert "if (expires_ms == 0) return now_ms + PET_P4_APPROVAL_TIMEOUT_MS;" in deadline_source
+    assert "if (expires_ms < PET_P4_WALL_CLOCK_EPOCH_MIN_MS)" in deadline_source
+    assert "if (!wall_now_ms) {" in deadline_source
+    assert "remaining_ms = expires_ms - wall_now_ms;" in deadline_source
+    assert "g_host_wall_clock_ms = host_ts_ms;" in protocol
+    assert "g_host_wall_clock_at_ms = heartbeat_now_ms;" in protocol
+
+    # Decision helper copies the ID, records it for replay dedupe, then clears.
+    decide_source = protocol[
+        protocol.index("bool pet_p4_state_decide_approval("):
+        protocol.index("void pet_p4_state_process(")
+    ]
+    assert "pet_p4_state_approval_pending(state, now_ms)" in decide_source
+    assert "pet_p4_state_clear_approval(state);" in decide_source
+    assert "state->approval_last_decided_id" in decide_source
+    # Expiry clears the modal without ever queuing a decision.
+    process_source = protocol[
+        protocol.index("void pet_p4_state_process("):
+        protocol.index("bool pet_p4_state_request_touch(")
+    ]
+    assert "state->approval_active && state->approval_expires_ms > 0" in process_source
+    assert "now_ms >= state->approval_expires_ms" in process_source
+    assert "pet_p4_state_clear_approval(state);" in process_source
+
+    # Modal overlay is painted above every page using existing primitives.
+    assert "#define PET_P4_APPROVAL_CARD_WIDTH 520" in renderer
+    assert "#define PET_P4_APPROVAL_CARD_HEIGHT 352" in renderer
+    assert "static void draw_approval_overlay(" in renderer
+    assert "if (!state || !pet_p4_state_approval_pending(state, now_ms)) return;" in renderer
+    assert "static bool g_last_approval_visible;" in renderer
+    assert (
+        "const bool approval_visible = state && pet_p4_state_approval_pending(state, now_ms);"
+        in renderer
+    )
+    assert renderer.count("blend_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, 0, 0, 0, 168);") == 1
+    assert 'draw_text_line("需要授权", content_x, card_y + 28, 220, ivory, 2, false);' in renderer
+    assert 'snprintf(countdown, sizeof(countdown), "剩余 %u 秒", seconds);' in renderer
+    assert "draw_text_right(countdown," in renderer
+    assert 'state->approval_agent[0] ? state->approval_agent : "未知 Agent"' in renderer
+    assert 'state->approval_tool[0] ? state->approval_tool : "未知工具"' in renderer
+    assert 'state->approval_reason[0] ? state->approval_reason : "无说明"' in renderer
+    assert "draw_card_body_lines(" in renderer
+    assert '"允许"' in renderer and '"拒绝"' in renderer
+    render_source = renderer[
+        renderer.index("esp_err_t pet_p4_renderer_render("):
+        renderer.index("esp_err_t pet_p4_renderer_render_transfer_status(")
+    ]
+    assert "draw_approval_overlay(state, now_ms);" in render_source
+    assert "approval_visible != g_last_approval_visible" in renderer
+    assert (
+        render_source.index("draw_approval_overlay(state, now_ms);")
+        > render_source.index("draw_boot_diagnostic")
+    )
+
+    # Input: SW1 allows, SW3 denies, other gestures are swallowed, one decision.
+    input_process = input_source[
+        input_source.index("void pet_p4_input_process("):
+        input_source.index("unsigned int pet_p4_input_dropped_events(")
+    ]
+    assert "if (handle_approval_input(state, send_line, ctx, &event)) continue;" in input_process
+    approval_input = input_source[
+        input_source.index("static bool approval_decision_for_event("):
+        input_source.index("static bool apply_local_action(")
+    ]
+    assert "if (!state || !event || !state->approval_active) return false;" in approval_input
+    assert "event->gesture != PET_P4_INPUT_GESTURE_SHORT_PRESS" in approval_input
+    assert "PET_P4_INPUT_GESTURE_HOLD_END && state->session_voice_active" in approval_input
+    assert "pet_p4_audio_capture_stop();" in approval_input
+    assert "approval_decision_for_event(event, &allow)" in approval_input
+    assert 'strcmp(binding->action, "page_enter") == 0' in approval_input
+    assert 'strcmp(binding->action, "page_back") == 0' in approval_input
+    assert "pet_p4_state_decide_approval(" in approval_input
+    assert 'cJSON_AddStringToObject(root, "topic", "approval/decision");' in input_source
+    assert 'cJSON_AddStringToObject(payload, "decision", allow ? "allow" : "deny");' in input_source
+    assert 'cJSON_AddStringToObject(payload, "source", "esp32");' in input_source
+    # The modal branch runs before the normal binding dispatcher, so inactive
+    # approval never changes the existing bindings and active approval never
+    # leaks its presses into them.
+    assert input_process.index("handle_approval_input") < input_process.index(
+        "dispatch_binding_event("
+    )
+
+    # Docs lock the wire topics, bounded state and UI/input behavior.
+    assert '"topic":"approval/request"' in doc
+    assert '"topic":"approval/decision"' in doc
+    assert "需要授权" in doc
+    assert "page_enter" in doc and "page_back" in doc
+    assert "approval_expired" in doc
+    assert "approval_already_decided" in doc
+    assert "PET_P4_APPROVAL_TIMEOUT_MS" in doc
+    assert "system/heartbeat.tsMs" in doc
+    assert "Unix epoch" in doc
+    assert "PET_P4_APPROVAL_MAX_HOLD_MS" in doc
+
+
 if __name__ == "__main__":
     tests = [
         test_protocol_doc_declares_usb_only_p4_runtime,
@@ -2519,6 +2698,8 @@ if __name__ == "__main__":
         test_p4_hardware_inputs_are_debounced_persistent_and_configurable,
         test_p4_device_ptt_stream_is_validated_and_relayed_by_pc,
         test_p4_gt911_touch_and_local_lifecycle_are_product_integrated,
+        test_p4_dsh_state_is_not_replaced_by_session_card_fallback,
+        test_p4_dsh_approval_modal_is_single_shot_and_bounded,
     ]
     for test in tests:
         test()

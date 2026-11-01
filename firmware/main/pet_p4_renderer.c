@@ -7,6 +7,7 @@
  *          global-binding-neutral navigation hints, modern clean cards/HUDs, and
  *          Session-independent recording feedback on the idle main page,
  *          a lightweight transfer screen that never reads changing assets,
+ *          a modal DSH approval overlay above every page,
  *          and reusable bounded H.264 decode storage isolated from immutable asset caches.
  * [Pos] ESP32-P4 display renderer.
  * [Sync] If this file changes, update `firmware/.folder.md` and renderer tests.
@@ -87,6 +88,11 @@ pet_p4_render_metrics_t pet_p4_renderer_metrics(void) {
 #define PET_P4_SESSION_CARD_GAP 8
 #define PET_P4_SESSION_CARD_BOTTOM 460
 #define PET_P4_COMPACT_TEXT_OPTICAL_Y (-2)
+#define PET_P4_APPROVAL_CARD_WIDTH 520
+#define PET_P4_APPROVAL_CARD_HEIGHT 352
+#define PET_P4_APPROVAL_CARD_RADIUS 20
+#define PET_P4_APPROVAL_CARD_X ((PET_P4_UI_WIDTH - PET_P4_APPROVAL_CARD_WIDTH) / 2)
+#define PET_P4_APPROVAL_CARD_Y ((PET_P4_UI_HEIGHT - PET_P4_APPROVAL_CARD_HEIGHT) / 2)
 #define PET_P4_PAGE_INDICATOR_X 294
 #define PET_P4_PAGE_INDICATOR_Y 16
 #define PET_P4_PAGE_INDICATOR_WIDTH 52
@@ -152,6 +158,7 @@ static uint16_t *g_session_overlay_cache;
 static uint64_t g_session_overlay_signature;
 static bool g_session_overlay_cache_valid;
 static bool g_last_realtime_conversation;
+static bool g_last_approval_visible;
 static bool g_session_overlay_cache_allocation_failed;
 static uint8_t g_session_overlay_row_run_count[PET_P4_UI_HEIGHT];
 static uint16_t g_session_overlay_row_run_start[PET_P4_UI_HEIGHT][PET_P4_SESSION_CACHE_MAX_RUNS];
@@ -5206,6 +5213,91 @@ esp_err_t pet_p4_renderer_init(void) {
   return ESP_OK;
 }
 
+static void draw_approval_button(
+  int x,
+  int y,
+  int w,
+  int h,
+  const char *label,
+  uint16_t fill,
+  uint16_t outline,
+  uint16_t ink
+) {
+  fill_round_rect_outline(x, y, w, h, 12, fill, outline);
+  draw_text_center(label, x + w / 2, text_y_in_box(label, 2, y, h), w - 24, ink, 2);
+}
+
+/* R5 DSH approval: a modal dark card over the current page. It never mutates
+ * normal page rendering; it is the last paint before rotation so it covers the
+ * home page, component center and mini-app frames identically. */
+static void draw_approval_overlay(
+  const pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+) {
+  const uint16_t card = rgb565(18, 22, 26);
+  const uint16_t shadow = rgb565(2, 3, 4);
+  const uint16_t outline = rgb565(255, 176, 32);
+  const uint16_t divider = rgb565(58, 64, 70);
+  const uint16_t ivory = rgb565(250, 241, 204);
+  const uint16_t ink = rgb565(235, 238, 240);
+  const uint16_t muted = rgb565(132, 140, 146);
+  const uint16_t reason_panel = rgb565(11, 14, 17);
+  const uint16_t reason_ink = rgb565(200, 208, 214);
+  const int card_x = PET_P4_APPROVAL_CARD_X;
+  const int card_y = PET_P4_APPROVAL_CARD_Y;
+  const int content_x = card_x + 28;
+  const int content_w = PET_P4_APPROVAL_CARD_WIDTH - 56;
+  const int button_w = (content_w - 16) / 2;
+  const int button_h = 46;
+  char countdown[24];
+  unsigned long long remaining_ms;
+  unsigned int seconds;
+
+  if (!state || !pet_p4_state_approval_pending(state, now_ms)) return;
+  blend_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, 0, 0, 0, 168);
+  fill_round_rect(card_x + 4, card_y + 6,
+                  PET_P4_APPROVAL_CARD_WIDTH, PET_P4_APPROVAL_CARD_HEIGHT,
+                  PET_P4_APPROVAL_CARD_RADIUS, shadow);
+  fill_round_rect_outline(card_x, card_y,
+                          PET_P4_APPROVAL_CARD_WIDTH, PET_P4_APPROVAL_CARD_HEIGHT,
+                          PET_P4_APPROVAL_CARD_RADIUS, card, outline);
+  draw_text_line("需要授权", content_x, card_y + 28, 220, ivory, 2, false);
+  remaining_ms = state->approval_expires_ms > now_ms
+    ? state->approval_expires_ms - now_ms
+    : 0;
+  if (remaining_ms > 999000ULL) remaining_ms = 999000ULL;
+  seconds = (unsigned int) ((remaining_ms + 999ULL) / 1000ULL);
+  snprintf(countdown, sizeof(countdown), "剩余 %u 秒", seconds);
+  draw_text_right(countdown, card_x + PET_P4_APPROVAL_CARD_WIDTH - 26,
+                  card_y + 30, 210, outline, 2);
+  fill_rect(content_x, card_y + 82, content_w, 1, divider);
+  draw_text_line_vcenter("来源", content_x, card_y + 92, 40, 64, muted, 1, false);
+  draw_text_line_vcenter(
+    state->approval_agent[0] ? state->approval_agent : "未知 Agent",
+    content_x + 72, card_y + 92, 40, content_w - 72, ink, 2, true
+  );
+  draw_text_line_vcenter("工具", content_x, card_y + 132, 40, 64, muted, 1, false);
+  draw_text_line_vcenter(
+    state->approval_tool[0] ? state->approval_tool : "未知工具",
+    content_x + 72, card_y + 132, 40, content_w - 72, ink, 2, true
+  );
+  fill_round_rect(content_x, card_y + 180, content_w, 94, 12, reason_panel);
+  draw_text_line("理由", content_x + 16, card_y + 188, 56, muted, 1, false);
+  draw_card_body_lines(
+    state->approval_reason[0] ? state->approval_reason : "无说明",
+    content_x + 16,
+    card_y + 206,
+    content_w - 32,
+    reason_ink
+  );
+  draw_approval_button(content_x, card_y + 290, button_w, button_h, "允许",
+                       rgb565(18, 54, 38), rgb565(64, 196, 128),
+                       rgb565(122, 236, 172));
+  draw_approval_button(content_x + button_w + 16, card_y + 290, button_w, button_h,
+                       "拒绝", rgb565(54, 22, 22), rgb565(236, 96, 88),
+                       rgb565(255, 150, 140));
+}
+
 esp_err_t pet_p4_renderer_render(
   const pet_p4_runtime_state_t *state,
   const pet_p4_view_model_t *view,
@@ -5237,6 +5329,15 @@ esp_err_t pet_p4_renderer_render(
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
     g_last_realtime_conversation = realtime_mode;
+  }
+  const bool approval_visible = state && pet_p4_state_approval_pending(state, now_ms);
+  if (approval_visible != g_last_approval_visible) {
+    // The modal dims arbitrary pixels; repaint the page beneath from black so
+    // entering/leaving it cannot leave a ghost card on pages (for example a
+    // missing appearance frame) that only repaint their own controls.
+    fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
+    g_session_overlay_cache_valid = false;
+    g_last_approval_visible = approval_visible;
   }
   if (strcmp(page, "components") == 0) {
     render_component_center_page();
@@ -5277,6 +5378,7 @@ esp_err_t pet_p4_renderer_render(
   if (!dedicated_page) draw_connection_banner(state, now_ms);
   snprintf(g_last_render_page, sizeof(g_last_render_page), "%s", page);
   if (!dedicated_page) draw_boot_diagnostic(now_ms);
+  draw_approval_overlay(state, now_ms);
   int64_t rotate_started_us = esp_timer_get_time();
   uint32_t overlay_us = elapsed_us_clamped(overlay_started_us, rotate_started_us);
   ESP_RETURN_ON_ERROR(rotate_landscape_to_panel(), TAG, "rotate logical framebuffer");
