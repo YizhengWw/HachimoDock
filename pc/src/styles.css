@@ -13904,7 +13904,7 @@ select:focus-visible {
   min-height: var(--control-height-sm);
   padding: 4px 12px;
   border-radius: var(--radius-md);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: var(--font-weight-semibold);
 }
 
@@ -13933,8 +13933,8 @@ select:focus-visible {
   padding: 0 10px;
   border-radius: var(--radius-sm);
   color: var(--text);
-  font-size: 12px;
-  font-weight: var(--font-weight-medium);
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
   text-align: left;
   white-space: nowrap;
 }
