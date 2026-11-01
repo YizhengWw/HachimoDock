@@ -2290,6 +2290,9 @@ static void handle_stats_update(pet_p4_runtime_state_t *state, const cJSON *payl
   state->last_update_ms = json_u64(payload, "tsMs", state->last_update_ms);
 }
 
+static char g_last_stopped_cue_session[PET_P4_SESSION_QUEUE_ID_MAX];
+static unsigned long long g_last_stopped_cue_revision;
+
 static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *payload) {
   const char *session_id = json_string(payload, "sessionId");
   const char *agent_id = json_string(payload, "agentId");
@@ -2397,6 +2400,21 @@ static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *p
         }
       } else if (lifecycle_is_terminal(candidate.state)) {
         bool stopped_transition = lifecycle_is(candidate.state, "stopped");
+        if (stopped_transition
+            && (!previous || !lifecycle_is(previous->state, "stopped"))) {
+          bool already_played = g_last_stopped_cue_revision == candidate.transition_revision
+            && strcmp(g_last_stopped_cue_session, candidate.id) == 0;
+          if (!already_played) {
+            snprintf(
+              g_last_stopped_cue_session,
+              sizeof(g_last_stopped_cue_session),
+              "%s",
+              candidate.id
+            );
+            g_last_stopped_cue_revision = candidate.transition_revision;
+            (void) pet_p4_audio_play_event_cue("session_terminated");
+          }
+        }
         copy_text(
           candidate.state,
           sizeof(candidate.state),
