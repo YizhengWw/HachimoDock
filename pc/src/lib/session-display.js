@@ -14,7 +14,7 @@ export const ACTIVE_DEVICE_SESSION_STATES = Object.freeze([
   "speaking",
   "waiting_user",
 ]);
-export const TERMINAL_DEVICE_SESSION_STATES = Object.freeze(["done", "error"]);
+export const TERMINAL_DEVICE_SESSION_STATES = Object.freeze(["done", "error", "stopped"]);
 
 const DEVICE_SESSION_TERMINAL_UNTIL_KEY = "__p4TerminalUntilMs";
 const DEVICE_SESSION_TRANSITION_REVISION_KEY = "__p4TransitionRevision";
@@ -47,7 +47,9 @@ export function filterActiveDeviceSessions(sessions) {
 }
 
 function canonicalTerminalState(session) {
-  return ["error", "failed"].includes(normalizedSessionState(session)) ? "error" : "done";
+  const state = normalizedSessionState(session);
+  if (state === "stopped") return "stopped";
+  return ["error", "failed"].includes(state) ? "error" : "done";
 }
 
 function isImplicitTerminalDeviceSession(session) {

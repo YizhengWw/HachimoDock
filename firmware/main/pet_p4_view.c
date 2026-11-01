@@ -16,6 +16,9 @@ static pet_p4_view_status_t status_from_state(const pet_p4_runtime_state_t *stat
   if (strcmp(status, "error") == 0 || strcmp(life, "error") == 0) {
     return PET_P4_VIEW_STATUS_ERROR;
   }
+  if (strcmp(status, "stopped") == 0 || strcmp(life, "stopped") == 0) {
+    return PET_P4_VIEW_STATUS_STOPPED;
+  }
   if (strcmp(status, "waiting_user") == 0 || strcmp(life, "waiting_user") == 0) {
     return PET_P4_VIEW_STATUS_WAITING;
   }

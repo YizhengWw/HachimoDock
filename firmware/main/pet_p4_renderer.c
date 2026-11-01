@@ -1427,6 +1427,11 @@ static void draw_status_marker(pet_p4_view_status_t status, unsigned long long n
     draw_line(cx + 6, cy - 6, cx - 6, cy + 6, white);
     return;
   }
+  if (status == PET_P4_VIEW_STATUS_STOPPED) {
+    fill_ellipse(cx, cy, 15, 15, gray);
+    fill_rect(cx - 5, cy - 5, 10, 10, white);
+    return;
+  }
   if (status == PET_P4_VIEW_STATUS_WAITING) {
     fill_ellipse(cx, cy, 15, 15, amber);
     fill_ellipse(cx - 6, cy, 2, 2, white);
@@ -1446,6 +1451,7 @@ static void draw_status_marker(pet_p4_view_status_t status, unsigned long long n
 static uint16_t view_status_color(pet_p4_view_status_t status) {
   if (status == PET_P4_VIEW_STATUS_DONE) return rgb565(85, 193, 133);
   if (status == PET_P4_VIEW_STATUS_ERROR) return rgb565(235, 89, 82);
+  if (status == PET_P4_VIEW_STATUS_STOPPED) return rgb565(120, 126, 132);
   if (status == PET_P4_VIEW_STATUS_WAITING) return rgb565(255, 163, 31);
   if (status == PET_P4_VIEW_STATUS_WORKING) return rgb565(96, 196, 255);
   return rgb565(170, 176, 173);
@@ -2837,6 +2843,7 @@ static uint16_t miniapp_state_color(const char *state) {
 static uint16_t session_status_color(const char *status) {
   if (status && strcmp(status, "done") == 0) return view_status_color(PET_P4_VIEW_STATUS_DONE);
   if (status && strcmp(status, "error") == 0) return view_status_color(PET_P4_VIEW_STATUS_ERROR);
+  if (status && strcmp(status, "stopped") == 0) return view_status_color(PET_P4_VIEW_STATUS_STOPPED);
   if (status && strcmp(status, "waiting_user") == 0) return view_status_color(PET_P4_VIEW_STATUS_WAITING);
   if (status && strcmp(status, "speaking") == 0) return view_status_color(PET_P4_VIEW_STATUS_WORKING);
   if (status && strcmp(status, "working") == 0) return view_status_color(PET_P4_VIEW_STATUS_WORKING);
@@ -2846,6 +2853,7 @@ static uint16_t session_status_color(const char *status) {
 static pet_p4_view_status_t session_view_status(const char *status) {
   if (status && strcmp(status, "done") == 0) return PET_P4_VIEW_STATUS_DONE;
   if (status && strcmp(status, "error") == 0) return PET_P4_VIEW_STATUS_ERROR;
+  if (status && strcmp(status, "stopped") == 0) return PET_P4_VIEW_STATUS_STOPPED;
   if (status && strcmp(status, "waiting_user") == 0) return PET_P4_VIEW_STATUS_WAITING;
   if (status && strcmp(status, "speaking") == 0) return PET_P4_VIEW_STATUS_WORKING;
   if (status && strcmp(status, "working") == 0) return PET_P4_VIEW_STATUS_WORKING;

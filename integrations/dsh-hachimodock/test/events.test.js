@@ -279,7 +279,7 @@ test('stopped DSH turns map to idle instead of a completed state', async (t) => 
     data: { turn: 1, reason: { kind: 'aborted', reason: 'user' } },
   })
   let { body } = await requestJson(`${url}/sessions`)
-  assert.equal(body.sessions[0].state, 'idle')
+  assert.equal(body.sessions[0].state, 'stopped')
 
   ctx.dispatchSync('session/event', session, {
     type: 'turn/start',

@@ -333,7 +333,7 @@ function turnEndState(data) {
   if (kind === 'error') return 'error'
   if (kind === 'completed') return 'done'
   if (kind === 'aborted' || kind === 'interrupted' || kind === 'blocked'
-      || kind === 'max-tokens' || kind === 'forked') return 'idle'
+      || kind === 'max-tokens' || kind === 'forked') return 'stopped'
   /* Older hosts omit the reason; preserve the historical completed behavior. */
   return 'done'
 }

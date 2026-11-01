@@ -180,7 +180,8 @@ static bool lifecycle_is(const char *value, const char *canonical) {
 }
 
 static bool lifecycle_is_terminal(const char *value) {
-  return lifecycle_is(value, "done") || lifecycle_is(value, "error");
+  return lifecycle_is(value, "done") || lifecycle_is(value, "error")
+    || lifecycle_is(value, "stopped");
 }
 
 static bool lifecycle_is_active(const char *value) {
@@ -2398,7 +2399,9 @@ static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *p
         copy_text(
           candidate.state,
           sizeof(candidate.state),
-          lifecycle_is(candidate.state, "error") ? "error" : "done"
+          lifecycle_is(candidate.state, "error")
+            ? "error"
+            : lifecycle_is(candidate.state, "stopped") ? "stopped" : "done"
         );
         if (candidate.transition_revision > 0) {
           if (revision_is_same) {
