@@ -13901,7 +13901,7 @@ select:focus-visible {
 
 .channel-row__approval-timeout-select > svg {
   position: absolute;
-  right: var(--space-2);
+  left: var(--space-2);
   color: var(--text-soft);
   pointer-events: none;
 }
@@ -13910,7 +13910,7 @@ select:focus-visible {
   appearance: none;
   -webkit-appearance: none;
   min-height: var(--control-height-sm);
-  padding: 0 30px 0 var(--space-3);
+  padding: 0 var(--space-3) 0 30px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface);

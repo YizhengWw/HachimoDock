@@ -136,11 +136,15 @@ export default function ChannelMatrixCard() {
     setDshApprovalTimeoutSaving(true);
     try {
       await invoke("save_dsh_approval_timeout", { timeoutMs });
+      const timeoutLabel = timeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
+        ? "永不超时"
+        : DSH_APPROVAL_TIMEOUT_OPTIONS.find((item) => item.value === timeoutMs)?.label
+          || `${Math.round(timeoutMs / 1000)} 秒`;
       push({
         tone: "success",
         title: timeoutMs === DSH_APPROVAL_NEVER_TIMEOUT_MS
           ? "DSH 审批将永不超时"
-          : `DSH 审批超时已设为 ${DSH_APPROVAL_TIMEOUT_OPTIONS.find((item) => item.value === timeoutMs)?.label || `${Math.round(timeoutMs / 1000)} 秒`}`,
+          : `DSH 审批超时已设为 ${timeoutLabel}`,
       });
     } catch (error) {
       setDshApprovalTimeoutMs(previous);
