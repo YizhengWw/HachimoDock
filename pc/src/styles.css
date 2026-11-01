@@ -13917,7 +13917,7 @@ select:focus-visible {
   color: var(--text);
   font-family: inherit;
   font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-semibold);
   line-height: 1;
   cursor: pointer;
 }
