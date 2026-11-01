@@ -1227,6 +1227,10 @@ fn submit_dsh_voice_composer(session_id: &str) -> Result<(), String> {
     dsh_voice_post("/voice/submit", &serde_json::json!({ "sessionId": session_id }))
 }
 
+fn interrupt_dsh_session(session_id: &str) -> Result<(), String> {
+    dsh_voice_post("/interrupt", &serde_json::json!({ "sessionId": session_id }))
+}
+
 fn submit_device_voice_via_agent_bus(context: Arc<DeviceVoiceContext>, text: String) {
     if !device_voice_target_is_current(&context) {
         cancel_device_voice_context(&context, "voice target changed before final submission");
@@ -2811,6 +2815,66 @@ fn handle_incoming_usb_message(
         if realtime_chat::handle_input_event(emitter, &payload) {
             return;
         }
+        if payload.get("action").and_then(|value| value.as_str()) == Some("dsh_interrupt")
+            && payload
+                .get("handledLocally")
+                .and_then(|value| value.as_bool())
+                != Some(true)
+        {
+            let board_device_id = payload
+                .get("boardDeviceId")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let (agent_id, session_id) = resolve_usb_inject_target(&board_device_id);
+            if agent_id != "deepseek-harness" {
+                let _ = emitter.emit(
+                    "usb-input-action-result",
+                    serde_json::json!({
+                        "ok": false,
+                        "pending": false,
+                        "actionType": "dsh_interrupt",
+                        "agentId": agent_id,
+                        "sessionId": session_id,
+                        "message": "打断 DSH 任务仅在跟随 DeepSeek Harness 时可用",
+                    }),
+                );
+                return;
+            }
+            let emitter = emitter.clone();
+            thread::spawn(move || {
+                match interrupt_dsh_session(&session_id) {
+                    Ok(()) => {
+                        let _ = emitter.emit(
+                            "usb-input-action-result",
+                            serde_json::json!({
+                                "ok": true,
+                                "pending": false,
+                                "actionType": "dsh_interrupt",
+                                "agentId": "deepseek-harness",
+                                "sessionId": session_id,
+                                "message": "已发送打断请求",
+                            }),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = emitter.emit(
+                            "usb-input-action-result",
+                            serde_json::json!({
+                                "ok": false,
+                                "pending": false,
+                                "actionType": "dsh_interrupt",
+                                "agentId": "deepseek-harness",
+                                "sessionId": session_id,
+                                "message": "打断 DSH 任务失败",
+                                "error": error,
+                            }),
+                        );
+                    }
+                }
+            });
+            return;
+        }
         let Some(agent_input) = extract_usb_agent_input(&topic, &payload) else {
             return;
         };
@@ -4012,6 +4076,7 @@ fn is_allowed_button_config_action(action: &str) -> bool {
             | "session_next"
             | "session_previous"
             | "session_clear"
+            | "dsh_interrupt"
             | "miniapp_screen_tap"
             | "miniapp_screen_long_press"
             | "component_center"
@@ -13877,6 +13942,7 @@ mod tests {
         assert!(is_allowed_button_config_action("session_next"));
         assert!(is_allowed_button_config_action("session_previous"));
         assert!(is_allowed_button_config_action("session_clear"));
+        assert!(is_allowed_button_config_action("dsh_interrupt"));
         assert!(is_allowed_button_config_action("miniapp_screen_tap"));
         assert!(is_allowed_button_config_action("miniapp_screen_long_press"));
         assert!(is_allowed_button_config_action("component_center"));

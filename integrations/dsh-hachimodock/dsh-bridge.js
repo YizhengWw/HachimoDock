@@ -646,6 +646,29 @@ function resolveApprovalTimeoutMs(bridge) {
   return bridge.options.approvalTimeoutMs
 }
 
+/**
+ * Cancel the active turn of one live DSH session.
+ * @param {object} bridge - bridge state.
+ * @param {{sessionId?: string}} args - target session, or auto.
+ * @returns {Promise<{ok:boolean, sessionId?:string, interrupted?:boolean, error?:string}>} result.
+ */
+async function interruptSession(bridge, args = {}) {
+  const target = resolveTargetSession(bridge, args.sessionId)
+  if (!target) return { ok: false, error: 'session-not-found' }
+  let agent
+  try {
+    agent = bridge.ctx.agents?.get?.(target.id)
+  } catch (error) {
+    bridge.logger.warn(error)
+  }
+  if (!agent) return { ok: false, error: 'agent-not-live' }
+  const running = agent.status === 'running' || agent.running === true
+  if (!running) return { ok: true, sessionId: target.id, interrupted: false, state: 'idle' }
+  if (typeof agent.cancel !== 'function') return { ok: false, error: 'agent-unsupported' }
+  agent.cancel({ kind: 'user' })
+  return { ok: true, sessionId: target.id, interrupted: true, state: 'cancelled' }
+}
+
 async function handleApprovalRequest(bridge, request, next) {
   const delegate = typeof next === 'function' ? next : () => Promise.resolve('unavailable')
   try {
@@ -746,6 +769,7 @@ function createBridge(ctx, config = {}) {
       return summaries
     },
     inject: (args) => injectToSession(bridge, args),
+    interrupt: (args) => interruptSession(bridge, args),
   })
 
   // Compact control-plane forwarding to GET /events.
@@ -787,6 +811,7 @@ function createBridge(ctx, config = {}) {
   bridge.start = async () => bridge.server.listen()
   bridge.stop = async () => bridge.server.close()
   bridge.handleApprovalRequest = (request, next) => handleApprovalRequest(bridge, request, next)
+  bridge.interruptSession = (args) => interruptSession(bridge, args)
   bridge.injectToSession = (args) => injectToSession(bridge, args)
   bridge.listSessions = () => bridge.server.listSessions()
   bridge.resolveTargetSession = (sessionId) => resolveTargetSession(bridge, sessionId)

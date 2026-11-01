@@ -2725,3 +2725,6 @@ def test_realtime_speaker_uses_full_scale_and_reports_readback():
     assert "esp_codec_dev_set_out_vol(g_speaker, PET_P4_AUDIO_PLAYBACK_VOLUME)" in audio
     assert "esp_codec_dev_get_out_vol(g_speaker, &output_volume)" in audio
     assert 'cJSON_AddNumberToObject(payload, "playbackVolume", output_volume)' in audio
+
+
+assert "dsh_interrupt" in (ROOT / "main/pet_p4_input.c").read_text()

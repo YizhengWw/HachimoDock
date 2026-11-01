@@ -205,6 +205,7 @@ static bool action_is_allowed(const char *action) {
     "session_next",
     "session_previous",
     "session_clear",
+    "dsh_interrupt",
     "miniapp_screen_tap",
     "miniapp_screen_long_press",
     "page_toggle",

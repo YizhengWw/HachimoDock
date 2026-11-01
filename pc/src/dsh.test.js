@@ -42,3 +42,13 @@ test("Rust keeps DeepSeek Harness on the bus-injection path", () => {
     /fn agent_uses_visible_composer\(agent_id: &str\) -> bool \{\s*matches!\([^)]*deepseek-harness/,
   );
 });
+
+test("DSH interrupt action is wired end to end and gated by selected agent", () => {
+  const rust = read("../src-tauri/src/lib.rs");
+  const dashboard = read("DeviceDashboard.jsx");
+  const panel = read("dashboard/BoardButtonPanel.jsx");
+  assert.match(rust, /dsh_interrupt/);
+  assert.match(rust, /fn interrupt_dsh_session/);
+  assert.match(dashboard, /dsh_interrupt/);
+  assert.match(panel, /selectedAgentId !== "deepseek-harness"/);
+});

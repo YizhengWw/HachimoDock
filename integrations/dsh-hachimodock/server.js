@@ -215,6 +215,7 @@ class BridgeServer {
    * @param {number} [options.approvalTimeoutMs] - default approval wait.
    * @param {() => Array<object>} [options.listSessions] - compact session summaries.
    * @param {(args: {sessionId: string, text: string, emit: (event: object) => void, signal: AbortSignal}) => Promise<void>} [options.inject] - prompt delivery.
+   * @param {(args: {sessionId: string}) => Promise<object>} [options.interrupt] - cancel the active turn.
    * @param {{info?: Function, warn?: Function, error?: Function}} [options.logger] - optional logger.
    * @param {() => number} [options.now] - clock.
    * @param {() => string} [options.createRequestId] - approval id factory.
@@ -229,6 +230,9 @@ class BridgeServer {
       (async ({ emit }) => {
         emit({ type: 'error', code: 'inject-unavailable', message: 'no inject adapter configured' })
       })
+    this.interrupt =
+      options.interrupt ??
+      (async () => ({ ok: false, error: 'interrupt-unavailable' }))
     this.logger = options.logger ?? null
     this.now = options.now ?? (() => Date.now())
     this.createRequestId = options.createRequestId ?? (() => `req-${randomUUID()}`)
@@ -550,6 +554,10 @@ class BridgeServer {
       if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method-not-allowed' })
       return this.handleInject(req, res)
     }
+    if (path === '/interrupt') {
+      if (method !== 'POST') return sendJson(res, 405, { ok: false, error: 'method-not-allowed' })
+      return this.handleInterrupt(req, res)
+    }
     if (path === '/events') {
       if (method !== 'GET') return sendJson(res, 405, { ok: false, error: 'method-not-allowed' })
       return this.handleEvents(req, res, url)
@@ -632,6 +640,37 @@ class BridgeServer {
     }
     if (!Array.isArray(sessions)) sessions = []
     sendJson(res, 200, { sessions: sessions.slice(0, 128) })
+  }
+
+  /**
+   * POST /interrupt: cancel the current DSH turn without streaming a response.
+   * @param {import('node:http').IncomingMessage} req - request.
+   * @param {import('node:http').ServerResponse} res - response.
+   * @returns {Promise<void>} settles after the response.
+   */
+  async handleInterrupt(req, res) {
+    let body
+    try {
+      body = await readJsonBody(req)
+    } catch (error) {
+      this.failRequest(res, error)
+      return
+    }
+    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+    try {
+      const result = await this.interrupt({ sessionId })
+      if (!result || result.ok !== true) {
+        sendJson(res, 409, {
+          ok: false,
+          error: result?.error === 'session-not-found' ? 'session-not-found' : 'interrupt-failed',
+          message: String(result?.error ?? 'interrupt failed'),
+        })
+        return
+      }
+      sendJson(res, 200, result)
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: 'interrupt-failed', message: String(error?.message || error) })
+    }
   }
 
   /**
