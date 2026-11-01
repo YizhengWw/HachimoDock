@@ -2525,7 +2525,9 @@ def test_p4_dsh_approval_modal_is_single_shot_and_bounded():
     assert "strcmp(request_id, state->approval_last_decided_id) == 0" in approval_handler
     # Epoch-ms deadlines from the plugin/bridge are translated into the device
     # monotonic base through the heartbeat wall-clock anchor.
-    assert "deadline_ms = approval_deadline_ms(expires_ms, now_ms, &expired);" in approval_handler
+    assert 'const cJSON *never_expires = cJSON_GetObjectItemCaseSensitive(payload, "neverExpires");' in approval_handler
+    assert "deadline_ms = cJSON_IsTrue(never_expires)" in approval_handler
+    assert "approval_deadline_ms(expires_ms, now_ms, &expired);" in approval_handler
     assert "if (expired) {" in approval_handler
     assert (
         "pet_p4_state_begin_approval(state, request_id, agent, tool, reason, deadline_ms)"

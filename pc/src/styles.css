@@ -13882,6 +13882,26 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.channel-row__approval-timeout {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.channel-row__approval-timeout select {
+  min-height: 26px;
+  padding: 0 22px 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+}
+
 .channel-row__follow {
   display: flex;
   justify-content: flex-end;

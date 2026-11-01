@@ -236,3 +236,28 @@ test('approval/asked and approval/decided correlate with the bridge request id',
   assert.equal(resolved.data.requestId, prompt.data.requestId)
   assert.equal(resolved.data.outcome, 'allowed-once')
 })
+
+test('a finite timeout emits approval-expired after the prompt', async (t) => {
+  const { ctx, session, sse } = await fixtures(t, { approvalTimeoutMs: 120 })
+  const outcome = answer(ctx, createApprovalRequest(session))
+  const prompt = await sse.next()
+  const expired = await sse.next()
+  assert.equal(expired.event, 'approval-expired')
+  assert.equal(expired.data.requestId, prompt.data.requestId)
+  assert.equal(await outcome, 'unavailable')
+})
+
+test('timeout 0 never expires and still accepts a decision', async (t) => {
+  const { ctx, session, sse, url } = await fixtures(t, { approvalTimeoutMs: 0 })
+  const outcome = answer(ctx, createApprovalRequest(session))
+  const prompt = await sse.next()
+  assert.equal(prompt.data.neverExpires, true)
+  assert.equal(prompt.data.expiresAtMs, 0)
+  await new Promise((resolve) => setTimeout(resolve, 180))
+  const decided = await postJson(`${url}/approval/decision`, {
+    requestId: prompt.data.requestId,
+    decision: 'allow',
+  })
+  assert.equal(decided.status, 200)
+  assert.equal(await outcome, 'allowed-once')
+})

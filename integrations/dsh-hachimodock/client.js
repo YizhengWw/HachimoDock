@@ -117,6 +117,20 @@ window.__ModuleLoader__.load({
       return true
     }
 
+    function dismissNativeApproval() {
+      // Timeout/abort has no native cancel API. Prefer the visible reject
+      // control; fall back to Escape so a stale composer cannot stay open.
+      if (clickApproval('rejected', 0, true)) return
+      try {
+        document.dispatchEvent(new KeyboardEvent('keydown', {
+          key: 'Escape', code: 'Escape', keyCode: 27, which: 27,
+          bubbles: true, cancelable: true,
+        }))
+      } catch {
+        /* no DOM focus available */
+      }
+    }
+
     function clickApproval(outcome, attempt = 0) {
       const allow = outcome === 'allowed-once'
       const labels = allow
@@ -177,10 +191,17 @@ window.__ModuleLoader__.load({
         }
         source.addEventListener('voice-insert', onVoiceInsert)
         source.addEventListener('voice-submit', onVoiceSubmit)
+        const onApprovalExpired = () => {
+          try { dismissNativeApproval() } catch { /* best effort */ }
+        }
+        source.addEventListener('approval-expired', onApprovalExpired)
+        source.addEventListener('approval-cancel', onApprovalExpired)
         ctx.effect(() => () => {
           source.removeEventListener('approval-resolved', onResolved)
           source.removeEventListener('voice-insert', onVoiceInsert)
           source.removeEventListener('voice-submit', onVoiceSubmit)
+          source.removeEventListener('approval-expired', onApprovalExpired)
+          source.removeEventListener('approval-cancel', onApprovalExpired)
           source.close()
         }, 'hachimodock: device approval dismissal')
       },

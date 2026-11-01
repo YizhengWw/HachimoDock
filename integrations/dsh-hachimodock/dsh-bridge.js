@@ -33,7 +33,11 @@
  */
 
 const { randomUUID } = require('node:crypto')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
 const { BridgeServer, DEFAULT_PORT, DEFAULT_APPROVAL_TIMEOUT_MS, boundString } = require('./server')
+const DEFAULT_BRIDGE_PROFILE = path.join(os.homedir(), '.claw-pet', 'pet-bridge.json')
 
 /** Agent identity reported to HachimoDock; fixed by the v0 contract. */
 const AGENT_ID = 'deepseek-harness'
@@ -72,9 +76,12 @@ function normalizeOptions(config = {}) {
   const port =
     positiveIntFromEnv(process.env.HACHIMODOCK_DSH_PORT) ??
     (Number.isSafeInteger(options.port) && options.port > 0 ? options.port : DEFAULT_PORT)
+  const envApprovalTimeout = Number(process.env.HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS)
   const approvalTimeoutMs =
-    positiveIntFromEnv(process.env.HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS) ??
-    (Number.isSafeInteger(options.approvalTimeoutMs) && options.approvalTimeoutMs > 0
+    (Number.isSafeInteger(envApprovalTimeout) && envApprovalTimeout >= 0
+      ? envApprovalTimeout
+      : undefined) ??
+    (Number.isSafeInteger(options.approvalTimeoutMs) && options.approvalTimeoutMs >= 0
       ? options.approvalTimeoutMs
       : DEFAULT_APPROVAL_TIMEOUT_MS)
   const fallback =
@@ -618,6 +625,29 @@ function correlateAskedApproval(bridge, request) {
  * @param {(() => unknown)|undefined} next - next waterfall answerer.
  * @returns {Promise<'allowed-once'|'rejected'|'unavailable'>} closed outcome.
  */
+/**
+ * Resolve the live approval timeout from the HachimoDock bridge profile.
+ * 0 means wait forever. Absent/invalid falls back to the plugin config.
+ * @param {object} bridge - bridge state.
+ * @returns {number} timeout in milliseconds; 0 means never.
+ */
+function resolveApprovalTimeoutMs(bridge) {
+  const envValue = process.env.HACHIMODOCK_DSH_APPROVAL_TIMEOUT_MS
+  if (typeof envValue === 'string' && envValue.trim() !== '') {
+    const parsed = Number(envValue)
+    if (Number.isSafeInteger(parsed) && parsed >= 0) return parsed
+  }
+  try {
+    const profilePath = process.env.HACHIMODOCK_BRIDGE_PROFILE || DEFAULT_BRIDGE_PROFILE
+    const raw = JSON.parse(fs.readFileSync(profilePath, 'utf8'))
+    const value = raw?.dshApprovalTimeoutMs
+    if (Number.isSafeInteger(value) && value >= 0) return value
+  } catch {
+    /* profile missing or unreadable: use the plugin default */
+  }
+  return bridge.options.approvalTimeoutMs
+}
+
 async function handleApprovalRequest(bridge, request, next) {
   const delegate = typeof next === 'function' ? next : () => Promise.resolve('unavailable')
   try {
@@ -635,7 +665,7 @@ async function handleApprovalRequest(bridge, request, next) {
       reason: typeof request.reason === 'string' ? request.reason : undefined,
       displayReason: typeof request.displayReason === 'string' ? request.displayReason : undefined,
       approvalId,
-      timeoutMs: bridge.options.approvalTimeoutMs,
+      timeoutMs: resolveApprovalTimeoutMs(bridge),
       signal: request.signal,
     })
     if (approvalId !== undefined) {

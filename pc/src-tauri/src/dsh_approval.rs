@@ -71,6 +71,8 @@ fn device_request_payload(event: &Value) -> Option<Value> {
         "reason": reason,
         "sessionId": event.get("sessionId").and_then(Value::as_str).unwrap_or(""),
         "expiresAtMs": event.get("expiresAtMs").and_then(Value::as_u64).unwrap_or(0),
+        "neverExpires": event.get("neverExpires").and_then(Value::as_bool).unwrap_or(false),
+        "timeoutMs": event.get("timeoutMs").and_then(Value::as_u64).unwrap_or(0),
     });
     Some(request)
 }
@@ -218,13 +220,29 @@ fn wait_for_device_decision(
         }
         return;
     }
-    match receiver.recv_timeout(APPROVAL_TIMEOUT) {
-        Ok(decision) => {
+    let never_expires = request
+        .get("neverExpires")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let configured_timeout_ms = request
+        .get("timeoutMs")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let decision = if never_expires {
+        receiver.recv().ok()
+    } else if configured_timeout_ms > 0 {
+        let wait = Duration::from_millis(configured_timeout_ms.saturating_add(5_000));
+        receiver.recv_timeout(wait).ok()
+    } else {
+        receiver.recv_timeout(APPROVAL_TIMEOUT).ok()
+    };
+    match decision {
+        Some(decision) => {
             if let Err(error) = post_decision(&base_url, &request_id, &decision) {
                 eprintln!("[dsh-approval] {error}");
             }
         }
-        Err(_) => {
+        None => {
             eprintln!("[dsh-approval] device decision timeout for {request_id}");
         }
     }
@@ -293,7 +311,7 @@ fn run_event_stream(usb: UsbSerialManager, base_url: String) -> Result<(), Strin
                         let base_url = base_url.clone();
                         thread::spawn(move || wait_for_device_decision(usb, request, base_url));
                     }
-                } else if event == "approval-cancel" {
+                } else if event == "approval-cancel" || event == "approval-expired" {
                     if let Some(request_id) = payload.get("requestId").and_then(Value::as_str) {
                         let _ = usb.send(
                             "approval/cancel",

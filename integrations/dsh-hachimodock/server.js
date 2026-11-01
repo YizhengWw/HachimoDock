@@ -368,7 +368,8 @@ class BridgeServer {
     const requestId = this.createRequestId()
     const timeoutMs =
       Number.isSafeInteger(request.timeoutMs) && request.timeoutMs > 0 ? request.timeoutMs : this.approvalTimeoutMs
-    const expiresAtMs = this.now() + timeoutMs
+    const neverExpires = timeoutMs === 0
+    const expiresAtMs = neverExpires ? 0 : this.now() + timeoutMs
     /** @type {Promise<string>} */
     const outcome = new Promise((resolve) => {
       const pending = {
@@ -380,15 +381,23 @@ class BridgeServer {
       // Register before arming the timer/abort path so an already-aborted
       // signal or an immediate timeout can settle this exact request.
       this.pending.set(requestId, pending)
-      pending.timer = setTimeout(() => {
-        this.settleApproval(requestId, 'unavailable', { expired: true })
-      }, timeoutMs)
-      if (typeof pending.timer.unref === 'function') pending.timer.unref()
+      if (!neverExpires) {
+        pending.timer = setTimeout(() => {
+          if (this.settleApproval(requestId, 'unavailable', { expired: true })) {
+            this.publish('approval-expired', { requestId })
+          }
+        }, timeoutMs)
+        if (typeof pending.timer.unref === 'function') pending.timer.unref()
+      }
       if (request.signal) {
+        const onAbort = () => {
+          if (this.settleApproval(requestId, 'unavailable', { expired: false })) {
+            this.publish('approval-cancel', { requestId })
+          }
+        }
         if (request.signal.aborted) {
-          this.settleApproval(requestId, 'unavailable', { expired: true })
+          onAbort()
         } else {
-          const onAbort = () => this.settleApproval(requestId, 'unavailable', { expired: true })
           request.signal.addEventListener('abort', onAbort, { once: true })
           pending.removeAbort = () => request.signal.removeEventListener('abort', onAbort)
         }
@@ -403,6 +412,8 @@ class BridgeServer {
       displayReason: boundString(request.displayReason) ?? '',
       ...(typeof request.approvalId === 'string' ? { approvalId: boundString(request.approvalId) } : {}),
       expiresAtMs,
+      timeoutMs,
+      neverExpires,
     })
     return { requestId, expiresAtMs, outcome }
   }

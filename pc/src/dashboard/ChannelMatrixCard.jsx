@@ -5,7 +5,8 @@
  * [Sync] If this file changes, update `pc/src/dashboard/.folder.md`.
  */
 
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   CheckCircle,
   ChevronDown,
@@ -39,7 +40,17 @@ const AGENT_ICONS = {
   openclaw: Zap,
   mimocode: Braces,
   workbuddy: Code,
+  "deepseek-harness": Braces,
 };
+
+const DSH_APPROVAL_TIMEOUT_OPTIONS = [
+  { value: 10000, label: "10 秒" },
+  { value: 30000, label: "30 秒" },
+  { value: 60000, label: "1 分钟" },
+  { value: 300000, label: "5 分钟" },
+  { value: 600000, label: "10 分钟" },
+  { value: 0, label: "永不超时" },
+];
 
 function appearanceKindLabel(appearance) {
   if (appearance?.type === "codex-import") return "Codex pet";
@@ -87,6 +98,8 @@ export default function ChannelMatrixCard() {
 
   const [pickerState, setPickerState] = useState(null); // { agentId }
   const [pendingFollow, setPendingFollow] = useState(null); // { agentId, appearance }
+  const [dshApprovalTimeoutMs, setDshApprovalTimeoutMs] = useState(30000);
+  const [dshApprovalTimeoutSaving, setDshApprovalTimeoutSaving] = useState(false);
   const syncing = appearanceSync?.pending === true;
   const syncProgress = appearanceSync?.progress
     ? normalizeSyncProgress(appearanceSync.progress)
@@ -102,6 +115,39 @@ export default function ChannelMatrixCard() {
     },
     [agentAppearanceMap, appearances],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    invoke("load_dsh_approval_timeout")
+      .then((value) => {
+        if (!disposed && Number.isFinite(Number(value))) setDshApprovalTimeoutMs(Number(value));
+      })
+      .catch((error) => {
+        console.warn("[ChannelMatrixCard] load DSH approval timeout failed", error);
+      });
+    return () => { disposed = true; };
+  }, []);
+
+  const updateDshApprovalTimeout = useCallback(async (nextValue) => {
+    const timeoutMs = Number(nextValue);
+    const previous = dshApprovalTimeoutMs;
+    setDshApprovalTimeoutMs(timeoutMs);
+    setDshApprovalTimeoutSaving(true);
+    try {
+      await invoke("save_dsh_approval_timeout", { timeoutMs });
+      push({
+        tone: "success",
+        title: timeoutMs === 0
+          ? "DSH 审批将永不超时"
+          : `DSH 审批超时已设为 ${DSH_APPROVAL_TIMEOUT_OPTIONS.find((item) => item.value === timeoutMs)?.label || `${Math.round(timeoutMs / 1000)} 秒`}`,
+      });
+    } catch (error) {
+      setDshApprovalTimeoutMs(previous);
+      push({ tone: "error", title: "保存 DSH 审批超时失败", message: error?.message || String(error) });
+    } finally {
+      setDshApprovalTimeoutSaving(false);
+    }
+  }, [dshApprovalTimeoutMs, push]);
 
   const closePicker = useCallback(() => setPickerState(null), []);
 
@@ -287,6 +333,21 @@ export default function ChannelMatrixCard() {
                       >
                         <ChevronDown size={14} /> 更换形象
                       </button>
+                      {agent.id === "deepseek-harness" && (
+                        <label className="channel-row__approval-timeout">
+                          <span>审批超时</span>
+                          <select
+                            value={dshApprovalTimeoutMs}
+                            onChange={(event) => updateDshApprovalTimeout(event.target.value)}
+                            disabled={dshApprovalTimeoutSaving || syncing}
+                            aria-label="DeepSeek Harness 审批超时时间"
+                          >
+                            {DSH_APPROVAL_TIMEOUT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                     </div>
                     <span>{appearanceKindLabel(appearance)}</span>
                   </div>

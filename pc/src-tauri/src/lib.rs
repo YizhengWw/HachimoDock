@@ -3067,6 +3067,7 @@ struct BridgeProfileFile {
     pet_channel_id: String,
     enabled_agents: Vec<String>,
     selected_agent_id: String,
+    dsh_approval_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -3712,6 +3713,7 @@ fn save_device_binding(binding: DeviceBinding) -> Result<Vec<DeviceBinding>, Str
             pet_channel_id: DEFAULT_PET_CHANNEL_ID.to_string(),
             enabled_agents: Vec::new(),
             selected_agent_id: String::new(),
+            dsh_approval_timeout_ms: None,
         };
         let profile_payload = serde_json::to_vec_pretty(&profile).map_err(|e| e.to_string())?;
         write_private_file(&config_path, &profile_payload)?;
@@ -4798,6 +4800,7 @@ fn merge_bridge_profile_input(
         selected_agent_id: input
             .selected_agent_id
             .unwrap_or(existing.selected_agent_id),
+        dsh_approval_timeout_ms: existing.dsh_approval_timeout_ms,
     })
 }
 
@@ -4823,6 +4826,38 @@ fn save_bridge_profile(input: BridgeProfileInput) -> Result<BridgeProfileRespons
     write_private_file(&config_path, &payload)?;
 
     Ok(build_bridge_profile_response(&config_path, profile))
+}
+
+const DEFAULT_DSH_APPROVAL_TIMEOUT_MS: u64 = 30_000;
+const MAX_DSH_APPROVAL_TIMEOUT_MS: u64 = 3_600_000;
+
+#[tauri::command]
+fn load_dsh_approval_timeout() -> Result<u64, String> {
+    let config_path = get_bridge_profile_path()?;
+    let profile = read_bridge_profile(&config_path)?.unwrap_or_default();
+    Ok(profile
+        .dsh_approval_timeout_ms
+        .unwrap_or(DEFAULT_DSH_APPROVAL_TIMEOUT_MS))
+}
+
+#[tauri::command]
+fn save_dsh_approval_timeout(timeout_ms: u64) -> Result<u64, String> {
+    if timeout_ms != 0
+        && (!(5_000..=MAX_DSH_APPROVAL_TIMEOUT_MS).contains(&timeout_ms))
+    {
+        return Err("审批超时必须在 5 秒到 1 小时之间，或选择永不超时。".to_string());
+    }
+    let config_path = get_bridge_profile_path()?;
+    let mut profile = read_bridge_profile(&config_path)?.unwrap_or_default();
+    profile.version = 1;
+    profile.updated_at = current_timestamp_ms();
+    profile.dsh_approval_timeout_ms = Some(timeout_ms);
+    if let Some(parent_dir) = config_path.parent() {
+        ensure_private_directory(parent_dir)?;
+    }
+    let payload = serde_json::to_vec_pretty(&profile).map_err(|error| error.to_string())?;
+    write_private_file(&config_path, &payload)?;
+    Ok(timeout_ms)
 }
 
 #[tauri::command]
@@ -4941,6 +4976,7 @@ fn ensure_bridge_runtime_blocking(
                 pet_channel_id: DEFAULT_PET_CHANNEL_ID.to_string(),
                 enabled_agents: Vec::new(),
                 selected_agent_id: String::new(),
+                dsh_approval_timeout_ms: None,
             }));
             let payload = serde_json::to_vec_pretty(&profile).map_err(|e| e.to_string())?;
             let _ = write_private_file(&config_path, &payload);
@@ -10596,6 +10632,8 @@ pub fn run() {
             dispatch_remote_cli_binding,
             load_bridge_profile,
             save_bridge_profile,
+            load_dsh_approval_timeout,
+            save_dsh_approval_timeout,
             clear_bridge_profile,
             load_agent_selection,
             save_agent_selection,
