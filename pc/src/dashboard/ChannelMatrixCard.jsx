@@ -353,7 +353,7 @@ export default function ChannelMatrixCard() {
                       </button>
                       {agent.id === "deepseek-harness" && (
                         <label className="channel-row__approval-timeout">
-                          <span>审批超时</span>
+                          <span>超时时间</span>
                           <span className="channel-row__approval-timeout-control">
                             <button
                               type="button"

@@ -13894,6 +13894,13 @@ select:focus-visible {
   white-space: nowrap;
 }
 
+.channel-row__approval-timeout > span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
 .channel-row__approval-timeout-control {
   position: relative;
   display: inline-flex;
