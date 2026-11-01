@@ -2396,16 +2396,19 @@ static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *p
           candidate.terminal_until_ms = 0;
         }
       } else if (lifecycle_is_terminal(candidate.state)) {
+        bool stopped_transition = lifecycle_is(candidate.state, "stopped");
         copy_text(
           candidate.state,
           sizeof(candidate.state),
           lifecycle_is(candidate.state, "error")
             ? "error"
-            : lifecycle_is(candidate.state, "stopped") ? "stopped" : "done"
+            : stopped_transition ? "stopped" : "done"
         );
         if (candidate.transition_revision > 0) {
           if (revision_is_same) {
-            if (!lifecycle_is_terminal(previous->state)
+            if (stopped_transition && lifecycle_is_active(previous->state)) {
+              candidate.terminal_until_ms = now_ms + PET_P4_DONE_HOLD_MS;
+            } else if (!lifecycle_is_terminal(previous->state)
                 || previous->terminal_until_ms <= now_ms) {
               candidate = *previous;
             } else {
@@ -2430,6 +2433,10 @@ static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *p
         }
       } else {
         continue;
+      }
+      if (lifecycle_is(candidate.state, "stopped")
+          && (!previous || !lifecycle_is(previous->state, "stopped"))) {
+        (void) pet_p4_audio_play_event_cue("session_terminated");
       }
       state->session_queue_staging[next_count] = candidate;
       next_count += 1;

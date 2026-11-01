@@ -100,7 +100,7 @@ endforeach()
 # Permission cues are generated ASM sources. Generate them at configure time
 # so a clean build always has the files before the ASM compile rules are added.
 idf_build_get_property(pet_idf_path IDF_PATH)
-foreach(cue permission_request permission_approved permission_denied permission_expired)
+foreach(cue permission_request permission_approved permission_denied permission_expired session_terminated)
   set(cue_input "${CMAKE_CURRENT_LIST_DIR}/../../pc/public/terrier-clips/${cue}.wav")
   set(cue_source "${CMAKE_BINARY_DIR}/${cue}.wav.S")
   execute_process(
