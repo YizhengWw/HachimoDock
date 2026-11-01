@@ -321,6 +321,23 @@ function rememberSessionText(bridge, sessionId, text) {
   }
 }
 
+/**
+ * Translate the DSH turn-end reason into a device lifecycle state.
+ * A stopped/cancelled turn must not look like a completed task: only an
+ * explicit `completed` ending is terminal `done`.
+ * @param {object} data - turn/end event data.
+ * @returns {'done'|'error'|'idle'} device state.
+ */
+function turnEndState(data) {
+  const kind = typeof data?.reason?.kind === 'string' ? data.reason.kind : ''
+  if (kind === 'error') return 'error'
+  if (kind === 'completed') return 'done'
+  if (kind === 'aborted' || kind === 'interrupted' || kind === 'blocked'
+      || kind === 'max-tokens' || kind === 'forked') return 'idle'
+  /* Older hosts omit the reason; preserve the historical completed behavior. */
+  return 'done'
+}
+
 function forwardSessionEvent(bridge, session, event) {
   if (!session || typeof session.id !== 'string' || !event || typeof event.type !== 'string') return
   const sessionId = session.id
@@ -355,11 +372,12 @@ function forwardSessionEvent(bridge, session, event) {
       return
     }
     case 'turn/end':
-      rememberSessionState(bridge, sessionId, 'done')
+      rememberSessionState(bridge, sessionId, turnEndState(data))
       bridge.server.publish('turn', {
         sessionId,
         phase: 'end',
         turn: Number.isSafeInteger(data.turn) ? data.turn : undefined,
+        reason: typeof data.reason?.kind === 'string' ? data.reason.kind : undefined,
       })
       return
     case 'tool/call': {

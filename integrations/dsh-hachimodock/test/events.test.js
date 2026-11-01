@@ -262,3 +262,35 @@ test('assistant text is exposed as bounded displayContent for the P4 body', asyn
   assert.equal(body.sessions[0].displayContent, '### 标题\n**粗体**\n- 列表')
   assert.equal(body.sessions[0].displayContent.includes('hidden reasoning'), false)
 })
+
+test('stopped DSH turns map to idle instead of a completed state', async (t) => {
+  const session = createFakeSession('session-stopped')
+  const ctx = createFakeCtx({ sessions: [session] })
+  const { url } = await startTestBridge(t, ctx)
+
+  ctx.dispatchSync('session/event', session, {
+    type: 'turn/start',
+    time: 7000,
+    data: { turn: 1 },
+  })
+  ctx.dispatchSync('session/event', session, {
+    type: 'turn/end',
+    time: 7001,
+    data: { turn: 1, reason: { kind: 'aborted', reason: 'user' } },
+  })
+  let { body } = await requestJson(`${url}/sessions`)
+  assert.equal(body.sessions[0].state, 'idle')
+
+  ctx.dispatchSync('session/event', session, {
+    type: 'turn/start',
+    time: 7002,
+    data: { turn: 2 },
+  })
+  ctx.dispatchSync('session/event', session, {
+    type: 'turn/end',
+    time: 7003,
+    data: { turn: 2, reason: { kind: 'completed' } },
+  })
+  ;({ body } = await requestJson(`${url}/sessions`))
+  assert.equal(body.sessions[0].state, 'done')
+})
