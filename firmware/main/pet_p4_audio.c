@@ -949,6 +949,20 @@ void pet_p4_audio_process(
   xQueueOverwrite(g_playback_queue, &request);
 }
 
+esp_err_t pet_p4_audio_play_event_cue(const char *family) {
+  if (!family || !pet_p4_system_cue_family(family)) return ESP_ERR_INVALID_ARG;
+  if (!pet_p4_audio_playback_ready() || !g_playback_queue) return ESP_ERR_INVALID_STATE;
+  pet_p4_audio_playback_request_t request;
+  memset(&request, 0, sizeof(request));
+  snprintf(request.family, sizeof(request.family), "%s", family);
+  request.audio_custom = false;
+  request.generation = atomic_fetch_add_explicit(
+    &g_playback_generation, 1U, memory_order_acq_rel
+  ) + 1U;
+  xQueueOverwrite(g_playback_queue, &request);
+  return ESP_OK;
+}
+
 esp_err_t pet_p4_audio_set_enabled(bool enabled) {
   if (!pet_p4_audio_ready()) return ESP_ERR_INVALID_STATE;
   atomic_store_explicit(&g_enabled, enabled, memory_order_release);

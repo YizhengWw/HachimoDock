@@ -20,6 +20,7 @@
  */
 
 #include "pet_p4_input.h"
+#include "pet_p4_audio.h"
 #include "pet_p4_conversation.h"
 
 #include <stdio.h>
@@ -1135,10 +1136,14 @@ static bool handle_approval_input(
         sizeof(request_id)
       )) {
     /* Expired modal: the pending state was dropped without a late decision. */
+    (void) pet_p4_audio_play_event_cue("permission_expired");
     state->last_update_ms = event->ts_ms;
     return true;
   }
   send_approval_decision(send_line, ctx, request_id, allow);
+  (void) pet_p4_audio_play_event_cue(
+    allow ? "permission_approved" : "permission_denied"
+  );
   state->last_update_ms = event->ts_ms;
   return true;
 }

@@ -458,10 +458,10 @@ class BridgeServer {
    * @param {string} requestId - pending approval id.
    * @returns {boolean} whether a pending request was cancelled.
    */
-  cancelApproval(requestId) {
+  cancelApproval(requestId, outcome = 'unavailable') {
     if (!this.pending.has(requestId)) return false
     this.settleApproval(requestId, 'unavailable', { expired: false })
-    this.publish('approval-cancel', { requestId })
+    this.publish('approval-cancel', { requestId, outcome })
     return true
   }
 

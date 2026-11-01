@@ -751,7 +751,7 @@ async function handleApprovalRequest(bridge, request, next) {
       })
     })
     if (outcome.source === 'native') {
-      bridge.server.cancelApproval(prompt.requestId)
+      bridge.server.cancelApproval(prompt.requestId, outcome.value)
       return outcome.value
     }
     if (outcome.value === 'allowed-once' || outcome.value === 'rejected') return outcome.value

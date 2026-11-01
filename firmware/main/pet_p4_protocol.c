@@ -17,6 +17,7 @@
 
 #include "pet_p4_protocol.h"
 #include "pet_p4_conversation.h"
+#include "pet_p4_audio.h"
 #include "pet_p4_transport_config.h"
 
 #include <errno.h>
@@ -1567,6 +1568,7 @@ void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_
       && now_ms >= state->approval_expires_ms) {
     /* Timeout is fail-closed: hide the modal but never send a decision. */
     pet_p4_state_clear_approval(state);
+    (void) pet_p4_audio_play_event_cue("permission_expired");
     state->last_update_ms += 1;
   }
   if (state->conversation_error_until_ms && now_ms >= state->conversation_error_until_ms) {
@@ -2251,6 +2253,7 @@ static bool handle_approval_request(
     : approval_deadline_ms(expires_ms, now_ms, &expired);
   if (expired) {
     /* Requests that expired before arrival are ignored, never shown. */
+    (void) pet_p4_audio_play_event_cue("permission_expired");
     send_protocol_ack(send_line, ctx, "approval/request", payload, false,
                       "approval_expired", "request is already expired");
     return true;
@@ -2261,6 +2264,7 @@ static bool handle_approval_request(
     return false;
   }
   state->last_update_ms += 1;
+  (void) pet_p4_audio_play_event_cue("permission_request");
   send_protocol_ack(send_line, ctx, "approval/request", payload, true, "ok", NULL);
   ESP_LOGI(TAG, "approval pending tool=%s expires_ms=%llu",
            state->approval_tool, state->approval_expires_ms);
@@ -2597,7 +2601,15 @@ bool pet_p4_handle_line(
     const char *request_id = json_string(payload, "requestId");
     if (request_id[0]
         && strcmp(request_id, state->approval_request_id) == 0) {
+      const char *outcome = json_string(payload, "outcome");
       pet_p4_state_clear_approval(state);
+      if (strcmp(outcome, "allowed-once") == 0) {
+        (void) pet_p4_audio_play_event_cue("permission_approved");
+      } else if (strcmp(outcome, "rejected") == 0) {
+        (void) pet_p4_audio_play_event_cue("permission_denied");
+      } else {
+        (void) pet_p4_audio_play_event_cue("permission_expired");
+      }
       state->last_update_ms += 1;
     }
     return true;

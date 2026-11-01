@@ -313,9 +313,13 @@ fn run_event_stream(usb: UsbSerialManager, base_url: String) -> Result<(), Strin
                     }
                 } else if event == "approval-cancel" || event == "approval-expired" {
                     if let Some(request_id) = payload.get("requestId").and_then(Value::as_str) {
+                        let outcome = payload
+                            .get("outcome")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
                         let _ = usb.send(
                             "approval/cancel",
-                            &json!({"requestId": request_id}),
+                            &json!({"requestId": request_id, "outcome": outcome}),
                         );
                     }
                 }
