@@ -337,16 +337,19 @@ export default function ChannelMatrixCard() {
                       {agent.id === "deepseek-harness" && (
                         <label className="channel-row__approval-timeout">
                           <span>审批超时</span>
-                          <select
-                            value={dshApprovalTimeoutMs}
-                            onChange={(event) => updateDshApprovalTimeout(event.target.value)}
-                            disabled={dshApprovalTimeoutSaving || syncing}
-                            aria-label="DeepSeek Harness 审批超时时间"
-                          >
-                            {DSH_APPROVAL_TIMEOUT_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
+                          <span className="channel-row__approval-timeout-select">
+                            <select
+                              value={dshApprovalTimeoutMs}
+                              onChange={(event) => updateDshApprovalTimeout(event.target.value)}
+                              disabled={dshApprovalTimeoutSaving || syncing}
+                              aria-label="DeepSeek Harness 审批超时时间"
+                            >
+                              {DSH_APPROVAL_TIMEOUT_OPTIONS.map((option) => (
+                                <option key={option.value} value={option.value}>{option.label}</option>
+                              ))}
+                            </select>
+                            <ChevronDown size={14} aria-hidden="true" />
+                          </span>
                         </label>
                       )}
                     </div>
