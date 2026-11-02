@@ -10162,6 +10162,7 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") { window.show()?; }
                 return Ok(());
             }
+            desktop_window::init_tray(app.handle())?;
             desktop_window::fit(app.handle(),true);
             let bundled=app.path().resource_dir()?.join("builtin-clawpkgs");
             #[cfg(debug_assertions)]
@@ -10353,9 +10354,13 @@ pub fn run() {
         // stop the user's regular Pet Manager or its voice/USB connection.
         if cfg!(feature = "composer-diagnostic") { return; }
         match event {
-            RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
-                if desktop_window::request_exit(app_handle){api.prevent_close();}
+            RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
+                if label=="main" && desktop_window::hide_main(app_handle){
+                    api.prevent_close();
+                }else if desktop_window::request_exit(app_handle){api.prevent_close();}
             },
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => desktop_window::show_main(app_handle),
             RunEvent::WindowEvent { event: tauri::WindowEvent::ScaleFactorChanged { .. }, .. } => desktop_window::fit(app_handle,false),
             RunEvent::ExitRequested { api, .. } => {
                 if desktop_window::request_exit(app_handle){api.prevent_exit();}

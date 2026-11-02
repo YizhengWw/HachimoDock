@@ -1,9 +1,57 @@
+/*
+ * [Input] Desktop window, system tray, and explicit quit requests.
+ * [Output] Close-to-background, restore/quit menu, bounded window sizing and
+ *          existing transfer/unsaved-task protection on actual application exit.
+ * [Pos] Desktop window and tray lifecycle shared by the Tauri event loop.
+ * [Sync] If this file changes, update `pc/.folder.md` and background usage docs.
+ */
 use std::sync::{Mutex,atomic::{AtomicBool,Ordering}};
 use tauri::{Manager, AppHandle};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 static REASONS:Mutex<Vec<String>>=Mutex::new(Vec::new());
 static PROMPT:AtomicBool=AtomicBool::new(false);
 static APPROVED:AtomicBool=AtomicBool::new(false);
+const TRAY_ID:&str="hachimidock-background";
+
+pub fn init_tray(app:&AppHandle)->tauri::Result<()>{
+    let open=MenuItem::with_id(app,"show-main","打开 HachimiDock",true,None::<&str>)?;
+    let separator=PredefinedMenuItem::separator(app)?;
+    let quit=MenuItem::with_id(app,"quit-app","退出 HachimiDock",true,None::<&str>)?;
+    let menu=Menu::with_items(app,&[&open,&separator,&quit])?;
+    let mut tray=TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("HachimiDock · 后台运行")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .on_menu_event(|app,event|match event.id.as_ref(){
+            "show-main"=>show_main(app),
+            "quit-app"=>app.exit(0),
+            _=>{}
+        });
+    if let Some(icon)=app.default_window_icon(){tray=tray.icon(icon.clone());}
+    let tray=tray.build(app)?;
+    // Keep an owned handle for the entire application lifetime.
+    app.manage(tray);
+    Ok(())
+}
+pub fn show_main(app:&AppHandle){
+    if let Some(window)=app.get_webview_window("main"){
+        #[cfg(target_os="macos")]
+        let _=app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        fit(app,false);
+        let _=window.unminimize();
+        let _=window.show();
+        let _=window.set_focus();
+    }
+}
+pub fn hide_main(app:&AppHandle)->bool{
+    if app.tray_by_id(TRAY_ID).is_none(){return false;}
+    if !app.get_webview_window("main").is_some_and(|window|window.hide().is_ok()){return false;}
+    #[cfg(target_os="macos")]
+    let _=app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    true
+}
 
 #[tauri::command]
 pub fn set_exit_reasons(reasons:Vec<String>){
@@ -17,6 +65,7 @@ pub fn request_exit(app:&AppHandle)->bool{
     if crate::component_media::is_playing() || crate::component_audio::active_for_exit(){reasons.push("组件音频仍在播放，退出将停止播放".into());}
     if reasons.is_empty(){return false;}
     if !PROMPT.swap(true,Ordering::SeqCst){
+        show_main(app);
         let handle=app.clone();
         app.dialog().message(format!("{}\n\n退出会中断以上任务或丢弃未保存修改。是否仍要退出？",reasons.join("\n")))
             .title("退出 Pet Manager？").kind(MessageDialogKind::Warning)
@@ -34,6 +83,7 @@ fn fit_size(width:f64,height:f64,scale:f64,wanted:(f64,f64))->((f64,f64),(f64,f6
 }
 pub fn fit(app:&AppHandle,initial:bool){
     if let Some(window)=app.get_webview_window("main"){
+        let visible=window.is_visible().unwrap_or(false);
         if let Ok(Some(monitor))=window.current_monitor(){
             let area=monitor.work_area();
             let wanted=if initial{(1200.0,760.0)}else{window.inner_size().map(|s|(s.width as f64/monitor.scale_factor(),s.height as f64/monitor.scale_factor())).unwrap_or((1200.0,760.0))};
@@ -42,7 +92,7 @@ pub fn fit(app:&AppHandle,initial:bool){
             let _=window.set_size(tauri::LogicalSize::new(size.0,size.1));
             if initial{let _=window.center();}
         }
-        let _=window.show();
+        if initial||visible{let _=window.show();}
     }
 }
 #[cfg(test)]mod tests{use super::*;
