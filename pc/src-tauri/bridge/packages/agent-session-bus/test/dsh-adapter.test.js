@@ -33,6 +33,33 @@ test('availability authenticates actual descriptor endpoint via sessions, never 
   const { adapter } = await fixture(t, (req, res) => { assert.equal(req.url, '/sessions'); res.end(JSON.stringify({ version: 2, sessions: [] })) })
   assert.deepEqual(await adapter.isAvailable(), { ready: true, reason: null, version: 2 })
 })
+test('network budgets start after private descriptor verification, including synchronous Windows ACL checks', async t => {
+  let requests = 0, verified = false, validations = 0
+  const { adapter } = await fixture(t, (req, res) => {
+    requests++
+    if (req.url === '/inject') sse(res, [['done', { sessionId: 'a' }]])
+    else res.end(JSON.stringify({ version: 2, sessions: [] }))
+  })
+  const auth = adapter._auth.bind(adapter), timeout = AbortSignal.timeout
+  const budgets = []
+  t.mock.method(adapter, '_auth', () => {
+    assert.equal(verified, false)
+    const headers = auth() // Real descriptor and, on Windows, real PowerShell ACL validation.
+    verified = true; validations++
+    return headers
+  })
+  t.mock.method(AbortSignal, 'timeout', milliseconds => {
+    assert.equal(verified, true, 'no network deadline may start before trusted local validation')
+    verified = false; budgets.push(milliseconds)
+    return timeout.call(AbortSignal, milliseconds)
+  })
+  assert.equal((await adapter.isAvailable()).ready, true)
+  assert.deepEqual(await adapter.listSessions(), [])
+  assert.equal((await collect(adapter, { sessionId: 'a', text: 'synthetic' })).at(-1).kind, 'done')
+  assert.deepEqual(budgets, [2000, 5000, 600000], 'existing network budgets stay unchanged')
+  assert.equal(validations, 3)
+  assert.equal(requests, 3)
+})
 test('unauthenticated health-style success is not readiness', async t => {
   let calls = 0
   const { adapter } = await fixture(t, (_, res) => { calls++; res.end(JSON.stringify({ ok: true, version: 2 })) })
