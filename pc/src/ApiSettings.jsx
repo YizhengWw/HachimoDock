@@ -24,6 +24,7 @@ import Card from "./shell/Card.jsx";
 import LlmNetworkSettings from "./LlmNetworkSettings.jsx";
 import GenerationDiagnostics from "./GenerationDiagnostics.jsx";
 import TextModelSelect from "./TextModelSelect.jsx";
+import ImageModelSelect from "./ImageModelSelect.jsx";
 import { VideoModelSelect } from "./VideoGenerationSettings.jsx";
 import { useUsageHelp } from "./shell/DeviceContext.jsx";
 import UsageHelp from "./UsageHelp.jsx";
@@ -56,6 +57,7 @@ function persistedProviderConfig(config) {
     baseUrl: config.baseUrl || "",
     model: config.model || "",
     thinkingModel: config.thinkingModel || "",
+    imageModel: (config.imageModel || "").trim(),
     fastGeneration: config.fastGeneration !== false,
     videoParameters: config.videoParameters || {},
     advanced: config.advanced || {},
@@ -587,6 +589,12 @@ export default function ApiSettings({ onBack, configReadError = "" }) {
                     <span className="ui-field__label">图像理解 / 提示词模型</span>
                     <TextModelSelect vision label="图像理解模型" value={config.thinkingModel}
                       onChange={thinkingModel => updateProvider(provider.id, { thinkingModel })}
+                      apiKey={config.apiKey} baseUrl={config.baseUrl} />
+                  </div>}
+                  {provider.id === "volcengine" && <div className="ui-field">
+                    <span className="ui-field__label">图片处理模型</span>
+                    <ImageModelSelect value={config.imageModel}
+                      onChange={imageModel => updateProvider(provider.id, { imageModel })}
                       apiKey={config.apiKey} baseUrl={config.baseUrl} />
                   </div>}
                 </fieldset>

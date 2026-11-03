@@ -1,6 +1,9 @@
 # Joint PR12 / PR20 integration
 
-Baseline: `b72fce800594947d57310c3dd3b260b8fffa28a7`.
+Baseline: fetched `origin/main` at
+`4b24954aba704ee596747e0da09111fbc1d863e6`.
+The integration includes all changes on that main revision; the initial
+`b72fce800594947d57310c3dd3b260b8fffa28a7` baseline is its ancestor.
 Retained merge ancestry:
 
 - PR12: `56d507fe8ba1becbb12363bb0e94ba64a75ab1ce`.
@@ -31,8 +34,10 @@ text isolation, current/stale/expired/replayed stop transitions and stale/curren
 cancellation cleanup. Existing cue fixtures now include `session_terminated`
 and recognize the production conditional allow/deny call.
 
-Joint verification on 2026-11-03: 148 selected Node tests and 22 focused host
-tests passed in a synthetic HOME with external network, real credentials and
+Focused integration verification on 2026-11-03: 148 selected Node tests and
+22 focused host tests passed. After merging the fetched main revision, 94
+related avatar-model/recovery, DSH, session and bubble Node tests passed again.
+Checks used a synthetic HOME with external network, real credentials and
 serial/IOKit denied by the OS sandbox. Rust parsing and whitespace checks passed.
 The combined native type check passed with `cargo check --release --offline
 --locked --lib --jobs 2`, reusing existing dependencies and setting

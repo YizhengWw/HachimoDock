@@ -183,6 +183,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   const [model, setModel] = useState(provider.models[0] || "");
   const [thinkingModel, setThinkingModel] = useState("");
+  const [imageModel, setImageModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [openaiCompat, setOpenaiCompat] = useState(true);
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
@@ -254,6 +255,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     setBaseUrl(saved.baseUrl);
     setModel(saved.model);
     setThinkingModel(saved.thinkingModel);
+    setImageModel(saved.imageModel);
     setFastGeneration(saved.fastGeneration);
     setVideoParameters(saved.videoParameters);
     setAdvanced(saved.advanced);
@@ -531,11 +533,12 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
       baseUrl,
       model,
       thinkingModel,
+      imageModel: imageModel.trim(),
       fastGeneration,
       videoParameters,
       advanced,
     });
-  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, videoParameters, advanced]);
+  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, imageModel, fastGeneration, videoParameters, advanced]);
 
   const handleSingleStateFile = useCallback((file) => {
     if (!file) return;
@@ -1307,6 +1310,8 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
                     onModel={setModel}
                     thinkingModel={thinkingModel}
                     onThinkingModel={setThinkingModel}
+                    imageModel={imageModel}
+                    onImageModel={setImageModel}
                     advancedOpen={advancedOpen}
                     onAdvancedOpen={setAdvancedOpen}
                     openaiCompat={openaiCompat}

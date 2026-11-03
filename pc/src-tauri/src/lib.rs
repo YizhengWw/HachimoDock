@@ -6216,6 +6216,41 @@ fn detect_codex() -> DetectedAgent {
     }
 }
 
+/// Decide the OpenClaw discovery state from a real CLI entry and the local
+/// status-bridge identity file.
+///
+/// `~/.status-bridge/openclaw-device.json` is created by the bundled status
+/// bridge on first launch (it is only a local MQTT device identity), so its
+/// presence must never be reported as an installed OpenClaw CLI/Gateway.
+fn openclaw_detection(
+    cli_path: Option<&str>,
+    has_status_bridge_identity: bool,
+) -> (bool, &'static str, String) {
+    match (cli_path, has_status_bridge_identity) {
+        (Some(path), true) => (
+            true,
+            "ready",
+            format!("已检测到 OpenClaw CLI 与本地状态桥身份: {}", path),
+        ),
+        (Some(path), false) => (
+            true,
+            "ready",
+            format!("已检测到 OpenClaw CLI（等待 Gateway 配置）: {}", path),
+        ),
+        (None, true) => (
+            false,
+            "not_found",
+            "仅检测到 HachimoDock 本地状态桥身份文件（客户端自动生成），未安装 OpenClaw CLI"
+                .to_string(),
+        ),
+        (None, false) => (
+            false,
+            "not_found",
+            "未检测到 OpenClaw CLI 或 Gateway".to_string(),
+        ),
+    }
+}
+
 fn detect_openclaw() -> DetectedAgent {
     let home = get_home_dir().ok();
     let cli_path = find_agent_executable(
@@ -6233,37 +6268,18 @@ fn detect_openclaw() -> DetectedAgent {
                 .to_string()
         })
         .unwrap_or_default();
-    let has_config = !config_path.is_empty() && Path::new(&config_path).exists();
+    let has_status_bridge_identity =
+        !config_path.is_empty() && Path::new(&config_path).exists();
 
-    let (detected, status, detail) = match (&cli_path, has_config) {
-        (Some(path), true) => (
-            true,
-            "ready".to_string(),
-            format!("已检测到 OpenClaw CLI 与 Gateway: {}", path),
-        ),
-        (Some(path), false) => (
-            true,
-            "ready".to_string(),
-            format!("已检测到 OpenClaw CLI（等待 Gateway 配置）: {}", path),
-        ),
-        (None, true) => (
-            true,
-            "ready".to_string(),
-            "OpenClaw Gateway 已配置（未发现 CLI 入口）".to_string(),
-        ),
-        (None, false) => (
-            false,
-            "not_found".to_string(),
-            "未检测到 OpenClaw CLI 或 Gateway".to_string(),
-        ),
-    };
+    let (detected, status, detail) =
+        openclaw_detection(cli_path.as_deref(), has_status_bridge_identity);
 
     DetectedAgent {
         id: "openclaw".to_string(),
         label: "OpenClaw".to_string(),
         detected,
         ready: status == "ready",
-        status,
+        status: status.to_string(),
         detail,
         command_path: cli_path.unwrap_or_default(),
         config_path,
@@ -10639,6 +10655,15 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") { window.show()?; }
                 return Ok(());
             }
+            #[cfg(target_os="macos")]
+            if let Err(error)=desktop_window::route_macos_quit(app.handle()){
+                eprintln!("[desktop-menu] guarded Quit unavailable: {}",error);
+            }
+            // The tray is optional: shell/icon failures must not prevent the
+            // foreground app from starting. Without a tray, Close still exits.
+            if let Err(error)=desktop_window::init_tray(app.handle()){
+                eprintln!("[desktop-tray] unavailable; keeping foreground close/exit behavior: {}",error);
+            }
             desktop_window::fit(app.handle(),true);
             let bundled=app.path().resource_dir()?.join("builtin-clawpkgs");
             #[cfg(debug_assertions)]
@@ -10834,9 +10859,13 @@ pub fn run() {
         // stop the user's regular Pet Manager or its voice/USB connection.
         if cfg!(feature = "composer-diagnostic") { return; }
         match event {
-            RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
-                if desktop_window::request_exit(app_handle){api.prevent_close();}
+            RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. } => {
+                if label=="main" && desktop_window::hide_main(app_handle){
+                    api.prevent_close();
+                }else if desktop_window::request_exit(app_handle){api.prevent_close();}
             },
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => desktop_window::show_main(app_handle),
             RunEvent::WindowEvent { event: tauri::WindowEvent::ScaleFactorChanged { .. }, .. } => desktop_window::fit(app_handle,false),
             RunEvent::ExitRequested { api, .. } => {
                 if desktop_window::request_exit(app_handle){api.prevent_exit();}
@@ -12834,6 +12863,24 @@ mod tests {
             &enabled
         ));
         assert!(!usb_source_allowed_by_follow("codex", &selected, &enabled));
+    }
+
+    #[test]
+    fn openclaw_status_bridge_identity_alone_is_not_an_installed_cli() {
+        let (detected, status, detail) = openclaw_detection(None, true);
+        assert!(!detected);
+        assert_eq!(status, "not_found");
+        assert!(detail.contains("状态桥身份"));
+    }
+
+    #[test]
+    fn openclaw_cli_detection_stays_ready_with_or_without_bridge_identity() {
+        for has_status_bridge_identity in [true, false] {
+            let (detected, status, _) =
+                openclaw_detection(Some("/tmp/openclaw"), has_status_bridge_identity);
+            assert!(detected);
+            assert_eq!(status, "ready");
+        }
     }
 
     #[test]
