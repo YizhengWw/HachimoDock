@@ -15,12 +15,40 @@ static PROMPT:AtomicBool=AtomicBool::new(false);
 static APPROVED:AtomicBool=AtomicBool::new(false);
 const TRAY_ID:&str="hachimidock-background";
 
+#[cfg(target_os="macos")]
+pub fn route_macos_quit(app:&AppHandle)->tauri::Result<()>{
+    // Keep Tauri's default menu and all native Edit/Window/Services items.
+    // Its predefined Quit sends terminate: directly, bypassing ExitRequested.
+    let menu=app.menu().ok_or_else(||std::io::Error::new(std::io::ErrorKind::NotFound,"default application menu unavailable"))?;
+    let quit_text=PredefinedMenuItem::quit(app,None)?.text()?;
+    for item in menu.items()?{
+        let Some(submenu)=item.as_submenu() else {continue;};
+        for (index,old) in submenu.items()?.into_iter().enumerate(){
+            if old.id().as_ref()=="guarded-app-quit"{return Ok(());}
+            if let Some(predefined)=old.as_predefined_menuitem(){
+                if predefined.text()?!=quit_text{continue;}
+                let quit=MenuItem::with_id(app,"guarded-app-quit",quit_text.clone(),true,Some("CmdOrCtrl+Q"))?;
+                submenu.insert(&quit,index)?;
+                if let Err(error)=submenu.remove(&old){
+                    let _=submenu.remove(&quit);
+                    return Err(error);
+                }
+                app.on_menu_event(|app,event|{
+                    if event.id.as_ref()=="guarded-app-quit"{app.exit(0);}
+                });
+                return Ok(());
+            }
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::NotFound,"default Quit menu item unavailable").into())
+}
+
 pub fn init_tray(app:&AppHandle)->tauri::Result<()>{
     let open=MenuItem::with_id(app,"show-main","打开 HachimiDock",true,None::<&str>)?;
     let separator=PredefinedMenuItem::separator(app)?;
     let quit=MenuItem::with_id(app,"quit-app","退出 HachimiDock",true,None::<&str>)?;
     let menu=Menu::with_items(app,&[&open,&separator,&quit])?;
-    let mut tray=TrayIconBuilder::with_id(TRAY_ID)
+    let tray=TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("HachimiDock · 后台运行")
         .menu(&menu)
         .show_menu_on_left_click(true)
@@ -29,8 +57,8 @@ pub fn init_tray(app:&AppHandle)->tauri::Result<()>{
             "quit-app"=>app.exit(0),
             _=>{}
         });
-    if let Some(icon)=app.default_window_icon(){tray=tray.icon(icon.clone());}
-    let tray=tray.build(app)?;
+    let icon=app.default_window_icon().ok_or_else(||std::io::Error::new(std::io::ErrorKind::NotFound,"default tray icon unavailable"))?;
+    let tray=tray.icon(icon.clone()).build(app)?;
     // Keep an owned handle for the entire application lifetime.
     app.manage(tray);
     Ok(())
@@ -46,6 +74,9 @@ pub fn show_main(app:&AppHandle){
     }
 }
 pub fn hide_main(app:&AppHandle)->bool{
+    // AppIndicator can build successfully without a visible tray host. Until
+    // Linux has a reliable restore/quit entry, closing retains the exit guards.
+    if cfg!(target_os="linux"){return false;}
     if app.tray_by_id(TRAY_ID).is_none(){return false;}
     if !app.get_webview_window("main").is_some_and(|window|window.hide().is_ok()){return false;}
     #[cfg(target_os="macos")]

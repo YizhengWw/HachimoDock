@@ -10162,7 +10162,15 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") { window.show()?; }
                 return Ok(());
             }
-            desktop_window::init_tray(app.handle())?;
+            #[cfg(target_os="macos")]
+            if let Err(error)=desktop_window::route_macos_quit(app.handle()){
+                eprintln!("[desktop-menu] guarded Quit unavailable: {}",error);
+            }
+            // The tray is optional: shell/icon failures must not prevent the
+            // foreground app from starting. Without a tray, Close still exits.
+            if let Err(error)=desktop_window::init_tray(app.handle()){
+                eprintln!("[desktop-tray] unavailable; keeping foreground close/exit behavior: {}",error);
+            }
             desktop_window::fit(app.handle(),true);
             let bundled=app.path().resource_dir()?.join("builtin-clawpkgs");
             #[cfg(debug_assertions)]
