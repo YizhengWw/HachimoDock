@@ -1104,7 +1104,14 @@ def test_p4_conversation_queue_is_synced_and_rendered_with_pixel_ellipsis():
     assert "candidate.terminal_until_ms = now_ms + terminal_remaining_ms" in protocol
     assert "candidate = *previous" in protocol
     assert "previous->terminal_until_ms > now_ms" in protocol
-    assert 'lifecycle_is(candidate.state, "error") ? "error" : "done"' in protocol
+    # A terminal stop remains distinct from successful completion; failures
+    # still map to error and the ordinary terminal fallback remains done.
+    assert 'bool stopped_transition = lifecycle_is(candidate.state, "stopped")' in protocol
+    assert re.search(
+        r'lifecycle_is\(candidate\.state,\s*"error"\)\s*\?\s*"error"\s*:'
+        r'\s*stopped_transition\s*\?\s*"stopped"\s*:\s*"done"',
+        protocol,
+    )
     assert "unsigned int ordered_count = 0" in protocol
     assert "matched_index = j" in protocol
     assert "matched_index - ordered_count" in protocol

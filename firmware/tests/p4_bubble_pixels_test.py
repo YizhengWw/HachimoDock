@@ -97,7 +97,13 @@ int main(int argc,char**argv){
   v=cJSON_GetObjectItemCaseSensitive(c,"drawHeld");if(v){assert(holding);unsigned page=num(v,"page");if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v,"pinPage")))pet_bubble_pixels_pin_page(&held,page);for(unsigned i=0;i<640*480+2;i++)framebuffer[i]=0xffff;framebuffer[0]=framebuffer[640*480+1]=0xabcd;const cJSON*x=cJSON_GetObjectItemCaseSensitive(v,"x"),*clip=cJSON_GetObjectItemCaseSensitive(v,"clip");bool ok=pet_bubble_pixels_draw_pinned(&held,num(v,"style"),page,framebuffer+1,cJSON_IsNumber(x)?x->valueint:0,0,cJSON_IsNumber(clip)?clip->valueint:496,0);assert(ok==cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(v,"ok")));assert(framebuffer[0]==0xabcd&&framebuffer[640*480+1]==0xabcd);if(ok){assert(framebuffer[1]==num(v,"first"));}cJSON*expected=cJSON_GetObjectItemCaseSensitive(v,"expectedPixels");if(expected){assert(cJSON_GetArraySize(expected)<=640*480);for(int i=0;i<cJSON_GetArraySize(expected);i++)assert(framebuffer[i+1]==cJSON_GetArrayItem(expected,i)->valueint);} }
   if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(c,"release"))){assert(holding);pet_bubble_pixels_release(&held);holding=false;}
  }
- if(holding)pet_bubble_pixels_release(&held);pet_bubble_pixels_maintain(20000,true);cJSON_Delete(commands);return 0;}
+ if (holding) {
+  pet_bubble_pixels_release(&held);
+ }
+ pet_bubble_pixels_maintain(20000,true);
+ cJSON_Delete(commands);
+ return 0;
+}
 ''')
     vendor=ROOT/'tests/vendor/cjson';binary=t/'receiver'
     flags=['-std=c11','-O1','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-fno-omit-frame-pointer','-pthread']
