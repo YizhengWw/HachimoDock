@@ -167,3 +167,16 @@ test("FormosaPickerModal CSS stays compact when only a few appearances exist", (
   assert.match(styles, /\.channel-row__thumb:is\(img,\s*video\)\s*\{[\s\S]*object-fit:\s*contain/);
   assert.match(styles, /\.modal-card--formosa-picker\s+\.modal-footer\s*\{/);
 });
+
+test("DSH row exposes a persisted approval timeout selector", () => {
+  assert.match(source, /load_dsh_approval_timeout/);
+  assert.match(source, /save_dsh_approval_timeout/);
+  assert.match(source, /dshApprovalTimeoutMs/);
+  assert.match(source, /DSH_APPROVAL_TIMEOUT_OPTIONS/);
+  assert.match(source, /agent\.id === "deepseek-harness"/);
+  assert.match(source, /超时时间/);
+  assert.match(source, /永不超时/);
+  assert.match(extractCssRule(styles, ".channel-row__approval-timeout-trigger"), /border-radius:\s*var\(--radius-md\)/);
+  assert.match(source, /channel-row__approval-timeout-menu/);
+  assert.match(source, /channel-row__approval-timeout-option/);
+});

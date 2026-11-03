@@ -64,7 +64,7 @@ def test_realtime_renderer_and_input_never_use_agent_queue():
 def test_recording_row_is_shared_without_duplicate_idle_bubble():
     source = (ROOT / "main/pet_p4_renderer.c").read_text()
     assert "if (view && view->show_voice_overlay) draw_standalone_voice_overlay();" in source
-    assert "else if (!show_session_queue) draw_bubble(view, now_ms);" in source
+    assert "else if (!show_session_queue) draw_bubble(state, view, now_ms);" in source
     assert "draw_voice_input_row(x, y + 18)" in source
     assert "draw_voice_input_row(x, y + 62)" in source
     assert source.count('draw_text_line_vcenter("LISTENING"') == 1

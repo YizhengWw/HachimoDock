@@ -68,6 +68,9 @@ void pet_p4_audio_process(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
 );
+/* Play one embedded UI/system cue (permission request/approved/denied/expired).
+ * Unlike lifecycle cues this is event-driven and may repeat for another request. */
+esp_err_t pet_p4_audio_play_event_cue(const char *family);
 void pet_p4_audio_send_status(void);
 
 #ifdef __cplusplus

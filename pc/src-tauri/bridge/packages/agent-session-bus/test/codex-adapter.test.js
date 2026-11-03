@@ -267,6 +267,12 @@ test("listSessions excludes internal Codex approval review rollouts", async () =
   await withFakeHome({
     sessions: {
       "2026/06/03": {
+          "rollout-2026-06-03T19-33-42-guardian-review.jsonl": {
+            mtimeAgo: 50,
+            meta: { id: "guardian-review", cwd: "/repo", originator: "Codex Desktop",
+              thread_source: "guardian_review", source: { subagent: { other: "guardian" } } },
+            lines: [{ type: "event_msg", payload: { type: "task_started" } }],
+          },
         "rollout-2026-06-03T19-32-42-internal-review.jsonl": {
           mtimeAgo: 100,
           meta: { id: "internal-review", cwd: "/repo" },

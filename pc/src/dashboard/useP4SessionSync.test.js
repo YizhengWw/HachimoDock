@@ -88,3 +88,10 @@ test("P4 card content prefers live text, suppresses plugin payloads, and respect
       <= 383,
   );
 });
+
+test("stopped sessions render an explicit stopped body", () => {
+  assert.equal(
+    formatDeviceSessionContent({ state: "stopped", displayContent: "old reply" }, "Build"),
+    "已停止",
+  );
+});

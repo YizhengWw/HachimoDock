@@ -1,5 +1,21 @@
 # ESP-P4 USB Protocol
 
+可选气泡像素能力为 `capabilities.bubblePixels=p4-text-alpha-v2`，另带本次设备启动的16hex `bubblePixelsBoot`。未知 boot、旧 v1/不支持的对端完全保留本机字库文字；不降级发送旧像素协议。最新文字立即显示，图片只是同内容的可选增强，不保留上一会话文字等待下载。
+
+主窗口 renderer 使用32hex instance，native 按 board/connection(decimal string)/boot/renderer/owner/contentVersion 授权。每条当前文字状态的 `textPixels` 对象含 `boot/client/owners[]`；owner 项为 `{id,version,assets:[{id,style}]}`，是 native 跨 display role 的完整当前快照（不是设备端增量合并），最多12 owner、每owner最多4资产；遗漏的owner立即退休其staging。owner和version均16hex；同topic独立会话不覆盖，`session/current`完整快照只排当前可见的最多3项。FNV 是相关性/意外损坏校验，不是认证。
+
+`ui/text-pixels` 的每个阶段都带 `requestId/boot/client/owner/version/transfer/id/style`，requestId匹配本阶段响应。`begin` 另含 `pageSizes:[length]`、`totalBytes<=32768`、8hex FNV32 checksum、`pageIndex/pageCount`。一次只接收一页、一张完整asset，`style=2`可有最多16页，其他style只有页0。样式1/2/3/4的几何分别为474×38、496×54、348×38、496×54；字号分别32/24/32/24px。编码仍是高4bit alpha、低4bit run-1，每byte代表1..16像素，不删灰阶。
+
+`begin` 必须收到 `ui/text-pixels/status` 的ok及offset0才可发数据；`cached:true`只证明本boot/client当前资产仍驻留，跳过data。每个 `chunk` 为最多512B raw Base64且offset严格连续，响应必须确认累计offset。RLE像素总数/FNV按块增量检查；`end`只核对完整计数并短发布，不整图重扫。每条响应带匹配的phase/boot/client/owner/version/transfer/id；未知ACK或物理写入失败不重播整帧。`status`可查同一个transfer；`abort`只释放匹配owner/route/transfer，不能改已提交cache。
+
+device只允许一个route/client/boot拥有的staging，busy begin不覆盖；idle3秒/absolute10秒到期，或内容退休、peer变化、audio/OTA/普通asset工作保护时释放。cache最多8槽、256KiB加一个32KiB staging，均不写Flash。元数据锁与不可变读pin让标题/当前正文页贯穿一次frame，淘汰/peer退休先停止新读，最后一个pin释放后才free；缺少任一角色即整对文字fallback。只更新实际显示项的pin时效，cache revision参与overlay重建。
+
+主机单worker/单raster，在完整asset结束或取消后按owner FIFO轮转，禁止跨owner交错未完成staging。每wire frame单独取得asset guard，提交后先释放再等ACK/限速；每个异步边界及最后写入点复验native代次/boot/renderer/内容和media保护。host wire预算为8% UART8N1吞吐且最多12288B/s，frame最多1536B，asset绝对deadline10秒；预计不够在BEGIN前回退文字。只对未提交前的worker忙最多重试两次；其他错误等待新状态或有界missing通知。
+
+翻页/淘汰缺图可触发 `ui/text-pixels/need`：只含boot/client/id/style/page，无文本或会话ID。设备8项合并队列、最多每秒一条；native仅接受当前peer/renderer及当前desired白名单资产，并限频。JS只渲染所需页，失败冷却5秒，不把旧sent时间当驻留证明。页预取是懒执行且受相同预算约束；无法补图始终保持当前文字。
+
+这些常量是明确的资源/工作上界，不是已通过所有芯片时延、heap、stack、音频或HIL的宣称；仍需实际双镜像预算及设备验收。
+
 0.7.103-p4：内置清单、启动器图片及完整出厂资源统一为 29 项。末尾追加 `decision-capsule`、`answer-book`、`hope-train`；通用 `widgetLocalTools=p4-local-tools-v1` 契约保持不变。OTA 仍保留轻量资源引导与现有用户存档，完整出厂镜像才携带全部图片。
 
 0.7.100-p4：新增 `widgetMediaQueueMax=128` 与 `widgetMediaLifecycle=p4-media-lifecycle-v1`。媒体队列超过 20 项时，key 至多 80 UTF-8 字节、标题至多 90 字节；上限 128，刷新按 key 保留选中项，不修改音频会话。`media/event` 新增 `operation=visibility`，包含 `source/boot/epoch/visible`；进入或离开递增 epoch，可见时每 2 秒发送心跳。宿主只有资源包声明自动播放、当前可见且新的进入事件时才准备播放，停止/离开取消未开始的播放；目录刷新不重新触发播放。能力与配置为通用媒体机制，不绑定特定组件 ID。
@@ -404,8 +420,52 @@ PC to board:
 {"topic":"ack","payload":{"desktopDeviceId":"desktop-..."}}
 ```
 
+## DSH 审批上屏（R5 设备侧 v0）
+
+DSH 审批卡片由 PC bridge 转发到设备；设备只负责显示并回传一次决定，
+不实现审批策略、不访问网络，也不改变审批未激活时的原有页面渲染与键位绑定。
+
+PC → P4：
+
+```json
+{"topic":"approval/request","payload":{"requestId":"req-1","agent":"DeepSeek Harness","tool":"bash","reason":"列出当前目录","sessionId":"session-...","expiresAtMs":1790000000000}}
+```
+
+- `requestId` 必填，最长 95 个 UTF-8 字节；缺失时回 `protocol/ack` 失败
+  `invalid_approval_request`。
+- `agent`（最长 64 字节）、`tool`（64）、`reason`（192）可选，超长按 UTF-8
+  边界截断；缺失时卡片分别显示 `未知 Agent`、`未知工具`、`无说明`。
+- `expiresAtMs` 可选，毫秒单位。DSH 插件/PC bridge 使用 Unix epoch 毫秒
+  （如 `1790000000000`），设备用最近一次 `system/heartbeat.tsMs` 锚点换算成
+  单调时钟；尚未收到心跳锚点或发送端直接给设备单调毫秒时，使用收到的值，
+  缺省为收到时刻 + 30 秒（`PET_P4_APPROVAL_TIMEOUT_MS`）。换算后的设备侧
+  pending 最长保留 5 分钟（`PET_P4_APPROVAL_MAX_HOLD_MS`，防御异常时钟）。
+  到达时已过期的请求直接忽略（fail closed，回 `approval_expired`），不会弹窗。
+- 同一时刻只保留一个 pending 请求：新请求覆盖旧请求；已回复过的同一
+  `requestId` 重发会被去重（回 `approval_already_decided`），不会再次弹窗。
+- 成功接收回 `protocol/ack`（`requestTopic:"approval/request"`、`ok:true`、
+  `requestId` 原样回传）。桥接端可据此确认设备在线，无需自行等待 UI。
+
+P4 → PC：
+
+```json
+{"topic":"approval/decision","payload":{"requestId":"req-1","decision":"allow","source":"esp32"}}
+```
+
+- 卡片显示期间 SW1 短按 = `allow`，SW3 短按 = `deny`；decision 入队后立即
+  清除 pending，因此同一请求只会产生一条 decision（幂等）。
+- 卡片显示期间其余按键、长按、HOLD、摇杆/旋钮事件全部被吞掉，不会落到原有
+  键位绑定，也不会误触允许/拒绝。
+- 换算后的设备侧 deadline 到期时设备自行清除 pending 且不发送任何 decision；
+  审批超时仍由 DSH 插件（默认 30 秒，fail closed）负责。
+- 界面为覆盖当前页面的深色模态卡片：标题 `需要授权`、来源/工具行、最多两行
+  省略理由、剩余秒数，底部 `确认键允许` / `取消键拒绝`。卡片只叠加在普通帧上；
+  固件/形象传输状态帧期间到达的请求会在传输界面结束后显示（其超时同样生效）。
+
 ## Supported Input Topics
 
+- `approval/request`: shows the modal DSH approval card (see above) and becomes
+  the only accepted input context until a decision or expiry clears it.
 - `state/<agent>`: updates current lifecycle state, event, and status marker.
 - `speech/text`: updates the speech bubble title, body, status, and status text.
   A terminal `done` lifecycle remains visible on the device for 60 seconds

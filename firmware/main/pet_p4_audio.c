@@ -76,6 +76,8 @@ static atomic_uint g_playback_generation;
 static pet_p4_behavior_t g_playback_behavior;
 static char g_playback_family[PET_P4_ASSET_FAMILY_MAX];
 static unsigned int g_playback_asset_revision;
+static char g_playback_session_key[PET_P4_SESSION_QUEUE_ID_MAX];
+static unsigned long long g_playback_session_revision;
 
 /* ---- 实时对话：持续采集 + 流式播放 ---- */
 #define PET_P4_AUDIO_STREAM_RING_BYTES (96 * 1024)  /* 3 s @ 16 kHz s16 mono */
@@ -913,7 +915,27 @@ void pet_p4_audio_process(
    * Those cues also gate half-duplex capture and can suppress an entire user utterance. */
   if (atomic_load(&g_instrument_enabled) || pet_p4_audio_conversation_active()
       || atomic_load_explicit(&g_stream_active, memory_order_acquire)) return;
+  /* Never replace an event cue (for example session_terminated) with an
+   * inferred lifecycle cue while the event cue is still playing. */
+  if (pet_p4_audio_playback_active()) return;
   const char *lifecycle = pet_p4_canonical_lifecycle(pet_p4_state_effective_lifecycle(state, now_ms));
+  const pet_p4_session_queue_item_t *current_session = NULL;
+  for (unsigned i = 0; i < state->session_queue_count && i < PET_P4_SESSION_QUEUE_MAX; i += 1) {
+    if (state->current_session_id[0]
+        && strcmp(state->session_queue[i].id, state->current_session_id) == 0) {
+      current_session = &state->session_queue[i];
+      break;
+    }
+  }
+  if (!current_session && state->current_session_index < state->session_queue_count) {
+    current_session = &state->session_queue[state->current_session_index];
+  }
+  const char *session_key = current_session
+    ? current_session->id
+    : state->current_session_id;
+  unsigned long long session_revision = current_session
+    ? current_session->transition_revision
+    : 0;
   int index = pet_p4_behavior_select(
     &g_playback_behavior,
     &state->asset_catalog,
@@ -927,11 +949,15 @@ void pet_p4_audio_process(
   /* Status cues do not depend on a matching animation being installed. */
   if (entry && strcmp(entry->family, family)) entry = NULL;
   if (g_playback_asset_revision == state->asset_revision
-      && strcmp(g_playback_family, family) == 0) {
+      && strcmp(g_playback_family, family) == 0
+      && strcmp(g_playback_session_key, session_key) == 0
+      && g_playback_session_revision == session_revision) {
     return;
   }
 
   snprintf(g_playback_family, sizeof(g_playback_family), "%s", family);
+  snprintf(g_playback_session_key, sizeof(g_playback_session_key), "%s", session_key);
+  g_playback_session_revision = session_revision;
   g_playback_asset_revision = state->asset_revision;
   unsigned int generation = atomic_fetch_add_explicit(
     &g_playback_generation, 1U, memory_order_acq_rel
@@ -947,6 +973,20 @@ void pet_p4_audio_process(
   }
   request.generation = generation;
   xQueueOverwrite(g_playback_queue, &request);
+}
+
+esp_err_t pet_p4_audio_play_event_cue(const char *family) {
+  if (!family || !pet_p4_system_cue_family(family)) return ESP_ERR_INVALID_ARG;
+  if (!pet_p4_audio_playback_ready() || !g_playback_queue) return ESP_ERR_INVALID_STATE;
+  pet_p4_audio_playback_request_t request;
+  memset(&request, 0, sizeof(request));
+  snprintf(request.family, sizeof(request.family), "%s", family);
+  request.audio_custom = false;
+  request.generation = atomic_fetch_add_explicit(
+    &g_playback_generation, 1U, memory_order_acq_rel
+  ) + 1U;
+  xQueueOverwrite(g_playback_queue, &request);
+  return ESP_OK;
 }
 
 esp_err_t pet_p4_audio_set_enabled(bool enabled) {

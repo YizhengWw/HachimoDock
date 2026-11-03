@@ -136,6 +136,7 @@ function ControlGlyph({ controlId, label, active = false }) {
 }
 
 export default function BoardButtonPanel({
+  selectedAgentId,
   voiceConfig,
   buttonActions = DEFAULT_BUTTON_ACTIONS,
   buttonValues = {},
@@ -375,10 +376,11 @@ export default function BoardButtonPanel({
                   {group.rows.map((row) => {
                     const currentActionId = buttonActions?.[row.id] || row.defaultAction;
                     const isShortPress = isP4Runtime && row.event.endsWith(".short_press");
-                    const allowedOptions = BUTTON_FUNCTION_OPTIONS.filter((option) =>
-                      row.actionOptions.includes(option.id)
-                        || (isShortPress && option.id === "voice_ptt"),
-                    );
+                    const allowedOptions = BUTTON_FUNCTION_OPTIONS.filter((option) => {
+                      if (option.id === "dsh_interrupt" && selectedAgentId !== "deepseek-harness") return false;
+                      return row.actionOptions.includes(option.id)
+                        || (isShortPress && option.id === "voice_ptt");
+                    });
                     const isVoicePttRow = currentActionId === "voice_ptt";
                     const rowHovered = hoveredButtonId === row.id || (row.controlId && hoveredButtonId === row.controlId);
                     const fieldId = `button-action-${row.id}`;

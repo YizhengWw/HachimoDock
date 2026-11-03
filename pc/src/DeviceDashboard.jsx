@@ -127,6 +127,7 @@ export const BUTTON_FUNCTION_OPTIONS = [
   { id: "session_previous", label: "上一个", detail: "宠物界面切换到上一个会话气泡；组件中心切换到上一个组件。" },
   { id: "session_next", label: "下一个", detail: "宠物界面切换到下一个会话气泡；组件中心切换到下一个组件。" },
   { id: "session_clear", label: "清空主页会话", detail: "清除设备主页当前显示的全部会话；新会话或新活动会自动重新显示。" },
+  { id: "dsh_interrupt", label: "打断 DSH 当前任务", detail: "仅在跟随 DeepSeek Harness 时可用：取消当前正在执行的回合。" },
   { id: "component_center", label: "切换宠物/组件", detail: "切换宠物界面和组件列表；组件运行时请先返回。" },
   { id: "page_enter", label: "确认", detail: "发送语音输入的文字，或打开选中的组件；组件内按其玩法操作。" },
   { id: "page_back", label: "返回（取消）", detail: "取消当前选择，或从当前组件返回上一级。" },
@@ -160,6 +161,7 @@ const P4_CUSTOM_ACTION_OPTIONS = [
   "session_previous",
   "session_next",
   "session_clear",
+  "dsh_interrupt",
   "component_center",
   "page_enter",
   "page_back",
@@ -1525,6 +1527,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
 
       <Card>
         <BoardButtonPanel
+          selectedAgentId={selectedAgentId}
           voiceConfig={runtimeVoiceConfig}
           buttonActions={voiceConfig.buttonActions}
           buttonValues={voiceConfig.buttonValues}

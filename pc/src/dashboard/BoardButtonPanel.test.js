@@ -281,3 +281,9 @@ test("BoardButtonPanel is always visible (no Card.Collapsible wrapper in this fi
   // The panel itself does not collapse — the parent DeviceDashboard places it in a plain Card.
   assert.doesNotMatch(source, /Card\.Collapsible/);
 });
+
+test("DSH interrupt action is only offered while following DeepSeek Harness", () => {
+  assert.match(source, /selectedAgentId/);
+  assert.match(source, /dsh_interrupt/);
+  assert.match(source, /selectedAgentId !== "deepseek-harness"/);
+});
