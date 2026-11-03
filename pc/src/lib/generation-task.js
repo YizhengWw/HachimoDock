@@ -16,7 +16,7 @@ import { getVolcanoInputImageRejection } from "./avatar-pipeline/providers/volca
 import { getArkImageEditPolicyRejection } from "./avatar-pipeline/providers/volcano-image.js";
 import { replaceFamilyVideo, saveAppearance, prepareSavedAppearance } from "./appearance-store.js";
 import { recordDiagnostic } from "./avatar-pipeline/diagnostics.js";
-import { loadGenerationSession, saveGenerationSession, beginGenerationSession, publicGenerationConfig, generationSessionNeedsProtection, summarizeGenerationSession, canAutoResume } from "./avatar-pipeline/session.js";
+import { loadGenerationSession, saveGenerationSession, beginGenerationSession, publicGenerationConfig, resumeGenerationImageEdit, generationSessionNeedsProtection, summarizeGenerationSession, canAutoResume } from "./avatar-pipeline/session.js";
 import { loadProviderConfig, loadArkImageConfig } from "./avatar-pipeline/provider-config.js";
 
 /**
@@ -110,7 +110,7 @@ export async function resumeGenerationTask(key = "current", { automaticResume = 
     personality: session.personality, styleDescription: session.styleDescription || '', skipProcessing: session.skipProcessing, session, restoreArchived: key !== "current",
     manualReview: session.automatic !== true,
     retryReview: !automaticResume,
-    providerConfig: { ...saved, ...session.config, imageEdit: loadArkImageConfig() },
+    providerConfig: { ...saved, ...session.config, imageEdit: resumeGenerationImageEdit(session, loadArkImageConfig()) },
   });
 }
 

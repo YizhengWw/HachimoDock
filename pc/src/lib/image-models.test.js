@@ -51,3 +51,21 @@ test("catalog refresh only reads metadata and preserves authentication/cancellat
     return Response.json({ data: [] });
   }), { name: "AbortError" });
 });
+
+
+test("disabled presets and current selections stay excluded after merging and duplicate rows", async () => {
+  const ids = ["doubao-seedream-5-0-flash-260915", "doubao-seedream-4-5-251128", "doubao-seedream-4-0-250828", "ep-disabled", "ep-inactive", "ep-unavailable"];
+  const catalog = await listImageModelCatalog({ apiKey: "fixture-only", baseUrl: "https://ark.cn-beijing.volces.com" }, async () => Response.json({ data: [
+    { id: ids[0], enabled: false }, { id: ids[1], available: false }, { id: ids[2], active: false },
+    { id: ids[3], lifecycle: { status: "Disabled" } }, { id: ids[4], status: "Inactive" }, { id: ids[5], status: "Unavailable" },
+    { id: ids[0], modalities: { input_modalities: ["image"], output_modalities: ["image"] } },
+    { id: "doubao-seedream-retiring", lifecycle: { status: "Retiring" } },
+  ] }));
+  assert.deepEqual(new Set(catalog.unavailableModels), new Set(ids));
+  for (const current of ["", ...ids]) {
+    const options = imageModelOptions(catalog, current);
+    for (const id of ids) assert.ok(!options.includes(id), `${id} must not return through presets/current`);
+    assert.ok(options.includes("doubao-seedream-retiring"));
+  }
+  assert.ok(imageModelOptions(catalog, "ep-manual-unknown").includes("ep-manual-unknown"));
+});

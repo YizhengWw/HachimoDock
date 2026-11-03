@@ -9,20 +9,25 @@ export function isImageModelShutdown(row) {
   return typeof status === "string" && /^(shutdown|offline|retired|eos|已下线)$/i.test(status.trim());
 }
 
-export function imageModelOptions({ models, shutdownModels }, current = "") {
-  const shutdown = new Set(shutdownModels);
+export function isImageModelUnavailable(row) {
+  const status = row?.lifecycle?.status || row?.lifecycle || row?.status;
+  return isImageModelShutdown(row) || row?.available === false || row?.enabled === false || row?.active === false
+    || (typeof status === "string" && /disabled|unavailable|inactive/i.test(status));
+}
+
+export function imageModelOptions({ models = [], shutdownModels = [], unavailableModels = [] }, current = "") {
+  const shutdown = new Set([...shutdownModels, ...unavailableModels]);
   return [...new Set([...IMAGE_MODEL_PRESETS, ...models, ...(current ? [current] : [])])]
     .filter(id => !shutdown.has(id));
 }
 
 export function normalizeImageModels(rows) {
   const ids = new Set();
+  const unavailable = new Set((rows || []).filter(isImageModelUnavailable)
+    .map(row => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean));
   for (const row of rows || []) {
     const id = typeof row === "string" ? row.trim() : typeof row?.id === "string" ? row.id.trim() : "";
-    if (!id || id.length > 200 || ids.has(id)) continue;
-    if (row?.available === false || row?.enabled === false || row?.active === false) continue;
-    const status = row?.lifecycle?.status || row?.lifecycle || row?.status;
-    if (isImageModelShutdown(row) || (typeof status === "string" && /disabled|unavailable/i.test(status))) continue;
+    if (!id || id.length > 200 || ids.has(id) || unavailable.has(id)) continue;
     const input = row?.modalities?.input_modalities;
     const output = row?.modalities?.output_modalities;
     if ((Array.isArray(input) && !input.includes("image")) || (Array.isArray(output) && !output.includes("image"))) continue;
@@ -42,6 +47,8 @@ export async function listImageModelCatalog({ apiKey, baseUrl, signal }, fetcher
   if (!Array.isArray(value?.data) || value.has_more) throw Error("模型目录不完整，可手动填写模型或接入点 ID");
   return {
     models: normalizeImageModels(value.data),
+    unavailableModels: [...new Set(value.data.filter(isImageModelUnavailable)
+      .map(row => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean))],
     shutdownModels: value.data.filter(isImageModelShutdown)
       .map(row => typeof row?.id === "string" ? row.id.trim() : "").filter(Boolean),
   };

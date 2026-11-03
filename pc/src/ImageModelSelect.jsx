@@ -5,11 +5,12 @@ import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./lib/avatar-pipeline/providers/vol
 export default function ImageModelSelect({ value, onChange, apiKey = "", baseUrl, disabled = false, saveHint = "修改后点击保存。" }) {
   const [revision, setRevision] = useState(0);
   const [manual, setManual] = useState(false);
-  const [state, setState] = useState({ models: [], shutdownModels: [], loading: false, error: "" });
+  const [state, setState] = useState({ models: [], shutdownModels: [], unavailableModels: [], loading: false, error: "" });
   useEffect(() => {
     const controller = new AbortController();
     setState(previous => ({ models: [],
       shutdownModels: previous.apiKey === apiKey && previous.baseUrl === baseUrl ? previous.shutdownModels : [],
+      unavailableModels: previous.apiKey === apiKey && previous.baseUrl === baseUrl ? previous.unavailableModels : [],
       apiKey, baseUrl, loading: Boolean(apiKey.trim()), error: "" }));
     const timer = setTimeout(() => {
       if (!apiKey.trim()) return;
@@ -24,14 +25,15 @@ export default function ImageModelSelect({ value, onChange, apiKey = "", baseUrl
   }, [apiKey, baseUrl, revision]);
   const models = imageModelOptions(state, value);
   const currentModel = value || DEFAULT_VOLCANO_IMAGE_MODEL;
-  const selectedShutdown = state.shutdownModels.includes(currentModel);
-  const defaultShutdown = state.shutdownModels.includes(DEFAULT_VOLCANO_IMAGE_MODEL);
+  const unavailable = new Set([...state.shutdownModels, ...state.unavailableModels]);
+  const selectedShutdown = unavailable.has(currentModel);
+  const defaultShutdown = unavailable.has(DEFAULT_VOLCANO_IMAGE_MODEL);
   return <div className="text-model-select">
     <div className="video-model-row">
       <select className="ui-control field-input" aria-label="图片处理模型" value={selectedShutdown ? "" : value || ""}
         disabled={disabled} onChange={event => onChange(event.target.value)}>
-        <option value="" disabled={selectedShutdown || defaultShutdown}>{selectedShutdown ? "当前模型已下线，请重新选择"
-          : defaultShutdown ? "默认模型已下线，请选择其他模型" : `默认 · ${DEFAULT_VOLCANO_IMAGE_MODEL}`}</option>
+        <option value="" disabled={selectedShutdown || defaultShutdown}>{selectedShutdown ? "当前模型不可用，请重新选择"
+          : defaultShutdown ? "默认模型不可用，请选择其他模型" : `默认 · ${DEFAULT_VOLCANO_IMAGE_MODEL}`}</option>
         {models.map(id => <option key={id} value={id}>{id}</option>)}
       </select>
       <button type="button" className="btn-ghost btn-sm" disabled={disabled || state.loading || !apiKey.trim()}
@@ -42,7 +44,7 @@ export default function ImageModelSelect({ value, onChange, apiKey = "", baseUrl
     {manual && <input className="ui-control field-input" aria-label="图片处理模型自定义 ID" disabled={disabled}
       value={value} onChange={event => onChange(event.target.value)} placeholder="模型名称或 ep- 接入点 ID" />}
     <div className="muted small">用于图片预览生成、背景处理和独立动作首帧。需支持图片编辑；列表不代表已开通权限。{saveHint}</div>
-    {selectedShutdown && <div role="alert" className="muted small">已保存的模型 {currentModel} 已下线，请重新选择并保存。</div>}
+    {selectedShutdown && <div role="alert" className="muted small">已保存的模型 {currentModel} 不可用，请重新选择并保存。</div>}
     {state.error && <div role="status" className="muted small">{state.error}</div>}
   </div>;
 }

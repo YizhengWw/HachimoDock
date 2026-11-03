@@ -2,6 +2,7 @@
  * IDB transactions atomically commit source/reference images, prompts and cloud IDs.
  * A submission intent without an ID is deliberately not replayable. */
 import { CUSTOM_GENERATION_FAMILIES } from "./families.js";
+import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 
 // Reconstruct display state from durable evidence, never from an absent UI progress object.
 export function summarizeGenerationSession(session) {
@@ -41,8 +42,23 @@ export function serialQueue() {
 }
 
 export function publicGenerationConfig(config = {}) {
-  return Object.fromEntries(["provider", "model", "thinkingModel", "fastGeneration", "duration", "resolution", "ratio", "generateAudio", "cameraFixed", "watermark", "seed"]
+  const saved = Object.fromEntries(["provider", "model", "thinkingModel", "fastGeneration", "duration", "resolution", "ratio", "generateAudio", "cameraFixed", "watermark", "seed"]
     .filter(key => config[key] !== undefined).map(key => [key, config[key]]));
+  // Pin the effective non-secret model, using the same precedence as the runner.
+  // Credentials and URL overrides never enter the durable task journal.
+  const imageModel = config.imageEdit?.model || config.imageModel || DEFAULT_VOLCANO_IMAGE_MODEL;
+  return { ...saved, imageModel: String(imageModel).trim() || DEFAULT_VOLCANO_IMAGE_MODEL };
+}
+
+export function resumeGenerationImageEdit(session, current = {}) {
+  const model = typeof session?.config?.imageModel === "string" ? session.config.imageModel.trim() : "";
+  if (model) return { ...current, model };
+  // Legacy journals cannot identify which model produced cached paid results.
+  // Conversion-only and explicit original-image tasks make no new image calls.
+  const conversionOnly = session?.appearanceId && ["converting", "conversion_failed"].includes(session.phase);
+  const originalOnly = session?.skipProcessing === true && session.distinctStartFrames !== true;
+  if (conversionOnly || originalOnly) return { ...current };
+  throw new Error("旧任务未记录图片模型，已有结果已保留；不会使用当前模型继续生成。请先核对已有结果，再单独重做未完成动作。");
 }
 
 export function assertResumableAction(action, provider) {
