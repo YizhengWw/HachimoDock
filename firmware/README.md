@@ -258,7 +258,13 @@ Windows 也可使用 `.\tools\p4.ps1 test`，再运行 `build`。源代码测试
 
 ## 字体与许可
 
-设备界面使用 MiSans Medium，来自[小米澎湃 OS 官方字体网站](https://hyperos.mi.com/font/zh/)，遵循 MiSans 字体知识产权许可协议。仓库不分发原始 OTF 文件，包含为设备生成的 16 px、1 bpp 中文字形数据。
+设备界面使用 MiSans Medium，来自[小米澎湃 OS 官方字体网站](https://hyperos.mi.com/font/zh/)，遵循 MiSans 字体知识产权许可协议。仓库不分发原始 OTF 文件，保留原有 16 px、1 bpp、21,207字形的完整fallback，未缩减为GB2312子集；原有字宽、字距和行高保持。
+
+另含用于 32 px 标题和紧凑气泡的原生 2 bpp 小字库，覆盖内置组件名称、“组件中心”、“休息中”、对话标题“你／宠物”和可打印 ASCII；正文提示词仍按 24 px 路径绘制，不因加入 32 px 字库而改变。未收录的字继续放大 16 px 字形。沿用原有字宽和字距，不改变换行布局。
+
+与支持 `p4-text-alpha-v2` 及已确认boot的配套PC连接时，可按32px标题、24px正文渲染16级alpha层，支持Markdown简化与懒分页。最新文字立即发布；只有当前内容的标题/正文页都就绪才成对画图，任何缺图、繁忙、超时或资源不足保持当前文字。传输有owner/boot/版本校验、单staging、READY/分块ACK、超时/取消、限流和有界missing重取；详见 [protocol.md](protocol.md)。不宣称本次host测试代替设备/音频/预算验收。
+
+重新生成需自行取得合法MiSans-Medium.otf及既有 `lv_font_conv@1.5.3` 工具，在仓库根目录运行 `node firmware/tools/generate_p4_font.cjs --font <OTF路径> --converter <包目录>`。默认只生成native32，不读取其他用户配置或自动获取依赖；只有明确加 `--rebuild-fallback` 才尝试重生成16px，并保留所有原始codepoint。生成后须核对原layout/字宽及真实镜像预算。本集成未读取OTF或运行生成器。
 
 项目自有源码采用根目录 [HachimoDock 项目许可证](../LICENSE)，仅限许可范围内的非商业用途；第三方驱动、字体与依赖继续遵循各自许可证，见 [第三方声明](../THIRD_PARTY_NOTICES.md)。
 

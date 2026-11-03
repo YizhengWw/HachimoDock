@@ -197,6 +197,9 @@ copyFileSync(join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), join(stageRoot, "TH
 copyFileSync(join(repositoryRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"), join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"));
 copyFileSync(join(repositoryRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"), join(stageRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"));
 copyFileSync(join(repositoryRoot, "licenses", "sysinfo-LICENSE.txt"), join(stageRoot, "licenses", "sysinfo-LICENSE.txt"));
+for (const notice of ["MiSans-Font-License-Agreement.pdf", "MiSans-Embedded-Fonts-NOTICE.txt"]) {
+  copyFileSync(join(repositoryRoot, "licenses", notice), join(stageRoot, "licenses", notice));
+}
 copyFileSync(windowsFfmpeg, join(stageRoot, "tools", "ffmpeg.exe"));
 for (const notice of ["ffmpeg.LICENSE", "ffmpeg.README", "ffmpeg.SOURCE.txt", "zlib.LICENSE"]) {
   copyFileSync(
@@ -219,6 +222,8 @@ const requiredResources = [
   join(stageRoot, "THIRD_PARTY_NOTICES.md"),
   join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"),
   join(stageRoot, "licenses", "sysinfo-LICENSE.txt"),
+  join(stageRoot, "licenses", "MiSans-Font-License-Agreement.pdf"),
+  join(stageRoot, "licenses", "MiSans-Embedded-Fonts-NOTICE.txt"),
   join(stageRoot, "bridge", "runtime", "node.exe"),
   join(stageRoot, "tools", "ffmpeg.exe"),
   join(stageRoot, "tools", "ffmpeg.LICENSE"),

@@ -60,6 +60,8 @@
       "../../licenses/Xiaomi-Miloco-LICENSE.md": "licenses/Xiaomi-Miloco-LICENSE.md",
       "../../licenses/Espressif-ESP-SR-LICENSE.txt": "licenses/Espressif-ESP-SR-LICENSE.txt",
       "../../licenses/sysinfo-LICENSE.txt": "licenses/sysinfo-LICENSE.txt",
+      "../../licenses/MiSans-Font-License-Agreement.pdf": "licenses/MiSans-Font-License-Agreement.pdf",
+      "../../licenses/MiSans-Embedded-Fonts-NOTICE.txt": "licenses/MiSans-Embedded-Fonts-NOTICE.txt",
       "firmware/esp32-p4/firmware.bin": "firmware/esp32-p4/firmware.bin",
       "firmware/esp32-p4/firmware-v3.bin": "firmware/esp32-p4/firmware-v3.bin"
     }

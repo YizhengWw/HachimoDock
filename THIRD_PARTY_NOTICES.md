@@ -14,7 +14,7 @@ HachimoDock's non-commercial license applies only to its own materials. It does 
 
 ## MiSans font
 
-`firmware/main/pet_p4_font_cn.c` embeds glyph data rendered from MiSans Medium. MiSans is provided by Xiaomi under the [MiSans Font Intellectual Property License Agreement](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf), not the HachimoDock license. Original font files are not distributed here. See the [official embedding FAQ](https://hyperos.mi.com/font/zh/faq/). Do not extract and redistribute the font as a standalone font product.
+`firmware/main/pet_p4_font_cn.c` (16 px, 1 bpp, 21,207 glyphs) and `firmware/main/pet_p4_font_cn_32.c` (32 px, 2 bpp, 199 glyphs) embed glyph data rendered from MiSans Medium. MiSans is provided by Xiaomi under the [MiSans Font Intellectual Property License Agreement](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf), not the HachimoDock license. Original font files are not distributed here. The unmodified [Agreement](licenses/MiSans-Font-License-Agreement.pdf) and [embedded-font notice](licenses/MiSans-Embedded-Fonts-NOTICE.txt) accompany both sizes. See the [official embedding FAQ](https://hyperos.mi.com/font/zh/faq/). Do not extract and redistribute the font as a standalone font product.
 
 ## ESP32-P4 board drivers and build dependencies
 
