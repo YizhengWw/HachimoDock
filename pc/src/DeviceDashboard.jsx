@@ -53,6 +53,7 @@ import DeviceVolumePanel from "./dashboard/DeviceVolumePanel.jsx";
 import SharedLocationPanel from "./dashboard/SharedLocationPanel.jsx";
 import { createSharedLocationController } from "./dashboard/shared-location-model.js";
 import { useExitProtection } from "./lib/exit-protection.js";
+import { loadKeepAwake, saveKeepAwake } from "./lib/keep-awake.js";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
@@ -798,6 +799,15 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const { deviceVoiceFlow } = useDeviceVoiceRouter({
     onAudioActivity: onDeviceVoiceAudioActivity,
   });
+  const [keepAwake, setKeepAwake] = useState(loadKeepAwake);
+  const toggleKeepAwake = useCallback(() => {
+    setKeepAwake((current) => saveKeepAwake(!current));
+  }, []);
+  useEffect(() => {
+    invoke("set_keep_awake_mode", { blockSleep: keepAwake }).catch((error) => {
+      console.warn("Failed to update keep-awake mode", error);
+    });
+  }, [keepAwake]);
   const [voiceConfig, setVoiceConfig] = useState(loadVoiceConfigFromStorage);
   const voiceConfigRef = useRef(voiceConfig);
   // 实时对话键是否已绑到某个按键（提示文案用；真正的按键事件由 Rust 处理）
@@ -1517,6 +1527,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onForceSyncAppearance={onForceSyncAppearance}
           onReconcileAppearance={onReconcileAppearance}
           canReconcileAppearance={usb.connected === true && Boolean(usb.boardDeviceId) && !appearanceSync?.pending && !appearanceObservationBusy}
+          keepAwake={keepAwake}
+          onToggleKeepAwake={toggleKeepAwake}
           onUpdateFirmware={usb.connected && usb.runtime === P4_RUNTIME_ID
             ? () => {
               setFirmwareTargetBoardDeviceId(usb.boardDeviceId || "");

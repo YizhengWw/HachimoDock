@@ -11427,9 +11427,54 @@ fn frontend_startup_generation(window: tauri::WebviewWindow, supervisor: tauri::
 fn frontend_startup_ready(window: tauri::WebviewWindow, supervisor: tauri::State<'_,startup_supervision::Supervisor>, generation:u64, token:String) -> Result<bool,String> {
     if window.label()!="main" || token.len()>64 {return Err("startup confirmation invalid".into());}
     Ok(supervisor.ready(generation,&token))
+#[cfg(target_os = "macos")]
+static APP_NAP_GUARD: std::sync::Mutex<Option<std::process::Child>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn caffeinate_flag(block_sleep: bool) -> &'static str {
+    if block_sleep { "-imsu" } else { "-u" }
+}
+
+#[cfg(target_os = "macos")]
+fn restart_app_nap_guard(block_sleep: bool) {
+    let mut guard = match APP_NAP_GUARD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let pid = std::process::id().to_string();
+    let flag = caffeinate_flag(block_sleep);
+    match std::process::Command::new("/usr/bin/caffeinate")
+        .args([flag, "-w", &pid])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => {
+            *guard = Some(child);
+            eprintln!("[app-nap] caffeinate {flag} started for pid {pid}");
+        }
+        Err(error) => eprintln!("[app-nap] failed to start caffeinate: {error}"),
+    }
+}
+
+#[tauri::command]
+fn set_keep_awake_mode(block_sleep: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    restart_app_nap_guard(block_sleep);
+    #[cfg(not(target_os = "macos"))]
+    let _ = block_sleep;
+    Ok(())
 }
 
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    restart_app_nap_guard(false);
     let usb_manager = usb_serial::UsbSerialManager::new();
     if !cfg!(feature = "composer-diagnostic") {
     if let Err(error) = sync_usb_desktop_device_id(&usb_manager) {
@@ -11564,6 +11609,7 @@ pub fn run() {
         .manage(usb_manager)
         .invoke_handler(tauri::generate_handler![
             appearance_recovery_ipc::usb_reconcile_appearance_unknown,
+            set_keep_awake_mode,
             reference_image::reference_image_mount,
             reference_image::reference_image_action,
             desktop_window::set_exit_reasons,

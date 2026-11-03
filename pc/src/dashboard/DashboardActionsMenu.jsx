@@ -22,6 +22,8 @@ export default function DashboardActionsMenu({
   onForceSyncAppearance,
   onReconcileAppearance,
   canReconcileAppearance = false,
+  keepAwake,
+  onToggleKeepAwake,
   onUpdateFirmware,
   onDiagnostics,
 }) {
@@ -74,6 +76,22 @@ export default function DashboardActionsMenu({
             <Copy size={14} />
             复制桌面设备 ID
           </button>
+          {typeof keepAwake === "boolean" && (
+            <div className="dashboard-actions-menu__section">
+              <span className="dashboard-actions-menu__section-label">电源</span>
+              <button
+                type="button"
+                className="dashboard-actions-menu__item dashboard-actions-menu__toggle"
+                role="menuitemcheckbox"
+                aria-checked={keepAwake}
+                onClick={() => onToggleKeepAwake?.()}
+                title="开启后合盖或空闲时保持唤醒；关闭后允许系统睡眠（默认）"
+              >
+                <span>阻止合盖睡眠</span>
+                <span className={`dashboard-actions-menu__switch${keepAwake ? " is-on" : ""}`} />
+              </button>
+            </div>
+          )}
           {onDeviceReturnHome && (
             <button
               type="button"
