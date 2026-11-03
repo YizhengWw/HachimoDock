@@ -808,7 +808,7 @@ void app_main(void) {
       &&!pet_p4_ota_transfer_active()&&!pet_p4_audio_conversation_active(),
       instrument_effect,instrument_ambience);
     pet_bubble_pixels_maintain(now_ms,
-      pet_p4_audio_active() || pet_p4_audio_playback_active()
+      pet_p4_audio_active() || pet_p4_audio_playback_active() || pet_p4_audio_music_active()
       || pet_p4_audio_conversation_active() || pet_p4_ota_active() || g_state.asset_transfer_active);
     pet_bubble_need_t need;
     if(pet_bubble_pixels_next_need(now_ms,&need)){

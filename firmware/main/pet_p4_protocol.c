@@ -2656,7 +2656,7 @@ bool pet_p4_handle_line(
         cJSON_AddStringToObject(reply,fields[i],strlen(value)<=64?value:"");
       }
       pet_bubble_pixels_maintain((uint64_t)(esp_timer_get_time()/1000),
-        pet_p4_audio_active() || pet_p4_audio_playback_active()
+        pet_p4_audio_active() || pet_p4_audio_playback_active() || pet_p4_audio_music_active()
         || pet_p4_audio_conversation_active() || pet_p4_ota_active() || state->asset_transfer_active);
       (void)pet_bubble_pixels_handle_owned(payload,ctx,(uint64_t)(esp_timer_get_time()/1000),reply);
       send_topic_payload(send_line,ctx,"ui/text-pixels/status",reply);
