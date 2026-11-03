@@ -56,15 +56,23 @@ function createCapabilityStore(options = {}) {
   function writeDescriptor(d, file = descriptorPath()) {
     prepareDirectory(file)
     const dir = paths.dirname(file), tmp = paths.join(dir, `.capability-${mint()}.tmp`)
-    const fd = io.openSync(tmp, 'wx', 0o600)
+    let fd, created = false
     try {
-      // The empty temp inherits the protected directory ACL. Make its DACL
-      // explicit/protected and verify BEFORE writing even a single secret byte.
-      if (win) acl('protect-file', tmp)
+      // Windows creates the empty temp with explicit owner + protected DACL,
+      // rather than relying on the elevated token's default object owner.
+      if (win) { acl('create-file', tmp); created = true }
+      fd = io.openSync(tmp, win ? 'r+' : 'wx', 0o600)
+      created = true
+      if (win) {
+        acl('verify-file', tmp)
+        const st = privateStat(tmp), opened = io.fstatSync(fd)
+        if (!opened.isFile() || st.ino !== opened.ino || st.dev !== opened.dev || opened.size !== 0) throw new Error('unsafe new capability file')
+      }
       io.writeFileSync(fd, JSON.stringify(d)); io.fsyncSync(fd)
     } catch (e) {
-      io.closeSync(fd)
-      if (existing(tmp)) io.unlinkSync(tmp)
+      if (fd !== undefined) io.closeSync(fd)
+      // CreateNew rejection must never delete a preexisting entry.
+      if (created && existing(tmp)) io.unlinkSync(tmp)
       throw e
     }
     io.closeSync(fd)

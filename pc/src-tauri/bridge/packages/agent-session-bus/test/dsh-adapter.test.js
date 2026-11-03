@@ -2,25 +2,106 @@
 const test = require('node:test'), assert = require('node:assert/strict'), http = require('node:http')
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 const { DshAdapter, _internal } = require('../src/adapters/dsh')
-const { windowsAcl } = require('../src/adapters/windows-acl')
+const { windowsAcl, windowsPath } = require('../src/adapters/windows-acl')
+const { spawnSync } = require('node:child_process')
+const { createCapabilityStore } = require('../../../../../../integrations/dsh-hachimodock/capability')
 const token = 'a'.repeat(64), epoch = 'b'.repeat(64)
+// Capture only the production helper's fixed diagnostic schema. Nothing from
+// raw PowerShell stderr (which may include paths) is forwarded to CI output.
+function fixtureAcl(t, operation, target) {
+  return windowsAcl(operation, target, { spawn(executable, args, options) {
+    const result = spawnSync(executable, args, options)
+    const match = /DSH_ACL_REJECTED:(\{[^\r\n]+\})/.exec(result.stderr || '')
+    if (match) {
+      try {
+        const d = JSON.parse(match[1])
+        const stages = ['input', 'reparse', 'attributes', 'get-acl', 'owner', 'access-rules', 'raw-dacl', 'validate', 'acl-build', 'existing-owner', 'set-acl', 'create-directory', 'create-file']
+        const causes = ['other', 'owner', 'acl', 'reparse', 'kind', 'path', 'user', 'operation', 'local-fixed-volume-required']
+        const exceptions = ['other', 'RuntimeException', 'MethodInvocationException', 'UnauthorizedAccessException', 'IOException', 'ArgumentException', 'CommandNotFoundException', 'PropertyNotFoundException', 'ParameterBindingException']
+        if (stages.includes(d.stage) && causes.includes(d.cause) && exceptions.includes(d.exception) &&
+            [null, true, false].includes(d.ownerMatches) && [null, true, false].includes(d.protected) &&
+            (d.aceCount === null || Number.isInteger(d.aceCount) && d.aceCount >= 0 && d.aceCount <= 4096)) {
+          t.diagnostic(JSON.stringify({ operation, stage: d.stage, cause: d.cause, exception: d.exception, ownerMatches: d.ownerMatches, protected: d.protected, aceCount: d.aceCount }))
+        }
+      } catch { /* Never print malformed/native stderr. */ }
+    }
+    return result
+  } })
+}
+let defaultOwnerProbed = false
+function probeDefaultWindowsOwner(t, container) {
+  if (defaultOwnerProbed) return
+  defaultOwnerProbed = true
+  const file = path.join(container, 'empty-owner-probe.tmp')
+  fs.writeFileSync(file, '', { flag: 'wx' })
+  const root = windowsPath(process.env.SystemRoot || process.env.SYSTEMROOT || process.env.WINDIR)
+  const script = String.raw`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$WarningPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$current = [Security.Principal.WindowsIdentity]::GetCurrent().User
+$rows = @()
+foreach ($kind in @('directory', 'file')) {
+    $row = @{ kind = $kind; stage = 'get-acl'; ownerMatches = $null; protected = $null; aceCount = $null; exception = 'none' }
+    try {
+        $name = [Environment]::GetEnvironmentVariable('DSH_FIXTURE_PROBE_DIRECTORY')
+        if ($kind -eq 'file') { $name = [IO.Path]::Combine($name, 'empty-owner-probe.tmp') }
+        $acl = Microsoft.PowerShell.Security\Get-Acl -LiteralPath $name
+        $row.stage = 'owner'
+        $row.ownerMatches = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -eq $current.Value
+        $row.protected = [Bool] $acl.AreAccessRulesProtected
+        $row.stage = 'raw-dacl'
+        $raw = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access))
+        $row.aceCount = $raw.DiscretionaryAcl.Count
+        $row.stage = 'complete'
+    } catch {
+        $kindName = $_.Exception.GetType().Name
+        $row.exception = if ($kindName -in @('RuntimeException', 'MethodInvocationException', 'UnauthorizedAccessException', 'IOException', 'ArgumentException', 'CommandNotFoundException', 'PropertyNotFoundException', 'ParameterBindingException')) { $kindName } else { 'other' }
+    }
+    $rows += $row
+}
+$rows | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress
+`
+  const r = spawnSync(path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    { encoding: 'utf8', windowsHide: true, timeout: 5000, maxBuffer: 32768, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { SystemRoot: root, WINDIR: root, PSModulePath: path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'), DSH_FIXTURE_PROBE_DIRECTORY: container } })
+  try {
+    assert.equal(r.status, 0)
+    const rows = JSON.parse(r.stdout.replace(/^\uFEFF/, '').trim())
+    assert.equal(rows.length, 2)
+    for (const d of rows) {
+      assert.ok(['directory', 'file'].includes(d.kind) && ['get-acl', 'owner', 'raw-dacl', 'complete'].includes(d.stage))
+      assert.ok(['none', 'other', 'RuntimeException', 'MethodInvocationException', 'UnauthorizedAccessException', 'IOException', 'ArgumentException', 'CommandNotFoundException', 'PropertyNotFoundException', 'ParameterBindingException'].includes(d.exception))
+      assert.ok([null, true, false].includes(d.ownerMatches) && [null, true, false].includes(d.protected))
+      assert.ok(d.aceCount === null || Number.isInteger(d.aceCount) && d.aceCount >= 0 && d.aceCount <= 4096)
+      t.diagnostic(JSON.stringify({ probe: 'default-object-security', kind: d.kind, stage: d.stage, ownerMatches: d.ownerMatches, protected: d.protected, aceCount: d.aceCount, exception: d.exception }))
+    }
+  } catch { t.diagnostic('default-object-security probe unavailable; raw output withheld') }
+}
 async function fixture(t, handler) {
   const server = http.createServer((req, res) => {
     assert.equal(req.headers.authorization, `Bearer ${token}`)
     Promise.resolve(handler(req, res)).catch(e => res.destroy(e))
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bus-'))
+  const container = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-bus-'))
+  const dir = path.join(container, 'private')
   // Register cleanup before ACL setup: a failed secure setup must fail the
   // test without leaving a listening server behind.
-  t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); fs.rmSync(dir, { recursive: true, force: true }) })
-  if (process.platform === 'win32') windowsAcl('prepare-directory', dir)
-  else fs.chmodSync(dir, 0o700)
+  t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); fs.rmSync(container, { recursive: true, force: true }) })
   const file = path.join(dir, 'capability.json'), baseUrl = `http://127.0.0.1:${server.address().port}`
-  fs.writeFileSync(file, JSON.stringify({ version: 2, epoch, baseUrl, tokens: { bus: token } }), { mode: 0o600 })
-  // Windows chmod does not establish a private DACL. Exercise the real fixed
-  // PowerShell program and receipt verifier, just as the production writer does.
-  if (process.platform === 'win32') windowsAcl('protect-file', file)
+  const descriptor = { version: 2, epoch, baseUrl, tokens: { bus: token } }
+  if (process.platform === 'win32') {
+    probeDefaultWindowsOwner(t, container)
+    // Exercise the real production writer: secure creation, empty-file check,
+    // secret write, atomic rename and final ACL verification, with no bypass.
+    createCapabilityStore({ acl: (op, target) => fixtureAcl(t, op, target) }).writeDescriptor(descriptor, file)
+  } else {
+    fs.mkdirSync(dir, { mode: 0o700 })
+    fs.writeFileSync(file, JSON.stringify(descriptor), { mode: 0o600, flag: 'wx' })
+  }
   return { file, dir, baseUrl, adapter: new DshAdapter({ env: { HACHIMODOCK_DSH_CAPABILITY_FILE: file } }) }
 }
 function sse(res, frames) { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); for (const [e, d] of frames) res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`); res.end() }

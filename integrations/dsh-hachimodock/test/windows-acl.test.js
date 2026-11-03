@@ -43,8 +43,9 @@ test('PowerShell invocation is fixed, bounded, NoProfile/NonInteractive; only pa
 test('PowerShell failure, timeout, bad/oversized output and insecure receipt fail closed', () => {
   for (const result of [{ error: Error('timeout') }, { status: 1, stdout: '{}', stderr: '' }, { status: 0, signal: 'SIGTERM', stdout: '{}', stderr: '' }, { status: 0, stdout: '{}', stderr: 'warning' }, { status: 0, stdout: 'not-json', stderr: '' }, { status: 0, stdout: 'x'.repeat(32769), stderr: '' }, { status: 0, stdout: JSON.stringify({ ...receipt(), currentSid: SYSTEM }), stderr: '' }]) assert.throws(() => windowsAcl('verify-file', file, { env: { SystemRoot: 'C:\\Windows' }, spawn: () => result }))
 })
-function fakeWriter({ failAcl, failTempAcl = false, foreignOld = false, link = false } = {}) {
+function fakeWriter({ failAcl, failTempAcl = false, foreignOld = false, link = false, tempCollision = false } = {}) {
   const log = [], entries = new Map([[path.win32.dirname(file), { directory: true, data: '' }], [file, { directory: false, data: 'OLD-DISCLOSED-TOKEN', insecure: true, link }]])
+  if (tempCollision) entries.set('C:\\private\\.capability-new-tmp.tmp', { directory: false, data: 'EXISTING-NOT-OURS', protected: true })
   let fd = 0; const handles = new Map()
   const stat = p => {
     const e = entries.get(p); if (!e) throw Object.assign(Error('missing'), { code: 'ENOENT' })
@@ -56,20 +57,25 @@ function fakeWriter({ failAcl, failTempAcl = false, foreignOld = false, link = f
     fsyncSync() {}, closeSync() {}, renameSync(a, b) { log.push(['rename', a, b]); entries.set(b, entries.get(a)); entries.delete(a) }, unlinkSync(p) { entries.delete(p) }, mkdirSync() { throw Error('PowerShell must prepare Windows directory') } }
   const store = createCapabilityStore({ platform: 'win32', fs: io, secret: () => { log.push(['mint-temp']); return 'new-tmp' }, acl(op, target) {
     log.push(['acl', op, target])
-    if (op === failAcl || foreignOld && target === file || failTempAcl && op === 'protect-file' && target !== file) throw Error('ACL rejected')
-    if (op === 'prepare-directory') entries.get(target).protected = true
+    if (op === failAcl || foreignOld && target === file || failTempAcl && op === 'create-file' && target !== file) throw Error('ACL rejected')
+    if (op === 'create-file') {
+      assert.equal(entries.get(path.win32.dirname(target)).protected, true)
+      if (entries.has(target)) throw Error('already exists')
+      entries.set(target, { directory: false, data: '', protected: true })
+    }
+    else if (op === 'prepare-directory') entries.get(target).protected = true
     else if (op === 'protect-file') { assert.equal(entries.get(path.win32.dirname(target)).protected, true); entries.get(target).protected = true; entries.get(target).insecure = false }
     else assert.equal(entries.get(target).protected, true)
     return receipt(op, target)
   } })
   return { log, entries, store }
 }
-test('actual writer secures directory, repairs old ACL without reading token, protects empty temp before secret write and rotates', () => {
+test('actual writer secures directory, repairs old ACL without reading token, creates private empty temp before secret write and rotates', () => {
   const x = fakeWriter(); const d = { epoch: 'NEW-EPOCH', tokens: { bus: 'NEW-NOT-OLD' } }
   x.store.writeDescriptor(d, file)
   assert.deepEqual(x.log[0], ['acl', 'prepare-directory', 'C:\\private'])
   assert.ok(x.log.findIndex(e => e[1] === 'protect-file' && e[2] === file) < x.log.findIndex(e => e[0] === 'mint-temp'))
-  const writeAt = x.log.findIndex(e => e[0] === 'write'), tempProtectAt = x.log.findIndex(e => e[1] === 'protect-file' && e[2] !== file)
+  const writeAt = x.log.findIndex(e => e[0] === 'write'), tempProtectAt = x.log.findIndex(e => e[1] === 'create-file' && e[2] !== file)
   assert.ok(tempProtectAt >= 0 && tempProtectAt < writeAt)
   assert.equal(x.entries.get(file).data, JSON.stringify(d)); assert.equal(x.entries.get(file).data.includes('OLD-DISCLOSED'), false)
   assert.equal(x.log.at(-1)[1], 'verify-file')
@@ -78,6 +84,23 @@ test('insecure directory/foreign owner/reparse or temp ACL failure never writes 
   for (const options of [{ failAcl: 'prepare-directory' }, { foreignOld: true }, { link: true }, { failAcl: 'protect-file' }, { failTempAcl: true }]) {
     const x = fakeWriter(options); assert.throws(() => x.store.writeDescriptor({ tokens: 'NEW' }, file)); assert.equal(x.log.some(e => e[0] === 'write'), false)
   }
+})
+test('CreateNew collision preserves existing bytes and never writes credentials', () => {
+  const x = fakeWriter({ tempCollision: true })
+  assert.throws(() => x.store.writeDescriptor({ tokens: 'NEW' }, file))
+  assert.equal(x.entries.get('C:\\private\\.capability-new-tmp.tmp').data, 'EXISTING-NOT-OURS')
+  assert.equal(x.log.some(e => e[0] === 'write'), false)
+})
+test('Windows creation receives owner/protected ACL at creation and rejects foreign existing entries', () => {
+  const script = fs.readFileSync(path.join(__dirname, '../windows-acl.ps1'), 'utf8')
+  assert.ok(script.includes('[IO.Directory]::CreateDirectory($target, $newAcl)'))
+  assert.ok(script.includes('[IO.FileMode]::CreateNew'))
+  assert.ok(script.includes('[IO.FileOptions]::None, $newAcl)'))
+  assert.ok(script.includes("if ($old.owner -ne $current.Value) { throw 'owner' }"))
+  const good = receipt('create-file')
+  assert.equal(validateAclReceipt(good, 'create-file', file), good)
+  const bad = clone(good); bad.item.owner = 'S-1-5-32-544'
+  assert.throws(() => validateAclReceipt(bad, 'create-file', file))
 })
 test('actual server secures auth directory before generating epoch/tokens, including failed prepare', async () => {
   const source = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8'), log = []

@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 const SYSTEM = 'S-1-5-18', FULL = 2032127
-const OPERATIONS = new Set(['prepare-directory', 'protect-file', 'verify-directory', 'verify-file'])
+const OPERATIONS = new Set(['prepare-directory', 'create-file', 'protect-file', 'verify-directory', 'verify-file'])
 function windowsPath(value) {
   if (typeof value !== 'string' || value.length > 2048 || !/^[A-Za-z]:\\/.test(value) || /[\x00-\x1f]/.test(value) || value.slice(2).includes(':') || value.includes('/')) throw new Error('invalid Windows capability path')
   const parts = value.slice(3).split('\\')
