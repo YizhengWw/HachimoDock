@@ -280,11 +280,10 @@ pet_bubble_pixels_desire(const cJSON * payload, const void *ctx, const char *sco
   const           cJSON *owners = cJSON_GetObjectItemCaseSensitive(m, "owners");
   int             n = cJSON_GetArraySize(owners);
   desired_t       next[VIEW_SLOTS];
-  uint64_t        sc = hash_bytes(UINT64_C(14695981039346656037), !strncmp(scope, "state/", 6) || !strcmp(scope, "speech/text") ? "bubble" : scope);
+  (void)scope; /* owner list is a complete native snapshot across display roles */
   bool            valid = !strcmp(b, boot) && hex_string(c, 32) && cJSON_IsArray(owners) && n >= 0 && n <= VIEW_SLOTS;
   for (int i = 0; valid && i < n; i++) {
     const           cJSON *v = cJSON_GetArrayItem(owners, i);
-    next[i].scope = sc;
     valid = hex_value(string_value(v, "id"), 16, &next[i].owner) && hex_value(string_value(v, "version"), 16, &next[i].version);
     for (int k = 0; k < i; k++)
       if (next[k].owner == next[i].owner)
@@ -307,17 +306,8 @@ pet_bubble_pixels_desire(const cJSON * payload, const void *ctx, const char *sco
       snprintf(client, sizeof(client), "%s", c);
       route = (uintptr_t) ctx;
     }
-    unsigned        kept = 0;
-    for (unsigned i = 0; i < desired_count; i++)
-      if (desired[i].scope != sc)
-        desired[kept++] = desired[i];
-    desired_count = kept;
-    if (desired_count + (unsigned)n > VIEW_SLOTS) {
-      clear_stage();
-      desired_count = 0;
-    } else
-      for (int i = 0; i < n; i++)
-        desired[desired_count++] = next[i];
+    desired_count = (unsigned)n;
+    memcpy(desired,next,desired_count*sizeof(*desired));
     expire(now);
   }
   xSemaphoreGive(mutex);

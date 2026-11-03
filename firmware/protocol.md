@@ -2,7 +2,7 @@
 
 可选气泡像素能力为 `capabilities.bubblePixels=p4-text-alpha-v2`，另带本次设备启动的16hex `bubblePixelsBoot`。未知 boot、旧 v1/不支持的对端完全保留本机字库文字；不降级发送旧像素协议。最新文字立即显示，图片只是同内容的可选增强，不保留上一会话文字等待下载。
 
-主窗口 renderer 使用32hex instance，native 按 board/connection(decimal string)/boot/renderer/owner/contentVersion 授权。每条当前文字状态的 `textPixels` 对象含 `boot/client/owners[]`；owner 项为 `{id,version,assets:[{id,style}]}`，最多12 owner、每owner最多4资产。owner和version均16hex；同topic独立会话不覆盖，`session/current`完整快照只排当前可见的最多3项。FNV 是相关性/意外损坏校验，不是认证。
+主窗口 renderer 使用32hex instance，native 按 board/connection(decimal string)/boot/renderer/owner/contentVersion 授权。每条当前文字状态的 `textPixels` 对象含 `boot/client/owners[]`；owner 项为 `{id,version,assets:[{id,style}]}`，是 native 跨 display role 的完整当前快照（不是设备端增量合并），最多12 owner、每owner最多4资产；遗漏的owner立即退休其staging。owner和version均16hex；同topic独立会话不覆盖，`session/current`完整快照只排当前可见的最多3项。FNV 是相关性/意外损坏校验，不是认证。
 
 `ui/text-pixels` 的每个阶段都带 `requestId/boot/client/owner/version/transfer/id/style`，requestId匹配本阶段响应。`begin` 另含 `pageSizes:[length]`、`totalBytes<=32768`、8hex FNV32 checksum、`pageIndex/pageCount`。一次只接收一页、一张完整asset，`style=2`可有最多16页，其他style只有页0。样式1/2/3/4的几何分别为474×38、496×54、348×38、496×54；字号分别32/24/32/24px。编码仍是高4bit alpha、低4bit run-1，每byte代表1..16像素，不删灰阶。
 

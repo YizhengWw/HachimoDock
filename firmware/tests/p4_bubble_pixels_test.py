@@ -195,3 +195,10 @@ def test_all_alpha_levels_and_negative_clip_preserve_framebuffer_guards(receiver
     receiver([desire(assets=[(4,'mix')])]+send(transfer('mix',data=encoded))+
         [select(body='mix',pixels=True,hold=True),{'drawHeld':{'style':4,'ok':True,'first':65535,'expectedPixels':[shade(i) for i in range(16)]}},
          {'drawHeld':{'style':4,'ok':True,'x':-1,'clip':3,'first':shade(1),'expectedPixels':[shade(1),shade(2),65535]}},{'release':True}])
+
+
+def test_complete_manifest_retires_omitted_owner_across_display_scopes(receiver):
+    old=transfer('a');owner='2'*16;new=transfer('b',owner=owner)
+    receiver([desire(scope='state/working',assets=[(4,'a')])]+send(old[:1])+
+        [desire(scope='ui/conversation',owner=owner,assets=[(4,'b')]),{'payload':old[1],'ok':False}]+
+        send(new)+[select(body='b',pixels=True)])

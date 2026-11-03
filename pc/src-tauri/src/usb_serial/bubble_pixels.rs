@@ -162,11 +162,11 @@ impl RenderBridge {
                         .any(|(style, key)| p["style"] == *style && p["id"] == *key)
             })
     }
-    pub fn metadata(&self, topic: &str, boot: &str) -> Value {
+    pub fn metadata(&self, _topic: &str, boot: &str) -> Value {
         if self.sink.is_none() || !valid_boot(boot) {
             return Value::Bool(false);
         }
-        json!({"boot":boot,"client":self.instance,"owners":self.recent.iter().filter(|d|scope(&d.topic)==scope(topic))
+        json!({"boot":boot,"client":self.instance,"owners":self.recent.iter()
             .map(|d|json!({"id":d.owner,"version":d.version,"assets":d.assets.iter().map(|(style,id)|json!({"style":style,"id":id})).collect::<Vec<_>>()})).collect::<Vec<_>>()})
     }
     pub fn observe(
@@ -708,5 +708,25 @@ mod tests {
         assert_eq!(wire_rate(4_000_000), 12288);
         assert!(estimated_wire_bytes(MAX_BYTES) > wire_rate(115200) * 10);
         assert!(estimated_wire_bytes(MAX_BYTES) < wire_rate(4_000_000) * 10);
+    }
+    #[test]
+    fn manifest_is_the_complete_bounded_authority_snapshot_across_roles() {
+        let mut b = ready();
+        b.observe(
+            "speech/text",
+            &json!({"sessionId":"a","text":"body"}),
+            1,
+            "board",
+            "1234567890abcdef",
+        );
+        b.observe(
+            "ui/conversation",
+            &json!({"conversationId":"b","text":"body"}),
+            1,
+            "board",
+            "1234567890abcdef",
+        );
+        let m = b.metadata("ui/conversation", "1234567890abcdef");
+        assert_eq!(m["owners"].as_array().unwrap().len(), 2);
     }
 }

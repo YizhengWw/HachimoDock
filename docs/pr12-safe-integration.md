@@ -22,7 +22,8 @@ The original v1 pixel wire contract is replaced by matched-peer `p4-text-alpha-v
   wait/token sleep. Unknown delivery is not replayed. The worker uses existing
   paced serial writes; it does not open another port or replace its driver.
 - Device stage admission requires matching boot/client/route/owner/version AND an
-  expected asset key/style; READY precedes chunks. It incrementally checks RLE
+  expected asset key/style; each text manifest replaces the entire bounded owner
+  snapshot across roles, retiring omitted owners immediately; READY precedes chunks. It incrementally checks RLE
   geometry/checksum, ACKs each exact phase/offset, and retires on supersession,
   idle/absolute timeout, protected work or explicit matching abort. Another begin
   cannot overwrite it. Resource limits are8 cache slots/256KiB plus32KiB staging.
