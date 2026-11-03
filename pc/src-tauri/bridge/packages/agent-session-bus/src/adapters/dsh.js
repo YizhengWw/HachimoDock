@@ -13,6 +13,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 
+const { windowsAcl, windowsPath } = require("./windows-acl");
+
 const { BaseAdapter } = require("./base");
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:17892";
@@ -241,14 +243,17 @@ function resolveBaseUrl(raw) {
 }
 function readCapability(file) {
   const check = (st, dir) => {
-    if (st.isSymbolicLink() || (dir ? !st.isDirectory() : !st.isFile()) || (st.mode & 0o077) || process.getuid && st.uid !== process.getuid()) throw new Error('unsafe DSH capability');
+    if (st.isSymbolicLink() || (dir ? !st.isDirectory() : !st.isFile()) || process.platform !== 'win32' && ((st.mode & 0o077) || process.getuid && st.uid !== process.getuid())) throw new Error('unsafe DSH capability');
   };
-  if (process.platform === 'win32') throw new Error('DSH owner-only ACL verification unavailable');
+  const win = process.platform === 'win32';
+  if (win) { file = windowsPath(file); windowsAcl('verify-file', file); }
   check(fs.lstatSync(path.dirname(file)), true);
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  check(fs.lstatSync(file), false);
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
     const st = fs.fstatSync(fd); check(st, false);
     if (st.size > 4096) throw new Error('invalid DSH capability');
+    if (win) windowsAcl('verify-file', file);
     const d = JSON.parse(fs.readFileSync(fd, 'utf8'));
     resolveBaseUrl(d.baseUrl);
     if (d.version !== 2 || !/^[a-f0-9]{64}$/.test(d.epoch) || !/^[a-f0-9]{64}$/.test(d.tokens?.bus)) throw new Error('invalid DSH capability');

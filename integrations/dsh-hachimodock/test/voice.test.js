@@ -79,3 +79,16 @@ test('HTTP voice begin/insertion ACK and submit are bound to one mounted owner/s
   assert.equal(input.submits, 1); stream.close(); await waitFor(() => !s.voiceOwners.has('a'))
   assert.equal((await post('/voice/submit', binding, nativeHeaders)).status, 409)
 })
+
+// Exercise the actual browser plugin registration rather than a copied DOM shim.
+test('official scoped slot remounts pairing state for a different session', () => {
+  const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path')
+  let plugin, component
+  const react = { createElement: (type, props) => ({ type, props }) }
+  const context = { window: { __ModuleLoader__: { load(spec) { plugin = spec.factory(() => react) } } } }
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client.js'), 'utf8'), context)
+  plugin.apply({ slots: { inject(name, mount) { assert.equal(name, 'conversation.composer.dock'); mount() }, register(spec, c) { component = c; return () => {} } } })
+  const props = { inputActions: { captureInsertion() {}, insertText() {}, submit() {} }, useInput() {} }
+  assert.equal(component({ ...props, sessionId: 'a' }).props.key, 'a')
+  assert.equal(component({ ...props, sessionId: 'b' }).props.key, 'b')
+})

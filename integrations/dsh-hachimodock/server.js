@@ -26,7 +26,7 @@
 
 const { createServer } = require('node:http')
 const { randomUUID } = require('node:crypto')
-const { secret, equal, writeDescriptor } = require('./capability')
+const { secret, equal, writeDescriptor, prepareDirectory } = require('./capability')
 
 /** Protocol version advertised by `GET /health`. */
 const PROTOCOL_VERSION = 2
@@ -227,9 +227,9 @@ class BridgeServer {
    * @param {() => string} [options.createRequestId] - approval id factory.
    */
   constructor(options = {}) {
-    this.epoch = secret()
-    this.tokens = { relay: secret(), bus: secret(), voice: secret() }
-    this.pairingCode = secret()
+    this.epoch = null
+    this.tokens = {}
+    this.pairingCode = null
     this.pairingExpires = Date.now() + 120000
     this.pairingAttempts = 0
     this.webClients = new Map()
@@ -288,9 +288,11 @@ class BridgeServer {
    */
   async listen(port) {
     if (this.httpServer) return this.listeningPort
+    // Authenticate the storage boundary before generating any new capability.
+    if (this.writeBootstrap) prepareDirectory(this.bootstrapFile)
+    this.epoch = secret(); this.tokens = { relay: secret(), bus: secret(), voice: secret() }
+    this.pairingCode = secret(); this.pairingExpires = Date.now() + 120000; this.pairingAttempts = 0
     if (this.didListen) {
-      this.epoch = secret(); this.tokens = { relay: secret(), bus: secret(), voice: secret() }
-      this.pairingCode = secret(); this.pairingExpires = Date.now() + 120000; this.pairingAttempts = 0
       this.events = []; this.nextSeq = 1; this.resolved.clear(); this.injecting.clear()
     }
     const server = createServer((req, res) => {

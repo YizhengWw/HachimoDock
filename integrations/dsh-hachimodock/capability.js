@@ -5,40 +5,76 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const { randomBytes, timingSafeEqual } = require('node:crypto')
+const { windowsAcl, windowsPath } = require('./windows-acl')
 const secret = () => randomBytes(32).toString('hex')
 const descriptorPath = () => process.env.HACHIMODOCK_DSH_CAPABILITY_FILE || path.join(os.homedir(), '.claw-pet', 'dsh-bridge', 'capability.json')
 function equal(a, b) {
   return typeof a === 'string' && typeof b === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
-function privateStat(file, directory = false) {
-  if (process.platform === 'win32') throw new Error('DSH owner-only ACL verification unavailable')
-  const st = fs.lstatSync(file)
-  if (st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile()) ||
-      (process.getuid && st.uid !== process.getuid()) || (st.mode & 0o077)) throw new Error('unsafe capability permissions')
-  return st
+// Dependency injection exercises the real writer ordering and reader guards on
+// non-Windows hosts; it is not a Windows filesystem/PowerShell execution claim.
+function createCapabilityStore(options = {}) {
+  const io = options.fs || fs, win = (options.platform || process.platform) === 'win32'
+  const paths = win ? path.win32 : path
+  const acl = options.acl || windowsAcl, mint = options.secret || secret
+  const uid = options.uid || (() => process.getuid?.())
+  function privateStat(file, directory = false) {
+    const st = io.lstatSync(file)
+    if (st.isSymbolicLink() || (directory ? !st.isDirectory() : !st.isFile()) ||
+        (!win && (uid() !== undefined && st.uid !== uid() || st.mode & 0o077))) throw new Error('unsafe capability permissions')
+    return st
+  }
+  function existing(file) {
+    try { return io.lstatSync(file) } catch (e) { if (e.code === 'ENOENT') return null; throw e }
+  }
+  function prepareDirectory(file = descriptorPath()) {
+    if (win) { file = windowsPath(file); acl('prepare-directory', paths.dirname(file)) }
+    else io.mkdirSync(paths.dirname(file), { recursive: true, mode: 0o700 })
+    privateStat(paths.dirname(file), true)
+    if (existing(file)) {
+      privateStat(file)
+      // A disclosed existing token is never read/reused. Repair only its ACL
+      // after the directory is private, then replace with a newly minted epoch.
+      if (win) acl('protect-file', file)
+    }
+  }
+  function readDescriptor(file = descriptorPath()) {
+    if (win) { file = windowsPath(file); acl('verify-file', file) }
+    privateStat(paths.dirname(file), true)
+    const fd = io.openSync(file, io.constants.O_RDONLY | (io.constants.O_NOFOLLOW || 0))
+    try {
+      const before = privateStat(file), st = io.fstatSync(fd)
+      if (!st.isFile() || st.ino !== before.ino || st.dev !== before.dev || st.size > 4096 || !win && (uid() !== undefined && st.uid !== uid() || st.mode & 0o077)) throw new Error('unsafe capability descriptor')
+      if (win) acl('verify-file', file)
+      const d = JSON.parse(io.readFileSync(fd, 'utf8'))
+      const u = new URL(d.baseUrl)
+      if (d.version !== 2 || !/^[a-f0-9]{64}$/.test(d.epoch) || u.protocol !== 'http:' || u.hostname !== '127.0.0.1' || !u.port || u.username || u.password || u.pathname !== '/' || u.search || u.hash ||
+          !['relay', 'bus', 'voice'].every(k => /^[a-f0-9]{64}$/.test(d.tokens?.[k]))) throw new Error('invalid capability descriptor')
+      return d
+    } finally { io.closeSync(fd) }
+  }
+  function writeDescriptor(d, file = descriptorPath()) {
+    prepareDirectory(file)
+    const dir = paths.dirname(file), tmp = paths.join(dir, `.capability-${mint()}.tmp`)
+    const fd = io.openSync(tmp, 'wx', 0o600)
+    try {
+      // The empty temp inherits the protected directory ACL. Make its DACL
+      // explicit/protected and verify BEFORE writing even a single secret byte.
+      if (win) acl('protect-file', tmp)
+      io.writeFileSync(fd, JSON.stringify(d)); io.fsyncSync(fd)
+    } catch (e) {
+      io.closeSync(fd)
+      if (existing(tmp)) io.unlinkSync(tmp)
+      throw e
+    }
+    io.closeSync(fd)
+    try {
+      io.renameSync(tmp, file)
+      if (win) acl('verify-file', file)
+      else privateStat(file)
+    } finally { if (existing(tmp)) io.unlinkSync(tmp) }
+  }
+  return { readDescriptor, writeDescriptor, prepareDirectory }
 }
-function readDescriptor(file = descriptorPath()) {
-  privateStat(path.dirname(file), true)
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0))
-  try {
-    const before = privateStat(file)
-    const st = fs.fstatSync(fd)
-    if (st.ino !== before.ino || st.dev !== before.dev || st.size > 4096) throw new Error('unsafe capability descriptor')
-    const d = JSON.parse(fs.readFileSync(fd, 'utf8'))
-    const u = new URL(d.baseUrl)
-    if (d.version !== 2 || !/^[a-f0-9]{64}$/.test(d.epoch) || u.protocol !== 'http:' || u.hostname !== '127.0.0.1' || !u.port || u.username || u.password || u.pathname !== '/' || u.search || u.hash ||
-        !['relay', 'bus', 'voice'].every(k => /^[a-f0-9]{64}$/.test(d.tokens?.[k]))) throw new Error('invalid capability descriptor')
-    return d
-  } finally { fs.closeSync(fd) }
-}
-function writeDescriptor(d, file = descriptorPath()) {
-  const dir = path.dirname(file)
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  privateStat(dir, true)
-  if (fs.existsSync(file)) privateStat(file)
-  const tmp = path.join(dir, `.capability-${secret()}.tmp`)
-  const fd = fs.openSync(tmp, 'wx', 0o600)
-  try { fs.writeFileSync(fd, JSON.stringify(d)); fs.fsyncSync(fd) } finally { fs.closeSync(fd) }
-  try { fs.renameSync(tmp, file) } finally { if (fs.existsSync(tmp)) fs.unlinkSync(tmp) }
-}
-module.exports = { secret, equal, descriptorPath, readDescriptor, writeDescriptor }
+const store = createCapabilityStore()
+module.exports = { secret, equal, descriptorPath, createCapabilityStore, ...store }

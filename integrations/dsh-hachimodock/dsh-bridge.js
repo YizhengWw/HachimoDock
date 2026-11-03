@@ -490,7 +490,10 @@ async function handleApprovalRequest(bridge, request, next) {
       agentId: AGENT_ID, sessionId,
       tool: typeof request.toolName === 'string' ? request.toolName : 'unknown',
       reason: typeof request.reason === 'string' ? request.reason : undefined,
-      displayReason: typeof request.displayReason === 'string' ? request.displayReason : undefined,
+      displayReason: typeof request.displayReason === 'string' ? request.displayReason
+        : typeof request.displayReason?.['zh-CN'] === 'string' ? request.displayReason['zh-CN']
+        : typeof request.displayReason?.zh === 'string' ? request.displayReason.zh
+        : typeof request.displayReason?.en === 'string' ? request.displayReason.en : undefined,
       timeoutMs: resolveApprovalTimeoutMs(bridge), signal: request.signal,
     })
     // Claim once. No parallel next(), no DOM dismissal and no reassignment on disconnect.

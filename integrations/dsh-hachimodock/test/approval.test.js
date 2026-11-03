@@ -262,3 +262,12 @@ test('the large never sentinel never expires and still accepts a decision', asyn
   assert.equal(decided.status, 200)
   assert.equal(await outcome, 'allowed-once')
 })
+
+test('pinned official localized displayReason object preserves presentation without audit ID guessing', async t => {
+  const { ctx, session, sse, url } = await fixtures(t)
+  const outcome = answer(ctx, createApprovalRequest(session, { displayReason: { en: 'Run tests?', 'zh-CN': '运行测试？' } }))
+  const frame = await sse.next()
+  assert.equal(frame.data.displayReason, '运行测试？')
+  await postJson(`${url}/approval/decision`, { requestId: frame.data.requestId, decision: 'deny' })
+  assert.equal(await outcome, 'rejected')
+})

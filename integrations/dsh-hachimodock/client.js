@@ -70,7 +70,7 @@ function install(loader) {
       if (typeof props.sessionId !== 'string' || typeof props.useInput !== 'function' || !['captureInsertion', 'insertText', 'submit'].every(k => typeof props.inputActions?.[k] === 'function')) {
         return React.createElement('span', null, 'HachimoDock voice unavailable: unsupported scoped InputActions')
       }
-      return React.createElement(ScopedVoiceDock, props)
+      return React.createElement(ScopedVoiceDock, { ...props, key: props.sessionId })
     }
     function ScopedVoiceDock(props) {
       const state = props.useInput(s => s), input = React.useRef(state); input.current = state
@@ -88,7 +88,12 @@ function install(loader) {
         const consumer = createVoiceConsumer({ ...pair, inputActions: props.inputActions, readInput: () => input.current, ack: b => post('/voice/ack', b) })
         fetch(base + '/events', { headers: { Authorization: `Bearer ${pair.token}` }, signal: controller.signal, redirect: 'error', cache: 'no-store' })
           .then(r => consumeEvents(r, controller.signal, consumer.handle))
-          .catch(() => { consumer.dispose(); controller.abort(); setStatus('语音连接已关闭；未确认的动作不会重发') })
+          .catch(() => {
+            consumer.dispose()
+            const unmounted = controller.signal.aborted
+            controller.abort()
+            if (!unmounted) { setPair(null); setStatus('语音连接已关闭；未确认的动作不会重发') }
+          })
         return () => { consumer.dispose(); controller.abort() }
       }, [pair, props.sessionId, props.inputActions])
       const pairNow = async () => {

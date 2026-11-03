@@ -35,23 +35,42 @@ pub(crate) fn load(role: &str) -> Result<Capability, String> {
         }
         options.custom_flags(libc::O_NOFOLLOW);
     }
-    // Windows bootstrap requires a separately verified owner-only ACL. Do not
-    // treat a writable file/readonly attribute as an ACL or fall back anonymous.
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        if dm.file_attributes() & 0x400 != 0 {
+            return Err("unsafe DSH reparse directory".into());
+        }
+        crate::dsh_windows_acl::verify_file(&file)?;
+        // Open the reparse entry itself rather than following it, and prohibit
+        // sharing writes/deletes while the protected descriptor is being read.
+        options.custom_flags(0x00200000).share_mode(1);
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         return Err("DSH capability ACL verification unavailable on this platform".into());
     }
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
-        use std::os::unix::fs::MetadataExt;
         let mut f = options.open(&file).map_err(|_| "DSH unpaired")?;
         let m = f.metadata().map_err(|_| "DSH unpaired")?;
-        if !m.is_file()
-            || m.uid() != unsafe { libc::geteuid() }
-            || m.mode() & 0o077 != 0
-            || m.len() > 4096
-        {
+        if !m.is_file() || m.len() > 4096 {
             return Err("unsafe DSH capability file".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if m.uid() != unsafe { libc::geteuid() } || m.mode() & 0o077 != 0 {
+                return Err("unsafe DSH capability file".into());
+            }
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if m.file_attributes() & 0x400 != 0 {
+                return Err("unsafe DSH reparse file".into());
+            }
+            crate::dsh_windows_acl::verify_file(&file)?;
         }
         let mut raw = String::new();
         f.by_ref()

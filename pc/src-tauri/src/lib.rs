@@ -54,6 +54,7 @@
 
 mod dsh_approval;
 mod dsh_auth;
+mod dsh_windows_acl;
 mod clawpkg;
 mod widget_data;
 mod stock_quotes;

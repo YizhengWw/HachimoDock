@@ -7,7 +7,7 @@ remediation. No device or installed DSH validation is claimed by the Node tests.
 
 ## Compatibility
 
-The API reference is DeepSeek Harness `0.2.2-alpha.2`, upstream commit
+The statically checked API reference is DeepSeek Harness `0.2.2-alpha.2`, upstream commit
 `ce7073d51254c26cd63b22a60835b8f948deb447`:
 
 - [approval/request and closed outcomes](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/interaction/user-approval/src/types.ts)
@@ -15,8 +15,9 @@ The API reference is DeepSeek Harness `0.2.2-alpha.2`, upstream commit
 - [strict Session slots and InputActions](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/client/ui-conversation/src/client/contract/slots.ts)
 - [framework Session inject parameters](https://github.com/deepseek-ai/deepseek-harness/blob/ce7073d51254c26cd63b22a60835b8f948deb447/packages/client/ui-slots/src/index.ts)
 
-This is a pinned source-contract reference, **not an installed-version contract
-pass**. The host requires `sessions`, `agents`, `sessionController`. Unsupported
+The 18 retained reference files match the pinned commit's Git blob identities;
+8 API/lifecycle contracts were checked against those files. This is **not an
+installed-version contract pass**. The host requires `sessions`, `agents`, `sessionController`. Unsupported
 services/slots disable the affected feature. There are no guessed APIs, global
 DOM/editor/approval selectors, synthetic keys, delayed send or anonymous fallbacks.
 
@@ -48,11 +49,28 @@ unmount or lost connection; no pending action is automatically replayed.
 The browser dock currently targets the default port 17892; custom host ports
 support native/bus callers, but browser voice is unavailable there.
 
-On Windows the current host, native and bus bootstrap deliberately fail closed until
-owner-only ACL verification is implemented and validated. POSIX chmod bits are
-not treated as Windows ACL evidence. Other DSH discovery/status UI remains; no
-unauthenticated HTTP fallback is enabled. This platform limitation is a remaining
-integration item, not a Windows validation pass.
+Windows uses a fixed Windows PowerShell 5.1 program (`-NoProfile`,
+`-NonInteractive`, absolute executable path). It resolves the current user's SID
+and SYSTEM (`S-1-5-18`) numerically, protects the dedicated directory before
+minting credentials, and gives both exactly FullControl with inheritance disabled
+on each descriptor file. It checks owner, protected DACL, raw ACE count,
+non-inherited allowed SIDs, file kind and every existing path segment for reparse
+points. UNC/device/ADS/ambiguous paths and non-local fixed volumes are refused.
+An insecure existing descriptor owned by this user is ACL-protected and replaced
+without reading or reusing its old token. Foreign owners/reparse entries abort.
+Temp files are protected before secret bytes are written; final replacement is
+verified again. Readers never repair an unsafe ACL or fall back anonymously.
+
+The PowerShell child receives only operation/path and minimal Windows environment;
+no token goes into command arguments, child environment or output. Its bounded
+metadata receipt is checked independently by Node/native; errors/timeouts fail
+closed. Distributed scripts are byte-identical and native embeds the same script.
+The ACL operations use [Get-Acl](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-acl?view=powershell-5.1),
+[Set-Acl](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/set-acl?view=powershell-5.1)
+and [protected access rules](https://learn.microsoft.com/en-us/dotnet/api/system.security.accesscontrol.objectsecurity.setaccessruleprotection?view=netframework-4.8.1).
+POSIX retains uid/0700-directory/0600-file/O_NOFOLLOW checks. Windows OS/PowerShell
+execution is **NOT_RUN** on the available macOS host; mock policy tests and static
+API checks are not presented as a physical Windows validation pass.
 
 ## Approval ownership and cancellation
 
@@ -115,5 +133,8 @@ Run `node --test integrations/dsh-hachimodock/test/*.test.js` and
 `node --test pc/src-tauri/bridge/packages/agent-session-bus/test/dsh-adapter.test.js`
 in a synthetic HOME/minimal environment under the parent's loopback-only OS
 sandbox. No installs, model calls, real DSH instance or serial port are required.
-Native in-file lifecycle tests require a later authorized native compile; mock
-Node tests cannot certify that build or the installed DSH ABI.
+A release offline locked lib check validates native types with bundle-resource
+inputs omitted for this code-only check; it is not a package validation. A small
+native test harness compiles the actual DSH source modules with cached dependencies
+and only the disconnected USB boundary stubbed. These checks do not certify the
+installed DSH ABI or actual Windows/PowerShell behavior.

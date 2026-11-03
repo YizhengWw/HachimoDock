@@ -16,7 +16,9 @@
     "index.js",
     "server.js",
     "capability.js",
-    "pair.js"
+    "pair.js",
+    "windows-acl.js",
+    "windows-acl.ps1"
   ],
   "scripts": {
     "test": "node --test"
