@@ -31,3 +31,21 @@ CONFIG_ESP_H264_DUAL_TASK_CORE=1
 CONFIG_ESP_H264_DUAL_TASK_PRIORITY=17
 
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
+
+# Wi-Fi comes from the ESP32-C6 on the companion board through ESP-Hosted (SDIO slot 1, 4-bit).
+# Defaults for ESP32-P4 are CMD19/CLK18/D0-D3=14-17 and C6 reset on GPIO54; the SD card uses slot 0
+# on GPIO39-44, so the two never share pins. Keep the radio failures contained to the radio:
+# a stuck co-processor must never restart the P4, which keeps serving USB.
+CONFIG_ESP_HOSTED_TRANSPORT_RESTART_ON_FAILURE=n
+CONFIG_ESP_HOSTED_CLI_ENABLED=n
+CONFIG_ESP_HOSTED_MEM_MONITOR=n
+CONFIG_ESP_HOSTED_ENABLE_ITWT=n
+CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=n
+CONFIG_LWIP_IPV6=n
+CONFIG_LWIP_IGMP=n
+CONFIG_LWIP_MAX_SOCKETS=6
+# Station-only client: the DHCP server (SoftAP), mDNS queries and ARP address-conflict probing add
+# flash without serving this link.
+CONFIG_LWIP_DHCPS=n
+CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES=n
+CONFIG_LWIP_DHCP_DOES_ARP_CHECK=n

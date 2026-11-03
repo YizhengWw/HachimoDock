@@ -56,6 +56,8 @@ export function normalizeUsbStatusPayload(status) {
   return {
     connected: !!status?.connected,
     portName: status?.portName || "",
+    // "wifi" only when the backend says so; every serial/native-USB link is "usb".
+    transport: status?.transport === "wifi" ? "wifi" : "usb",
     baudRate: Number(status?.baudRate) || 0,
     boardDeviceId: status?.connected ? status?.boardDeviceId || "" : "",
     runtime: resolveUsbRuntime({ ...status, capabilities }),
@@ -75,6 +77,7 @@ export function usbStatusSnapshotsEqual(left, right) {
   if (!left || !right) return false;
   return left.connected === right.connected
     && left.portName === right.portName
+    && left.transport === right.transport
     && left.baudRate === right.baudRate
     && left.boardDeviceId === right.boardDeviceId
     && left.runtime === right.runtime

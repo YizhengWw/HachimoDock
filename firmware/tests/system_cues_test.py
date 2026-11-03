@@ -6,15 +6,15 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_identical_default_cues_are_embedded_only_once():
-    clips = ROOT.parent / "pc/public/terrier-clips"
-    assert (clips / "error.wav").read_bytes() == (clips / "waiting_user.wav").read_bytes()
+def test_default_status_cues_are_not_embedded_in_the_firmware():
+    """The OTA slot is reserved for the Wi-Fi stack; the desktop keeps playing its own WAVs."""
     cmake = (ROOT / "main/CMakeLists.txt").read_text()
-    assert "PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA" in cmake
-    assert "foreach(cue done error)" in cmake
-    assert "../pc/public/terrier-clips/waiting_user.wav" not in (ROOT / "platformio.ini").read_text()
+    ini = (ROOT / "platformio.ini").read_text()
     source = (ROOT / "main/pet_p4_system_cues.c").read_text()
-    assert "_binary_waiting_user_wav" not in source
+    for text in (cmake, ini):
+        assert "terrier-clips/done.wav" not in text and "terrier-clips/error.wav" not in text
+        assert "foreach(cue done error)" not in text
+    assert "_binary_" not in source
 
 
 def test_shared_cues_parse_and_preserve_unknown_custom_audio():
@@ -24,13 +24,6 @@ def test_shared_cues_parse_and_preserve_unknown_custom_audio():
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* Link-only placeholders: host test exercises the parser on real resource bytes. */
-const unsigned char d0[1] __asm__("_binary_done_wav_start") = {0};
-const unsigned char d1[1] __asm__("_binary_done_wav_end") = {0};
-const unsigned char e0[1] __asm__("_binary_error_wav_start") = {0};
-const unsigned char e1[1] __asm__("_binary_error_wav_end") = {0};
-const unsigned char w0[1] __asm__("_binary_waiting_user_wav_start") = {0};
-const unsigned char w1[1] __asm__("_binary_waiting_user_wav_end") = {0};
 int main(int argc, char **argv) {
   assert(argc==4);
   for (int i=1;i<argc;i++) {
@@ -43,6 +36,11 @@ int main(int argc, char **argv) {
     assert(!pet_p4_cue_parse_wav(wav,20,&pcm,&count));
     wav[0]=0; assert(!pet_p4_cue_parse_wav(wav,size,&pcm,&count)); free(wav);
   }
+  /* No built-in sound: every family is silent unless the appearance ships custom audio. */
+  const unsigned char *shared = (const unsigned char *) 1; size_t shared_size = 7;
+  assert(!pet_p4_system_cue_pcm("done", &shared, &shared_size) && !shared && shared_size == 0);
+  assert(!pet_p4_system_cue_pcm("error", &shared, &shared_size));
+  assert(!pet_p4_system_cue_pcm("waiting_user", &shared, &shared_size));
   assert(pet_p4_system_cue_family("done"));
   assert(pet_p4_system_cue_family("error"));
   assert(pet_p4_system_cue_family("waiting_user"));

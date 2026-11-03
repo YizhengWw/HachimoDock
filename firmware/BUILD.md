@@ -42,6 +42,15 @@ PC 打包前，将两个环境的 `firmware.bin` 分别放入 `pc/src-tauri/firm
 
 0.7.53-p4 修复了部分形象循环播放或切换状态后停止的问题。v3.2 已完成保留数据的 OTA，以及休息、工作、等待、结束和返回休息的连续播放验证；v1 已完成编译和共享播放代码的主机回归，尚未完成本版实机验证。以上不代表全部功能已验收，按键/摇杆、麦克风、完整形象下发、断线重连及断电恢复仍需分别验证。
 
+## WiFi 构建说明 / Wi-Fi build notes
+
+WiFi 通过配套板上的 ESP32-C6 提供：固件使用 `esp_wifi_remote 1.6.3` 与 `esp_hosted 2.13.1`（SDIO slot 1，引脚为 ESP32-P4 默认的 CMD19/CLK18/D0–D3=14–17、C6 复位 GPIO54，与 SD 卡所在的 slot 0 互不占用）。协议、配对与允许的操作见 [protocol.md](protocol.md)。
+
+- **未配置 WiFi 时不触碰 C6。** `esp_hosted` 自带开机构造函数，会在启动时初始化传输并复位 C6、失败即中止；`main/CMakeLists.txt` 通过 `-Wl,--wrap=esp_hosted_init` 把它改成空操作，真实初始化在配置后由 `pet_p4_network.c` 延迟执行。升级 `esp_hosted` 后需确认该符号与构造函数仍如此。
+- **容量。** 无线栈（hosted 的 protobuf RPC、lwIP、SDMMC）净增约 125 KB。为此不再内置默认完成/错误提示音（约 240 KB），并对无线相关组件使用 `-Os`、关闭其 INFO 日志与 SoftAP/mDNS 相关的 lwIP 功能。当前 v3 镜像 2,449,712 B，OTA 余量约 168 KB（红线 128 KiB），内部静态 RAM 347 KB（上限 384 KiB）。后续新增功能应先对照 `firmware-budget.json`。
+- **依赖锁。** 加入无线组件时求解器曾顺带升级 `esp-dl`/`dl_fft`；两者已在 `main/idf_component.yml` 中固定为 3.3.11 / 0.7.0。提交前仍需运行 `python tools/normalize_dependency_lock.py`。`dependencies.lock`（v1）未更新，本项目不构建 v1。
+- **未实机验证。** C6 出厂固件版本、SDIO 引脚、连接稳定性与内存余量需要在 Waveshare ESP32-P4-WIFI6 上确认；状态中的 `coprocessorVersion` 用于核对 C6 固件是否与 hosted 2.x 配套。
+
 ## 完整出厂镜像 / Complete factory image
 
 先运行 `pio run -e esp32_p4_evboard_v3 -t factory`（旧芯片改用 `esp32_p4_evboard`）。PC/设备仍使用同一套形象、组件、分区和交互配置。

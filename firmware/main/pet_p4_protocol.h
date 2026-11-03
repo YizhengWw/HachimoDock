@@ -54,6 +54,13 @@ typedef struct {
 
 typedef void (*pet_p4_send_line_fn)(const char *line, void *ctx);
 
+/* Physical link a request arrived on. Wi-Fi carries status, sessions and key events only; the
+ * protocol layer refuses everything else with `wifi_unsupported` and trims the hello capabilities. */
+typedef enum {
+  PET_P4_LINK_USB = 0,
+  PET_P4_LINK_WIFI = 1,
+} pet_p4_link_t;
+
 typedef struct {
   char id[PET_P4_SESSION_QUEUE_ID_MAX];
   char title[PET_P4_SESSION_QUEUE_TITLE_MAX];
@@ -118,6 +125,8 @@ typedef struct {
   unsigned long long done_until_ms;
   unsigned long long host_last_seen_ms;
   bool native_usb_mounted;
+  /* Set by the protocol worker for the duration of one request; USB when idle. */
+  pet_p4_link_t request_link;
   int local_touch_x;
   int local_touch_y;
   unsigned long long last_update_ms;

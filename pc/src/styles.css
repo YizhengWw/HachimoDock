@@ -14521,3 +14521,25 @@ select:focus-visible {
 .app-activity summary { cursor: pointer; color: var(--text); }
 .app-activity ul { padding-left: 16px; margin: 8px 0 0; max-height: 160px; overflow: auto; }
 .api-settings__draft { color: var(--accent, #db641c); font-size: 13px; }
+
+.wifi-link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.wifi-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wifi-link-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+}
