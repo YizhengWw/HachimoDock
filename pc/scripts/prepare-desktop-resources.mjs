@@ -34,6 +34,7 @@ const bundledP4FirmwareDir = join(tauriRoot, "firmware", "esp32-p4");
 const p4ProjectCmake = join(repositoryRoot, "firmware", "CMakeLists.txt");
 const auditedFfmpegBinarySha256 = {
   "macos-arm64": "e340c148c720888a528e7bd2e7867da3b4bea91d1f6e508c9526111257ee0468",
+  "macos-x64": "d0afebc3542bb65d4bcf94e185878482066fc5ca899c4ae6a7e1aeaeae96d680",
   "windows-x64": "1cefca14ea713d5d7e7a1b948299142831185487f5efb14914d049ba9090d95f",
 };
 
