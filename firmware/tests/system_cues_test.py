@@ -12,6 +12,7 @@ def test_identical_default_cues_are_embedded_only_once():
     cmake = (ROOT / "main/CMakeLists.txt").read_text()
     assert "PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA" in cmake
     assert "foreach(cue done error)" in cmake
+    assert "foreach(cue permission_request permission_approved permission_denied permission_expired)" in cmake
     assert "../pc/public/terrier-clips/waiting_user.wav" not in (ROOT / "platformio.ini").read_text()
     source = (ROOT / "main/pet_p4_system_cues.c").read_text()
     assert "_binary_waiting_user_wav" not in source
@@ -31,8 +32,16 @@ const unsigned char e0[1] __asm__("_binary_error_wav_start") = {0};
 const unsigned char e1[1] __asm__("_binary_error_wav_end") = {0};
 const unsigned char w0[1] __asm__("_binary_waiting_user_wav_start") = {0};
 const unsigned char w1[1] __asm__("_binary_waiting_user_wav_end") = {0};
+const unsigned char pr0[1] __asm__("_binary_permission_request_wav_start") = {0};
+const unsigned char pr1[1] __asm__("_binary_permission_request_wav_end") = {0};
+const unsigned char pa0[1] __asm__("_binary_permission_approved_wav_start") = {0};
+const unsigned char pa1[1] __asm__("_binary_permission_approved_wav_end") = {0};
+const unsigned char pd0[1] __asm__("_binary_permission_denied_wav_start") = {0};
+const unsigned char pd1[1] __asm__("_binary_permission_denied_wav_end") = {0};
+const unsigned char pe0[1] __asm__("_binary_permission_expired_wav_start") = {0};
+const unsigned char pe1[1] __asm__("_binary_permission_expired_wav_end") = {0};
 int main(int argc, char **argv) {
-  assert(argc==4);
+  assert(argc==9);
   for (int i=1;i<argc;i++) {
     FILE *f=fopen(argv[i],"rb"); assert(f);
     fseek(f,0,SEEK_END); size_t size=(size_t)ftell(f); rewind(f);
@@ -46,6 +55,10 @@ int main(int argc, char **argv) {
   assert(pet_p4_system_cue_family("done"));
   assert(pet_p4_system_cue_family("error"));
   assert(pet_p4_system_cue_family("waiting_user"));
+  assert(pet_p4_system_cue_family("permission_request"));
+  assert(pet_p4_system_cue_family("permission_approved"));
+  assert(pet_p4_system_cue_family("permission_denied"));
+  assert(pet_p4_system_cue_family("permission_expired"));
   assert(!pet_p4_system_cue_family("working"));
   assert(pet_p4_system_cue_legacy("done",UINT64_C(0x392e208e77b6a2a4)));
   assert(pet_p4_system_cue_legacy("done",UINT64_C(0x3800fd80e9e2461f)));
@@ -61,7 +74,7 @@ int main(int argc, char **argv) {
         subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-I", str(ROOT / "main"),
                         str(ROOT / "main/pet_p4_system_cues.c"), str(source), "-o", str(binary)], check=True)
         subprocess.run([str(binary), *[str(ROOT.parent / "pc/public/terrier-clips" / (n + ".wav"))
-                        for n in ("done", "error", "waiting_user")]], check=True)
+                        for n in ("done", "error", "waiting_user", "permission_request", "permission_approved", "permission_denied", "permission_expired")]], check=True)
 
 
 def test_playback_is_not_conditioned_on_matching_animation():
@@ -73,3 +86,16 @@ def test_playback_is_not_conditioned_on_matching_animation():
     assert "pet_p4_audio_conversation_active()" in process
     assert "!request.audio_custom" in source
     assert "pet_p4_system_cue_legacy(request.family, checksum)" in source
+
+
+def test_permission_cues_are_event_driven_on_approval():
+    protocol = (ROOT / "main/pet_p4_protocol.c").read_text()
+    inp = (ROOT / "main/pet_p4_input.c").read_text()
+    audio = (ROOT / "main/pet_p4_audio.c").read_text()
+    assert 'pet_p4_audio_play_event_cue("permission_request")' in protocol
+    assert 'pet_p4_audio_play_event_cue("permission_approved")' in protocol
+    assert 'pet_p4_audio_play_event_cue("permission_denied")' in protocol
+    assert 'pet_p4_audio_play_event_cue("permission_expired")' in protocol
+    assert 'pet_p4_audio_play_event_cue("permission_approved")' in inp
+    assert 'pet_p4_audio_play_event_cue("permission_denied")' in inp
+    assert "pet_p4_audio_play_event_cue(const char *family)" in audio

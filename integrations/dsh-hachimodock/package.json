@@ -1,0 +1,51 @@
+{
+  "name": "@hachimodock/dsh-bridge",
+  "version": "0.1.0",
+  "description": "HachimoDock bridge for DeepSeek Harness: a localhost-only HTTP/SSE session and approval channel that lets the HachimoDock PC bridge and ESP32-P4 display follow DSH sessions and answer permission prompts.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "README.md",
+    "client.js",
+    "cordis.patch.yml",
+    "dsh-bridge.js",
+    "index.js",
+    "server.js",
+    "capability.js",
+    "pair.js"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "cordis-plugin",
+    "hachimodock"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "compatibility": {
+      "upstream": "ce7073d51254c26cd63b22a60835b8f948deb447",
+      "version": "0.2.2-alpha.2",
+      "runtimeVerified": false
+    }
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  }
+}

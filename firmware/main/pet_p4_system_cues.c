@@ -5,6 +5,16 @@ extern const uint8_t done_start[] __asm__("_binary_done_wav_start");
 extern const uint8_t done_end[] __asm__("_binary_done_wav_end");
 extern const uint8_t error_start[] __asm__("_binary_error_wav_start");
 extern const uint8_t error_end[] __asm__("_binary_error_wav_end");
+extern const uint8_t permission_request_start[] __asm__("_binary_permission_request_wav_start");
+extern const uint8_t permission_request_end[] __asm__("_binary_permission_request_wav_end");
+extern const uint8_t permission_approved_start[] __asm__("_binary_permission_approved_wav_start");
+extern const uint8_t permission_approved_end[] __asm__("_binary_permission_approved_wav_end");
+extern const uint8_t permission_denied_start[] __asm__("_binary_permission_denied_wav_start");
+extern const uint8_t permission_denied_end[] __asm__("_binary_permission_denied_wav_end");
+extern const uint8_t permission_expired_start[] __asm__("_binary_permission_expired_wav_start");
+extern const uint8_t permission_expired_end[] __asm__("_binary_permission_expired_wav_end");
+extern const uint8_t session_terminated_start[] __asm__("_binary_session_terminated_wav_start");
+extern const uint8_t session_terminated_end[] __asm__("_binary_session_terminated_wav_end");
 /* The shipped waiting/error WAVs are byte-identical. CMake verifies that
  * invariant; share the payload without merging their lifecycle identities. */
 
@@ -13,7 +23,10 @@ static uint32_t le32(const uint8_t *p) {
 }
 
 bool pet_p4_system_cue_family(const char *family) {
-  return family && (!strcmp(family,"done") || !strcmp(family,"error") || !strcmp(family,"waiting_user"));
+  return family && (!strcmp(family,"done") || !strcmp(family,"error")
+    || !strcmp(family,"waiting_user") || !strcmp(family,"permission_request")
+    || !strcmp(family,"permission_approved") || !strcmp(family,"permission_denied")
+    || !strcmp(family,"permission_expired") || !strcmp(family,"session_terminated"));
 }
 
 /* Only known shipped defaults migrate. Unknown WAVs remain appearance overrides. */
@@ -52,7 +65,11 @@ bool pet_p4_system_cue_pcm(const char *family, const uint8_t **pcm, size_t *size
   const uint8_t *start, *end;
   if (!pet_p4_system_cue_family(family)) return false;
   if (!strcmp(family,"done")) { start=done_start; end=done_end; }
-  else if (!strcmp(family,"error")) { start=error_start; end=error_end; }
+  else if (!strcmp(family,"permission_request")) { start=permission_request_start; end=permission_request_end; }
+  else if (!strcmp(family,"permission_approved")) { start=permission_approved_start; end=permission_approved_end; }
+  else if (!strcmp(family,"permission_denied")) { start=permission_denied_start; end=permission_denied_end; }
+  else if (!strcmp(family,"permission_expired")) { start=permission_expired_start; end=permission_expired_end; }
+  else if (!strcmp(family,"session_terminated")) { start=session_terminated_start; end=session_terminated_end; }
   else { start=error_start; end=error_end; }
   return pet_p4_cue_parse_wav(start, (size_t)(end-start), pcm, size);
 }

@@ -1752,6 +1752,18 @@ impl UsbSerialManager {
         self.send_inner(topic, payload, false, None, None, None)
     }
 
+    // Approval ownership is bound to a physical connection generation; no
+    // decoder, scheduling or generic transport behavior changes here.
+    pub(crate) fn approval_connection(&self) -> Option<(String, u64)> {
+        let conn = self.connection.lock().ok()?;
+        let c = conn.as_ref()?;
+        if !c.connected || c.board_device_id.is_empty() { return None; }
+        Some((c.board_device_id.clone(), c.connection_id))
+    }
+    pub(crate) fn send_approval_bound(&self, board: &str, generation: u64, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
+        self.send_inner(topic, payload, true, Some(board), Some(generation), None)
+    }
+
     pub(crate) fn send_to_board(
         &self,
         expected_board_device_id: &str,

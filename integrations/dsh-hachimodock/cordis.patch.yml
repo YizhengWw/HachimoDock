@@ -1,0 +1,12 @@
+# One terminal answerer. No sibling loading-order or dual-UI race policy.
+- insert:
+    - id: hachimodock-bridge
+      name: '@hachimodock/dsh-bridge'
+      config:
+        port: 17892
+        approvalTimeoutMs: 30000
+        # Delegate only BEFORE claiming, if no authenticated physical relay.
+        approvalFallback: delegate
+        # Set the verified exact DSH web Origin(s) before explicit pairing.
+        # Empty disables browser voice without weakening native authentication.
+        allowedOrigins: []

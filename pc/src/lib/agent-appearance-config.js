@@ -33,6 +33,11 @@ export const FIXED_AGENT_OPTIONS = [
     detail: "MiMoCode 本地会话与实时状态渠道",
   },
   {
+    id: "deepseek-harness",
+    label: "DeepSeek Harness",
+    detail: "DeepSeek Harness 桌面对话与本地桥接渠道",
+  },
+  {
     id: "workbuddy",
     label: "WorkBuddy",
     detail: "WorkBuddy 状态与气泡跟随；向当前可见对话追加语音草稿",

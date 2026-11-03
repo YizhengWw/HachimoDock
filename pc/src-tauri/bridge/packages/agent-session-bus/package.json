@@ -13,6 +13,7 @@
     "./adapters/codex": "./src/adapters/codex.js",
     "./adapters/openclaw": "./src/adapters/openclaw.js",
     "./adapters/mimocode": "./src/adapters/mimocode.js",
+    "./adapters/dsh": "./src/adapters/dsh.js",
     "./adapters/mock": "./src/adapters/mock.js"
   },
   "scripts": {
