@@ -25,6 +25,16 @@ test('Windows path policy handles Unicode/spaces and rejects UNC, devices, ADS a
   assert.equal(windowsPath('D:\\用户 Name\\dsh-bridge\\capability.json'), 'D:\\用户 Name\\dsh-bridge\\capability.json')
   for (const p of ['relative.json', '\\\\server\\share\\capability.json', '\\\\?\\C:\\private\\capability.json', 'C:\\private\\..\\capability.json', 'C:\\private\\capability.json:stream', 'C:\\private \\capability.json', 'C:\\private.\\capability.json', 'C:/private/capability.json', 'C:\\private\\\nfile', 'C:\\' + 'x'.repeat(2048)]) assert.throws(() => windowsPath(p), p)
 })
+test('8.3 caller spelling stays exact; an expanded receipt is never accepted as a different path', () => {
+  const short = 'C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\private\\capability.json'
+  assert.equal(windowsPath(short), short)
+  const good = receipt('verify-file', short)
+  assert.equal(validateAclReceipt(good, 'verify-file', short), good)
+  const expanded = clone(good)
+  expanded.directory.path = expanded.directory.path.replace('RUNNER~1', 'runneradmin')
+  expanded.item.path = expanded.item.path.replace('RUNNER~1', 'runneradmin')
+  assert.throws(() => validateAclReceipt(expanded, 'verify-file', short))
+})
 test('PowerShell invocation is fixed, bounded, NoProfile/NonInteractive; only path/operation enter child env', () => {
   let called = 0
   const result = windowsAcl('verify-file', file, { env: { SystemRoot: 'C:\\Windows', API_TOKEN: 'do-not-inherit' }, spawn(exe, args, opts) {

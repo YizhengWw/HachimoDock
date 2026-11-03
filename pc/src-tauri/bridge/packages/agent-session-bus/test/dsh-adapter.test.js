@@ -2,7 +2,7 @@
 const test = require('node:test'), assert = require('node:assert/strict'), http = require('node:http')
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os')
 const { DshAdapter, _internal } = require('../src/adapters/dsh')
-const { windowsAcl, windowsPath } = require('../src/adapters/windows-acl')
+const { windowsAcl, windowsPath, validateAclReceipt } = require('../src/adapters/windows-acl')
 const { spawnSync } = require('node:child_process')
 const { createCapabilityStore } = require('../../../../../../integrations/dsh-hachimodock/capability')
 const token = 'a'.repeat(64), epoch = 'b'.repeat(64)
@@ -11,6 +11,32 @@ const token = 'a'.repeat(64), epoch = 'b'.repeat(64)
 function fixtureAcl(t, operation, target) {
   return windowsAcl(operation, target, { spawn(executable, args, options) {
     const result = spawnSync(executable, args, options)
+    if (result.status === 0 && !result.stderr?.trim()) {
+      try {
+        const receipt = JSON.parse(result.stdout.replace(/^\uFEFF/, '').trim())
+        try { validateAclReceipt(receipt, operation, target) } catch {
+          const entry = (value, expectedPath, directory) => ({
+            pathType: typeof value?.path,
+            pathMatches: typeof value?.path === 'string' && value.path.toLowerCase() === expectedPath.toLowerCase(),
+            directoryType: typeof value?.directory, directoryMatches: value?.directory === directory,
+            ownerType: typeof value?.owner, ownerMatches: typeof receipt.currentSid === 'string' && value?.owner === receipt.currentSid,
+            protectedType: typeof value?.protected, protectedMatches: value?.protected === true,
+            reparseType: typeof value?.reparse, reparseMatches: value?.reparse === false,
+            rawAceCountType: typeof value?.rawAceCount,
+            rawAceCount: Number.isInteger(value?.rawAceCount) && value.rawAceCount >= 0 && value.rawAceCount <= 4096 ? value.rawAceCount : null,
+            rulesIsArray: Array.isArray(value?.rules),
+            ruleCount: Array.isArray(value?.rules) ? Math.min(value.rules.length, 4097) : null,
+          })
+          const file = operation.endsWith('file')
+          t.diagnostic(JSON.stringify({ probe: 'actual-acl-receipt-rejected', operation,
+            versionType: typeof receipt.version, versionMatches: receipt.version === 1,
+            operationMatches: receipt.operation === operation, currentSidType: typeof receipt.currentSid,
+            inputHasShortComponent: /(?:^|[\\])[^\\]*~[0-9]+(?:[\\]|$)/.test(target),
+            directory: entry(receipt.directory, file ? path.win32.dirname(target) : target, true),
+            item: file ? entry(receipt.item, target, false) : { nullMatches: receipt.item === null } }))
+        }
+      } catch { t.diagnostic('actual ACL receipt diagnostic unavailable; raw output withheld') }
+    }
     const match = /DSH_ACL_REJECTED:(\{[^\r\n]+\})/.exec(result.stderr || '')
     if (match) {
       try {

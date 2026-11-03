@@ -17,7 +17,10 @@ try {
     foreach ($part in $target.Substring(3).Split('\')) {
         if ($part -eq '.' -or $part -eq '..' -or $part.EndsWith('.') -or $part.EndsWith(' ') -or $part.Contains('/')) { throw 'path' }
     }
-    $target = [IO.Path]::GetFullPath($target)
+    # Validate syntax without replacing the caller's validated absolute spelling.
+    # .NET Framework expands 8.3 aliases here; receipts must retain the spelling
+    # JS/native validated, while every filesystem/ACL check uses that same path.
+    [Void] [IO.Path]::GetFullPath($target)
     if ([IO.DriveInfo]::new([IO.Path]::GetPathRoot($target)).DriveType -ne [IO.DriveType]::Fixed) { throw 'local fixed volume required' }
     $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
     $system = [Security.Principal.SecurityIdentifier]::new('S-1-5-18')
