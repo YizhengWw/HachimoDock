@@ -27,7 +27,7 @@ import { buildVolcanoTaskPayload } from './providers/volcano.js';
 import { processImageForPipeline } from './image-processing.js';
 
 test('journal config omits all credentials and URL overrides', () => {
-  assert.deepEqual(publicGenerationConfig({provider:'volcengine',model:'test',apiKey:'secret',accessKey:'secret',secretKey:'secret',baseUrl:'https://user:password@host',imageEdit:{apiKey:'secret'},advanced:{authHeader:'secret'}}),{provider:'volcengine',model:'test'});
+  assert.deepEqual(publicGenerationConfig({provider:'volcengine',model:'test',apiKey:'secret',accessKey:'secret',secretKey:'secret',baseUrl:'https://user:password@host',imageEdit:{apiKey:'secret'},advanced:{authHeader:'secret'}}),{provider:'volcengine',model:'test',imageModel:'doubao-seedream-5-0-flash-260915'});
 });
 
 test('serial saves never overlap and a failed save does not poison the queue', async () => {

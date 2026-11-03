@@ -36,6 +36,7 @@ import {
 import HelpTooltip from "./HelpTooltip.jsx";
 import { VideoModelSelect, VideoGenerationSettings } from "./VideoGenerationSettings.jsx";
 import TextModelSelect from "./TextModelSelect.jsx";
+import ImageModelSelect from "./ImageModelSelect.jsx";
 import useReferenceImageImport from "./useReferenceImageImport.js";
 import { discoverDefaultVideoModel } from "./lib/avatar-pipeline/video-models.js";
 import { createReferencePreviewController, normalizeStyleDescription } from './lib/avatar-pipeline/reference-preview.js';
@@ -62,6 +63,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
   const [styleDescription, setStyleDescription] = useState('');
   const [referencePreview, setReferencePreview] = useState({busy:false,result:null,error:''});
   const previewController = useRef(null);
+  const previewImageModel = useRef("");
   if(!previewController.current)previewController.current=createReferencePreviewController(setReferencePreview);
 
   const [providerId, setProviderId] = useState(DEFAULT_PROVIDER_ID);
@@ -77,6 +79,7 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   const [model, setModel] = useState(provider.models[0] || "");
   const [thinkingModel, setThinkingModel] = useState("");
+  const [imageModel, setImageModel] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [openaiCompat, setOpenaiCompat] = useState(true);
   const [advanced, setAdvanced] = useState({ ...DEFAULT_ADVANCED });
@@ -86,11 +89,12 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
   const [videoParameters, setVideoParameters] = useState({});
   const [modelDiscovery, setModelDiscovery] = useState({ loading: false, error: "" });
   const [modelRetry, setModelRetry] = useState(0);
-  useEffect(()=>{previewController.current.invalidate();return ()=>previewController.current.invalidate();},[file,styleDescription,removeBg,apiKey,providerId,fastGeneration]);
+  useEffect(()=>{previewController.current.invalidate();return ()=>previewController.current.invalidate();},[file,styleDescription,removeBg,apiKey,providerId,fastGeneration,imageModel]);
   const validPreview=referencePreview.result?.source===file && referencePreview.result?.style===normalizeStyleDescription(styleDescription)
     ? referencePreview.result : null;
   const handleStylePreview=()=>previewController.current.run({imageFile:file,styleDescription,
-    cloudBackground:resolveArkBackgroundConfig({provider:providerId,apiKey,baseUrl,imageEdit:loadArkImageConfig()}),
+    cloudBackground:resolveArkBackgroundConfig({provider:providerId,apiKey,baseUrl,
+      imageEdit:{...loadArkImageConfig(),...(isVolcengine?{model:imageModel.trim()}:{})}}),
     maxDimension:fastGeneration?FAST_VIDEO_GENERATION_PROFILE.imageMaxDimension:undefined});
 
   // The default page must prepare its own model; the advanced selector is not mounted there.
@@ -127,12 +131,18 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
 
   const refreshProviderConfig = useCallback(() => {
     const saved = loadProviderConfig(providerId);
+    const currentImageModel = loadArkImageConfig().model;
+    if (previewImageModel.current !== currentImageModel) {
+      previewImageModel.current = currentImageModel;
+      previewController.current.invalidate();
+    }
     setApiKey(saved.apiKey);
     setAccessKey(saved.accessKey);
     setSecretKey(saved.secretKey);
     setBaseUrl(saved.baseUrl);
     setModel(saved.model);
     setThinkingModel(saved.thinkingModel);
+    setImageModel(saved.imageModel);
     setFastGeneration(saved.fastGeneration);
     setVideoParameters(saved.videoParameters);
     setAdvanced(saved.advanced);
@@ -225,11 +235,12 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
       baseUrl,
       model,
       thinkingModel,
+      imageModel: imageModel.trim(),
       fastGeneration,
       videoParameters,
       advanced,
     });
-  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, fastGeneration, videoParameters, advanced]);
+  }, [providerId, apiKey, accessKey, secretKey, baseUrl, model, thinkingModel, imageModel, fastGeneration, videoParameters, advanced]);
 
   const handleStartGenerate = useCallback(async () => {
     if (!file || startingRef.current || referencePreview.busy) return;
@@ -403,6 +414,8 @@ export default function CustomAvatarWizard({ onExit, onOpenApiSettings }) {
             onModel={setModel}
             thinkingModel={thinkingModel}
             onThinkingModel={setThinkingModel}
+            imageModel={imageModel}
+            onImageModel={setImageModel}
             advancedOpen={advancedOpen}
             onAdvancedOpen={setAdvancedOpen}
             openaiCompat={openaiCompat}
@@ -569,6 +582,8 @@ export function AvatarWizardStep2({
   onModel,
   thinkingModel,
   onThinkingModel,
+  imageModel,
+  onImageModel,
   advancedOpen,
   onAdvancedOpen,
   openaiCompat,
@@ -665,6 +680,13 @@ export function AvatarWizardStep2({
       {isVolcengine && <FieldWithHelp label="图像理解 / 提示词模型" help="默认使用 Lite；可主动选择 2.1 Pro。不会在失败后自动换模型。">
         <TextModelSelect vision label="图像理解模型" value={thinkingModel || ""} onChange={onThinkingModel}
           apiKey={apiKey} baseUrl={baseUrl} />
+      </FieldWithHelp>}
+
+      {isVolcengine && <FieldWithHelp label="图片处理模型" help="用于图片预览生成、背景处理和独立动作首帧，需支持图片编辑。">
+        <ImageModelSelect value={imageModel || ""} onChange={onImageModel}
+          apiKey={apiKey} baseUrl={baseUrl} disabled={!removeBg}
+          saveHint="开始生成时保存并同步到 API 配置。" />
+        {!removeBg && <p className="muted small">当前使用原图，不调用图片处理模型。</p>}
       </FieldWithHelp>}
 
       {isCustom && (

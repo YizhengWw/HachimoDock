@@ -1,7 +1,7 @@
 /**
  * [Input] image payload + requested family list + Volcengine Ark API-key/model-name config.
  * [Output] structured persona + per-family prompts via Ark Responses; known Doubao models
- *          use direct generation unless deeper reasoning was explicitly requested.
+ *          use direct generation unless deeper reasoning was explicitly requested; errors name the submitted model.
  * [Pos] lib node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
@@ -158,7 +158,7 @@ export async function callThinkingModel({
         },
         body: JSON.stringify(body),
       });
-      return readJsonOrThrow(response, "thinking model");
+      return readJsonOrThrow(response, `thinking model (${body.model})`);
     },
     {
       retries: 0,

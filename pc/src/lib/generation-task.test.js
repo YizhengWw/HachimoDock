@@ -1,6 +1,6 @@
 /**
  * [Input] Raw provider and per-family generation errors.
- * [Output] Regression coverage for actionable failures, reference-image policy rejection, manual MP4 guidance and skipped-action summaries.
+ * [Output] Regression coverage for model-specific permission errors, actionable failures, reference-image policy rejection, manual MP4 guidance and skipped-action summaries.
  * [Pos] test node in pc/src/lib
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -141,7 +141,9 @@ test("all-family failures collapse repeated ModelNotOpen errors into one actiona
   const message = buildAllFamiliesFailedMessage(families);
 
   assert.match(message, /生成失败：所有动作都没有生成成功/);
-  assert.equal((message.match(/火山引擎模型未开通/g) || []).length, 1);
+  assert.equal((message.match(/模型未开通或无权限/g) || []).length, 1);
+  assert.match(message, /doubao-seedance-2-0-260128/);
+  assert.doesNotMatch(message, /Seedance 1.5|doubao-seedance-1-5/);
   assert.match(message, /影响动作：welcome、idle\.playing、idle\.wandering/);
   assert.match(message, /诊断摘要/);
   assert.doesNotMatch(message, /idle\.playing: volcano submit HTTP 404/);
@@ -167,6 +169,29 @@ test("raw provider errors are translated into product-level guidance", () => {
     normalizeGenerationErrorMessage('volcano submit HTTP 401: {"error":{"message":"invalid api key"}}'),
     /API Key 无效或已过期/,
   );
+});
+
+test("unavailable model messages name the request model and distinguish generation stages", () => {
+  const denied = '{"error":{"code":"ModelNotOpen","message":"model service is not activated"}}';
+  for (const [prefix, stage, model] of [
+    ["Ark image edit", "图片处理", "doubao-seedream-5-0-flash-260915"],
+    ["thinking model", "图像理解 / 提示词", "ep-analysis-fixture"],
+    ["参考图检查", "自动检查", "doubao-seed-2-1-lite-260915"],
+  ]) {
+    const message = normalizeGenerationErrorMessage(`${prefix} (${model}) HTTP 404: ${denied}`);
+    assert.match(message, new RegExp(`^${stage}模型未开通或无权限：`));
+    assert.ok(message.includes(model));
+    assert.doesNotMatch(message, /所选视频模型|Seedance 1.5|API Key 无效/);
+    assert.equal(normalizeGenerationErrorMessage(message), message);
+  }
+  const video = normalizeGenerationErrorMessage('火山引擎模型不可用：doubao-seedance-2-0-260128 已下线、未开通或当前 API Key 无权限。');
+  assert.match(video, /^视频生成模型不可用：doubao-seedance-2-0-260128/);
+  assert.doesNotMatch(video, /API Key 无效/);
+  const unknown = normalizeGenerationErrorMessage(`provider HTTP 404: ${denied}`);
+  assert.match(unknown, /模型 ID 未获取/);
+  assert.doesNotMatch(unknown, /视频生成|seedream|seedance/i);
+  const notFound = normalizeGenerationErrorMessage('Ark image edit (ep-image-fixture) HTTP 404: {"error":{"code":"InvalidEndpointOrModel.NotFound"}}');
+  assert.match(notFound, /^图片处理模型不可用：ep-image-fixture/);
 });
 
 test("portrait upload alternative survives the all-actions-failed summary", () => {

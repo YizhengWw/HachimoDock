@@ -158,11 +158,9 @@ export function loadProviderConfig(providerId = DEFAULT_PROVIDER_ID, storage = d
       : typeof saved.thinkingModel === "string"
         ? saved.thinkingModel
         : provider.thinkingModel || "",
-    imageModel: isVolcengine
-      ? VOLCENGINE_IMAGE_MODEL
-      : typeof saved.imageModel === "string"
-        ? saved.imageModel
-        : "",
+    imageModel: typeof saved.imageModel === "string" && saved.imageModel.trim()
+      ? saved.imageModel.trim()
+      : provider.imageModel || "",
     fastGeneration: saved.fastGeneration !== false,
     videoParameters: pickVideoParameters(saved.videoParameters),
     advanced: { ...DEFAULT_ADVANCED, ...(saved.advanced || {}) },
@@ -174,7 +172,7 @@ export function loadArkImageConfig(storage = defaultStorage()) {
   return {
     apiKey: config.apiKey,
     baseUrl: VOLCENGINE_BASE_URL,
-    model: VOLCENGINE_IMAGE_MODEL,
+    model: config.imageModel,
   };
 }
 
