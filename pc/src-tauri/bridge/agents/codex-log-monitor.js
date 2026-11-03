@@ -266,7 +266,11 @@ function compactText(value, max = MAX_MESSAGE_PREVIEW) {
 }
 
 function wrapDisplayBody(value) {
-  return compactText(value, MAX_MESSAGE_PREVIEW);
+  if (typeof value !== "string") return "";
+  // Markdown headings, lists and code fences need their original line starts.
+  const text = value.replace(/\r\n?/g, "\n").trim();
+  return text.length > MAX_MESSAGE_PREVIEW
+    ? `${text.slice(0, MAX_MESSAGE_PREVIEW - 1)}...` : text;
 }
 
 function responseAssistantText(payload) {
@@ -866,7 +870,7 @@ class CodexLogMonitor {
       const message = responseAssistantText(payload);
       if (!message) return;
       if (isMirroredAssistantMessage(entry, message, "response_item", payload.phase || payload.channel)) return;
-      entry.lastAgentMessage = compactText(message, MAX_MESSAGE_PREVIEW);
+      entry.lastAgentMessage = wrapDisplayBody(message);
       entry.agentMessageCount = (entry.agentMessageCount || 0) + 1;
       entry.lastState = "speaking";
       entry.lastEvent = "response_item:assistant_message";
@@ -953,7 +957,7 @@ class CodexLogMonitor {
       if (!isVisibleAssistantPayload(payload)) return;
       if (typeof payload.message === "string" && payload.message.trim()
           && isMirroredAssistantMessage(entry, payload.message, "event_msg", payload.phase || payload.channel)) return;
-      const message = compactText(payload.message || "", MAX_MESSAGE_PREVIEW);
+      const message = wrapDisplayBody(payload.message || "");
       if (message) entry.lastAgentMessage = message;
       entry.agentMessageCount = (entry.agentMessageCount || 0) + 1;
       entry.agentPhase = typeof payload.phase === "string" ? payload.phase : "";
@@ -962,7 +966,7 @@ class CodexLogMonitor {
     if (key === "event_msg:task_complete" && payload) {
       entry.turnActive = false;
       entry.userAwaitingStart = false;
-      const message = compactText(payload.last_agent_message || "", MAX_MESSAGE_PREVIEW);
+      const message = wrapDisplayBody(payload.last_agent_message || "");
       if (message) {
         entry.lastTaskCompleteMessage = message;
         entry.lastAgentMessage = message;

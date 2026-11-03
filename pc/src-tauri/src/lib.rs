@@ -6422,6 +6422,46 @@ async fn usb_send_speech(
 }
 
 #[tauri::command]
+fn usb_bubble_pixels_ready(
+    window: tauri::WebviewWindow,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    ready: bool,
+    instance: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Bubble renderer belongs to main window".into());
+    }
+    let sink = if ready {
+        Some(Arc::new(move |event: serde_json::Value| {
+            let _ = window.emit("usb-bubble-render", event);
+        }) as Arc<dyn Fn(serde_json::Value) + Send + Sync>)
+    } else {
+        None
+    };
+    let changed = usb_manager.set_bubble_renderer(&instance, sink);
+    if ready && !changed { return Err("Invalid bubble renderer instance".into()); }
+    Ok(())
+}
+#[tauri::command]
+async fn usb_send_bubble_pixels(
+    window: tauri::WebviewWindow,
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    frame: usb_serial::BubbleFrame,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Bubble renderer belongs to main window".into());
+    }
+    let manager = usb_manager.inner().clone();
+    let lease = manager.reserve_bubble_worker(&frame)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _lease = lease;
+        manager.send_bubble_pixels(frame)
+    })
+    .await
+    .map_err(|_| "BUBBLE_FALLBACK: worker stopped".to_string())?
+}
+
+#[tauri::command]
 async fn usb_send_command(
     usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
     command: String,
@@ -10312,6 +10352,8 @@ pub fn run() {
             usb_disconnect,
             usb_send_state,
             usb_send_speech,
+            usb_bubble_pixels_ready,
+            usb_send_bubble_pixels,
             usb_send_command,
             usb_audio_capture_control,
             usb_get_status,

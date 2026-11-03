@@ -38,6 +38,8 @@ function isInternalCodexReviewText(value) {
 
 function isInternalCodexSession(session) {
   if (!session || typeof session !== "object") return false;
+  if ([session.threadSource, session.thread_source]
+    .some(value => normalize(value) === "guardian_review")) return true;
   for (const value of [
     session.model,
     session.originator,

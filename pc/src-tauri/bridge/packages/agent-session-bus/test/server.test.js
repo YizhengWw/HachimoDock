@@ -194,6 +194,28 @@ test("GET /agent/session-events filters internal Codex approval reviews", async 
   }
 });
 
+test("Codex snapshot and event routes filter Guardian sources without filtering user review titles", async () => {
+  const sessions = [
+    { id: "guardian", threadSource: "guardian_review", state: "thinking", name: "Guardian review" },
+    { id: "guardian-raw", thread_source: "guardian_review", state: "thinking" },
+    { id: "user-review", name: "Guardian review", state: "working" },
+  ];
+  const adapter = new MockAdapter({ agentId: "codex" });
+  adapter.listSessions = async () => sessions;
+  const { bus, port } = await startBus({ agentId: "codex", adapter,
+    sessionEventProvider: () => ({ streamId: "guardian-test", cursor: 3,
+      events: sessions.map((session, index) => ({ cursor: index + 1, session })) }),
+  });
+  try {
+    const snapshot = await jsonRequest(port, "GET", "/agent/sessions?agentId=codex");
+    const events = await jsonRequest(port, "GET", "/agent/session-events?agentId=codex");
+    assert.equal(snapshot.status, 200);
+    assert.equal(events.status, 200);
+    assert.deepEqual(snapshot.body.sessions.map(session => session.id), ["user-review"]);
+    assert.deepEqual(events.body.events.map(event => event.session.id), ["user-review"]);
+  } finally { await bus.stop(); }
+});
+
 test("GET /agent/session-events validates agentId and cursor", async () => {
   const { bus, port } = await startBus();
   try {

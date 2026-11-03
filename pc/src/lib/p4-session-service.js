@@ -27,6 +27,8 @@ const GENERIC_SESSION_TITLES = new Set([
 ]);
 
 function isInternalReviewSession(session) {
+  if ([session?.threadSource, session?.thread_source]
+    .some(value => normalizeSessionText(value).toLowerCase() === "guardian_review")) return true;
   const model = normalizeSessionText(session?.model).toLowerCase();
   if (["codex-auto-review", "codex_auto_review", "approvals-reviewer"].includes(model)) {
     return true;

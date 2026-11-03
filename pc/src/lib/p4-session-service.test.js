@@ -40,6 +40,16 @@ test("routing sessions deduplicate by id, sort by activity, and exclude internal
   ]);
 });
 
+test("Guardian review sources stay out of P4 routing while ordinary review conversations remain", () => {
+  const sessions = buildP4RoutingSessions([
+    { id: "guardian", threadSource: "guardian_review", name: "Guardian review", state: "thinking" },
+    { id: "guardian-raw", thread_source: "guardian_review", state: "thinking" },
+    { id: "user", name: "Guardian review", state: "working" },
+    { id: "worker", threadSource: "worker", state: "working" },
+  ]);
+  assert.deepEqual(sessions.map(session => session.id), ["user", "worker"]);
+});
+
 test("snapshots preserve event lifecycle fields while still removing omitted routing sessions", () => {
   const previous = [
     { id: "kept", state: "working", lastModified: 10, summary: "original" },

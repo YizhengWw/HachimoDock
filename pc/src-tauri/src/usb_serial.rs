@@ -74,6 +74,8 @@ mod native_usb_protocol;
 mod transaction_waiters;
 mod transfer_log;
 mod widget_transaction;
+mod bubble_pixels;
+pub(crate) use bubble_pixels::BubbleFrame;
 
 use appearance_transaction::{
     asset_checksum_hex, build_asset_file_commit_payload, compute_p4_pack_id,
@@ -1269,6 +1271,8 @@ fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Resu
 
 #[derive(Clone)]
 pub struct UsbSerialManager {
+    bubble_renderer: Arc<Mutex<bubble_pixels::RenderBridge>>,
+    bubble_worker: Arc<AtomicBool>,
     last_serial_baud: Arc<Mutex<Option<(String, u32)>>>,
     connection: Arc<Mutex<Option<UsbConnection>>>,
     status_snapshot: Arc<Mutex<UsbConnectionStatus>>,
@@ -1349,6 +1353,8 @@ fn validate_expected_board_device_id(expected_board_device_id: &str) -> Result<&
 impl UsbSerialManager {
     pub fn new() -> Self {
         Self {
+            bubble_renderer: Arc::new(Mutex::new(bubble_pixels::RenderBridge::default())),
+            bubble_worker: Arc::new(AtomicBool::new(false)),
             last_serial_baud: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(None)),
             status_snapshot: Arc::new(Mutex::new(disconnected_usb_status())),
@@ -1597,6 +1603,7 @@ impl UsbSerialManager {
         let firmware_status_waiters = Arc::clone(&self.firmware_status_waiters);
         let device_response_waiters = Arc::clone(&self.device_response_waiters);
         let serial_body_write_active = Arc::clone(&self.serial_body_write_active);
+        let bubble_ref=Arc::clone(&self.bubble_renderer);
 
         thread::spawn(move || {
             let mut reader = BufReader::new(reader_port);
@@ -1676,6 +1683,14 @@ impl UsbSerialManager {
                     }
                 }
 
+                if msg.topic=="ui/text-pixels/need" {
+                    let delivery=conn_ref.try_lock().ok().and_then(|conn|conn.as_ref().and_then(|c|{
+                        if c.connection_id!=connection_id||c.capabilities["bubblePixelsBoot"]!=msg.payload["boot"]{return None;}
+                        let mut bridge=bubble_ref.lock().ok()?;
+                        Some((bridge.sink(),bridge.need(&msg.payload,connection_id,&c.board_device_id)))
+                    }));
+                    if let Some((Some(sink),events))=delivery{for event in events{sink(event);}}
+                }
                 on_message(msg.topic, msg.payload);
             }
 
@@ -1711,6 +1726,7 @@ impl UsbSerialManager {
                     existing.cancel_reader.store(true, Ordering::SeqCst);
                 }
                 *conn = None;
+                if let Ok(mut bridge)=self.bubble_renderer.lock(){bridge.clear_peer();}
                 cache_usb_status(&self.status_snapshot, None);
             }
         }
@@ -1719,6 +1735,176 @@ impl UsbSerialManager {
     /// Send a message to the device
     pub fn send(&self, topic: &str, payload: &serde_json::Value) -> Result<(), String> {
         self.send_inner(topic, payload, true, None, None, None)
+    }
+
+    pub(crate) fn set_bubble_renderer(
+        &self,
+        instance: &str,
+        sink: Option<bubble_pixels::RenderSink>,
+    ) -> bool {
+        self.bubble_renderer
+            .lock()
+            .map(|mut bridge| bridge.set_sink(instance, sink))
+            .unwrap_or(false)
+    }
+    pub(crate) fn reserve_bubble_worker(
+        &self,
+        frame: &BubbleFrame,
+    ) -> Result<bubble_pixels::WorkerLease, String> {
+        if frame.data.len() > 43692 {
+            return Err("BUBBLE_FALLBACK: encoded limit".into());
+        }
+        if !self
+            .bubble_renderer
+            .lock()
+            .map_err(|_| "BUBBLE_FALLBACK: lifecycle")?
+            .current(frame)
+        {
+            return Err("BUBBLE_FALLBACK: stale content".into());
+        }
+        bubble_pixels::WorkerLease::acquire(self.bubble_worker.clone())
+    }
+    pub(crate) fn send_bubble_pixels(&self, frame: BubbleFrame) -> Result<(), String> {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&frame.data)
+            .map_err(|_| "BUBBLE_FALLBACK: base64")?;
+        bubble_pixels::validate_frame(&frame, &bytes)?;
+        let status = self.status();
+        if status.capabilities["bubblePixels"] != bubble_pixels::SCHEMA {
+            return Err("BUBBLE_FALLBACK: unsupported peer".into());
+        }
+        let connection_id = frame
+            .connection_id
+            .parse::<u64>()
+            .map_err(|_| "BUBBLE_FALLBACK: connection")?;
+        let rate = bubble_pixels::wire_rate(status.baud_rate);
+        if bubble_pixels::estimated_wire_bytes(bytes.len())
+            > rate * bubble_pixels::DEADLINE_MS as usize / 1000
+        {
+            return Err("BUBBLE_FALLBACK: asset cannot fit wire budget".into());
+        }
+        let deadline = Instant::now() + Duration::from_millis(bubble_pixels::DEADLINE_MS);
+        let transfer = uuid::Uuid::new_v4().simple().to_string();
+        let mut next_write = Instant::now();
+        let mut phase = |name: &str,
+                         extra: serde_json::Value|
+         -> Result<serde_json::Value, String> {
+            while Instant::now() < next_write {
+                if Instant::now() >= deadline
+                    || !self
+                        .bubble_renderer
+                        .lock()
+                        .map_err(|_| "BUBBLE_FALLBACK: lifecycle")?
+                        .current(&frame)
+                {
+                    return Err("BUBBLE_FALLBACK: retired".into());
+                }
+                thread::sleep(
+                    next_write
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(10)),
+                );
+            }
+            if Instant::now() >= deadline {
+                return Err("BUBBLE_FALLBACK: deadline".into());
+            }
+            let request_id = format!("bubble-{}", uuid::Uuid::new_v4());
+            let mut payload = serde_json::json!({"phase":name,"requestId":request_id,"boot":frame.boot_id,
+                "client":frame.renderer_id,"owner":frame.owner,"version":frame.version,"transfer":transfer,
+                "id":frame.id,"style":frame.style});
+            if let Some(extra) = extra.as_object() {
+                for (k, v) in extra {
+                    payload[k] = v.clone();
+                }
+            }
+            let cost = serde_json::to_vec(
+                &serde_json::json!({"topic":"ui/text-pixels","payload":payload}),
+            )
+            .map_err(|_| "BUBBLE_FALLBACK: JSON")?
+            .len()
+                + 1;
+            if cost > 1536 {
+                return Err("BUBBLE_FALLBACK: frame budget".into());
+            }
+            let (sender, receiver) = mpsc::channel();
+            self.device_response_waiters
+                .lock()
+                .map_err(|_| "BUBBLE_FALLBACK: waiter")?
+                .push(DeviceResponseWaiter {
+                    request_id: request_id.clone(),
+                    response_topic: "ui/text-pixels/status".into(),
+                    sender,
+                });
+            let result = (|| {
+                // One FRAME owns the low-priority guard. It is released before
+                // token sleep or ACK wait, allowing media/OTA between frames.
+                {
+                    if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
+                        return Err("BUBBLE_FALLBACK: media pending".into());
+                    }
+                    let _guard = self
+                        .asset_transfer_guard
+                        .try_lock()
+                        .map_err(|_| "BUBBLE_FALLBACK: transfer contention")?;
+                    self.send_inner(
+                        "ui/text-pixels",
+                        &payload,
+                        false,
+                        Some(&frame.board_device_id),
+                        Some(connection_id),
+                        None,
+                    )?;
+                }
+                next_write = Instant::now() + Duration::from_secs_f64(cost as f64 / rate as f64);
+                let wait = deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(1000));
+                let reply = receiver
+                    .recv_timeout(wait)
+                    .map_err(|_| "BUBBLE_FALLBACK: unknown ACK; no replay")?;
+                for key in [
+                    "phase", "boot", "client", "owner", "version", "transfer", "id",
+                ] {
+                    if reply[key] != payload[key] {
+                        return Err("BUBBLE_FALLBACK: stale ACK".into());
+                    }
+                }
+                if reply["ok"] != true {
+                    return Err("BUBBLE_FALLBACK: device declined".into());
+                }
+                Ok(reply)
+            })();
+            self.remove_device_response_waiter(&request_id, "ui/text-pixels/status");
+            result
+        };
+        let result = (|| {
+            let begin = phase(
+                "begin",
+                serde_json::json!({"pageSizes":frame.page_sizes,"pageIndex":frame.page_index,
+                "pageCount":frame.page_count,"checksum":frame.checksum,"totalBytes":bytes.len()}),
+            )?;
+            if begin["cached"] == true {
+                return Ok(());
+            }
+            if begin["offset"] != 0 {
+                return Err("BUBBLE_FALLBACK: invalid READY".into());
+            }
+            for (index, chunk) in bytes.chunks(bubble_pixels::CHUNK_BYTES).enumerate() {
+                let reply = phase(
+                    "chunk",
+                    serde_json::json!({"offset":index*bubble_pixels::CHUNK_BYTES,
+                    "data":base64::engine::general_purpose::STANDARD.encode(chunk)}),
+                )?;
+                if reply["offset"] != index * bubble_pixels::CHUNK_BYTES + chunk.len() {
+                    return Err("BUBBLE_FALLBACK: offset ACK".into());
+                }
+            }
+            phase("end", serde_json::json!({}))?;
+            Ok(())
+        })();
+        // No uncertain image/frame replay. Superseding text invalidates its
+        // device stage; otherwise the bounded idle/absolute timeout retires it.
+        result
     }
 
     /// Low-priority snapshots never interleave with firmware/widget/appearance transfers.
@@ -1794,8 +1980,8 @@ impl UsbSerialManager {
         expected_connection_id: Option<u64>,
         write_slice_bytes: Option<usize>,
     ) -> Result<(), String> {
-        let mut conn = self.connection.lock().map_err(|e| e.to_string())?;
-        let conn = conn.as_mut().ok_or("Not connected")?;
+        let mut connection_guard = self.connection.lock().map_err(|e| e.to_string())?;
+        let conn = connection_guard.as_mut().ok_or("Not connected")?;
 
         if !conn.connected {
             return Err("Connection lost".to_string());
@@ -1828,6 +2014,25 @@ impl UsbSerialManager {
             return Err("语音通道使用中，稍后更新组件数据".into());
         }
         let mut payload = payload.clone();
+        let pixel_wire_guard=if topic=="ui/text-pixels" {
+            if conn.capture_active.load(Ordering::Acquire)||self.media_requests_pending.load(Ordering::SeqCst)!=0
+                ||self.appearance_sync_active.load(Ordering::Acquire)||conn.cancel_reader.load(Ordering::Acquire){
+                return Err("BUBBLE_FALLBACK: protected transport".into());
+            }
+            let bridge=self.bubble_renderer.lock().map_err(|_|"BUBBLE_FALLBACK: lifecycle")?;
+            let boot=conn.capabilities["bubblePixelsBoot"].as_str().unwrap_or("");
+            if conn.capabilities["bubblePixels"]!=bubble_pixels::SCHEMA||!bridge.current_wire(&payload,conn.connection_id,&conn.board_device_id,boot){
+                return Err("BUBBLE_FALLBACK: stale peer/content".into());
+            }
+            Some(bridge) // Linearize invalidation with this final physical write.
+        }else{None};
+        let mut bubble_events=Vec::new();let mut bubble_sink=None;
+        if conn.capabilities["bubblePixels"]==bubble_pixels::SCHEMA&&bubble_pixels::is_text_topic(topic)&&payload.is_object(){
+            let mut bridge=self.bubble_renderer.lock().map_err(|_|"BUBBLE_FALLBACK: lifecycle")?;
+            let boot=conn.capabilities["bubblePixelsBoot"].as_str().unwrap_or("");
+            bubble_events=bridge.observe(topic,&payload,conn.connection_id,&conn.board_device_id,boot);
+            payload["textPixels"]=bridge.metadata(topic,boot);bubble_sink=bridge.sink();
+        }
         if topic == "system/heartbeat" && conn.capabilities["widgetLocalTools"] == "p4-local-tools-v1" && payload.is_object() {
             let now=chrono::Local::now();
             payload["clock"]=serde_json::json!({"unixSeconds":now.timestamp(),"utcOffsetMinutes":now.offset().local_minus_utc()/60});
@@ -1859,7 +2064,7 @@ impl UsbSerialManager {
         // Replaceable widget snapshots share the audio-safe paced path. A
         // driver's blocking drain can otherwise hold the mutex indefinitely
         // even after media itself stopped using flush()/tcdrain().
-        let live_frame = audio_frame || topic == "widget/data" || topic == "app/snapshot"
+        let live_frame = audio_frame || topic == "widget/data" || topic == "app/snapshot" || topic == "ui/text-pixels"
             || (!bulk_frame && conn.capture_active.load(Ordering::Acquire));
         let write_result = {
             let _pause = (!live_frame).then(|| SerialReaderPause::new(&self.serial_body_write_active));
@@ -1912,6 +2117,10 @@ impl UsbSerialManager {
             cache_usb_status(&self.status_snapshot, Some(conn));
             return Err(error);
         }
+
+        drop(pixel_wire_guard);
+        drop(connection_guard);
+        if let Some(sink)=bubble_sink {for event in bubble_events {sink(event);}}
 
         Ok(())
     }

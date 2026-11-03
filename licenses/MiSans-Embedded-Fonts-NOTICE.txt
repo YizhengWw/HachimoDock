@@ -1,0 +1,25 @@
+MiSans embedded-font notice
+
+HachimiDock firmware uses glyph data rendered from Xiaomi MiSans Medium:
+- 16 px, 1 bpp font data in pet_p4_font_cn.c;
+- 32 px, 2 bpp font data, 199 glyphs, in pet_p4_font_cn_32.c.
+
+MiSans is provided by Xiaomi Inc. under the MiSans Font Intellectual Property
+License Agreement. Its license is separate from HachimiDock's own license.
+The existing MiSans attribution in THIRD_PARTY_NOTICES.md applies to this
+font identity; this notice explicitly identifies both embedded sizes.
+
+Official font source and embedding FAQ:
+https://hyperos.mi.com/font/zh/
+https://hyperos.mi.com/font/zh/faq/
+
+The unmodified official Agreement accompanies this notice as:
+MiSans-Font-License-Agreement.pdf
+
+Official Agreement source:
+https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf
+
+Original OTF/TTF font files are not included. Embedded glyph data is supplied
+as part of the firmware, not as a standalone font product. Retain the MiSans
+attribution, accompanying Agreement and existing third-party notices when
+redistributing this package.
