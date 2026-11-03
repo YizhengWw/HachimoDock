@@ -14,6 +14,7 @@ typedef enum {
   PET_P4_VIEW_STATUS_WAITING,
   PET_P4_VIEW_STATUS_DONE,
   PET_P4_VIEW_STATUS_ERROR,
+  PET_P4_VIEW_STATUS_STOPPED,
 } pet_p4_view_status_t;
 
 typedef struct {

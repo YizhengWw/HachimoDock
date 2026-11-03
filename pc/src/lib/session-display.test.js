@@ -434,3 +434,21 @@ test("deduplicates title-only cards using the lifecycle text rendered by firmwar
   assert.equal(next.length, 1);
   assert.equal(next[0].id, "event-id");
 });
+
+test("admits a stopped card only within the stop timestamp hold", () => {
+  const nowMs = 8_000_000;
+  const recent = reconcileDeviceSessionQueue(
+    [],
+    [{ id: "stopped-recent", state: "stopped", lastModified: nowMs - 1_000 }],
+    nowMs,
+  );
+  assert.deepEqual(recent.map((session) => session.id), ["stopped-recent"]);
+  assert.ok(deviceSessionTerminalRemainingMs(recent[0], nowMs) > 0);
+
+  const stale = reconcileDeviceSessionQueue(
+    [],
+    [{ id: "stopped-old", state: "stopped", lastModified: nowMs - 120_000 }],
+    nowMs,
+  );
+  assert.deepEqual(stale, []);
+});

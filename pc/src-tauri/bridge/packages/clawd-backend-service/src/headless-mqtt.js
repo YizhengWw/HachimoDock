@@ -2403,6 +2403,7 @@ async function main() {
       OpenClawAdapter,
       MiMoCodeAdapter,
       WorkBuddyAdapter,
+      DshAdapter,
     } = busModule;
     const busLog = (level, message, details) => log(level, `bus :: ${message}`, details);
     const adapters = [
@@ -2411,6 +2412,7 @@ async function main() {
       new OpenClawAdapter({ log: busLog }),
       new MiMoCodeAdapter({ log: busLog }),
       new WorkBuddyAdapter({ log: busLog }),
+      new DshAdapter({ log: busLog }),
     ];
     agentBus = createAgentSessionBus({
       adapters,

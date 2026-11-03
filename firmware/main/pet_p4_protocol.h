@@ -41,6 +41,12 @@ extern "C" {
 #define PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS 15000ULL
 #define PET_P4_CONVERSATION_HISTORY_MAX 8
 #define PET_P4_CONVERSATION_CUES_MAX 12
+/* DSH approval modal (R5): one pending request at a time, bounded strings. */
+#define PET_P4_APPROVAL_REQUEST_ID_MAX 96
+#define PET_P4_APPROVAL_AGENT_MAX 64
+#define PET_P4_APPROVAL_TOOL_MAX 64
+#define PET_P4_APPROVAL_REASON_MAX 192
+#define PET_P4_APPROVAL_TIMEOUT_MS 30000ULL
 
 typedef struct {
   char text[PET_P4_SPEECH_MAX];
@@ -86,6 +92,16 @@ typedef struct {
   bool session_voice_active;
   unsigned long long session_snapshot_last_seen_ms;
   char screen_page[PET_P4_PAGE_MAX];
+  /* DSH 审批上屏（R5）：PC bridge 下发的单条 pending approval。active 时渲染
+   * 覆盖层；一次 SW1/SW3 短按产生唯一 decision 并清空 pending 字段。
+   * approval_last_decided_id 保留最近一次已回复的 requestId，用于幂等去重。 */
+  bool approval_active;
+  char approval_request_id[PET_P4_APPROVAL_REQUEST_ID_MAX];
+  char approval_agent[PET_P4_APPROVAL_AGENT_MAX];
+  char approval_tool[PET_P4_APPROVAL_TOOL_MAX];
+  char approval_reason[PET_P4_APPROVAL_REASON_MAX];
+  unsigned long long approval_expires_ms;
+  char approval_last_decided_id[PET_P4_APPROVAL_REQUEST_ID_MAX];
   /* Ephemeral native touch diagnostic; never persisted or advertised as PetUI. */
   pet_p4_slice_t touch_test;
   unsigned long long touch_test_until_ms;
@@ -125,6 +141,27 @@ typedef struct {
 
 void pet_p4_state_init(pet_p4_runtime_state_t *state, const char *board_device_id);
 void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_ms);
+/* DSH R5 approval pending state: set by approval/request, consumed exactly once
+ * by SW1/SW3, cleared without an outgoing decision when it expires. */
+void pet_p4_state_clear_approval(pet_p4_runtime_state_t *state);
+bool pet_p4_state_approval_pending(
+  const pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+);
+bool pet_p4_state_begin_approval(
+  pet_p4_runtime_state_t *state,
+  const char *request_id,
+  const char *agent,
+  const char *tool,
+  const char *reason,
+  unsigned long long expires_ms
+);
+bool pet_p4_state_decide_approval(
+  pet_p4_runtime_state_t *state,
+  unsigned long long now_ms,
+  char *request_id_out,
+  size_t request_id_out_size
+);
 void pet_p4_asset_transfer_process(
   pet_p4_runtime_state_t *state,
   unsigned long long now_ms

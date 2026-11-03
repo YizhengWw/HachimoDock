@@ -61,6 +61,8 @@
           "dispatch_remote_cli_binding",
           "load_bridge_profile",
           "save_bridge_profile",
+          "load_dsh_approval_timeout",
+          "save_dsh_approval_timeout",
           "clear_bridge_profile",
           "load_agent_selection",
           "save_agent_selection",

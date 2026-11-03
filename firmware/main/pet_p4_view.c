@@ -16,6 +16,9 @@ static pet_p4_view_status_t status_from_state(const pet_p4_runtime_state_t *stat
   if (strcmp(status, "error") == 0 || strcmp(life, "error") == 0) {
     return PET_P4_VIEW_STATUS_ERROR;
   }
+  if (strcmp(status, "stopped") == 0 || strcmp(life, "stopped") == 0) {
+    return PET_P4_VIEW_STATUS_STOPPED;
+  }
   if (strcmp(status, "waiting_user") == 0 || strcmp(life, "waiting_user") == 0) {
     return PET_P4_VIEW_STATUS_WAITING;
   }
@@ -38,6 +41,13 @@ static bool should_compact_bubble(const pet_p4_runtime_state_t *state) {
   return false;
 }
 
+static bool is_dsh_state_event(const pet_p4_runtime_state_t *state) {
+  return state
+    && (strncmp(state->current_event, "tool/", 5) == 0
+        || strncmp(state->current_event, "turn/", 5) == 0
+        || strncmp(state->current_event, "session", 7) == 0);
+}
+
 static bool should_wait_for_session_card(const pet_p4_runtime_state_t *state) {
   if (!state
       || state->session_queue_count > 0
@@ -45,7 +55,16 @@ static bool should_wait_for_session_card(const pet_p4_runtime_state_t *state) {
       || state->session_voice_active) {
     return false;
   }
-  return status_from_state(state) != PET_P4_VIEW_STATUS_IDLE;
+  /* DSH has no P4 session-queue snapshot; its state/tool events are the
+   * authoritative status source. Do not replace working/tool_running with the
+   * "休息中" fallback. */
+  if (strcmp(state->active_agent, "deepseek-harness") == 0 || is_dsh_state_event(state)) {
+    return false;
+  }
+  /* Never replace an active lifecycle with the idle "休息中" placeholder just
+   * because a session card has not arrived. This affected DSH and, after
+   * switching, Claude/Codex too. */
+  return false;
 }
 
 static const char *conversation_hint(const char *conversation_state) {
