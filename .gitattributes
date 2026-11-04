@@ -5,3 +5,11 @@
 *.mjpg binary
 *.wav binary
 *.bin binary
+
+# Upstream legal and vendored files must retain their original bytes.
+licenses/** -text -whitespace
+**/licenses/** -text -whitespace
+**/LICENSE* -text -whitespace
+**/NOTICE* -text -whitespace
+**/THIRD_PARTY_NOTICES* -text -whitespace
+integrations/**/vendor/** -text -whitespace

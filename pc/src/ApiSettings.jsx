@@ -68,7 +68,7 @@ function resultToneClass(tone) {
   return tone ? ` is-${tone}` : "";
 }
 
-export default function ApiSettings({ onBack, configReadError = "" }) {
+export default function ApiSettings({ onBack, configReadError = "", active = true }) {
   const usageHelp = useUsageHelp();
   const [showSecrets, setShowSecrets] = useState(false);
   const [videoConfigs, setVideoConfigs] = useState(loadVideoConfigs);
@@ -306,8 +306,8 @@ export default function ApiSettings({ onBack, configReadError = "" }) {
   return (
     <div className="api-settings-page">
     <PageShell
-      title="API 配置"
-      subtitle="按需配置语音输入、宠物聊天和形象生成服务"
+      title="设置"
+      subtitle="API 服务配置"
       actions={(
         <div className="api-settings__page-actions">
           <button

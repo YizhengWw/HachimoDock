@@ -42,7 +42,7 @@ test("Windows current-task lookup rejects ambiguous windows without using launch
   assert.equal((dispatch.match(/Invoke-SendButton/g) || []).length,1);
   assert.match(dispatch, /submission = \$submission/);
   assert.doesNotMatch(dispatch, /PressEnter|Start-Sleep|readbackDeadline/);
-  assert.match(source, /if \(\$strictButton -or -not \$allowQueue\) \{ throw 'DESKTOP_TASK_SEND_UNAVAILABLE' \}/);
+  assert.match(source, /if \(\$state.Agent -eq 'deepseek-harness' -or \$strictButton -or -not \$allowQueue\) \{ throw 'DESKTOP_TASK_SEND_UNAVAILABLE' \}/);
   assert.match(source, /\$submission = Invoke-SendButton \$state \$true \$true/);
 });
 
@@ -118,12 +118,14 @@ test("both platforms append live drafts without waiting for old receipts", () =>
 test("WorkBuddy snapshots share the safe task protocol but keep native adapters isolated", () => {
   const windows = rust("codex_composer.rs");
   const snapshot = windows.split("function Get-TaskDraftSnapshot")[1].split("function Test-CodexSubmitPoint")[0];
-  assert.match(snapshot, /@\('codex','workbuddy'\) -notcontains \$state.Agent/);
+  assert.match(snapshot, /@\('codex','workbuddy','deepseek-harness'\) -notcontains \$state.Agent/);
   assert.match(snapshot, /agent = \$state.Agent/);
   assert.match(snapshot, /@\('agent','processId'/);
   const dispatch = windows.split("'dispatch' {")[1].split("'release' {")[0];
   assert.doesNotMatch(dispatch, /\$state.Agent -eq 'codex'/);
-  assert.match(windows, /\$attempts = if \(\$state.Agent -eq 'workbuddy'\) \{ 1 \}/);
+  const send = windows.split("function Invoke-SendButton(")[1].split("$state = $null")[0];
+  assert.equal((send.match(/\.Pattern\.Invoke\(\)/g) || []).length, 1);
+  assert.doesNotMatch(send, /\$attempts|catch\s*\{/);
   // Do not substitute Codex's managed UIA hit testing for WorkBuddy's native provider.
   assert.match(windows, /\$nativeTaskClick = \$strictButton -and \$state.CurrentTask -and \$state.Agent -eq 'codex'/);
   const mac = rust("codex_composer_macos.rs");
@@ -161,7 +163,12 @@ test("Codex task uses the voice native paste transport once and preserves safe r
   assert.match(write,/post_codex_command\(&target.app, 0\)\?/);
   assert.doesNotMatch(write,/AXSelectedText|encode_utf16|codex_task_selection_matches/);
   assert.match(write,/AXFocusedUIElement/);
-  assert.match(write,/assert_unchanged\(\)\?;\s+post_codex_paste/);
+  assert.match(write,/snapshot.set_text\(text\)\?;\s+assert_unchanged\(\)\?;\s+snapshot.verify_written\(\)\?;\s+post_codex_paste\(&target.app\)\?;/);
+  const ownershipCheck=source.split("fn verify_written(&self)")[1].split("fn restore(self)")[0];
+  assert.match(ownershipCheck,/ownership.owns_written\(NSPasteboard::generalPasteboard\(\).changeCount\(\)\)/);
+  assert.match(ownershipCheck,/else \{ Err\(/);
+  const restore=source.split("fn restore(self)")[1].split("let items = items")[0];
+  assert.match(restore,/if !ownership.owns_written\(pasteboard.changeCount\(\)\) \{ return; \}/);
   assert.match(write,/snapshot.restore\(\)/);
   assert.equal((write.match(/post_codex_paste\(/g)||[]).length,1);
   assert.doesNotMatch(write,/AXAttribute::value\(|press_enter\(|press_unique_submission\(/);
@@ -179,7 +186,8 @@ test("Codex task uses the voice native paste transport once and preserves safe r
   assert.match(transport,/down.post_to_pid\(pid\); up.post_to_pid\(pid\);/);
   const coordinator=rust("desktop_agent.rs").split("let submitted = bridge.dispatch_task_from_draft")[1].split("let drained")[0];
   assert.match(coordinator,/if error.starts_with\("DESKTOP_TASK_WRITE_NOT_CONFIRMED:"\)[\s\S]*?State::Failed/);
-  const submit=source.split('if expected.is_some() {')[1].split('return Ok(mode.into())')[0];
+  const confirm = source.split("fn confirm_voice_inner(")[1].split("pub(super) fn ")[0];
+  const submit=confirm.split("// Codex tasks share dictation's one-shot submit:")[1].split('return Ok(mode.into())')[0];
   assert.match(submit,/state.agent == MacosAgent::Codex[\s\S]*submit_once\(/);
   assert.match(submit,/assert_submission_target\(&target\)\?; press_enter\(target.agent, &target.app\)/);
 });

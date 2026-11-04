@@ -80,15 +80,15 @@ test('HTTP voice begin/insertion ACK and submit are bound to one mounted owner/s
   assert.equal((await post('/voice/submit', binding, nativeHeaders)).status, 409)
 })
 
-// Exercise the actual browser plugin registration rather than a copied DOM shim.
-test('official scoped slot remounts pairing state for a different session', () => {
+// Exercise actual browser registration: desktop input now uses the OS composer.
+test('status-only browser module has no pairing slot, network or input side effects', () => {
   const vm = require('node:vm'), fs = require('node:fs'), path = require('node:path')
-  let plugin, component
-  const react = { createElement: (type, props) => ({ type, props }) }
-  const context = { window: { __ModuleLoader__: { load(spec) { plugin = spec.factory(() => react) } } } }
+  let plugin, registrations = 0
+  const forbidden = () => { throw Error('status module must stay inert') }
+  const context = { fetch: forbidden, WebSocket: forbidden, EventSource: forbidden,
+    window: { __ModuleLoader__: { load(spec) { registrations++; assert.equal(spec.id, '@hachimodock/dsh-bridge'); plugin = spec.factory(forbidden) } } } }
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../client.js'), 'utf8'), context)
-  plugin.apply({ slots: { inject(name, mount) { assert.equal(name, 'conversation.composer.dock'); mount() }, register(spec, c) { component = c; return () => {} } } })
-  const props = { inputActions: { captureInsertion() {}, insertText() {}, submit() {} }, useInput() {} }
-  assert.equal(component({ ...props, sessionId: 'a' }).props.key, 'a')
-  assert.equal(component({ ...props, sessionId: 'b' }).props.key, 'b')
+  assert.equal(registrations, 1)
+  assert.deepEqual([...plugin.inject], [])
+  plugin.apply({ slots: { inject: forbidden, register: forbidden }, inputActions: { insertText: forbidden, submit: forbidden } })
 })

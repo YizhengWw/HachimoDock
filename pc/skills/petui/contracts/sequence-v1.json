@@ -1,0 +1,889 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-sequence-v1",
+ "notes": "Shared p4-sequence-v1 vectors for the firmware parser (ctypes/C harness), Python and Rust validators and the preview takeSequenceState. Device synthesis is tested separately.",
+ "limits": {
+  "bpm": [
+   40,
+   240
+  ],
+  "tracks": 2,
+  "notes": 64,
+  "midi": [
+   36,
+   96
+  ],
+  "beats": [
+   1,
+   16
+  ],
+  "waves": [
+   "square",
+   "triangle",
+   "noise"
+  ]
+ },
+ "vectors": [
+  {
+   "name": "loop with play/stop ops",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "start",
+      "sequence": "play"
+     },
+     {
+      "from": "*",
+      "on": "stop",
+      "sequence": "stop"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "two tracks and a tick completion play",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "n": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [
+     {
+      "every_ms": 1000,
+      "inc": {
+       "n": 1
+      },
+      "when": {
+       "var": "n",
+       "lte": 0
+      },
+      "then": {
+       "to": "idle",
+       "set": {
+        "n": 5
+       },
+       "sequence": "play"
+      }
+     }
+    ],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      },
+      {
+       "wave": "noise",
+       "volume": 30,
+       "notes": [
+        [
+         0,
+         1
+        ],
+        [
+         40,
+         1
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "op without the profile",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "start",
+      "sequence": "play"
+     }
+    ],
+    "tick": []
+   }
+  },
+  {
+   "name": "unknown op value",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "start",
+      "sequence": "pause"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "bpm below 40",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 30,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "midi above 96",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         97,
+         1
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "beats above 16",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         17
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "three tracks",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      },
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      },
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "sixty-five notes",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "triangle",
+       "volume": 50,
+       "notes": [
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ],
+        [
+         60,
+         1
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "unknown wave",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "saw",
+       "volume": 50,
+       "notes": [
+        [
+         60,
+         1
+        ]
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "mixed with the instrument",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ]
+    },
+    "instrument": {
+     "source": "percussion.wooden-fish",
+     "effect_volume": 70,
+     "ambience_volume": 18
+    }
+   }
+  },
+  {
+   "name": "extra key",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "sequence": {
+     "engine": "p4-sequence-v1",
+     "bpm": 120,
+     "volume": 60,
+     "loop": true,
+     "tracks": [
+      {
+       "wave": "square",
+       "volume": 80,
+       "notes": [
+        [
+         60,
+         2
+        ],
+        [
+         0,
+         1
+        ],
+        [
+         64,
+         1
+        ],
+        [
+         67,
+         4
+        ]
+       ]
+      }
+     ],
+     "tempo": 1
+    }
+   }
+  }
+ ]
+}

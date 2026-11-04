@@ -1,0 +1,16 @@
+{
+ "engine":"p4-integer-program-v1",
+ "scope":"offline pure logic vectors; not installed device programs or physical acceptance",
+ "cases":[
+  {"name":"category-totals","cells":4,"initial":[0,0,0,0],"events":[[0,10],[2,20],[0,-3]],"values":[7,0,20,0],"output":7,"code":[["EVENT",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,1],["ADD",1,1,2,0],["STORE",0,1,0,0],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},
+  {"name":"interval-overlap","cells":0,"initial":[],"events":[[8,10],[17,18],[10,12]],"values":[],"output":1,"code":[["EVENT",0,0,0,0],["EVENT",1,0,0,1],["CONST",2,0,0,17],["CONST",3,0,0,9],["LT",4,0,2,0],["LT",5,3,1,0],["MUL",6,4,5,0],["OUTPUT",0,6,0,0],["HALT",0,0,0,0]]},
+  {"name":"review-spacing","cells":2,"initial":[1,100],"events":[[],[]],"values":[4,106],"output":106,"code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["CONST",2,0,0,2],["MUL",1,1,2,0],["STORE",0,1,0,0],["CONST",0,0,0,1],["LOAD",3,0,0,0],["ADD",3,3,1,0],["STORE",0,3,0,0],["OUTPUT",0,3,0,0],["HALT",0,0,0,0]]},
+  {"name":"clamped-growth","cells":1,"initial":[95],"events":[[10],[-3]],"values":[97],"output":97,"code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["ADD",1,1,2,0],["CONST",3,0,0,0],["LT",4,1,3,0],["JZ",4,0,0,8],["MOVE",1,3,0,0],["CONST",3,0,0,100],["LT",4,3,1,0],["JZ",4,0,0,12],["MOVE",1,3,0,0],["STORE",0,1,0,0],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},
+  {"name":"inventory-slots","cells":2,"initial":[2,0],"events":[[0,3],[1,4],[0,-1]],"values":[4,4],"output":4,"code":[["EVENT",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,1],["ADD",1,1,2,0],["STORE",0,1,0,0],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},
+  {"name":"actor-health-phase","cells":2,"initial":[100,0],"events":[[20],[40]],"values":[40,1],"output":1,"code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["SUB",1,1,2,0],["STORE",0,1,0,0],["CONST",3,0,0,50],["LT",4,1,3,0],["CONST",0,0,0,1],["STORE",0,4,0,0],["OUTPUT",0,4,0,0],["HALT",0,0,0,0]]},
+  {"name":"integer-motion-step","cells":2,"initial":[0,1],"events":[[2],[3]],"values":[9,6],"output":9,"code":[["CONST",0,0,0,1],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["ADD",1,1,2,0],["STORE",0,1,0,0],["CONST",0,0,0,0],["LOAD",3,0,0,0],["ADD",3,3,1,0],["STORE",0,3,0,0],["OUTPUT",0,3,0,0],["HALT",0,0,0,0]]},
+  {"name":"conditional-event-routing","cells":2,"initial":[0,0],"events":[[0,4],[1,7],[0,-2]],"values":[2,7],"output":2,"code":[["EVENT",0,0,0,0],["CONST",1,0,0,0],["EQ",2,0,1,0],["JZ",2,0,0,6],["CONST",3,0,0,0],["JUMP",0,0,0,7],["CONST",3,0,0,1],["LOAD",4,3,0,0],["EVENT",5,0,0,1],["ADD",4,4,5,0],["STORE",3,4,0,0],["OUTPUT",0,4,0,0],["HALT",0,0,0,0]]},
+  {"name":"bounded-collection-sum","cells":4,"initial":[2,3,5,7],"events":[[]],"values":[2,3,5,7],"output":17,"code":[["CONST",0,0,0,0],["CONST",1,0,0,0],["CONST",2,0,0,4],["CONST",3,0,0,1],["LT",4,0,2,0],["JZ",4,0,0,10],["LOAD",5,0,0,0],["ADD",1,1,5,0],["ADD",0,0,3,0],["JUMP",0,0,0,4],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},
+  {"name":"explicit-time-cooldown","cells":1,"initial":[0],"events":[[10],[15],[25]],"values":[25],"output":1,"code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["SUB",3,2,1,0],["CONST",4,0,0,10],["LT",5,3,4,0],["JZ",5,0,0,9],["CONST",6,0,0,0],["JUMP",0,0,0,11],["STORE",0,2,0,0],["CONST",6,0,0,1],["OUTPUT",0,6,0,0],["HALT",0,0,0,0]]}
+ ]
+}

@@ -1,40 +1,85 @@
 /* Session-scoped InputActions only. No approval UI, DOM, keyboard or retry fallback. */
+;(function () {
 'use strict'
 
-function createVoiceConsumer({ sessionId, clientId, epoch, inputActions, readInput, ack }) {
+function opaqueId(value, maximum = 512) {
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum
+}
+
+function supportedInputSnapshot(state) {
+  return state !== null && typeof state === 'object'
+    && ['plain', 'claimed', 'adjudicating', 'submitting'].includes(state.phase)
+    && typeof state.draft === 'string'
+    && Number.isSafeInteger(state.draftRev) && state.draftRev >= 0
+    && Array.isArray(state.attachmentIds) && Array.isArray(state.occurrences)
+}
+
+function supportedInsertionSpan(span) {
+  return span !== null && typeof span === 'object' && !Array.isArray(span)
+    && Number.isSafeInteger(span.start) && span.start >= 0
+    && Number.isSafeInteger(span.end) && span.end >= span.start
+    && Number.isSafeInteger(span.draftRev) && span.draftRev >= 0
+}
+
+function supportedInputActions(actions) {
+  return actions !== null && typeof actions === 'object'
+    && ['captureInsertion', 'insertText', 'submit'].every(k => typeof actions[k] === 'function')
+}
+
+function createVoiceConsumer({ sessionId, clientId, epoch, inputActions, readInput, ack, isCurrent = () => true, onUnavailable = () => {} }) {
   let disposed = false
   const utterances = new Map(), receipts = new Map()
   async function handle(type, p) {
-    if (disposed || !p || p.sessionId !== sessionId || p.owner !== clientId || p.epoch !== epoch || typeof p.actionId !== 'string' || typeof p.utteranceId !== 'string' || typeof p.lease !== 'string') return
+    if (disposed || !isCurrent() || !p || p.sessionId !== sessionId || p.owner !== clientId || p.epoch !== epoch
+      || !opaqueId(p.actionId) || !opaqueId(p.utteranceId) || !opaqueId(p.lease)) return
     const prior = receipts.get(p.actionId)
     if (prior) { await ack(prior); return }
-    let ok = false
+    let ok = false, unavailable = null
     try {
-      const state = readInput()
-      const u = utterances.get(p.utteranceId)
-      if (type === 'voice-begin' && !u && utterances.size < 32 && state.phase === 'plain') {
+      const state = readInput(), u = utterances.get(p.utteranceId)
+      if (!supportedInputActions(inputActions) || !supportedInputSnapshot(state)) {
+        unavailable = 'unsupported'
+      } else if (type === 'voice-begin' && !u && utterances.size < 32 && state.phase === 'plain') {
         const span = inputActions.captureInsertion()
-        utterances.set(p.utteranceId, { span, lease: p.lease, state: 'captured' })
-        ok = true
-      } else if (type === 'voice-insert' && u?.state === 'captured' && u.lease === p.lease && typeof p.text === 'string' && p.text.trim() && p.text.length <= 4000 && Number.isSafeInteger(p.revision)) {
-        u.state = 'insertion-unknown' // consume before calling user code
-        ok = inputActions.insertText(p.text, u.span) === true
-        if (ok) {
-          u.state = 'inserted'; u.text = p.text; u.revision = p.revision
-          u.draftRev = inputActions.captureInsertion().draftRev
+        if (!supportedInsertionSpan(span) || span.draftRev !== state.draftRev) unavailable = 'unsupported'
+        else if (isCurrent()) {
+          utterances.set(p.utteranceId, { span: { start: span.start, end: span.end, draftRev: span.draftRev }, lease: p.lease, state: 'captured' })
+          ok = true
         }
-      } else if (type === 'voice-submit' && u?.state === 'inserted' && u.lease === p.lease && u.revision === p.revision && state.phase === 'plain' && state.draft === u.text && state.draftRev === u.draftRev && !state.attachmentIds?.length && !state.occurrences?.length && inputActions.captureInsertion().draftRev === u.draftRev) {
-        u.state = 'submit-unknown' // void submit is a request, never a delivery ACK
-        inputActions.submit()
-        ok = true
+      } else if (type === 'voice-insert' && u?.state === 'captured' && u.lease === p.lease
+        && typeof p.text === 'string' && p.text.trim() && p.text.length <= 4000
+        && Number.isSafeInteger(p.revision) && p.revision >= 0) {
+        u.state = 'insertion-unknown' // consume before user code; never replay an uncertain side effect
+        if (isCurrent()) {
+          const inserted = inputActions.insertText(p.text, u.span)
+          if (typeof inserted !== 'boolean') unavailable = 'unsupported'
+          else if (inserted) {
+            const span = inputActions.captureInsertion()
+            if (!supportedInsertionSpan(span)) unavailable = 'unsupported'
+            else {
+              u.state = 'inserted'; u.text = p.text; u.revision = p.revision; u.draftRev = span.draftRev
+              ok = true
+            }
+          }
+        }
+      } else if (type === 'voice-submit' && u?.state === 'inserted' && u.lease === p.lease
+        && u.revision === p.revision && state.phase === 'plain' && state.draft === u.text
+        && state.draftRev === u.draftRev && state.attachmentIds.length === 0 && state.occurrences.length === 0) {
+        const span = inputActions.captureInsertion()
+        if (!supportedInsertionSpan(span)) unavailable = 'unsupported'
+        else if (span.draftRev === u.draftRev && isCurrent()) {
+          u.state = 'submit-unknown' // submit():void means requested, never delivered
+          const submitted = inputActions.submit()
+          if (submitted !== undefined) unavailable = 'unsupported'
+          else ok = true
+        }
       }
-    } catch { ok = false }
+    } catch { unavailable = 'unconfirmed'; ok = false }
     const receipt = { actionId: p.actionId, utteranceId: p.utteranceId, sessionId, epoch, lease: p.lease, ok }
     receipts.set(p.actionId, receipt)
-    // Retain terminal IDs for this bounded lease. At capacity the stream closes;
-    // eviction could turn an old action into a new side effect.
     if (receipts.size > 128) { disposed = true; throw new Error('voice lease exhausted') }
-    await ack(receipt)
+    if (unavailable) disposed = true
+    try { await ack(receipt) } finally { if (unavailable) onUnavailable(unavailable) }
   }
   return { handle, dispose() { disposed = true; utterances.clear(); receipts.clear() } }
 }
@@ -64,56 +109,16 @@ async function consumeEvents(response, signal, handle) {
 }
 
 function install(loader) {
-  loader.load({ id: '@hachimodock/dsh-bridge', factory(require) {
-    const React = require('react')
-    function VoiceDock(props) {
-      if (typeof props.sessionId !== 'string' || typeof props.useInput !== 'function' || !['captureInsertion', 'insertText', 'submit'].every(k => typeof props.inputActions?.[k] === 'function')) {
-        return React.createElement('span', null, 'HachimoDock voice unavailable: unsupported scoped InputActions')
-      }
-      return React.createElement(ScopedVoiceDock, { ...props, key: props.sessionId })
-    }
-    function ScopedVoiceDock(props) {
-      const state = props.useInput(s => s), input = React.useRef(state); input.current = state
-      const [code, setCode] = React.useState(''), [pair, setPair] = React.useState(null)
-      const [status, setStatus] = React.useState('未配对：从本地受保护的 capability descriptor 获取一次性配对码')
-      const base = 'http://127.0.0.1:17892'
-      React.useEffect(() => {
-        if (!pair || pair.sessionId !== props.sessionId) return
-        const controller = new AbortController()
-        const post = async (path, body) => {
-          const r = await fetch(base + path, { method: 'POST', headers: { Authorization: `Bearer ${pair.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: controller.signal, redirect: 'error', cache: 'no-store' })
-          if (!r.ok) throw new Error('voice receipt unavailable')
-          return r.json()
-        }
-        const consumer = createVoiceConsumer({ ...pair, inputActions: props.inputActions, readInput: () => input.current, ack: b => post('/voice/ack', b) })
-        fetch(base + '/events', { headers: { Authorization: `Bearer ${pair.token}` }, signal: controller.signal, redirect: 'error', cache: 'no-store' })
-          .then(r => consumeEvents(r, controller.signal, consumer.handle))
-          .catch(() => {
-            consumer.dispose()
-            const unmounted = controller.signal.aborted
-            controller.abort()
-            if (!unmounted) { setPair(null); setStatus('语音连接已关闭；未确认的动作不会重发') }
-          })
-        return () => { consumer.dispose(); controller.abort() }
-      }, [pair, props.sessionId, props.inputActions])
-      const pairNow = async () => {
-        const oneTimeCode = code; setCode('')
-        try {
-          const r = await fetch(base + '/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: oneTimeCode, sessionId: props.sessionId }), redirect: 'error', cache: 'no-store' })
-          const p = await r.json()
-          if (!r.ok || p.sessionId !== props.sessionId || typeof p.token !== 'string') throw new Error('unpaired')
-          setPair(p); setStatus('此会话已配对；切换/卸载后重新配对，不自动重发')
-        } catch { setStatus('配对不可用：检查已配置的精确 Origin 与一次性配对码') }
-      }
-      return React.createElement('div', null,
-        React.createElement('span', { role: 'status' }, status),
-        !pair && React.createElement('input', { type: 'password', autoComplete: 'off', value: code, onChange: e => setCode(e.target.value), 'aria-label': 'HachimoDock pairing code' }),
-        !pair && React.createElement('button', { type: 'button', onClick: pairNow, disabled: !code }, '配对此会话'))
-    }
-    return { inject: ['slots'], apply(ctx) {
-      ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({ name: 'conversation.composer.dock', id: 'hachimodock-voice-dock', order: 999 }, VoiceDock))
-    } }
+  if (typeof loader?.load !== "function") return false
+  // Desktop input is owned by the same OS composer adapter as ChatGPT and
+  // WorkBuddy. Keep the status resource registered, without a pairing dock,
+  // editor injection, automatic form changes or browser credentials.
+  loader.load({ id: "@hachimodock/dsh-bridge", factory() {
+    return { inject: [], apply() {} }
   } })
+  return true
 }
 if (typeof module !== 'undefined' && module.exports) module.exports = { createVoiceConsumer, consumeEvents }
 if (typeof window !== 'undefined' && window.__ModuleLoader__) install(window.__ModuleLoader__)
+
+})();

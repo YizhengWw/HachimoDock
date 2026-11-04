@@ -1,0 +1,2658 @@
+{
+  "schema": "appearance-query-parser-vectors-v1",
+  "syntheticOnly": true,
+  "vectors": [
+    {
+      "name": "operation",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "owner",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "id",
+      "ack": {
+        "transferId": "different-token",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "duplicate",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "partial",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "schema",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "legacy",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance IO active"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "identity-snapshot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "idle",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "ok",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "storage-unavailable",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance storage unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "bad-transfer",
+      "ack": {
+        "transferId": "bad id",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "transfer",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "missing-transfer",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "duplicate-board",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "duplicate-boot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "duplicate-schema",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "duplicate-transfer",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "storage",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "unknown",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_outcome_unknown"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unknown",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "unknown-operation",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_outcome_unknown"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unknown",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "distinct-tokens",
+      "ack": {
+        "transferId": "slots-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "board",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "boot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "nonce",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance observation binding unavailable"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "actual-c-response"
+    },
+    {
+      "name": "busy-missing-transferId",
+      "ack": {
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-queryNonce",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-boardDeviceId",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-bootId",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-observationSchema",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-phase",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-serialized",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-ok",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-proof",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-quiescent",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-missing-errorCode",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-transferId",
+      "ack": {
+        "transferId": "other",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-queryNonce",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "other",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-boardDeviceId",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "other-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-bootId",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "old-boot",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-phase",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "activate",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-serialized",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": false,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-ok",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": "false",
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-proof",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": true,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-quiescent",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": true,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-errorCode",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "unrecognized"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-wrong-observationSchema",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "old",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-slots",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "slots": []
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-activeSlot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "activeSlot": 0
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-nativeIoEpoch",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-snapshotChanged",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "snapshotChanged": false
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-assetTransferActive",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "assetTransferActive": true
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "busy-forged-activePackId",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_busy",
+        "activePackId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "unknown-plus-operation-text",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "proof": false,
+        "quiescent": false,
+        "errorCode": "appearance_query_outcome_unknown",
+        "error": "operation in progress"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "untyped-nack",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "ok": false,
+        "error": "appearance IO active"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-with-busy-code",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9,
+        "errorCode": "appearance_query_busy"
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-with-not-proof",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9,
+        "proof": false
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-snapshotChanged",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": true,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-assetTransferActive",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": true,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-rawReceiving",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": true,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-appearanceOwnerActive",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": true,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-assetFileOpen",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": true,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-assetSlotPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": true,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-nativeTransferActive",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": true,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-nativeReceiving",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": true,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-nativeWorkerPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": true,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-protocolWorkerPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": true,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-storageWorkerPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": true,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-firmwareOtaActive",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": true,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-busy-rebootPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": true,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-not-quiescent",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": false,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "waiting",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-slots",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-activeSlot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-nativeIoEpoch",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-quiescent",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-snapshotChanged",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-missing-nativeWorkerPending",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-duplicate-slot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-active-invalid",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": false,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-bool-epoch",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": true
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-overflow-epoch",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 4294967295
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "positive-fractional-slot",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0.5,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "input-invalid-generation81",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 0,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "input-invalid-nonce82",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "bad nonce",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "input-invalid-board83",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "input-invalid-boot84",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "synthetic-board",
+      "generation": 7,
+      "boot": "",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    },
+    {
+      "name": "input-invalid-board85",
+      "ack": {
+        "transferId": "observe-synthetic",
+        "phase": "slot-query",
+        "builtinProtected": true,
+        "systemCues": true,
+        "ok": true,
+        "activeSlot": 0,
+        "slots": [
+          {
+            "slot": 0,
+            "valid": true,
+            "packId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          {
+            "slot": 1,
+            "valid": true,
+            "packId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "observationSchema": "p4-appearance-quiescent-v1",
+        "queryNonce": "observe-synthetic",
+        "boardDeviceId": "synthetic-board",
+        "bootId": "0000000000000001",
+        "serialized": true,
+        "snapshotChanged": false,
+        "quiescent": true,
+        "assetTransferActive": false,
+        "rawReceiving": false,
+        "appearanceOwnerActive": false,
+        "assetFileOpen": false,
+        "assetSlotPending": false,
+        "nativeTransferActive": false,
+        "nativeReceiving": false,
+        "nativeWorkerPending": false,
+        "protocolWorkerPending": false,
+        "storageWorkerPending": false,
+        "firmwareOtaActive": false,
+        "rebootPending": false,
+        "nativeIoEpoch": 9
+      },
+      "nonce": "observe-synthetic",
+      "board": "bad\nboard",
+      "generation": 7,
+      "boot": "0000000000000001",
+      "expect": "unproven",
+      "origin": "mutation-of-actual-c-response"
+    }
+  ]
+}

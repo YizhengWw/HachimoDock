@@ -1,0 +1,782 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-events-v1",
+ "notes": "Shared p4-events-v1 vectors: emit names (<= 8, <= 15 safe ASCII), event:<name> transition triggers (<= 8 subscriptions), and alarms (<= 4, every_ms >= 60000 or at_ms_var, action must be a declared transition trigger, background bubbles need the PC alarm policy). Alarms need events and persist.",
+ "limits": {
+  "names": 8,
+  "queue": 8,
+  "nameLength": 15,
+  "alarms": 4,
+  "alarmMinMs": 60000,
+  "textBytes": 40
+ },
+ "vectors": [
+  {
+   "name": "emit and subscribe",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "emit": "done"
+     },
+     {
+      "from": "*",
+      "on": "event:done",
+      "to": "idle"
+     },
+     {
+      "from": "*",
+      "on": "event:ping"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    }
+   }
+  },
+  {
+   "name": "alarms with persist",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     },
+     {
+      "from": "*",
+      "on": "ring"
+     },
+     {
+      "from": "*",
+      "on": "set",
+      "set": {
+       "remind_in": 300000
+      }
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     },
+     {
+      "id": "timer",
+      "at_ms_var": "remind_in",
+      "action": "ring"
+     }
+    ]
+   }
+  },
+  {
+   "name": "emit without the profile",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "emit": "done"
+     }
+    ],
+    "tick": []
+   }
+  },
+  {
+   "name": "subscribe without the profile",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "event:done"
+     }
+    ],
+    "tick": []
+   }
+  },
+  {
+   "name": "undeclared emit name",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "emit": "boom"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    }
+   }
+  },
+  {
+   "name": "nine emit names",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "e0",
+      "e1",
+      "e2",
+      "e3",
+      "e4",
+      "e5",
+      "e6",
+      "e7",
+      "e8"
+     ]
+    }
+   }
+  },
+  {
+   "name": "name longer than 15",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "abcdefghijklmnop"
+     ]
+    }
+   }
+  },
+  {
+   "name": "name with a colon",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "a:b"
+     ]
+    }
+   }
+  },
+  {
+   "name": "nine subscriptions",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "event:e0"
+     },
+     {
+      "from": "*",
+      "on": "event:e1"
+     },
+     {
+      "from": "*",
+      "on": "event:e2"
+     },
+     {
+      "from": "*",
+      "on": "event:e3"
+     },
+     {
+      "from": "*",
+      "on": "event:e4"
+     },
+     {
+      "from": "*",
+      "on": "event:e5"
+     },
+     {
+      "from": "*",
+      "on": "event:e6"
+     },
+     {
+      "from": "*",
+      "on": "event:e7"
+     },
+     {
+      "from": "*",
+      "on": "event:e8"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1"
+    }
+   }
+  },
+  {
+   "name": "alarms without persist",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     }
+    ]
+   }
+  },
+  {
+   "name": "alarms without events",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     }
+    ]
+   }
+  },
+  {
+   "name": "every_ms below one minute",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 59999,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     }
+    ]
+   }
+  },
+  {
+   "name": "action not a transition trigger",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "nope",
+      "background": true,
+      "text": "喝水"
+     }
+    ]
+   }
+  },
+  {
+   "name": "both every_ms and at_ms_var",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水",
+      "at_ms_var": "remind_in"
+     }
+    ]
+   }
+  },
+  {
+   "name": "five alarms",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "a0",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     },
+     {
+      "id": "a1",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     },
+     {
+      "id": "a2",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     },
+     {
+      "id": "a3",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     },
+     {
+      "id": "a4",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "喝水"
+     }
+    ]
+   }
+  },
+  {
+   "name": "text over 40 bytes",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "remind_in": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "remind"
+     }
+    ],
+    "tick": [],
+    "events": {
+     "engine": "p4-events-v1",
+     "emit": [
+      "done",
+      "ping"
+     ]
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "remind_in"
+     ],
+     "states": {
+      "idle": "idle"
+     }
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      }
+     ]
+    },
+    "alarms": [
+     {
+      "id": "water",
+      "every_ms": 3600000,
+      "action": "remind",
+      "background": true,
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    ]
+   }
+  }
+ ]
+}

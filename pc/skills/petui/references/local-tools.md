@@ -3,7 +3,7 @@
 `local.engine="p4-local-tools-v1"` 是 0.7.102 新增的通用离线能力。
 必须核验设备 `widgetLocalTools`；不能用 bounded-v4 版本代替能力协商。
 仅用于 tool + app surface + input-v1，不与 host、media、data、scene、game、instrument、pages 或 tick 混用。
-运行时与其他图形包共用 8191 字节/32 节点/128 KiB 编译图片预算。
+运行时沿用声明的 quota 配额：默认 app 为 8191 字节/32 节点，v2 为 8191 字节/48 节点，v3 为 12287 字节/64 节点；编译图片仍受 128 KiB 预算约束。
 
 `local` 精确字段：engine、kind、groups、actions、reveal_ms、idle、busy、hint。
 kind 为 deck 或 countdown；揭晓时间 300–2000ms；三条状态文案各 1–144 UTF-8 字节。
@@ -11,7 +11,8 @@ groups 为 1–3 组，每组 title 为 1–30 字节。
 
 ## 内容池
 
-deck 每组包含 items（2–16 项），每项精确为 title（1–60 字节）及 note（1–144 字节）。
+deck 每组包含 items：默认 2–16 项，`quota="p4-quota-v2"` 为 2–24 项，`quota="p4-quota-v3"` 为 2–64 项；每项精确为 title（1–60 字节）及 note（1–144 字节）。
+任一组超过 16 项时，还必须确认设备 `widgetLocalToolsMasks="p4-local-masks-v2"`；旧固件单独宣称 quota 或 maxLocalItems 不证明排除位图安全，PC 必须在任何安装写入前拒绝。
 同组标题唯一。内容为原创或取得授权，不冒充占卜、医疗、金融或法律建议。
 actions 是逻辑动作到 draw/exclude/reset/close/previous/next 的映射，不得重复操作。
 draw 必需；多组须有 previous+next；exclude 必须同时提供 reset，防止排空后无路可退。
@@ -37,11 +38,14 @@ PC 仅对支持本能力的设备发送。本机时间错误会影响倒计时�
 
 ## 固定存档和表面
 
-使用七个 int 变量 local0…local6；local0 是组序号。
+countdown 及每组最多 24 项的 deck 使用原有七个 int 变量 local0…local6；local0 是组序号。
 每组依次用两个变量：deck 为排除位图和上次结果索引（初值 0/-1），countdown 为 civil-day 和当日分钟。
 civil-day 是从 1970-01-01 起的公历天数；分钟范围 0–1439。
 状态固定按序 ready、busy、result、editing、empty、offline；初始 ready。
 persist 为 version:1、vars 按序包含七个变量、所有 states 恢复映射到 ready，不保存编辑草稿/半次抽取。
+
+任一组超过 24 项的 v3 deck 显式使用十三个 int 变量 `local0`…`local12`，persist 的 version 为 2、vars 按数字顺序完整列出十三名。每组低 24 位仍放在 local1/3/5；第 24–43 项的位图放在 local7/9/11，第 44–63 项放在 local8/10/12（项索引从 0 开始）。每个高位分词仅 20 bit，避免 JSON 浮点精度和 int32 符号/移位问题。上次结果仍用 local2/4/6。旧七变量版本不暗迁移、不截断；六个状态的恢复映射仍为 ready。
+
 每个 transition 精确为 `{from:"*",on:<逻辑动作>}`，不自行添加 set/inc/to/page。
 引擎填充 eyebrow/headline/note/metricValue/metricLabel/metricUnit/badge/progress，表面使用 bind 读取。
 原始文章不宜超过配额；大量长文请用知识库宿主，不把此能力扩成脚本运行器。

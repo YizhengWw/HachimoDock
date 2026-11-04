@@ -5,6 +5,17 @@ use std::{fs::{self, OpenOptions}, io::Write, path::{Path, PathBuf}, sync::{Mute
 static LOG: OnceLock<Mutex<PathBuf>> = OnceLock::new();
 const MAX_BYTES: u64 = 1024 * 1024;
 
+#[path = "realtime_aec_diagnostics.rs"]
+pub(crate) mod aec;
+
+/// The termination cause is known even when a human-readable error is not a
+/// transport/service error. The preceding AEC receipt has the narrower class.
+pub fn termination_error_kind(reason: &str, error: &str) -> &'static str {
+    if reason == "aec_unavailable" { "aec_ingress_rejected" }
+    else if error.is_empty() { "none" }
+    else { error_kind(error) }
+}
+
 pub fn configure(dir: &Path) -> Result<(), String> {
     let dir = dir.join("logs");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -34,7 +45,40 @@ pub fn error_kind(error: &str) -> &'static str {
     else { "service_or_transport" }
 }
 
+// A separate, closed schema prevents this diagnostic from inheriting arbitrary
+// fields or logging audio/base64/identifiers from the caller's payload.
+fn audio_chunk_failure_metadata(details: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    let Some(kind) = details["errorKind"].as_str().filter(|v| matches!(*v,
+        "audio_bytes_missing" | "audio_bytes_invalid" | "audio_byte_count_mismatch")) else {
+        return Value::Object(out);
+    };
+    out.insert("stage".into(), json!("usb_audio_chunk_rejected"));
+    out.insert("errorKind".into(), json!(kind));
+    for key in ["seq", "expectedSeq", "declaredBytes", "decodedBytes", "base64CharCount", "priorChunks", "priorBytes"] {
+        if let Some(value) = details.get(key).and_then(Value::as_u64) {
+            out.insert(key.into(), json!(value));
+        } else if key == "declaredBytes" && details[key].is_null() {
+            out.insert(key.into(), Value::Null);
+        }
+    }
+    for key in ["bytesFieldType", "dataFieldType"] {
+        if let Some(value) = details[key].as_str().filter(|v| matches!(*v,
+            "missing" | "null" | "boolean" | "number" | "string" | "array" | "object")) {
+            out.insert(key.into(), json!(value));
+        }
+    }
+    if let Some(value) = details["dataFieldPresent"].as_bool() {
+        out.insert("dataFieldPresent".into(), json!(value));
+    }
+    Value::Object(out)
+}
+
 fn metadata(details: Value) -> Value {
+    if details["stage"] == "usb_audio_chunk_rejected" {
+        return audio_chunk_failure_metadata(&details);
+    }
+    if details.get("aecTopic").is_some() { return aec::sanitize(&details); }
     let mut out = serde_json::Map::new();
     // Only the applied numeric gain, never appearance names or voice IDs.
     if let Some(gain) = details.get("volume").and_then(Value::as_f64).filter(|v| v.is_finite() && *v >= 0.0 && *v <= 2.0) {
@@ -106,6 +150,35 @@ fn append(path: &Path, session: &str, event: &str, details: Value) -> std::io::R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_length_diagnostic_keeps_only_closed_types_and_counts() {
+        let source = json!({"stage":"usb_audio_chunk_rejected",
+            "errorKind":"audio_byte_count_mismatch", "seq":3, "expectedSeq":3,
+            "bytesFieldType":"number", "declaredBytes":640, "decodedBytes":0,
+            "dataFieldType":"missing", "dataFieldPresent":false, "base64CharCount":0,
+            "priorChunks":3, "priorBytes":1920,
+            "data":"PRIVATE_BASE64", "pcm":[1,2], "sessionId":"PRIVATE_SESSION",
+            "boardDeviceId":"PRIVATE_BOARD", "apiKey":"PRIVATE_KEY", "checksum":"PRIVATE_HASH"});
+        let safe = metadata(source);
+        assert_eq!(safe, json!({"stage":"usb_audio_chunk_rejected",
+            "errorKind":"audio_byte_count_mismatch", "seq":3, "expectedSeq":3,
+            "bytesFieldType":"number", "declaredBytes":640, "decodedBytes":0,
+            "dataFieldType":"missing", "dataFieldPresent":false, "base64CharCount":0,
+            "priorChunks":3, "priorBytes":1920}));
+        assert!(!safe.to_string().contains("PRIVATE_"));
+        let bad = metadata(json!({"stage":"usb_audio_chunk_rejected",
+            "errorKind":"audio_bytes_invalid", "bytesFieldType":"PRIVATE_TYPE",
+            "dataFieldType":"PRIVATE_TYPE", "dataFieldPresent":"PRIVATE_VALUE",
+            "declaredBytes":null, "decodedBytes":"PRIVATE_VALUE", "priorBytes":-1}));
+        assert_eq!(bad["declaredBytes"], Value::Null);
+        assert!(bad.get("decodedBytes").is_none());
+        assert!(bad.get("priorBytes").is_none());
+        assert!(!bad.to_string().contains("PRIVATE_"));
+        assert_eq!(metadata(json!({"stage":"usb_audio_chunk_rejected",
+            "errorKind":"PRIVATE_VALUE", "data":"PRIVATE_BASE64"})), json!({}));
+    }
+
     #[test]fn news_cache_diagnostics_keep_only_bounded_counts(){
         assert_eq!(metadata(json!({"hits":4,"prepared":16,"componentId":"private","text":"private","key":"private"})),json!({"hits":4,"prepared":16}));
         assert_eq!(metadata(json!({"hits":"private","prepared":10001})),json!({}));
@@ -181,5 +254,27 @@ mod tests {
             "captureTxLastUs":200,"captureTxMaxUs":1000,"captureStackMinBytes":2048}));
         assert_eq!(metadata(json!({"dspAecUs":"private words", "captureTxMaxUs":"secret",
             "internalFreeBytes":"private path", "captureStackMinBytes":"secret"})),json!({}));
+    }
+}
+
+#[cfg(test)]
+mod aec_receipt_tests {
+    use super::*;
+    #[test]
+    fn aec_termination_is_not_misclassified_as_transport_or_success() {
+        assert_eq!(termination_error_kind("aec_unavailable", "设备音频保护已停止"), "aec_ingress_rejected");
+        assert_eq!(termination_error_kind("aec_unavailable", ""), "aec_ingress_rejected");
+        assert_eq!(termination_error_kind("ui", ""), "none");
+        assert_eq!(termination_error_kind("asr", "request timeout"), "timeout");
+    }
+    #[test]
+    fn aec_receipt_uses_strict_allowlist_in_actual_file_logger() {
+        let dir=tempfile::tempdir().unwrap();let path=dir.path().join("aec.jsonl");
+        let mut details=aec::failure("audio/chunk",&json!({"aec":true,"vadSpeech":"PRIVATE_TRANSCRIPT","data":"PRIVATE_PCM","apiKey":"SECRET"}),aec::Context{board_id:"PRIVATE_BOARD",timeline_id:"PRIVATE_TIMELINE",duplex:true,armed:true,ready:true}).metadata;
+        details["reason"]=json!("privatewords");details["data"]=json!("PRIVATE_PCM");
+        append(&path,"rtc-synthetic","aec_fallback",details).unwrap();
+        let encoded=fs::read_to_string(&path).unwrap();let log:Value=serde_json::from_str(encoded.trim()).unwrap();
+        assert_eq!(log["details"]["aecTrigger"],"chunk_vad_not_boolean");assert_eq!(log["details"]["errorKind"],"aec_metadata_invalid");
+        assert!(!encoded.contains("PRIVATE")&&!encoded.contains("SECRET")&&!encoded.contains("privatewords"));
     }
 }

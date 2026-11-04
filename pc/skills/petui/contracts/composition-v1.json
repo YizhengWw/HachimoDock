@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "host": true,
+    "surface": {"engine":"p4-app-surface-v1","bindings":"p4-variable-bindings-v1"},
+    "vars": {"count":{"type":"int","init":0},"remaining":{"type":"int","init":60},"caption":{"type":"string","init":""}},
+    "tick": [],
+    "limits": {"count":[0,10],"remaining":[0,60]},
+    "transitions": [{"from":"*","on":"host.increment"},{"from":"*","on":"host.start"}]
+  },
+  "declaration": {
+    "schemaVersion":1,"engine":"pc-app-composition-v1","service":"composition",
+    "actions":{"host.increment":"counter:increment","host.start":"timer:start"},
+    "content":[{
+      "sources":{"counter":{"kind":"counter","initial":0,"min":0,"max":10,"step":1},"timer":{"kind":"timer","seconds":60},"labels":{"kind":"constant","value":{"title":"Focus"}}},
+      "bindings":{"count":{"source":"counter","pointer":"/value","fallback":0},"remaining":{"source":"timer","pointer":"/seconds","fallback":60},"caption":{"source":"labels","pointer":"/title","fallback":"Unavailable"}}
+    }]
+  },
+  "rejections": [
+    {"pointer":"/service","value":"notes"},
+    {"pointer":"/content/0/sources/timer/seconds","value":0},
+    {"pointer":"/content/0/sources/timer/seconds","value":true},
+    {"pointer":"/content/0/sources/counter/step","value":-1},
+    {"pointer":"/content/0/sources/counter/initial","value":11},
+    {"pointer":"/content/0/sources/labels/script","value":"run()"},
+    {"pointer":"/content/0/bindings/count/fallback","value":false},
+    {"pointer":"/content/0/bindings/count/fallback","value":11},
+    {"pointer":"/content/0/bindings/count/source","value":"missing"},
+    {"pointer":"/content/0/bindings/caption/pointer","value":"title"},
+    {"pointer":"/actions/host.start","value":"timer:delete"},
+    {"pointer":"/autoRead","value":true},
+    {"pointer":"/content/0/sources/labels","value":{"kind":"json-get","endpoint":"https://example.com/data?token=secret","hosts":["example.com"],"refresh_sec":60}},
+    {"pointer":"/content/0/sources/labels","value":{"kind":"json-get","endpoint":"http://example.com/data","hosts":["example.com"],"refresh_sec":60}},
+    {"pointer":"/content/0/sources/labels","value":{"kind":"json-get","endpoint":"https://127.0.0.1/data","hosts":["127.0.0.1"],"refresh_sec":60}},
+    {"pointer":"/content/0/sources/labels","value":{"kind":"json-get","endpoint":"https://example.com/data","hosts":["other.example.com"],"refresh_sec":60}}
+  ]
+}

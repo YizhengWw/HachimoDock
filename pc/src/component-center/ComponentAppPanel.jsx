@@ -1,7 +1,11 @@
-import React,{useEffect,useRef,useState} from "react";
+import React,{useEffect,useRef,useState,useMemo} from "react";
 import {invoke} from "@tauri-apps/api/core";
-import {AppSurface} from "./AppSurface.jsx";
+import {AppSurface,ComponentAppPreview} from "./AppSurface.jsx";
 import {initialApp} from "./app-runtime.js";
+import {updateCollectionReply} from './host-collection.js';
+import {updateOwnedHostReply} from './variable-owners.js';
+import {bridgeReply,validImageRef} from "./service-bridge.js";
+import ServiceBridgeControls from './ServiceBridgeControls.jsx';
 import "./component-app.css";
 
 const EMPTY_CITY={city:"",lat:0,lon:0};
@@ -15,31 +19,60 @@ export function permissionText(p={},notice=""){
   if(p.deviceAudio)result.push("通过 USB 使用设备扬声器。退出组件、断线或进入语音后停止，不会自动恢复。");
   if(p.todos)result.push(p.todoWrites?"读取本机待办；仅在你确认具体事项后标记完成或撤销完成，不新增、不删除事项。":p.microphone?"可在你确认后创建统一待办；删除笔记不删除关联待办。":"可读取本机近期待办，内容可能显示在设备上。");
   if(p.desktopReceipts)result.push("只读取当前设备跟随 Agent 的任务回执；默认隐藏正文。语音补充仍遵守客户端原有权限确认。");
+  if(p.desktopInput)result.push("可向这台电脑当前前台应用发送资源包声明的白名单组合键（无文本输入、无宏）。默认关闭：需要在下方开启后才真正按键；macOS 需在系统设置授予辅助功能权限；实时对话期间不发送。");
   return result;
 }
-export default function ComponentAppPanel({component,request=invoke}){
+export default function ComponentAppPanel({component,active=false,request=invoke}){
   const [data,setData]=useState(null),[error,setError]=useState(""),[pollError,setPollError]=useState(""),[busy,setBusy]=useState(false),[city,setCity]=useState(EMPTY_CITY),[editing,setEditing]=useState(null);
+  const [fetchHosts,setFetchHosts]=useState('');
+  const [serviceImages,setServiceImages]=useState({});
   const mounted=useRef(false),acting=useRef(false),epoch=useRef(0),cityDirty=useRef(false);
+  const [hostExpired,setHostExpired]=useState(true);
+  useEffect(()=>{setHostExpired(!data);if(!data)return;const timer=setTimeout(()=>setHostExpired(true),10000);return()=>clearTimeout(timer);},[data]);
   const id=component.id,service=component.pcApplication.service;
+  const viewId=useMemo(()=>crypto.randomUUID(),[id,component.versionHash]);
+  const updateReply=(old,v,merge=false)=>component.pcApplication.engine==="pc-service-bridge-v1"?bridgeReply(merge?{...old,...v}:v):component.appRuntime.ownership?updateOwnedHostReply(component.appRuntime,old,v,merge):component.appRuntime?.surface?.collection_view?updateCollectionReply(old,v,merge):merge?{...old,...v}:v;
   useEffect(()=>{mounted.current=true;epoch.current++;acting.current=false;cityDirty.current=false;let timer,stopped=false;setData(null);setError("");setPollError("");setEditing(null);setBusy(false);setCity(EMPTY_CITY);
-    async function poll(){const version=epoch.current;try{if(!acting.current){const v=await request("component_app_request",{componentId:id,input:{operation:"status",includeNotes:true}});if(!stopped&&version===epoch.current){setData(v);setPollError("");if(!cityDirty.current&&v.state?.city?.city)setCity(v.state.city);}}}catch(e){if(!stopped&&version===epoch.current)setPollError(String(e));}if(!stopped)timer=setTimeout(poll,2000);}
-    poll();return()=>{mounted.current=false;stopped=true;epoch.current++;clearTimeout(timer);};
+    async function poll(){const version=epoch.current;try{if(!acting.current){const v=await request("component_app_request",{componentId:id,input:{operation:"status",includeNotes:true,viewId,versionHash:component.versionHash}});if(!stopped&&version===epoch.current){setData(old=>updateReply(old,v));setPollError("");if(!cityDirty.current&&v.state?.city?.city)setCity(v.state.city);}}}catch(e){if(!stopped&&version===epoch.current)setPollError(String(e));}if(!stopped)timer=setTimeout(poll,2000);}
+    poll();return()=>{mounted.current=false;stopped=true;epoch.current++;clearTimeout(timer);if(service==="bridge")request("component_app_request",{componentId:id,input:{operation:"detach",viewId}}).catch(()=>{});};
   },[id,component.versionHash,request]);
   async function command(operation,extra={}){if(acting.current)return;acting.current=true;const version=++epoch.current;setBusy(true);setError("");
-    try{const v=await request("component_app_request",{componentId:id,input:{operation,includeNotes:true,...extra}});if(mounted.current&&version===epoch.current){setData(old=>({...old,...v}));if(operation==="edit")setEditing(null);if(["configure","locate"].includes(operation)){cityDirty.current=false;if(v.state?.city?.city)setCity(v.state.city);}}}
+    const mutation=operation==="action"&&["pc-app-composition-v2","pc-app-composition-v3","pc-service-bridge-v1"].includes(component.pcApplication.engine)?{eventId:crypto.randomUUID(),context:data?.ui?.context}:{};
+    try{const v=await request("component_app_request",{componentId:id,input:{operation,includeNotes:true,viewId,versionHash:component.versionHash,...mutation,...extra}});if(mounted.current&&version===epoch.current){setData(old=>updateReply(old,v,true));if(operation==="edit")setEditing(null);if(["configure","locate"].includes(operation)){cityDirty.current=false;if(v.state?.city?.city)setCity(v.state.city);}}}
     catch(e){if(mounted.current&&version===epoch.current)setError(String(e));}finally{if(version===epoch.current){acting.current=false;if(mounted.current)setBusy(false);}}}
+  const imageIdentity=JSON.stringify(data?.presentation?.images||{});
+  useEffect(()=>{let stopped=false;setServiceImages({});
+    for(const [alias,reference] of Object.entries(data?.presentation?.images||{})){
+      if(!validImageRef(reference))continue;
+      request("component_app_request",{componentId:id,input:{operation:"asset",reference}}).then(image=>{if(!stopped&&mounted.current&&image.key===reference.key&&image.revision===reference.revision)setServiceImages(old=>({...old,[alias]:image}));}).catch(()=>{});
+    }return()=>{stopped=true;};
+  },[id,component.versionHash,imageIdentity,request]);
   async function link(e,url){if(!window.__TAURI_INTERNALS__)return;e.preventDefault();try{await request("open_external_url",{url});}catch{setError("浏览器未打开，请稍后重试");}}
-  const enabled=data?.enabled===true&&!pollError,snapshot={...initialApp(component.appRuntime),values:data?.values||{},ui:busy?{mode:6,actions:[]}:!enabled?{mode:7,actions:[]}:data?.ui},content=data?.content||[],selected=(data?.state?.selected||0)%Math.max(1,content.length),current=data?.knowledge?.current||content[selected];
+  const base=useMemo(()=>initialApp(component.appRuntime),[component.appRuntime,component.versionHash]);
+  const enabled=data?.enabled===true&&!pollError,snapshot={...base,vars:{...base.vars,...data?.variables},values:data?.values||{},data:data?.data,presentation:data?.presentation,serviceImages,_bridgeReceivedAt:data?._bridgeReceivedAt,collectionView:data?.collectionView,pointerEpoch:data?._collectionEpoch||0,ui:busy?{mode:6,actions:[]}:!enabled?{mode:7,actions:[]}:data?.ui},content=data?.content||[],selected=(data?.state?.selected||0)%Math.max(1,content.length),current=data?.knowledge?.current||content[selected];
   const profile=component.pcApplication.location||data?.locationProfile,cities=profile?.cities||[],t=key=>profile?.text?.[key]||"";
-  const cityMode=data?.state?.auto_city&&data?.state?.geo?.error&&data.state.geo.error!==t("locatingNote")?data.state.geo.error:data?.state?.city_from_ip?t("autoMode"):data?.state?.auto_city?t("autoPending"):t("manualMode");
+  const mixed=!!component.appRuntime.ownership||service==="fetch",hostSnapshot={fresh:enabled&&!busy&&!hostExpired,variables:data?.variables,values:data?.values,ui:busy?{mode:6,actions:[]}:data?.ui,collectionView:data?.collectionView,data:data?.data,_hostEpoch:data?._hostEpoch};
+  const cityMode=data?.state?.auto_city&&data?.state?.geo?.error&&data.state.geo.error!==t("locatingNote")?data.state.geo.error:data?.state?.geo?.source==="manual"?"跟随共享位置 · 手动城市":data?.state?.city_from_ip?t("autoMode"):data?.state?.auto_city?t("autoPending"):t("manualMode");
   return <section className="component-app" aria-label={`${component.name}应用服务`}>
     <div className="component-app__heading"><div><h3>{component.name}</h3><p>标准 PetUI 资源包 · 设备界面 + 受控 PC 服务</p></div><span>{pollError?"状态暂不可用":!data?"检查中":enabled?"已启用":"已手动停用"}</span></div>
     <details className="component-app__permissions"><summary>服务与数据使用说明</summary>{permissionText(data?.permissions,t("dataNotice")).map(t=><p key={t}>{t}</p>)}</details>
     {data?.enabled===false&&<div className="component-app__permissions"><p>此组件服务已手动停用，本机记录仍保留。</p><button disabled={busy} onClick={()=>command("enable")}>重新开启服务</button></div>}
-    <div className="component-app__layout"><AppSurface runtime={component.appRuntime} snapshot={snapshot} images={component.sceneSprites} bindings={component.defaultBindings} onAction={enabled&&!busy&&service!=="journey"?(a,confirmation)=>command("action",{action:a,...confirmation}):undefined}/><div className="component-app__controls">
+    <div className="component-app__layout">{mixed?<ComponentAppPreview component={component} active={active} interactive={true} hostSnapshot={hostSnapshot} onHostAction={enabled&&!busy?(a,confirmation)=>command("action",{action:a,...confirmation}):undefined}/>:<AppSurface active={active} componentId={component.id} runtime={component.appRuntime} snapshot={snapshot} images={component.sceneSprites} bindings={component.defaultBindings} onAction={enabled&&!busy&&service!=="journey"?(a,confirmation)=>command("action",{action:a,...confirmation}):undefined}/>}<div className="component-app__controls">
       <p>{service==="journey"?"目的地直接在设备上选择：点击上一站/下一站或拨动摇杆，确认后出发。旅途中可以预选下一站，不会重置当前旅程；此处只展示状态。":"设备上操作与下方按钮使用同一条服务链路。播放和录音前，请在设备打开此组件。"}</p>
       {service==="todos"&&<p>直接点击预览或设备上的事项查看全文；在详情中确认完成，也可以撤销完成。摇杆上下选事项、左右翻页，切换筛选可查看已完成事项。完整待办仍在本机统一保存。</p>}
-      {!["journey","todos"].includes(service)&&<div className="component-app__actions">{Object.entries(component.pcApplication.actions).filter(([,op])=>op!=="delete"&&!(service!=="news"&&component.pcApplication.autoRead&&["previous","next"].includes(op))).map(([action,op])=><button key={action} disabled={!enabled||busy||(Array.isArray(data?.ui?.actions)&&!data.ui.actions.includes(action))} onClick={()=>{const prompt=component.appRuntime.input?.confirm?.[action];if(prompt){const context=data?.ui?.context;if(window.confirm(prompt))command("action",{action,confirm:true,context});}else command("action",{action});}}>{component.defaultBindings?.find(b=>b.action===action)?.label||(service==="notes"&&op==="todo"?"转为待办":LABELS[op]||op)}</button>)}</div>}
+      {service==="hotkeys"&&data?.hotkeys&&<div className="component-app__permissions" aria-label="快捷键发送开关">
+        <label><input type="checkbox" checked={data.hotkeys.sendEnabled===true} disabled={busy||!enabled} onChange={e=>command("configure",{send:e.target.checked})}/> 允许向这台电脑发送快捷键（当前 {data.hotkeys.platform==="macos"?"macOS":data.hotkeys.platform==="windows"?"Windows":"不支持的平台"}）</label>
+        {data.hotkeys.platform==="macos"&&data.hotkeys.accessibility===false&&<p role="alert">macOS 尚未授予辅助功能权限：系统设置 › 隐私与安全性 › 辅助功能 中允许 Pet Manager 后才会真正按键。</p>}
+        {data.hotkeys.platform==="unsupported"&&<p role="alert">此平台不支持发送快捷键；组件只记录按下。</p>}
+        <p>只会发送资源包声明的组合键；设备显示“已发送”仅表示系统已收到按键事件，不保证目标软件执行。</p>
+      </div>}
+      {service==="bridge"&&<ServiceBridgeControls key={`${id}:${component.versionHash}`} component={component} data={data} enabled={enabled&&!hostExpired} busy={busy} onCommand={command} onError={setError}/>}
+      {service==="composition"&&data?.sources&&<div aria-label="组合数据源诊断"><p role="status">{Object.entries(data.sources).map(([name,phase])=>`${name}：${({ready:"可用",preparing:"更新中",error:"暂不可用，已有记录保留",busy:"队列繁忙"})[phase]||"不可用"}`).join("；")}</p>{data.bindingErrors?.length>0&&<p role="alert">部分字段暂不可用，已显示资源包声明的备用值：{data.bindingErrors.join("、")}</p>}</div>}
+      {!["journey","todos","bridge"].includes(service)&&<div className="component-app__actions">{Object.entries(component.pcApplication.actions).filter(([,op])=>op!=="delete"&&!(service!=="news"&&component.pcApplication.autoRead&&["previous","next"].includes(op))).map(([action,op])=><button key={action} disabled={!enabled||busy||(Array.isArray(data?.ui?.actions)&&!data.ui.actions.includes(action))} onClick={()=>{const prompt=component.appRuntime.input?.confirm?.[action];if(prompt){const context=data?.ui?.context;if(window.confirm(prompt))command("action",{action,confirm:true,context});}else command("action",{action});}}>{component.defaultBindings?.find(b=>b.action===action)?.label||(service==="notes"&&op==="todo"?"转为待办":LABELS[op]||op)}</button>)}</div>}
+      {service==="fetch"&&<form aria-label="网络来源白名单" onSubmit={e=>{e.preventDefault();command("configure",{hosts:fetchHosts.split(/[\s,，]+/).filter(Boolean)});}}>
+        <p>显式启用服务并允许精确 HTTPS 主机后，PC 在组件隐藏时继续周期更新；停用服务或退出 PC 客户端后停止。空白名单不联网。</p>
+        <label>允许的主机<input aria-label="允许的主机" value={fetchHosts} placeholder="example.org" onChange={e=>setFetchHosts(e.target.value)} disabled={busy}/></label><button disabled={busy}>保存网络白名单</button>
+      </form>}
       {service==="weather"&&profile&&<form onSubmit={e=>{e.preventDefault();command("configure",{city});}}>
         <p role="status">{data?.state?.city?.city||t("unspecified")} · {cityMode}。{t("syncHint")}</p>
         <button type="button" disabled={!enabled||busy} onClick={()=>command("locate")}>{t("autoButton")}</button>

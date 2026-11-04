@@ -1,0 +1,670 @@
+{
+  "schema": 1,
+  "vectors": [
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        24
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        24
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        24
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        24
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        24
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        25
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        25
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        25
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        25
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        25
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        32
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        32
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        32
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        32
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        32
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        33
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        33
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        33
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        33
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        33
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        64
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        64
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v1"
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        64
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        64
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": true
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        64
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": [
+          "p4-local-masks-v2"
+        ]
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        16,
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": false
+    },
+    {
+      "counts": [
+        16,
+        17
+      ],
+      "kind": "deck",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64,
+        "widgetLocalToolsMasks": "p4-local-masks-v2"
+      },
+      "allowed": true
+    },
+    {
+      "counts": [],
+      "kind": "countdown",
+      "capabilities": {
+        "widgetLocalTools": "p4-local-tools-v1",
+        "widgetQuota": "p4-quota-v3",
+        "widgetQuotas": [
+          "p4-quota-v2",
+          "p4-quota-v3"
+        ],
+        "maxLocalItems": 64
+      },
+      "allowed": true
+    },
+    {
+      "counts": [
+        16
+      ],
+      "kind": "deck",
+      "capabilities": {},
+      "allowed": false
+    },
+    {
+      "counts": [],
+      "kind": null,
+      "capabilities": {},
+      "allowed": true
+    }
+  ]
+}

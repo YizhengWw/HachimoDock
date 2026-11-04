@@ -15,6 +15,7 @@ import { Download, LoaderCircle } from "lucide-react";
 import { firmwareUpdateDisposition } from "../lib/firmware-version.js";
 import { useToast } from "./ToastStack.jsx";
 import { useExitProtection } from "../lib/exit-protection.js";
+import { firmwareUpdateFailureMessage } from "../lib/firmware-update-error.js";
 
 export default function FirmwareUpdateNavItem({ usb = {} }) {
   const { push } = useToast();
@@ -92,8 +93,8 @@ export default function FirmwareUpdateNavItem({ usb = {} }) {
     } catch (error) {
       push({
         tone: "error",
-        title: "固件升级失败",
-        message: typeof error === "string" ? error : String(error),
+        title: "固件升级未完成",
+        message: firmwareUpdateFailureMessage(error),
       });
     } finally {
       setPending(false);

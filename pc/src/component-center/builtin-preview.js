@@ -3,6 +3,7 @@
 import {initialApp,appDashboard} from './app-runtime.js';
 import {COMPONENT_AUTHORS} from './component-authors.js';
 import {sortComponentsByDefaultOrder} from './library-order.js';
+import {keyframeImageEntries} from './keyframe-background.js';
 const manifests=import.meta.glob('../../builtin-clawpkgs/*/component.json',{eager:true,import:'default'});
 const runtimes=import.meta.glob('../../builtin-clawpkgs/*/runtime/widget.json',{eager:true,import:'default'});
 const bindings=import.meta.glob('../../builtin-clawpkgs/*/buttons.json',{eager:true,import:'default'});
@@ -24,7 +25,7 @@ export function latestBuiltinPreview(component){
     mediaSurface:runtime.surface||null,appRuntime:runtime.surface?runtime:null,
     dashboard:runtime.surface?.engine==='p4-app-surface-v1'?appDashboard(runtime,initialApp(runtime)):previews[`${root}/negative-screen.json`]?.dashboard||component.dashboard,
     defaultBindings:bindings[`${root}/buttons.json`]||[],
-    sceneSprites:declarations.map(im=>({...im,frameWidth:im.frame_width,frameHeight:im.frame_height,dataUrl:images[`${root}/${im.asset}`]})),
+    sceneSprites:[...declarations.map(im=>({...im,frameWidth:im.frame_width,frameHeight:im.frame_height,dataUrl:images[`${root}/${im.asset}`]})),...(runtime.surface?keyframeImageEntries(runtime.surface.images||[],asset=>images[`${root}/${asset}`]):[])],
   };
 }
 export function completeBuiltinCatalog(existing) {

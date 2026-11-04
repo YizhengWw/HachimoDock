@@ -240,6 +240,27 @@ function createFakeSession(id, extra = {}) {
   }
 }
 
+// Mirror Session.append: assign the next seq, commit the increment, then notify.
+// Raw dispatch remains available for missing/stale/gap negative controls.
+function appendSessionEvent(ctx, session, event) {
+  const committed = { ...event, seq: session.seq }
+  session.seq += 1
+  return ctx.dispatchSync('session/event', session, committed)
+}
+
+async function nextControlEvent(sse, expected, sessionId) {
+  for (let i = 0; i < 16; i++) {
+    const frame = await sse.next()
+    if (frame.event === 'session') {
+      if (frame.data?.session?.id !== sessionId) throw new Error('unexpected session summary')
+      continue
+    }
+    if (frame.event !== expected) throw new Error(`expected ${expected}, got ${frame.event}`)
+    return frame
+  }
+  throw new Error(`no ${expected} within bounded summary window`)
+}
+
 /**
  * Create a fake agent with the documented `followup` / `whenIdle` surface.
  * @param {object} session - owning fake session.
@@ -419,6 +440,8 @@ async function startTestBridge(t, ctx, config = {}) {
 }
 
 module.exports = {
+  appendSessionEvent,
+  nextControlEvent,
   parseSseBlock,
   createSseReader,
   openSse,

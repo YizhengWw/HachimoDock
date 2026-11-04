@@ -17,6 +17,7 @@
   "components": {
     "packagesDir": "../pc/builtin-clawpkgs",
     "ids": [
+      "city-radio",
       "cloud-hop",
       "stock-watchlist",
       "wooden-fish",
@@ -46,7 +47,7 @@
       "answer-book",
       "hope-train"
     ],
-    "defaultActiveId": "cloud-hop",
+    "defaultActiveId": "city-radio",
     "maxInstalled": 32,
     "widgetMaxBytes": 8191,
     "buttonsMaxBytes": 2047

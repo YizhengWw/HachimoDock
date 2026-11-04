@@ -1,0 +1,57 @@
+{
+  "purpose": "Synthetic local-only v3 integration fixture. No network, provider, credentials, automatic start, audio, or desktop dispatch. Not a published component.",
+  "manifest": {"id": "workflow-local-verification", "name": "Local workflow verification", "version": "1.0.0", "kind": "tool", "description": "Explicit start increments a private counter and appends one synthetic record. Completion and progress come from durable workflow checkpoints."},
+  "share": {"title": "Local workflow verification"},
+  "buttons": [
+    {"action": "host.start", "control": "SW1", "event": "button.sw1.short_press", "label": "Start"},
+    {"action": "host.cancel", "control": "SW2", "event": "button.sw2.short_press", "label": "Cancel"},
+    {"action": "host.resume", "control": "Joystick", "event": "joystick.up", "label": "Resume"}
+  ],
+  "runtime": {
+    "schema_version": 1, "engine": "p4-bounded-runtime-v4", "host": true,
+    "host_context": "p4-host-context-v1", "input": {"engine": "p4-input-v1"},
+    "vars": {"count": {"type": "int", "init": 0}, "rows": {"type": "int", "init": 0}, "phase": {"type": "string", "init": "idle"}, "progress": {"type": "int", "init": 0}},
+    "states": ["ready"], "initial_state": "ready", "tick": [],
+    "transitions": [{"from": "*", "on": "host.start"}, {"from": "*", "on": "host.resume"}, {"from": "*", "on": "host.cancel"}],
+    "dashboard": {"title": "Local workflow", "footer": "Start / Resume / Cancel", "visualStyle": "clean", "visualPalette": "ocean", "visualLayout": "tool", "visualSprite": "gauge"},
+    "surface": {
+      "engine": "p4-app-surface-v1", "graphics": "p4-app-graphics-v1", "bindings": "p4-variable-bindings-v1", "background": 2113,
+      "elements": [
+        {"type": "text", "x": 24, "y": 20, "w": 592, "h": 40, "color": 65535, "font_size": 28, "text": "LOCAL WORKFLOW"},
+        {"type": "text", "x": 24, "y": 74, "w": 592, "h": 36, "color": 65535, "font_size": 24, "var_bind": "phase"},
+        {"type": "meter", "x": 24, "y": 124, "w": 592, "h": 18, "color": 2047, "var_bind": "progress"},
+        {"type": "text", "x": 24, "y": 170, "w": 260, "h": 28, "color": 65535, "text": "Counter"},
+        {"type": "text", "x": 330, "y": 170, "w": 260, "h": 28, "color": 65535, "text": "Saved rows"},
+        {"type": "text", "x": 24, "y": 208, "w": 260, "h": 62, "color": 2047, "font_size": 48, "var_bind": "count"},
+        {"type": "text", "x": 330, "y": 208, "w": 260, "h": 62, "color": 2047, "font_size": 48, "var_bind": "rows"},
+        {"type": "button", "x": 24, "y": 304, "w": 184, "h": 60, "color": 2047, "foreground": 0, "radius": 16, "text": "Start", "action": "host.start"},
+        {"type": "button", "x": 228, "y": 304, "w": 184, "h": 60, "color": 14823, "foreground": 65535, "radius": 16, "text": "Resume", "action": "host.resume"},
+        {"type": "button", "x": 432, "y": 304, "w": 184, "h": 60, "color": 14823, "foreground": 65535, "radius": 16, "text": "Cancel", "action": "host.cancel"},
+        {"type": "text", "x": 24, "y": 394, "w": 592, "h": 28, "color": 65535, "text": "Local only. No network or provider calls."}
+      ]
+    }
+  },
+  "declaration": {
+    "schemaVersion": 1, "engine": "pc-app-composition-v3", "service": "composition",
+    "actions": {"host.start": "task:start", "host.resume": "task:resume", "host.cancel": "task:cancel"},
+    "content": [{
+      "sources": {
+        "task": {"kind": "workflow", "workflow": "local"},
+        "count": {"kind": "counter", "initial": 0, "min": 0, "max": 1000000, "step": 1},
+        "records": {"kind": "document", "initial": {"rows": []}},
+        "summary": {"kind": "computed", "expression": {"op": "len", "args": [{"ref": "/sources/records/rows"}]}}
+      },
+      "bindings": {
+        "count": {"source": "count", "pointer": "/value", "fallback": 0},
+        "rows": {"source": "summary", "pointer": "", "fallback": 0},
+        "phase": {"source": "task", "pointer": "/phase", "fallback": "unavailable"},
+        "progress": {"source": "task", "pointer": "/progress", "fallback": 0}
+      },
+      "asyncWorkflows": {"local": [
+        {"target": "count:increment"},
+        {"target": "records:append", "pointer": "/rows", "value": {"object": {"kind": "synthetic-local", "sequence": {"ref": "/sources/count/value"}}}}
+      ]}
+    }]
+  },
+  "expected": {"initial": {"phase": "idle", "progress": 0, "count": 0, "rows": 0}, "first_completion": {"phase": "completed", "progress": 100, "count": 1, "rows": 1}, "second_completion": {"phase": "completed", "progress": 100, "count": 2, "rows": 2}}
+}

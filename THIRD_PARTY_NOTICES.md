@@ -14,7 +14,7 @@ HachimoDock's non-commercial license applies only to its own materials. It does 
 
 ## MiSans font
 
-`firmware/main/pet_p4_font_cn.c` (16 px, 1 bpp, 21,207 glyphs) and `firmware/main/pet_p4_font_cn_32.c` (32 px, 2 bpp, 199 glyphs) embed glyph data rendered from MiSans Medium. MiSans is provided by Xiaomi under the [MiSans Font Intellectual Property License Agreement](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf), not the HachimoDock license. Original font files are not distributed here. The unmodified [Agreement](licenses/MiSans-Font-License-Agreement.pdf) and [embedded-font notice](licenses/MiSans-Embedded-Fonts-NOTICE.txt) accompany both sizes. See the [official embedding FAQ](https://hyperos.mi.com/font/zh/faq/). Do not extract and redistribute the font as a standalone font product.
+`firmware/main/pet_p4_font_cn.c` (16px/1bpp) and `firmware/main/pet_p4_font_cn_32.c` (32px/2bpp, 199 glyphs) embed glyph data rendered from MiSans Medium. MiSans is provided by Xiaomi under the [MiSans Font Intellectual Property License Agreement](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf), not the HachimoDock license. Original font files are not distributed here. See the [official embedding FAQ](https://hyperos.mi.com/font/zh/faq/). Do not extract and redistribute the font as a standalone font product. The unchanged [official Agreement](licenses/MiSans-Font-License-Agreement.pdf) and [embedded-font notice for both sizes](licenses/MiSans-Embedded-Fonts-NOTICE.txt) accompany distributions.
 
 ## ESP32-P4 board drivers and build dependencies
 
@@ -25,7 +25,7 @@ preserved in [Espressif ESP-SR LICENSE](licenses/Espressif-ESP-SR-LICENSE.txt).
 DSP and other transitive dependencies retain their upstream licenses and are
 pinned independently for each silicon family in the firmware lockfiles.
 
-The board support code in `firmware/components/esp32_p4_wifi6_touch_lcd_4_3/` and display driver in `firmware/components/esp_lcd_st7701/` preserve their Apache-2.0 licenses and original copyright headers. The local `esp_lvgl_adapter` directory is a project build shim. ESP-IDF, LVGL, TinyUSB and other downloaded components retain their respective licenses in their distributions; exact resolved versions are recorded in `firmware/dependencies.lock`.
+The board support code in `firmware/components/esp32_p4_wifi6_touch_lcd_4_3/` is a locally modified Waveshare BSP adaptation under Apache-2.0. Its component LICENSE is retained, and the affected files mark their local adaptation and license. The display driver in `firmware/components/esp_lcd_st7701/` retains its own Apache-2.0 notices. See [BSP license](licenses/Espressif-Waveshare-BSP-LICENSE.txt) and [dependency provenance/redistribution notice](licenses/DEPENDENCY-LICENSE-NOTICE.md). The local `esp_lvgl_adapter` directory is a project build shim. ESP-IDF, LVGL, TinyUSB and other downloaded components retain their respective licenses in their distributions; exact resolved versions are recorded in `firmware/dependencies.lock`.
 
 Desktop npm and Rust dependency versions are recorded in package lockfiles and `pc/src-tauri/Cargo.lock`. Their licenses accompany the upstream packages and remain independent of HachimoDock's first-party license.
 
@@ -93,3 +93,24 @@ SOFTWARE.
 随身听的在线搜索及音源解析使用 [GD 音乐台 API](https://music-api.gdstudio.xyz/api.php)，来源标识为 [GD音乐台](https://music.gdstudio.xyz/)。服务文档标注 CC BY-NC 4.0，并说明仅供学习参考，禁止下载、传播或商用；具体服务限制以提供方说明为准。
 
 本项目不打包歌曲、不提供歌曲下载/导出，也不绕过登录、付费或 DRM。用户选择播放时仅进行受限流式解码与设备播放；本地音频由用户自行提供。服务可访问不代表已取得相关音乐作品的使用或再分发许可。
+
+## unescaper 0.1.8 — MIT alternative
+
+This distribution elects the MIT alternative offered by the upstream
+GPL-3.0/MIT package. Copyright (c) 2023 Hack Ink. The complete unchanged MIT
+grant is included in [unescaper MIT License](licenses/unescaper-0.1.8-MIT-LICENSE.txt).
+Upstream metadata and the alternative GPL grant are not rewritten.
+Versioned source: <https://static.crates.io/crates/unescaper/unescaper-0.1.8.crate>.
+See [license provenance](licenses/DEPENDENCY-LICENSE-NOTICE.md) for exact source
+and license hashes and target-specific dependency scope.
+
+## serialport 4.9.0 — MPL-2.0
+
+serialport's original MPL notice is retained in
+[serialport LICENSE notice](licenses/serialport-4.9.0-LICENSE-NOTICE.txt), with
+the complete [Mozilla Public License 2.0](licenses/MPL-2.0.txt).
+Corresponding source for the unchanged covered library is available at
+<https://static.crates.io/crates/serialport/serialport-4.9.0.crate>
+(SHA256 a4d91116f97173694f1642263b2ff837f80d933aa837e2314969f6728f661df3).
+See [source availability and license provenance](licenses/DEPENDENCY-LICENSE-NOTICE.md).
+First-party application terms do not restrict recipients' MPL source rights.

@@ -1,0 +1,25 @@
+{
+  "engine":"p4-host-collection-v1",
+  "config":{"engine":"p4-host-collection-v1","source":"items","x":20,"y":100,"w":600,"row_height":56,"gap":8,"visible":2,"page":4,"actions":["host.pick_a","host.pick_b"],"colors":[65535,65504,0,16904,50712,63968]},
+  "snapshot":{"engine":"p4-host-collection-v1","source":"items","visible":2,"count":3,"offset":0,"selectionKey":"beta","rows":[{"present":true,"key":"alpha","label":"第一项","detail":"说明 A","index":0,"selected":false,"truncated":false},{"present":true,"key":"beta","label":"第二项","detail":"说明 B","index":1,"selected":true,"truncated":false}]},
+  "records":[{"id":"alpha","label":"第一项","detail":"说明 A"},{"id":"beta","label":"第二项","detail":"说明 B"},{"id":"gamma","label":"第三项","detail":"说明 C"}],
+  "runtimeBase":{"schema_version":1,"engine":"p4-bounded-runtime-v4","host":true,"host_context":"p4-host-context-v1","input":{"engine":"p4-input-v1"},"vars":{"count":{"type":"int","init":0}},"states":["ready"],"initial_state":"ready","transitions":[{"from":"*","on":"host.pick_a"},{"from":"*","on":"host.pick_b"},{"from":"*","on":"host.next"},{"from":"*","on":"host.previous"},{"from":"*","on":"host.up"},{"from":"*","on":"host.down"}],"tick":[],"dashboard":{"title":"集合测试"},"surface":{"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1","background":0,"elements":[{"type":"panel","x":0,"y":0,"w":640,"h":480,"color":0},{"type":"text","x":20,"y":20,"w":300,"h":24,"color":65535,"var_bind":"count"}]}},
+  "declarationBase":{"schemaVersion":1,"engine":"pc-app-composition-v2","service":"composition","actions":{"host.pick_a":"items:row_0","host.pick_b":"items:row_1","host.next":"items:page_next","host.previous":"items:page_previous","host.up":"items:up","host.down":"items:down"},"content":[{"sources":{"records":{"kind":"document","initial":[]},"items":{"kind":"collection","expression":{"ref":"/sources/records"},"view":{"key":"/id","label":"/label","detail":"/detail","page_size":2}}},"bindings":{"count":{"source":"items","pointer":"/count","fallback":0}}}]},
+  "buttons":[{"action":"host.next","event":"button.sw1.short_press","control":"SW1","label":"下一页"},{"action":"host.previous","event":"button.sw2.short_press","control":"SW2","label":"上一页"},{"action":"host.up","event":"joystick.up","control":"前方摇杆","label":"上一项"},{"action":"host.down","event":"joystick.down","control":"前方摇杆","label":"下一项"}],
+  "configReject":[
+    {"path":"/engine","value":"other"},{"path":"/source","value":"items\n"},{"path":"/source","value":"abcdefghijklmnopq"},
+    {"path":"/x","value":true},{"path":"/x","value":-1},{"path":"/w","value":621},{"path":"/row_height","value":47},
+    {"path":"/visible","value":0},{"path":"/visible","value":9},{"path":"/gap","value":17},{"path":"/page","value":5},
+    {"path":"/y","value":400},{"path":"/actions/1","value":"host.pick_a"},{"path":"/actions/0","value":"host."},
+    {"path":"/actions/0","value":"host.pick_a\n"},{"path":"/actions","value":["host.pick_a"]},{"path":"/colors/2","value":65536},
+    {"path":"/colors/2","value":false},{"path":"/extra","value":1}
+  ],
+  "snapshotReject":[
+    {"path":"/engine","value":"other"},{"path":"/source","value":"items\n"},{"path":"/visible","value":0},
+    {"path":"/count","value":129},{"path":"/count","value":true},{"path":"/offset","value":1},{"path":"/offset","value":128},
+    {"path":"/selectionKey","value":""},{"path":"/selectionKey","value":false},{"path":"/rows/1/key","value":"alpha"},
+    {"path":"/rows/0/present","value":1},{"path":"/rows/0/index","value":1},{"path":"/rows/1/selected","value":false},
+    {"path":"/rows/0/label","value":"line\nbreak"},{"path":"/rows/0/detail","value":"bad\u0085control"},
+    {"path":"/rows/0/truncated","value":1},{"path":"/rows/0/extra","value":"not allowed"},{"path":"/extra","value":1}
+  ]
+}

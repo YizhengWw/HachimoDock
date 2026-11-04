@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {parseQualityVerdict,reviewVisual,isRecoverableQueryError,checkpointedReview,inspectReference,settleVideoFrame,QUALITY_REVIEW_VERSION} from './quality.js';
+import {parseQualityVerdict,reviewVisual,isRecoverableQueryError,checkpointedReview,inspectReference,inspectVideo,videoInspectionFailure,settleVideoFrame,QUALITY_REVIEW_VERSION} from './quality.js';
 import {getGenerationDiagnostics,formatDiagnostic} from './diagnostics.js';
 import {canAutoResume} from './session.js';
 import {CUSTOM_GENERATION_FAMILIES} from './families.js';
@@ -138,4 +138,131 @@ test('one-click UI defaults to automatic cleaning, with review only in advanced 
   assert.match(task,/confirmReference: session.automatic \? undefined/);assert.match(task,/confirmTrial: session.automatic \? undefined/);
   assert.equal(CUSTOM_GENERATION_FAMILIES.length,11);
   for(const f of CUSTOM_GENERATION_FAMILIES)assert.match(f.prop_policy,/No newly invented props/);
+});
+
+// All video inspection fixtures are local DOM/media mocks, with no provider calls.
+async function videoFixture(options, run) {
+ const old={document:globalThis.document,create:URL.createObjectURL,revoke:URL.revokeObjectURL,
+   raf:globalThis.requestAnimationFrame,caf:globalThis.cancelAnimationFrame,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout};
+ const trace=[],timers=new Set(),stats={attached:0,removed:0,revoked:0,draws:0,raf:0,cancelled:0};let blob;
+ globalThis.setTimeout=(fn,ms,...args)=>{if(ms===20000)stats.operationTimers=(stats.operationTimers||0)+1;let id;id=old.setTimeout(()=>{timers.delete(id);fn(...args);},ms===20000?10:ms);timers.add(id);return id;};
+ globalThis.clearTimeout=id=>{timers.delete(id);return old.clearTimeout(id);};
+ class Video extends EventTarget {
+  style={};duration=options.duration??5;videoWidth=options.width??256;videoHeight=options.height??256;
+  callbacks=new Map();next=0;src='';_time=0;seeking=false;
+  setAttribute(){}removeAttribute(){this.src='';}pause(){stats.paused=true;}
+  remove(){stats.removed++;stats.attached--;}
+  requestVideoFrameCallback(cb){trace.push('request');const id=++this.next;this.callbacks.set(id,cb);return id;}
+  cancelVideoFrameCallback(id){stats.cancelled++;this.callbacks.delete(id);}
+  present(){trace.push('present');const callbacks=[...this.callbacks.values()];this.callbacks.clear();for(const cb of callbacks)cb(0,{mediaTime:this._time});}
+  transition(event,missing=false){queueMicrotask(()=>{
+   if(options.frameFirst){if(!missing)this.present();this.dispatchEvent(new Event(event));}
+   else{this.dispatchEvent(new Event(event));if(!missing)this.present();}
+  });}
+  load(){if(this.src){trace.push('load');if(options.loadError)queueMicrotask(()=>this.dispatchEvent(new Event('error')));else this.transition('loadeddata');}}
+  set currentTime(value){
+   this._time=value;trace.push('seek');options.onSeek?.();
+   if(options.staleWhileSeeking){
+    this.seeking=true;
+    queueMicrotask(()=>{
+     this.present(); // stale callback must re-register, not count as the frame
+     assert.equal(this.callbacks.size,1);trace.push('stale-rearmed');
+     options.afterStale?.();this.seeking=false;
+     if(options.freshBeforeSeeked){if(!options.missingFresh)this.present();this.dispatchEvent(new Event('seeked'));}
+     else{this.dispatchEvent(new Event('seeked'));if(!options.missingFresh)this.present();}
+    });
+   }else this.transition('seeked',options.missingFrame);
+  }
+  get currentTime(){return this._time;}
+ }
+ const video=new Video();if(options.noRvfc){video.requestVideoFrameCallback=undefined;video.cancelVideoFrameCallback=undefined;}
+ const canvas={width:0,height:0,getContext:()=>({drawImage(){stats.draws++;assert.equal(video.callbacks.size,0);assert.equal(stats.attached,1);},
+   getImageData(){if(options.canvasError)throw Error('fixture private URL must not escape');return {data:new Uint8ClampedArray(options.black?[0,0,0,255]:[21,0,0,255])};}}),toDataURL:()=> 'data:image/jpeg;base64,AQID'};
+ globalThis.document={body:{appendChild(node){assert.equal(node,video);stats.attached++;}},createElement:kind=>kind==='video'?video:canvas};
+ URL.createObjectURL=value=>{blob=value;return 'blob:local-fixture';};URL.revokeObjectURL=()=>{stats.revoked++;};
+ globalThis.requestAnimationFrame=cb=>{stats.raf++;queueMicrotask(cb);return stats.raf;};globalThis.cancelAnimationFrame=()=>{};
+ try{return await run({video,stats,trace,timers,blob:()=>blob});}
+ finally{globalThis.document=old.document;URL.createObjectURL=old.create;URL.revokeObjectURL=old.revoke;
+  globalThis.requestAnimationFrame=old.raf;globalThis.cancelAnimationFrame=old.caf;globalThis.setTimeout=old.setTimeout;globalThis.clearTimeout=old.clearTimeout;
+  for(const id of timers)old.clearTimeout(id);
+ }
+}
+for(const frameFirst of [false,true])test(`video waits for both seeked and presented frame (frameFirst=${frameFirst})`,async()=>{
+ await videoFixture({frameFirst},async({video,stats,trace,timers})=>{
+  const result=await inspectVideo(new Uint8Array([1,2,3]));assert.equal(result.frames.length,3);
+  assert.equal(stats.draws,3);assert.equal(stats.raf,0);assert.equal(video.muted,true);assert.equal(video.defaultMuted,true);
+  assert.notEqual(video.style.display,'none');assert.equal(video.style.left,'-10000px');
+  assert.equal(trace[0],'request');assert.equal(trace[1],'load');
+  for(let at=0;at<trace.length;at++)if(trace[at]==='seek')assert.equal(trace[at-1],'request');
+  assert.equal(stats.removed,1);assert.equal(stats.attached,0);assert.equal(stats.revoked,1);assert.equal(timers.size,0);
+ });
+});
+test('advertised rVFC missing after seek fails bounded and never falls back to RAF',async()=>{
+ await videoFixture({missingFrame:true},async({video,stats,timers})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1])),error=>{
+   assert.deepEqual(videoInspectionFailure(error),{code:'VIDEO_INSPECTION_FRAME_TIMEOUT',stage:'frame'});return true;
+  });assert.equal(stats.draws,0);assert.equal(stats.raf,0);assert.equal(video.callbacks.size,0);
+  assert.equal(stats.removed,1);assert.equal(stats.revoked,1);assert.equal(timers.size,0);
+ });
+});
+test('video cancellation clears presentation callbacks, timers and DOM without sampling',async()=>{
+ const controller=new AbortController();await videoFixture({onSeek:()=>controller.abort()},async({video,stats,timers})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1]),controller.signal),error=>{
+   assert.equal(error.name,'AbortError');assert.equal(error.code,'VIDEO_INSPECTION_ABORTED');assert.equal(videoInspectionFailure(error),null);return true;
+  });assert.equal(video.callbacks.size,0);assert.equal(stats.draws,0);assert.equal(timers.size,0);assert.equal(stats.removed,1);assert.equal(stats.revoked,1);
+ });
+});
+test('video Blob owns exactly a byte-offset view, not adjacent backing bytes',async()=>{
+ await videoFixture({},async({blob})=>{
+  const backing=new Uint8Array([99,1,2,3,88]);const view=backing.subarray(1,4);
+  const pending=inspectVideo(view);backing.fill(0);await pending;
+  assert.deepEqual([...new Uint8Array(await blob().arrayBuffer())],[1,2,3]);
+ });
+});
+test('true black video remains rejected and cleaned after presented-frame proof',async()=>{
+ await videoFixture({black:true},async({stats})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1])),error=>error.code==='VIDEO_INSPECTION_BLACK_FRAME'&&error.inspectionStage==='validate');
+  assert.equal(stats.draws,1);assert.equal(stats.removed,1);assert.equal(stats.revoked,1);
+ });
+});
+test('browsers without rVFC retain two-RAF compatibility for each sampled frame',async()=>{
+ await videoFixture({noRvfc:true},async({stats})=>{await inspectVideo(new Uint8Array([1]));assert.equal(stats.raf,6);assert.equal(stats.draws,3);});
+});
+test('video local decode/canvas failures are typed without exposing raw diagnostic strings',async()=>{
+ for(const options of [{loadError:true},{canvasError:true}])await videoFixture(options,async({stats})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1])),error=>{
+   assert.match(error.code,/^VIDEO_INSPECTION_/);assert.doesNotMatch(error.message,/private URL/);return true;
+  });assert.equal(stats.removed,1);assert.equal(stats.revoked,1);
+ });
+ assert.deepEqual(videoInspectionFailure(Error('raw private URL')),{stage:'inspection',code:'VIDEO_INSPECTION_LOCAL_ERROR'});
+});
+test('video size duration geometry and visibility thresholds are not bypassed',async()=>{
+ await assert.rejects(inspectVideo(new Uint8Array(0)),error=>error.code==='VIDEO_INSPECTION_INPUT_INVALID');
+ await assert.rejects(inspectVideo({byteLength:100*1024*1024+1}),error=>error.code==='VIDEO_INSPECTION_INPUT_INVALID');
+ for(const options of [{duration:0.99},{duration:30.01},{width:127},{height:127},{width:128,height:1024}])await videoFixture(options,async()=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1])),error=>error.inspectionStage==='validate');
+ });
+});
+
+for(const freshBeforeSeeked of [false,true])test(`stale seeking callback waits for fresh frame (freshBeforeSeeked=${freshBeforeSeeked})`,async()=>{
+ await videoFixture({staleWhileSeeking:true,freshBeforeSeeked},async({stats,trace,video,timers})=>{
+  const result=await inspectVideo(new Uint8Array([1]));assert.equal(result.frames.length,3);
+  assert.equal(trace.filter(t=>t==='seek').length,3);assert.equal(trace.filter(t=>t==='stale-rearmed').length,3);assert.equal(stats.operationTimers,4);
+  assert.equal(stats.draws,3);assert.equal(video.callbacks.size,0);assert.equal(timers.size,0);
+  assert.equal(stats.removed,1);assert.equal(stats.revoked,1);
+ });
+});
+test('stale seeking callback without a fresh presentation times out on the original operation',async()=>{
+ await videoFixture({staleWhileSeeking:true,missingFresh:true},async({stats,video,trace,timers})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1])),error=>error.code==='VIDEO_INSPECTION_FRAME_TIMEOUT'&&error.inspectionStage==='frame');
+  assert.equal(trace.filter(t=>t==='seek').length,1);assert.equal(stats.draws,0);assert.equal(stats.operationTimers,2);
+  assert.equal(video.callbacks.size,0);assert.equal(timers.size,0);assert.equal(stats.removed,1);
+ });
+});
+test('abort after stale presentation cancels the latest re-registered callback',async()=>{
+ const controller=new AbortController();await videoFixture({staleWhileSeeking:true,missingFresh:true,afterStale:()=>controller.abort()},async({video,stats,timers})=>{
+  await assert.rejects(inspectVideo(new Uint8Array([1]),controller.signal),error=>error.name==='AbortError'&&videoInspectionFailure(error)===null);
+  assert.equal(video.callbacks.size,0);assert.equal(stats.draws,0);assert.equal(timers.size,0);
+  assert.equal(stats.removed,1);assert.equal(stats.revoked,1);
+ });
 });

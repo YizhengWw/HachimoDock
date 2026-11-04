@@ -3,9 +3,9 @@ export async function createClassicCore(bytes,definition){
   const game=definition.game||definition;
   const {instance}=await WebAssembly.instantiate(bytes,{});
   const e=instance.exports;
-  if(!e.classic_init({blocks:2,snake:3,flappy:4}[game.type],game.tick_ms,17))throw Error('Unsupported game');
+  if(!e.classic_init({blocks:2,snake:3,flappy:4,gomoku:5}[game.type],game.tick_ms,17))throw Error('Unsupported game');
   if(game.vertical_speed_percent!==undefined&&(!Number.isInteger(game.vertical_speed_percent)||!e.classic_vertical_speed(game.vertical_speed_percent)))throw Error('Invalid vertical speed');
-  const commands={start:0,left:game.direction_mode==="absolute"?7:1,right:game.direction_mode==="absolute"?8:2,rotate:3,drop:4,flap:5,soft_drop:6,up:9,down:10};
+  const commands={start:0,left:game.direction_mode==="absolute"?7:1,right:game.direction_mode==="absolute"?8:2,rotate:3,drop:4,flap:5,soft_drop:6,up:9,down:10,place:11,undo:12};
   let state=definition.initial_state,record=0;
   const sync=()=>{
     const a=new Int32Array(e.memory.buffer,e.classic_snapshot(),6);
@@ -27,6 +27,6 @@ export async function createClassicCore(bytes,definition){
       sync();
     },
     tick(now){if(definition.transitions&&state!==game.playing_state)e.classic_hold_clock(now>>>0);else e.classic_tick(now>>>0);sync();},
-    snapshot(){sync();const a=new Int32Array(e.memory.buffer,e.classic_snapshot(),262);return {width:a[0],height:a[1],score:a[2],running:!!a[3],over:!!a[4],kind:a[5],state,record,cells:Array.from(a.slice(6,6+a[0]*a[1]))};},
+    snapshot(){sync();const a=new Int32Array(e.memory.buffer,e.classic_snapshot(),262);return {width:a[0],height:a[1],score:a[2],running:!!a[3],over:!!a[4],kind:a[5],state,record,cells:Array.from(a.slice(6,6+a[0]*a[1])),...(a[5]===5?{aiReads:e.classic_gomoku_reads()}:{})};},
   };
 }

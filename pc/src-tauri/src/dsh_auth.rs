@@ -120,6 +120,8 @@ pub(crate) fn client(timeout: Duration) -> Result<reqwest::blocking::Client, Str
 }
 pub(crate) fn post(cap: &Capability, path: &str, body: &Value) -> Result<Value, String> {
     if ![
+        "/voice/status",
+        "/pair/ticket",
         "/voice/begin",
         "/voice/draft",
         "/voice/submit",
@@ -143,15 +145,22 @@ pub(crate) fn post(cap: &Capability, path: &str, body: &Value) -> Result<Value, 
         .take(65537)
         .read_to_string(&mut raw)
         .map_err(|_| "DSH receipt unavailable")?;
-    if raw.len() > 65536 || !status.is_success() {
-        return Err(format!(
-            "DSH request rejected or unknown (HTTP {})",
-            status.as_u16()
-        ));
-    }
+    if raw.len() > 65536 { return Err("DSH receipt too large".into()); }
     let result: Value = serde_json::from_str(&raw).map_err(|_| "invalid DSH receipt")?;
-    if result["ok"] != true {
-        return Err("DSH request not acknowledged".into());
+    if !status.is_success() || result["ok"] != true {
+        // Return only protocol error codes; never response text/session/token.
+        let code = match result["error"].as_str().unwrap_or("") {
+            "composer-unavailable" => "composer-unavailable",
+            "question-pending" => "question-pending",
+            "exact-pair-target-required" => "exact-pair-target-required",
+            "forbidden-origin" => "forbidden-origin",
+            "delivery-unknown" => "delivery-unknown",
+            "stale-lease" => "stale-lease",
+            "unpaired" => "unpaired",
+            "forbidden" => "forbidden",
+            _ => "request-rejected",
+        };
+        return Err(format!("DSH {code} (HTTP {})", status.as_u16()));
     }
     Ok(result)
 }

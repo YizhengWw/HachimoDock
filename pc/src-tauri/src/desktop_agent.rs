@@ -26,14 +26,72 @@ impl Agent {
     }
 }
 static COMPOSER_BUSY: AtomicBool = AtomicBool::new(false);
+static COMPOSER_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 pub fn composer_busy() -> bool {
     COMPOSER_BUSY.load(Ordering::SeqCst)
 }
 pub fn composer_gate() -> Result<MutexGuard<'static, ()>, String> {
-    static GATE: OnceLock<Mutex<()>> = OnceLock::new();
-    GATE.get_or_init(|| Mutex::new(()))
-        .lock()
-        .map_err(|_| "桌面输入锁暂不可用".into())
+    let gate = COMPOSER_GATE.get_or_init(|| Mutex::new(()))
+        .lock().map_err(|_| "桌面输入锁暂不可用".to_string())?;
+    ensure_composer_admission(&COMPOSER_BUSY)?;
+    Ok(gate)
+}
+pub fn try_composer_gate() -> Result<MutexGuard<'static, ()>, String> {
+    let gate = COMPOSER_GATE.get_or_init(|| Mutex::new(())).try_lock()
+        .map_err(|_| "桌面输入通道正在处理，请稍后重新按住说话".to_string())?;
+    ensure_composer_admission(&COMPOSER_BUSY)?;
+    Ok(gate)
+}
+
+// Own a desktop writer from startup reservation through a real release ACK.
+// A failed release quarantines process-local admission; no timer/cancel/closed
+// bit clears it. Existing app restart is the explicit recovery boundary.
+trait DesktopDraftRelease {
+    fn release_draft(&self) -> Result<(), String>;
+}
+impl DesktopDraftRelease for crate::codex_composer::CodexComposerBridge {
+    fn release_draft(&self) -> Result<(), String> { self.preserve_draft() }
+}
+struct ComposerWriterLease<'a, W: DesktopDraftRelease> {
+    busy: &'a AtomicBool,
+    writer: Option<W>,
+    released: Mutex<Option<Result<(), String>>>,
+}
+impl<'a, W: DesktopDraftRelease> ComposerWriterLease<'a, W> {
+    fn claim(busy: &'a AtomicBool) -> Result<Self, String> {
+        busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map_err(|_| "桌面输入通道仍有写入或释放未确认".to_string())?;
+        Ok(Self { busy, writer: None, released: Mutex::new(None) })
+    }
+    fn attach(&mut self, writer: W) {
+        assert!(self.writer.is_none(), "writer cannot be replaced inside a reservation");
+        self.writer = Some(writer);
+    }
+    fn preserve_draft(&self) -> Result<(), String> {
+        let mut result = self.released.lock().map_err(|_| "桌面writer释放未确认".to_string())?;
+        if let Some(result) = result.as_ref() { return result.clone(); }
+        let actual = self.writer.as_ref().ok_or("桌面writer尚未就绪，释放未确认")?.release_draft();
+        *result = Some(actual.clone());
+        actual
+    }
+}
+impl<W: DesktopDraftRelease> std::ops::Deref for ComposerWriterLease<'_, W> {
+    type Target = W;
+    fn deref(&self) -> &W { self.writer.as_ref().expect("attached desktop writer") }
+}
+impl<W: DesktopDraftRelease> Drop for ComposerWriterLease<'_, W> {
+    fn drop(&mut self) {
+        // No writer means synchronous startup returned an error before any
+        // update/dispatch could be queued. Every attached writer needs its ACK.
+        if self.writer.is_none() || self.preserve_draft().is_ok() {
+            self.busy.store(false, Ordering::SeqCst);
+        }
+    }
+}
+fn ensure_composer_admission(busy: &AtomicBool) -> Result<(), String> {
+    if busy.load(Ordering::SeqCst) {
+        Err("桌面输入仍在进行或释放未确认；如持续未恢复，请核对原客户端后重启 Pet Manager。不会重发旧任务".into())
+    } else { Ok(()) }
 }
 
 #[derive(Clone)]
@@ -660,26 +718,18 @@ async fn run_dispatch(ctx: &Context, id: &str) -> Result<(String, u64), State> {
     let owned = ctx.clone();
     let dispatch_id = id.to_string();
     let submitted = tokio::task::spawn_blocking(move || {
-        {
-            let _gate = composer_gate().map_err(|_| preflight_failure(&owned, &dispatch_id, "composer_lock", "桌面输入通道暂不可用，尚未发送任务，请稍后重试。"))?;
-            if composer_busy() {
-                return Err(preflight_failure(&owned, &dispatch_id, "composer_busy", "另一项桌面任务正在写入或发送，本次尚未发送，请稍后再说。"));
-            }
+        let mut bridge = {
+            let _gate = composer_gate().map_err(|_| preflight_failure(&owned, &dispatch_id, "composer_lock", "桌面输入通道仍忙或释放未确认，尚未发送新任务；请核对原客户端。"))?;
             crate::release_completed_voice_for_desktop_task(&owned.board).map_err(|reason|
                 preflight_failure(&owned, &dispatch_id, reason, "按键语音仍在录音、写入或确认发送，本次任务尚未发送，请等它结束后重试。"))?;
-            COMPOSER_BUSY.store(true, Ordering::SeqCst);
-        }
-        struct Release;
-        impl Drop for Release {
-            fn drop(&mut self) {
-                COMPOSER_BUSY.store(false, Ordering::SeqCst);
-            }
-        }
-        let _release = Release;
-        let bridge = crate::codex_composer::CodexComposerBridge::start_current_task_for(owned.agent.id())
+            ComposerWriterLease::<crate::codex_composer::CodexComposerBridge>::claim(&COMPOSER_BUSY)
+                .map_err(|_| preflight_failure(&owned, &dispatch_id, "composer_busy", "桌面输入仍忙或释放未确认，尚未发送新任务。"))?
+        };
+        let writer = crate::codex_composer::CodexComposerBridge::start_current_task_for(owned.agent.id())
             .map_err(|error| {
                 preflight_failure(&owned, &dispatch_id, "composer_prepare", &current_task_start_failure(&error))
             })?;
+        bridge.attach(writer);
         if !owned.live()
             || task(&dispatch_id).is_none_or(|t| t.state != State::Preparing)
         {
@@ -2053,5 +2103,77 @@ mod tests {
         assert_eq!(execution_error_code("任务编号无效，尚未执行"),"invalid_task_id");
         assert_eq!(execution_error_code("实时对话已结束，未派发桌面任务"),"conversation_inactive");
         assert_eq!(execution_error_code("窗口 PRIVATE /Users/private/key"),"desktop_preflight_failed");
+    }
+}
+
+#[cfg(test)]
+mod writer_release_tests {
+    use super::*;
+    use std::sync::{Arc, atomic::AtomicUsize};
+    struct Writer { calls: Arc<AtomicUsize>, result: Result<(), String> }
+    impl DesktopDraftRelease for Writer {
+        fn release_draft(&self) -> Result<(), String> {
+            self.calls.fetch_add(1,Ordering::SeqCst);self.result.clone()
+        }
+    }
+    #[test]
+    fn desktop_writer_unknown_release_blocks_every_later_admission() {
+        let busy=AtomicBool::new(false);let calls=Arc::new(AtomicUsize::new(0));
+        {
+            let mut lease=ComposerWriterLease::<Writer>::claim(&busy).unwrap();
+            lease.attach(Writer {calls:calls.clone(),result:Err("release ACK unknown".into())});
+            assert!(ensure_composer_admission(&busy).is_err());
+            assert!(lease.preserve_draft().is_err());
+            assert!(lease.preserve_draft().is_err());
+        }
+        assert_eq!(calls.load(Ordering::SeqCst),1,"actual release happens once, including Drop");
+        assert!(busy.load(Ordering::SeqCst));
+        assert!(ensure_composer_admission(&busy).is_err());
+        assert!(ComposerWriterLease::<Writer>::claim(&busy).is_err(),"new explicit intent cannot erase old Unknown");
+    }
+    #[test]
+    fn desktop_writer_early_exit_requires_ack_but_failed_start_has_no_writer() {
+        for result in [Ok(()),Err("release unknown".into())] {
+            let busy=AtomicBool::new(false);let calls=Arc::new(AtomicUsize::new(0));
+            {
+                let mut lease=ComposerWriterLease::<Writer>::claim(&busy).unwrap();
+                lease.attach(Writer {calls:calls.clone(),result:result.clone()});
+                // Simulate any early return before an explicit preserve call.
+            }
+            assert_eq!(calls.load(Ordering::SeqCst),1);
+            assert_eq!(busy.load(Ordering::SeqCst),result.is_err());
+        }
+        let busy=AtomicBool::new(false);
+        {let _startup=ComposerWriterLease::<Writer>::claim(&busy).unwrap();}
+        assert!(!busy.load(Ordering::SeqCst),"failed startup queued no text request");
+    }
+    #[test]
+    fn pending_and_shared_release_callers_keep_real_result_and_single_owner() {
+        struct Blocking {calls:Arc<AtomicUsize>,started:std::sync::mpsc::Sender<()>,ack:Mutex<std::sync::mpsc::Receiver<Result<(),String>>>}
+        impl DesktopDraftRelease for Blocking {
+            fn release_draft(&self)->Result<(),String>{
+                self.calls.fetch_add(1,Ordering::SeqCst);self.started.send(()).unwrap();self.ack.lock().unwrap().recv().unwrap()
+            }
+        }
+        for actual in [Ok(()),Err("late release unknown".into())] {
+        let busy=AtomicBool::new(false);let calls=Arc::new(AtomicUsize::new(0));
+        let (started,seen)=std::sync::mpsc::channel();let (ack,rx)=std::sync::mpsc::channel();
+        let mut lease=ComposerWriterLease::<Blocking>::claim(&busy).unwrap();
+        lease.attach(Blocking {calls:calls.clone(),started,ack:Mutex::new(rx)});
+        let lease=Arc::new(lease);
+        std::thread::scope(|scope| {
+            let one=lease.clone();let a=scope.spawn(move||one.preserve_draft());
+            seen.recv().unwrap();
+            assert!(ensure_composer_admission(&busy).is_err());
+            assert!(ComposerWriterLease::<Writer>::claim(&busy).is_err());
+            let two=lease.clone();let b=scope.spawn(move||two.preserve_draft());
+            ack.send(actual.clone()).unwrap();
+            assert_eq!(a.join().unwrap(),actual);
+            assert_eq!(b.join().unwrap(),actual);
+        });
+        drop(lease);
+        assert_eq!(calls.load(Ordering::SeqCst),1);
+        assert_eq!(busy.load(Ordering::SeqCst),actual.is_err());
+        }
     }
 }

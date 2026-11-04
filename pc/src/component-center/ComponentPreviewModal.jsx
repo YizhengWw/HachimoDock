@@ -22,9 +22,12 @@ import LocalDataPanel from "./LocalDataPanel.jsx";
 import MusicPlayer from "./MusicPlayer.jsx";
 import ComponentMediaPanel from "./ComponentMediaPanel.jsx";
 import ComponentAppPanel from "./ComponentAppPanel.jsx";
-import { LOCAL_SOURCES } from "./local-widget-model.js";
+import { LOCAL_SOURCES, AUTH_SOURCES } from "./local-widget-model.js";
+import AuthProviderPanel from "./AuthProviderPanel.jsx";
+import {ProgramBackgroundStart} from './ProgramBackground.jsx';
 
 export default function ComponentPreviewModal({
+  active = true,
   component,
   usb,
   kind,
@@ -144,18 +147,20 @@ export default function ComponentPreviewModal({
         </div>
         <div className="modal-body">
           {component.sourceAlternatives?.length>1&&<label className="component-source-picker">资源来源（切换会放弃未保存的按钮草稿）<select aria-label="选择组件来源" value={component.isLocal?'local':'builtin'} onChange={e=>{const selected=component.sourceAlternatives.find(c=>Boolean(c.isLocal)===(e.target.value==='local'));if(selected)onSourceChange?.({...selected,sourceAlternatives:component.sourceAlternatives});}} disabled={installing}>{component.sourceAlternatives.map(c=><option key={c.isLocal?'local':'builtin'} value={c.isLocal?'local':'builtin'}>{c.isLocal?'本地创作 / 下载':'客户端内置'} · {c.version||'版本未知'}</option>)}</select></label>}
-          <p className="component-preview-mode">{isDeviceOnly?'设备清单信息：本机没有安装源，不能试玩、修改按钮或重新同步；可以查看信息或移除设备副本。':component.pcApplication||component.pcExtension||LOCAL_SOURCES.has(component.dataSource)||component.dataSource==='stocks.watchlist'?'真实服务控制：服务设置和数据操作会立即保存；底部“取消”只放弃未同步的按钮设置，不撤销已执行的服务操作。':'试玩预览：此处操作不会修改设备存档。按钮设置仅在同步成功后保存，取消不会修改设置。'}</p>
+          <p className="component-preview-mode">{isDeviceOnly?'设备清单信息：本机没有安装源，不能试玩、修改按钮或重新同步；可以查看信息或移除设备副本。':component.appRuntime?.program?'画面为本机预览；后台程序按钮实际控制设备已安装版本。预览与设备存档独立，不会自动安装、录音或播放。':component.pcApplication||component.pcExtension||LOCAL_SOURCES.has(component.dataSource)||component.dataSource==='stocks.watchlist'?'真实服务控制：服务设置和数据操作会立即保存；底部“取消”只放弃未同步的按钮设置，不撤销已执行的服务操作。':'试玩预览：此处操作不会修改设备存档。按钮设置仅在同步成功后保存，取消不会修改设置。'}</p>
+          <ProgramBackgroundStart key={`${component.id}:${component.versionHash}`} component={component} isInstalled={isInstalled} installing={installing}/>
           {(component.mediaSource === "audio.player" || component.id === "music-player") && <MusicPlayer />}
           {component.pcExtension && <ComponentMediaPanel key={`${component.id}:${component.versionHash}`} component={component} />}
-          {component.pcApplication && <ComponentAppPanel key={`${component.id}:${component.versionHash}`} component={{...component,defaultBindings:bindings}} />}
+          {component.pcApplication && <ComponentAppPanel key={`${component.id}:${component.versionHash}`} component={{...component,defaultBindings:bindings}} active={active} />}
           {(LOCAL_SOURCES.has(component.dataSource)||component.pcApplication?.service==="todos") && <LocalDataPanel key={component.id} source={component.pcApplication?.service==="todos"?"todos.upcoming":component.dataSource} deviceChecklist={component.pcApplication?.service==="todos"} />}
+          {AUTH_SOURCES.has(component.dataSource) && <AuthProviderPanel key={`auth-${component.id}`} source={component.dataSource} />}
           {(component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist") && (
             <StockWatchlist key={component.id} usb={usb} />
           )}
           <div className="component-preview-modal__layout">
             <aside className="component-preview-modal__overview" aria-label="组件预览与说明">
               {!component.pcApplication && !component.pcExtension && component.mediaSource !== "audio.player" && component.id !== "music-player" && <div className="component-preview-modal__screen">
-                <DeviceScreenPreview component={{...component,defaultBindings:bindings}} className="component-preview-modal__device" interactive />
+                <DeviceScreenPreview component={{...component,defaultBindings:bindings}} className="component-preview-modal__device" active={active} interactive />
               </div>}
               <div className="component-preview-modal__summary">
                 <div className="component-preview-modal__summary-tags">

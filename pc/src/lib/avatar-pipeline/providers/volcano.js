@@ -1,3 +1,4 @@
+import {withSubjectMotionPolicy} from '../motion-semantics.js';
 /**
  * [Input] per-family prompt + image payload + Volcengine Ark API-key/model-name config.
  * [Output] submitted task id, identity-reference payload (legacy 1.5: first frame only),
@@ -454,7 +455,7 @@ export async function runVolcanoFamily({ config, prompt, imageDataUrl, signal, o
     apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     model: config.model,
-    prompt,
+    prompt: withSubjectMotionPolicy(prompt),
     imageDataUrl,
     duration: config.duration,
     ratio: config.ratio,

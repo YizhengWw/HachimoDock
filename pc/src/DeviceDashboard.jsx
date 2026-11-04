@@ -27,12 +27,13 @@
  *          app-shell/native-operation-owned macOS Accessibility consent,
  *          shared first-visit onboarding state with a reopenable page guide,
  *          an ESP32-P4 A/B firmware update entry, shared current-key instructions,
- *          and a persona editor preserved while visiting API settings.
+ *          a persona editor preserved while visiting API settings,
+ *          and compact volume/city controls below voice input with retained city drafts.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
-import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw } from "lucide-react";
 import DeviceGuideModal from "./DeviceGuideModal.jsx";
@@ -48,9 +49,14 @@ import { buildUsageHelp } from "./lib/usage-help.js";
 import PersonaVoiceModal from "./PersonaVoiceModal.jsx";
 import { useToast } from "./shell/ToastStack.jsx";
 import DeviceStatusBar from "./dashboard/DeviceStatusBar.jsx";
+import DeviceVolumePanel from "./dashboard/DeviceVolumePanel.jsx";
+import SharedLocationPanel from "./dashboard/SharedLocationPanel.jsx";
+import { createSharedLocationController } from "./dashboard/shared-location-model.js";
+import { useExitProtection } from "./lib/exit-protection.js";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
+import {voiceRuntimeTarget,createVoiceRuntimePoller} from "./dashboard/voice-runtime-target.js";
 import RealtimeChatPanel, { realtimeStateLabel } from "./dashboard/RealtimeChatPanel.jsx";
 import { isRecoveringAsr } from "./lib/realtime-feedback.js";
 import { useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
@@ -61,6 +67,7 @@ import DashboardActionsMenu from "./dashboard/DashboardActionsMenu.jsx";
 import FirmwareUpdateModal from "./dashboard/FirmwareUpdateModal.jsx";
 import DeviceDiagnosticsModal from "./dashboard/DeviceDiagnosticsModal.jsx";
 import { ACTIVE_APPEARANCE_KEY } from "./lib/desktop-pet-assignment.js";
+import { observeAppearanceFromMenu, appearanceObservationError } from "./lib/appearance-readonly-observation.js";
 import { BUILTIN_TERRIER_APPEARANCE_ID } from "./lib/builtin-appearances.js";
 import { ensureBridgeRuntime } from "./lib/bridge-runtime.js";
 import { fetchAgentBusStatus } from "./lib/agent-bus-client.js";
@@ -756,6 +763,10 @@ function voiceReducer(state, action) {
 
 export default function DeviceDashboard({ active = true, binding, onUnbind, onOpenApiSettings, onOpenGallery }) {
   const [editingPersona, setEditingPersona] = useState(null);
+  const locationController = useMemo(() => createSharedLocationController({ invoke }), []);
+  const locationState = useSyncExternalStore(locationController.subscribe, locationController.getSnapshot, locationController.getSnapshot);
+  useExitProtection(locationState.saving ? "位置设置正在保存" : locationState.dirty ? "位置设置有未保存的修改" : "");
+  useEffect(() => () => locationController.setActive(false), [locationController]);
   // Native signaling now runs off the UI thread. Keep start/stop ordering
   // across auto-rearm, button configuration and manual toggles.
   const audioSignalQueueRef = useRef(Promise.resolve());
@@ -774,8 +785,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     agentScan,
     refreshAgents,
     realtimeChat,
+    appearanceSync,
     setUsageHelp,
   } = useDeviceContext();
+  const selectedAgentId = currentDisplay.agentId;
   const { push } = useToast();
 
   const [voiceState, voiceDispatch] = useReducer(voiceReducer, VOICE_INITIAL_STATE);
@@ -805,6 +818,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const buttonConfigQueryTokenRef = useRef(0);
   const isP4Runtime = String(usb.runtime || "").toLowerCase() === P4_RUNTIME_ID;
   const hasKnownRuntime = buttonControlRowsForRuntime(usb.runtime).length > 0;
+  const voiceTarget = voiceRuntimeTarget(usb, selectedAgentId);
+  const voiceTargetKeyRef = useRef(voiceTarget.key);
+  // Update during render: an old Promise may settle before effect cleanup.
+  voiceTargetKeyRef.current = voiceTarget.key;
   const p4VoiceRow = isP4Runtime
     ? preferredVoiceRow(P4_BUTTON_CONTROL_ROWS, voiceConfig.buttonActions, voiceConfig.trigger)
     : null;
@@ -874,6 +891,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     if (!usb.connected || !hasKnownRuntime || !buttonConfigTargetBoardDeviceId) return null;
     const queryToken = ++buttonConfigQueryTokenRef.current;
     const startingRevision = buttonConfigRevisionRef.current;
+    const startingScope = voiceTarget.key;
+    const queryIsCurrent = () => queryToken === buttonConfigQueryTokenRef.current
+      && startingRevision === buttonConfigRevisionRef.current
+      && startingScope === voiceTargetKeyRef.current;
     setVoiceConfigOtaState({
       pending: true,
       tone: "",
@@ -881,6 +902,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     });
     const clientConfig = normalizeVoiceConfig(voiceConfigRef.current);
     const syncClientConfig = async () => {
+      if (!queryIsCurrent()) return null;
       const resolved = resolveButtonConfigForRuntime(clientConfig, usb.runtime);
       return dispatchBoardButtonConfig({
         boardDeviceId: buttonConfigTargetBoardDeviceId,
@@ -895,12 +917,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       const boardConfig = await invoke("usb_get_button_config", {
         expectedBoardDeviceId: buttonConfigTargetBoardDeviceId,
       });
-      if (
-        queryToken !== buttonConfigQueryTokenRef.current
-        || startingRevision !== buttonConfigRevisionRef.current
-      ) {
-        return null;
-      }
+      if (!queryIsCurrent()) return null;
       if (boardButtonConfigMatchesClient(clientConfig, boardConfig, usb.runtime)) {
         setVoiceConfigDirty(false);
         setVoiceConfigOtaState({
@@ -919,7 +936,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       });
       try {
         await syncClientConfig();
-        if (startingRevision === buttonConfigRevisionRef.current) {
+        if (queryIsCurrent()) {
           setVoiceConfigDirty(false);
           setVoiceConfigOtaState({
             pending: false,
@@ -928,7 +945,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           });
         }
       } catch (syncError) {
-        if (startingRevision === buttonConfigRevisionRef.current) {
+        if (queryIsCurrent()) {
           setVoiceConfigDirty(true);
           setVoiceConfigOtaState({
             pending: false,
@@ -939,38 +956,16 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       }
       return boardConfig;
     } catch (error) {
-      if (
-        queryToken !== buttonConfigQueryTokenRef.current
-        || startingRevision !== buttonConfigRevisionRef.current
-      ) return null;
+      if (!queryIsCurrent()) return null;
       setVoiceConfigDirty(true);
       setVoiceConfigOtaState({
-        pending: true,
-        tone: "",
-        message: "设备配置读取失败，正在直接写入客户端按钮配置...",
+        pending: false,
+        tone: "warning",
+        message: "暂未读到设备按键配置，已停止自动写入。请确认设备就绪后手动同步。",
       });
-      try {
-        await syncClientConfig();
-        if (startingRevision === buttonConfigRevisionRef.current) {
-          setVoiceConfigDirty(false);
-          setVoiceConfigOtaState({
-            pending: false,
-            tone: "success",
-            message: "设备配置读取超时，已按客户端配置重新写入设备。",
-          });
-        }
-      } catch (syncError) {
-        if (startingRevision === buttonConfigRevisionRef.current) {
-          setVoiceConfigOtaState({
-            pending: false,
-            tone: "warning",
-            message: `设备配置校验失败，客户端配置自动覆盖也未完成：${syncError}`,
-          });
-        }
-      }
       return null;
     } finally {
-      if (queryToken === buttonConfigQueryTokenRef.current) {
+      if (queryIsCurrent()) {
         setButtonConfigHydratedFor(buttonConfigTargetBoardDeviceId);
       }
     }
@@ -979,6 +974,9 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     hasKnownRuntime,
     usb.connected,
     usb.runtime,
+    voiceTarget.key,
+    usb.connectionId,
+    usb.bootId,
   ]);
 
   useEffect(() => {
@@ -987,6 +985,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       setButtonConfigHydratedFor("");
       return undefined;
     }
+    setButtonConfigHydratedFor("");
     refreshButtonConfigFromBoard();
     return () => {
       buttonConfigQueryTokenRef.current += 1;
@@ -1004,7 +1003,6 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     if (shouldAutoOpenOnboarding(ONBOARDING_PAGE_IDS.DEVICE)) setGuideOpen(true);
   }, [active, binding, hasKnownRuntime]);
 
-  const selectedAgentId = currentDisplay.agentId;
   const p4TargetBoardDeviceId = isP4Runtime
     ? (usb.boardDeviceId || onlineBoardDeviceId || binding?.boardDeviceId || "")
     : "";
@@ -1022,6 +1020,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     boardDeviceId: p4TargetBoardDeviceId,
     agentId: selectedAgentId,
     usbConnected: usb.connected,
+    usbConnectionId: usb.connectionId,
+    usbBootId: usb.bootId || usb.capabilities?.debugBootId || "",
     displayEnabled: true,
     sessions: sessionFeed.sessions,
     routingSessions: sessionFeed.routingSessions,
@@ -1073,41 +1073,18 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     };
   }, []);
 
-  // Poll voice-runtime.
+  // Poll voice-runtime. Only after exact USB handshake; never infer legacy from !P4.
   useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-    const run = async () => {
-      if (cancelled || inFlight) return;
-      inFlight = true;
-      try {
-        const res = isP4Runtime
-          ? await invoke("ensure_device_voice_runtime", { input: { interactive: false } })
-          : await invoke("ensure_voice_runtime");
-        if (cancelled) return;
-        voiceDispatch({
-          type: "set_voice_runtime",
-          value: {
-            mode: res?.mode || null,
-            message: res?.message || "",
-            running: !!res?.running,
-            agentId: res?.selectedAgentId || res?.profile?.selectedAgentId || "",
-          },
-        });
-      } catch (err) {
-        if (cancelled) return;
-        voiceDispatch({ type: "set_voice_runtime", value: { mode: "error", message: String(err), running: false, agentId: "" } });
-      } finally {
-        inFlight = false;
-      }
-    };
-    run();
-    const id = setInterval(run, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [isP4Runtime, selectedAgentId]);
+    voiceDispatch({type:"set_voice_runtime",value:{mode:"waiting_device",running:false,
+      message:"正在等待设备握手确认",agentId:"",targetKey:voiceTarget.key}});
+    voiceDispatch({type:"set_audio_bridge_pending",value:false});
+    const poller=createVoiceRuntimePoller({target:voiceTarget,invoke,
+      isCurrent:()=>voiceTargetKeyRef.current===voiceTarget.key,
+      publish:value=>voiceDispatch({type:"set_voice_runtime",value})});
+    poller.poll();
+    const id=setInterval(()=>poller.poll(),5000);
+    return ()=>{poller.cancel();clearInterval(id);};
+  }, [voiceTarget.key]);
 
   // ---------- Button config update + OTA dispatch ----------
   const updateVoiceConfig = useCallback((patch) => {
@@ -1134,6 +1111,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   }, [isP4Runtime]);
 
   const applyVoiceConfigOverUsb = useCallback(async (configOverride = null) => {
+    const requestedRevision = buttonConfigRevisionRef.current;
+    const requestedScope = voiceTarget.key;
+    const isCurrent = () => requestedRevision === buttonConfigRevisionRef.current
+      && requestedScope === voiceTargetKeyRef.current;
     const requestedConfigInput = configOverride?.buttonActions
       ? normalizeVoiceConfig(configOverride)
       : voiceConfig;
@@ -1160,6 +1141,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         voiceButton: requestedVoiceTriggerId,
         voiceEnabled: requestedRuntimeVoiceEnabled,
       });
+      if (!isCurrent()) return;
       let voiceSetupWarning = "";
       try {
         if (isP4Runtime && requestedRuntimeVoiceEnabled) {
@@ -1168,26 +1150,33 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           if (!bridgeRuntime?.running) {
             throw new Error(bridgeRuntime?.message || "本地 Bridge 未启动");
           }
+          if (!isCurrent()) return;
           const voiceRuntime = await invoke("ensure_device_voice_runtime");
+          if (!isCurrent()) return;
           if (!voiceRuntime?.running) {
             throw new Error(voiceRuntime?.message || "设备录音识别通道未就绪");
           }
           const audio = await sendAudioBridgeSignal({
             boardDeviceId: targetBoardDeviceId,
+            expectedConnectionId: usb.connectionId,
             action: "start",
             voiceButton: requestedVoiceTriggerId,
           });
+          if (!isCurrent()) return;
           if (!audio?.usbSent) throw new Error(audio?.usbError || "设备麦克风信令未通过 USB 送达");
           voiceDispatch({ type: "set_audio_bridge_state", enabled: true, ok: true, message: "设备麦克风已通过 USB 接入" });
         } else if (voiceState.audioBridgeEnabled) {
           await sendAudioBridgeSignal({
             boardDeviceId: targetBoardDeviceId,
+            expectedConnectionId: usb.connectionId,
             action: "stop",
             voiceButton: requestedVoiceTriggerId,
           });
+          if (!isCurrent()) return;
           voiceDispatch({ type: "set_audio_bridge_state", enabled: false, ok: true, message: "设备麦克风监听已停止" });
         }
       } catch (voiceError) {
+        if (!isCurrent()) return;
         voiceSetupWarning = String(voiceError);
         voiceDispatch({
           type: "set_audio_bridge_state",
@@ -1196,6 +1185,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           message: `设备麦克风通道未就绪: ${voiceSetupWarning}`,
         });
       }
+      if (!isCurrent()) return;
       saveVoiceConfigToStorage(requestedConfig);
       setVoiceConfig(requestedConfig);
       const bindingCount = Number(ack?.bindingCount ?? ack?.ack?.bindingCount ?? 0);
@@ -1208,9 +1198,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           : "按钮配置已同步到设备，可以按新的设置操作了。",
       });
     } catch (err) {
+      if (!isCurrent()) return;
       setVoiceConfigOtaState({ pending: false, tone: "error", message: `按钮配置下发失败: ${err}` });
     }
-  }, [binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId, usb.connected, usb.runtime, voiceConfig, voiceState.audioBridgeEnabled]);
+  }, [voiceTarget.key, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId, usb.connected, usb.connectionId, usb.runtime, voiceConfig, voiceState.audioBridgeEnabled]);
 
   const updateVoiceTrigger = useCallback(async (trigger) => {
     buttonConfigRevisionRef.current += 1;
@@ -1288,6 +1279,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         }
         const audio = await sendAudioBridgeSignal({
           boardDeviceId: p4TargetBoardDeviceId,
+          expectedConnectionId: usb.connectionId,
           action: "start",
           voiceButton: activeVoiceTriggerId,
         });
@@ -1314,34 +1306,44 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     runtimeVoiceEnabled,
     sendAudioBridgeSignal,
     usb.connected,
+    usb.connectionId,
   ]);
 
   // ---------- Audio bridge toggle ----------
   const toggleAudioBridge = useCallback(async (action) => {
     const requestedEnabled = action === "start";
-    const targetBoardDeviceId = onlineBoardDeviceId || usb.boardDeviceId || binding.boardDeviceId;
+    const targetKey=voiceTarget.key;
+    const current=()=>voiceTargetKeyRef.current===targetKey;
+    if(voiceTarget.kind==="waiting")return;
+    const targetBoardDeviceId = usb.boardDeviceId;
     voiceDispatch({ type: "set_audio_bridge_pending", value: true });
     try {
       if (!targetBoardDeviceId) throw new Error("未找到可用的板子 ID，请先完成设备绑定。");
       if (action === "start") {
         const bridgeRuntime = await ensureBridgeRuntime();
+        if (!current()) return;
         if (bridgeRuntime?.running === false) throw new Error(bridgeRuntime?.message || "本地 Bridge 未启动，无法下发板子音频信令。");
         const voiceRuntime = await invoke(
           isP4Runtime ? "ensure_device_voice_runtime" : "ensure_voice_runtime",
         );
+        if (!current()) return;
         if (!voiceRuntime?.running) throw new Error(voiceRuntime?.message || "voice-service 未启动，无法接入板子音频。");
       }
+      if (!current()) return;
       const res = await sendAudioBridgeSignal({
         boardDeviceId: targetBoardDeviceId,
+        expectedConnectionId: usb.connectionId,
         action,
         voiceButton: activeVoiceTriggerId,
       });
+      if (!current()) return;
       const transports = res?.usbSent ? "USB" : "";
       voiceDispatch({ type: "set_audio_bridge_state", enabled: requestedEnabled, ok: true, message: `已通过 ${transports || "USB"} 下发到板端` });
     } catch (err) {
+      if (!current()) return;
       voiceDispatch({ type: "set_audio_bridge_state", enabled: !requestedEnabled, ok: false, message: `${action === "start" ? "启动" : "关闭"}板子音频失败: ${err}` });
     }
-  }, [activeVoiceTriggerId, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId]);
+  }, [voiceTarget.key, activeVoiceTriggerId, binding.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb.boardDeviceId, usb.connectionId]);
 
   const resumeDeviceVoiceAfterCredentialAccess = useCallback(() => {
     if (!isP4Runtime || !runtimeVoiceEnabled || !usb.connected || !p4TargetBoardDeviceId) {
@@ -1399,6 +1401,37 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         });
       });
   }, [p4SessionSync.sessionId, selectedAgentId, voiceState.mockInjectInput]);
+
+  const [appearanceObservationBusy, setAppearanceObservationBusy] = useState(false);
+  const appearanceObservationOwnerRef = useRef(null);
+  const appearanceObservationUsbRef = useRef(usb);
+  appearanceObservationUsbRef.current = usb;
+  useEffect(() => () => { appearanceObservationOwnerRef.current = null; }, []);
+  const onReconcileAppearance = useCallback(async () => {
+    if (appearanceObservationOwnerRef.current) return;
+    const current = appearanceObservationUsbRef.current;
+    if (!current?.connected || !current.boardDeviceId || appearanceSync?.pending) return;
+    const owner = { boardDeviceId: current.boardDeviceId, connectionId: current.connectionId,
+      bootId: current.bootId || current.capabilities?.debugBootId || "" };
+    appearanceObservationOwnerRef.current = owner;
+    setAppearanceObservationBusy(true);
+    const isCurrent = () => appearanceObservationOwnerRef.current === owner
+      && appearanceObservationUsbRef.current.connected === true
+      && appearanceObservationUsbRef.current.boardDeviceId === owner.boardDeviceId
+      && appearanceObservationUsbRef.current.connectionId === owner.connectionId
+      && (appearanceObservationUsbRef.current.bootId || appearanceObservationUsbRef.current.capabilities?.debugBootId || "") === owner.bootId;
+    try {
+      const result = await observeAppearanceFromMenu({ invoke, boardDeviceId: owner.boardDeviceId, isCurrent });
+      if (isCurrent()) push({ tone: "info", ...result });
+    } catch (error) {
+      if (appearanceObservationOwnerRef.current === owner) push({ tone: "warning", title: "形象状态尚未确认", message: appearanceObservationError(error) });
+    } finally {
+      if (appearanceObservationOwnerRef.current === owner) {
+        appearanceObservationOwnerRef.current = null;
+        setAppearanceObservationBusy(false);
+      }
+    }
+  }, [appearanceSync?.pending, push]);
 
   // ---------- Action-menu callbacks ----------
   const onSendTest = useCallback(() => {
@@ -1482,6 +1515,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onUnbind={onUnbindClick}
           onDeviceReturnHome={onDeviceReturnHome}
           onForceSyncAppearance={onForceSyncAppearance}
+          onReconcileAppearance={onReconcileAppearance}
+          canReconcileAppearance={usb.connected === true && Boolean(usb.boardDeviceId) && !appearanceSync?.pending && !appearanceObservationBusy}
           onUpdateFirmware={usb.connected && usb.runtime === P4_RUNTIME_ID
             ? () => {
               setFirmwareTargetBoardDeviceId(usb.boardDeviceId || "");
@@ -1557,6 +1592,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
             busSessionId: p4SessionSync.sessionId,
             selectedAgentId,
             deviceOnline,
+            voiceRuntimeTargetKey: voiceTarget.key,
+            voiceRuntimeTargetReady: voiceTarget.kind !== "waiting",
           }}
           dispatch={voiceDispatch}
           toggleAudioBridge={toggleAudioBridge}
@@ -1570,6 +1607,13 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onOpenApiSettings={onOpenApiSettings}
         />
       </Card.Collapsible>
+
+      <Card title="设备总音量">
+        <DeviceVolumePanel usb={usb} active={active} />
+      </Card>
+      <Card>
+        <SharedLocationPanel active={active} controller={locationController} />
+      </Card>
 
       <Card.Collapsible
         title="实时对话"

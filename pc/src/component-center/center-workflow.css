@@ -15,3 +15,7 @@
 .component-workflow-confirm .modal-body p {line-height:1.7;color:var(--text-soft)}
 .component-source-picker select:focus-visible,.component-library-toolbar>input:focus-visible,.component-library-toolbar>select:focus-visible {outline:2px solid var(--accent);outline-offset:2px}
 @media(max-width:700px){.component-source-picker{grid-template-columns:1fr}.component-library-toolbar .component-library-filters{margin-left:0;width:100%}}
+
+/* Transfer intent remains visible independently of component preview state. */
+.component-save-policy { margin: 16px 0; padding: 12px; border: 1px solid #d9dee8; border-radius: 10px; }
+.component-save-policy label { display: flex; gap: 8px; align-items: flex-start; }

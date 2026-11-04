@@ -302,7 +302,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     writeAudioSyncDirty(appearanceId, true);
     setAudioSyncDirty(true);
     setAudioSyncState("idle");
-    setAudioSyncMessage(message || "音效已保存到客户端，需要通过板端音效 OTA 通道下发到设备后才会生效。");
+    setAudioSyncMessage(message || "提示音已保存到客户端，点击下方的“下发音效”同步到设备后生效。");
   }, [appearanceId]);
 
   const reload = useCallback(async () => {
@@ -406,7 +406,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
         audioBytes,
       });
       setRecord(nextRecord);
-      markAudioSyncDirty(`已更新 ${activeFamily} 的提示音，请通过音效通道下发到设备。`);
+      markAudioSyncDirty(`已更新 ${activeFamily} 的提示音，点击下方的“下发音效”同步到设备。`);
     } catch (saveFailure) {
       console.error(saveFailure);
       setAudioErr(saveFailure?.message || String(saveFailure));
@@ -422,7 +422,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     try {
       const nextRecord = await removeFamilyAudioCue({ appearanceId: record.id, family: activeFamily });
       setRecord(nextRecord);
-      markAudioSyncDirty(`已移除 ${activeFamily} 的提示音，请通过音效通道下发到设备。`);
+      markAudioSyncDirty(`已移除 ${activeFamily} 的提示音，点击下方的“下发音效”同步到设备。`);
     } catch (removeFailure) {
       console.error(removeFailure);
       setAudioErr(removeFailure?.message || String(removeFailure));
@@ -475,16 +475,17 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
     if (!record || audioSyncState === "syncing") return;
     if (!hasTauriRuntime()) {
       setAudioSyncState("error");
-      setAudioSyncMessage("当前不是桌面客户端运行环境，无法通过板端音效 OTA 通道下发。");
+      setAudioSyncMessage("请使用桌面客户端下发提示音。");
       return;
     }
 
     setAudioSyncState("syncing");
-    setAudioSyncMessage("正在通过板端音效 OTA 通道下发 WAV...");
+    setAudioSyncMessage("正在同步提示音到设备...");
     try {
       const result = await invoke("usb_sync_appearance", {
         appearanceId: record.id,
         boardDeviceId,
+        audioOnly: true,
       });
       if (!result?.ok) {
         throw new Error(result?.error || "设备未确认提示音下发");
@@ -855,17 +856,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
               <X size={14} />
               中断传输
             </Button>
-          ) : audioSyncDirty && (
-            <Button
-              className="detail-audio-sync-btn"
-              variant="primary"
-              onClick={handleSyncAudioCues}
-              title="通过板端音效 OTA 通道下发当前 WAV"
-            >
-              <UploadCloud size={14} />
-              下发音效
-            </Button>
-          )}
+          ) : null}
           {!isBuiltin && (
             <button
               className="btn-ghost danger"
@@ -1085,7 +1076,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
                     }`}
                   >
                     {audioSyncState === "syncing" ? <Loader size={14} className="spin" /> : <UploadCloud size={14} />}
-                    {audioSyncMessage || "音效已保存到客户端，需要通过板端音效 OTA 通道下发到设备后才会生效。"}
+                    {audioSyncMessage || "提示音已保存到客户端，点击下方的“下发音效”同步到设备后生效。"}
                   </div>
                 )}
                 <div className="detail-audio-config__actions">
@@ -1114,6 +1105,20 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
                       <Trash2 size={14} />
                       移除提示音
                     </button>
+                  )}
+                  {audioSyncDirty && (
+                    <Button
+                      className="detail-audio-sync-btn"
+                      variant="primary"
+                      onClick={handleSyncAudioCues}
+                      loading={audioSyncState === "syncing"}
+                      loadingLabel="正在下发…"
+                      disabled={audioState === "saving" || singleStateBusy || stateVideoBusy}
+                      title="将已保存的提示音同步到设备"
+                    >
+                      <UploadCloud size={14} />
+                      下发音效
+                    </Button>
                   )}
                 </div>
                 {isBuiltin && (

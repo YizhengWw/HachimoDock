@@ -4,6 +4,7 @@
  *          bounded parallel video tasks with shared-reference rejection stopping unsubmitted actions,
  *          or a user-prompted single-family replacement; completed results remain available.
  *          Seedream input/output moderation stops preprocessing before prompt/video calls.
+ *          Explicit recovery migrates old review policy; local inspection failures retain safe stage/code and downloaded bytes; prompts adapt to original morphology.
  * [Pos] orchestrator node in pc/src/lib/avatar-pipeline
  * [Sync] If this file changes, update this header.
  */
@@ -20,8 +21,9 @@ import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 import { runKlingFamily } from "./providers/kling.js";
 import { runCustomFamily } from "./providers/custom.js";
 import { assertResumableAction, serialQueue } from "./session.js";
-import { inspectReference, inspectVideo, checkpointedReview, isRecoverableQueryError } from "./quality.js";
+import { inspectReference, inspectVideo, videoInspectionFailure, checkpointedReview, isRecoverableQueryError } from "./quality.js";
 import {ensureActionStartFrame} from './action-start-frame.js';
+import {withSubjectMotionPolicy} from './motion-semantics.js';
 
 function isVolcanoVideoModelName(model) {
   const normalized = String(model || "").trim().toLowerCase();
@@ -221,7 +223,7 @@ export async function runSingleFamilyVideo({
   } else {
     result = await runProviderFamily({
       providerConfig: effectiveProviderConfig,
-      prompt: entry.prompt,
+      prompt: withSubjectMotionPolicy(entry.prompt),
       imagePayload,
       signal,
       onStage: ({ stage, detail }) => {
@@ -248,7 +250,7 @@ export async function runSingleFamilyVideo({
     imagePayload,
     family: {
       family: entry.family,
-      prompt: entry.prompt,
+      prompt: withSubjectMotionPolicy(entry.prompt),
       ok: true,
       videoBytes: result.videoBytes,
       taskId: result.taskId,
@@ -395,21 +397,23 @@ export async function runAvatarPipeline({
   } else if (skipProcessing || dryRun) {
     imagePayload = originalImagePayload;
   } else {
-    if (session?.imageIntent) throw new Error("上次图片处理结果未知，不会自动再次调用付费服务；请核对后重新创建。");
-    await commit({ imageIntent: true });
+    if (session?.imageIntent && !session.imageResult) throw new Error("上次图片处理结果未知，不会自动再次调用付费服务；请核对后重新创建。");
+    if (!session?.imageResult) await commit({ imageIntent: true });
     const processed = await processImageForPipeline(imageFile, {
       styleDescription,
       maxDimension: runtimeConfig.imageMaxDimension,
       cloudBackground: resolveArkBackgroundConfig(effectiveProviderConfig),
       signal,
-      onProgress: (stage, imageProgress) => {
+      imageResult: session?.imageResult,
+      onImageResult: async imageResult => commit({ imageResult }),
+      onProgress: (stage, imageProgress, detail) => {
         const labels = {
           cloud_editing: "正在使用方舟图片模型替换背景…",
           cloud_fallback: "方舟背景处理不可用，正在使用原图继续…",
           compositing: "正在生成 4:3 黑底参考图…",
           done: "图片处理完成",
         };
-        progress.message = labels[stage] || "处理中…";
+        progress.message = detail || labels[stage] || "处理中…";
         progress.imageProgress = imageProgress;
         emit();
       },
@@ -429,7 +433,7 @@ export async function runAvatarPipeline({
   await commit({ reference: imagePayload });
   if (automatic && !dryRun && !session?.referenceApproved) {
     progress.stage='reference_review';progress.message="正在自动检查角色一致性、完整性与背景清理结果…";emit();
-    if(!session?.referenceQuality){
+    if(!session?.referenceQuality || retryReview){
       await checkpointedReview({owner:session,key:'referenceQuality',commit,retryReview,thinking,images:[inputInspection.dataUrl,imagePayload.dataUrl],kind:'reference',signal,styleDescription});
     }
     if(!session.referenceQuality.pass)throw Error(`参考图自动检查未通过：${session.referenceQuality.issues.join('；')}。原图与已有结果已保留，未继续提交视频。处理结果不合格不等于原图不支持；不会自动重复付费生成。`);
@@ -554,7 +558,7 @@ export async function runAvatarPipeline({
             mode: effectiveProviderConfig.mode,
             duration: effectiveProviderConfig.duration,
           },
-          prompt: entry.prompt,
+          prompt: withSubjectMotionPolicy(entry.prompt),
           imageBase64: imagePayload.base64,
           signal,
           onStage: familyOnStage,
@@ -568,7 +572,7 @@ export async function runAvatarPipeline({
             model: effectiveProviderConfig.model,
             advanced: effectiveProviderConfig.advanced,
           },
-          prompt: entry.prompt,
+          prompt: withSubjectMotionPolicy(entry.prompt),
           imageDataUrl: imagePayload.dataUrl,
           signal,
           onStage: familyOnStage,
@@ -602,7 +606,7 @@ export async function runAvatarPipeline({
 
       const familyResult = {
         family: entry.family,
-        prompt: entry.prompt,
+        prompt: withSubjectMotionPolicy(entry.prompt),
         ok: true,
         videoBytes: result.videoBytes,
         videoUrl: result.videoUrl,
@@ -617,7 +621,15 @@ export async function runAvatarPipeline({
       if(automatic&&!dryRun){
         setStatus(progress,entry.family,{status:'checking'});progress.message=`正在检查 ${entry.family} 的画面与格式…`;emit();
         const action=session.actions[entry.family];
-        const checked=await inspectVideo(result.videoBytes,signal);
+        let checked;
+        try {
+          checked=await inspectVideo(result.videoBytes,signal);
+          if(action.inspectionFailure){delete action.inspectionFailure;await commit({});}
+        } catch(error) {
+          const failure=videoInspectionFailure(error);
+          if(failure){action.inspectionFailure=failure;await commit({});}
+          throw error;
+        }
         if(entry.family===manifest.entries[0].family&&!session.trialApproved){
           progress.stage='trial_review';emit();
           action.inspection=checked;await commit({});
@@ -671,7 +683,7 @@ export async function runAvatarPipeline({
       emit();
       return {
         family: entry.family,
-        prompt: entry.prompt,
+        prompt: withSubjectMotionPolicy(entry.prompt),
         ok: false,
         error: message,
       };
@@ -700,7 +712,7 @@ export async function runAvatarPipeline({
       if (sharedImageError) {
         const entry = manifest.entries[idx];
         familiesResult[idx] = {
-          family: entry.family, prompt: entry.prompt, ok: false,
+          family: entry.family, prompt: withSubjectMotionPolicy(entry.prompt), ok: false,
           skipped: true, error: sharedImageError,
         };
         setStatus(progress, entry.family, { status: "failed", skipped: true, error: sharedImageError });

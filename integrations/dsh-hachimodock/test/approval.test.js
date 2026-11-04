@@ -10,6 +10,8 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const {
+  appendSessionEvent,
+  nextControlEvent,
   createFakeCtx,
   createFakeSession,
   createApprovalRequest,
@@ -206,31 +208,36 @@ test('the answerer never throws into the approval service', async (t) => {
 })
 
 test('official audit events are display-only and never guessed onto a request', async (t) => {
-  const { ctx, session, sse, url } = await fixtures(t)
+  const { bridge, ctx, session, sse, url } = await fixtures(t)
+  appendSessionEvent(ctx, session, { type: 'turn/start', data: { turn: 1 } })
+  appendSessionEvent(ctx, session, { type: 'tool/call', data: { turn: 1, callId: 'call-audit', name: 'bash' } })
+  await nextControlEvent(sse, 'turn', session.id)
+  await nextControlEvent(sse, 'tool', session.id)
   // DSH appends `approval/asked` synchronously before dispatching the answerer.
-  ctx.dispatchSync('session/event', session, {
+  appendSessionEvent(ctx, session, {
     type: 'approval/asked',
     time: Date.now(),
-    data: { id: 'dsh-approval-1', toolName: 'bash', reason: 'run the test suite' },
+    data: { id: 'dsh-approval-1', callId: 'call-audit', toolName: 'bash', reason: 'run the test suite' },
   })
-  const asked = await sse.next()
+  const asked = await nextControlEvent(sse, 'approval-asked', session.id)
   assert.equal(asked.event, 'approval-asked')
   assert.equal(asked.data.approvalId, 'dsh-approval-1')
+  assert.equal(bridge.server.pending.size, 0, 'display-only audit cannot authorize a tool')
 
   const outcome = answer(ctx, createApprovalRequest(session))
-  const prompt = await sse.next()
+  const prompt = await nextControlEvent(sse, 'approval', session.id)
   assert.equal(prompt.event, 'approval')
   assert.equal(prompt.data.approvalId, undefined)
 
   await postJson(`${url}/approval/decision`, { requestId: prompt.data.requestId, decision: 'allow' })
   assert.equal(await outcome, 'allowed-once')
 
-  ctx.dispatchSync('session/event', session, {
+  appendSessionEvent(ctx, session, {
     type: 'approval/decided',
     time: Date.now(),
     data: { id: 'dsh-approval-1', outcome: 'allowed-once' },
   })
-  const resolved = await sse.next()
+  const resolved = await nextControlEvent(sse, 'approval-resolved', session.id)
   assert.equal(resolved.event, 'approval-resolved')
   assert.equal(resolved.data.approvalId, 'dsh-approval-1')
   assert.equal(resolved.data.requestId, undefined)

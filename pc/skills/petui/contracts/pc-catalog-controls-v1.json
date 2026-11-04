@@ -1,0 +1,403 @@
+{
+  "schemaVersion": 1,
+  "description": "Shared native/Python catalog controls and complete package boundary vectors; synthetic station only, no network execution. Rust policy is unchanged.",
+  "packageFixture": "city-radio",
+  "packageFiles": [
+    "component.json",
+    "negative-screen.json",
+    "buttons.json",
+    "share.json",
+    "runtime/widget.json",
+    "pc/extension.json",
+    "assets/.keep",
+    "assets/background.png",
+    "assets/vinyl.png"
+  ],
+  "row": {
+    "id": "fixture-station",
+    "name": "Station",
+    "url": "https://example.invalid/audio",
+    "rank": 1,
+    "available": true
+  },
+  "cases": [
+    {
+      "name": "reject-control-u0000",
+      "value": "left\u0000right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0001",
+      "value": "left\u0001right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0002",
+      "value": "left\u0002right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0003",
+      "value": "left\u0003right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0004",
+      "value": "left\u0004right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0005",
+      "value": "left\u0005right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0006",
+      "value": "left\u0006right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0007",
+      "value": "left\u0007right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0008",
+      "value": "left\bright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0009",
+      "value": "left\tright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000a",
+      "value": "left\nright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000b",
+      "value": "left\u000bright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000c",
+      "value": "left\fright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000d",
+      "value": "left\rright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000e",
+      "value": "left\u000eright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u000f",
+      "value": "left\u000fright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0010",
+      "value": "left\u0010right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0011",
+      "value": "left\u0011right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0012",
+      "value": "left\u0012right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0013",
+      "value": "left\u0013right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0014",
+      "value": "left\u0014right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0015",
+      "value": "left\u0015right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0016",
+      "value": "left\u0016right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0017",
+      "value": "left\u0017right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0018",
+      "value": "left\u0018right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0019",
+      "value": "left\u0019right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001a",
+      "value": "left\u001aright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001b",
+      "value": "left\u001bright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001c",
+      "value": "left\u001cright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001d",
+      "value": "left\u001dright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001e",
+      "value": "left\u001eright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u001f",
+      "value": "left\u001fright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u007f",
+      "value": "left\u007fright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0080",
+      "value": "left\u0080right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0081",
+      "value": "left\u0081right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0082",
+      "value": "left\u0082right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0083",
+      "value": "left\u0083right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0084",
+      "value": "left\u0084right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0085",
+      "value": "left\u0085right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0086",
+      "value": "left\u0086right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0087",
+      "value": "left\u0087right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0088",
+      "value": "left\u0088right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0089",
+      "value": "left\u0089right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008a",
+      "value": "left\u008aright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008b",
+      "value": "left\u008bright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008c",
+      "value": "left\u008cright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008d",
+      "value": "left\u008dright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008e",
+      "value": "left\u008eright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u008f",
+      "value": "left\u008fright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0090",
+      "value": "left\u0090right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0091",
+      "value": "left\u0091right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0092",
+      "value": "left\u0092right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0093",
+      "value": "left\u0093right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0094",
+      "value": "left\u0094right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0095",
+      "value": "left\u0095right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0096",
+      "value": "left\u0096right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0097",
+      "value": "left\u0097right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0098",
+      "value": "left\u0098right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u0099",
+      "value": "left\u0099right",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009a",
+      "value": "left\u009aright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009b",
+      "value": "left\u009bright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009c",
+      "value": "left\u009cright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009d",
+      "value": "left\u009dright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009e",
+      "value": "left\u009eright",
+      "ok": false
+    },
+    {
+      "name": "reject-control-u009f",
+      "value": "left\u009fright",
+      "ok": false
+    },
+    {
+      "name": "accept-ascii",
+      "value": "Station 1",
+      "ok": true
+    },
+    {
+      "name": "accept-chinese",
+      "value": "\u4e2d\u6587\u7535\u53f0",
+      "ok": true
+    },
+    {
+      "name": "accept-accent",
+      "value": "Caf\u00e9",
+      "ok": true
+    },
+    {
+      "name": "accept-nbsp",
+      "value": "left\u00a0right",
+      "ok": true
+    },
+    {
+      "name": "accept-emoji",
+      "value": "\u5c0f\u72d7\ud83d\udc15",
+      "ok": true
+    },
+    {
+      "name": "accept-joiner",
+      "value": "left\u200dright",
+      "ok": true
+    },
+    {
+      "name": "accept-unicode-line-separator",
+      "value": "left\u2028right",
+      "ok": true
+    },
+    {
+      "name": "accept-leading-digit-field",
+      "value": "\u6b63\u5e38",
+      "ok": true,
+      "extraFields": {
+        "1extra": 0
+      }
+    },
+    {
+      "name": "accept-utf8-exactly-2048-bytes",
+      "value": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754cab",
+      "ok": true
+    },
+    {
+      "name": "reject-utf8-2049-bytes",
+      "value": "\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c\u754c",
+      "ok": false
+    }
+  ]
+}

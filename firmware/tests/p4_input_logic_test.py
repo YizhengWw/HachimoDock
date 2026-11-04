@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_invalid_startup_calibration_disarms_only_joystick():
     source = (ROOT / "main" / "pet_p4_input.c").read_text()
     assert "const bool joystick_calibrated = calibrate_joystick_center(" in source
-    assert "atomic_store_explicit(&g_joystick_ready, joystick_calibrated," in source
+    assert "joystick_observation_begin(joystick_calibrated,joystick_center_x,joystick_center_y);" in source
     assert "joystick_calibrated ? pet_p4_joystick_decoder_update(" in source
     assert ") : PET_P4_JOYSTICK_CENTER;" in source
     assert "PET_P4_INPUT_JOYSTICK_CENTER_DEFAULT" not in source

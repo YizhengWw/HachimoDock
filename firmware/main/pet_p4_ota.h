@@ -8,6 +8,13 @@
 #include "esp_err.h"
 #include "pet_p4_protocol.h"
 
+#ifndef PET_P4_OTA_METADATA_CACHED
+#define PET_P4_OTA_METADATA_CACHED 0
+#endif
+#if PET_P4_OTA_METADATA_CACHED
+#include "esp_ota_ops.h"
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,6 +36,11 @@ void pet_p4_ota_process(unsigned long long now_ms);
 void pet_p4_ota_send_status(pet_p4_send_line_fn send_line, void *ctx);
 bool pet_p4_ota_active(void);
 bool pet_p4_ota_transfer_active(void);
+#if PET_P4_OTA_METADATA_CACHED
+/* Read-only observed native boot/validation result; no flash/MMU access or
+ * long OTA mutex wait. An error is unavailable, never invented validity. */
+esp_err_t pet_p4_ota_observed_image_state(esp_ota_img_states_t *out);
+#endif
 
 #ifdef __cplusplus
 }

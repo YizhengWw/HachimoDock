@@ -1,0 +1,398 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-texts-v1",
+ "notes": "Shared p4-texts-v1 vectors. runtime: a complete valid package every validator accepts. reject: JSON-pointer patches every validator must refuse. cases: semantic runs for the JS preview, packaged mirror and Python model; nodeText lists the resolved text of every text_at node in element order, headline/note the dashboard text_at slots. An index outside 0..len-1 resolves to the empty string. Entries are UTF-8 without control characters (<32, 127), <=120 bytes each, <=64 entries, <=4096 bytes total. text_at needs graphics + p4-variable-bindings-v1 and is exclusive with text/bind/var_bind/field_bind/key_for.",
+ "limits": {
+  "maxEntries": 64,
+  "maxEntryBytes": 120,
+  "maxTotalBytes": 4096
+ },
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "texts": [
+   "You wake in a quiet dock.",
+   "A lantern flickers to the east.",
+   "The water is cold and still.",
+   "Morning. The pet is waiting."
+  ],
+  "vars": {
+   "line": {
+    "type": "int",
+    "init": 0
+   },
+   "far": {
+    "type": "int",
+    "init": 99
+   },
+   "name": {
+    "type": "string",
+    "init": "dock"
+   }
+  },
+  "limits": {
+   "line": [
+    0,
+    3
+   ]
+  },
+  "states": [
+   "read"
+  ],
+  "initial_state": "read",
+  "transitions": [
+   {
+    "from": "*",
+    "on": "page.next",
+    "inc": {
+     "line": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "page.prev",
+    "inc": {
+     "line": -1
+    }
+   },
+   {
+    "from": "*",
+    "on": "page.far",
+    "set": {
+     "line": 3
+    },
+    "inc": {
+     "far": 1
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "Texts contract",
+   "headline": {
+    "text_at": "line"
+   },
+   "note": {
+    "text_at": "far"
+   },
+   "visualStyle": "clean",
+   "visualPalette": "mint",
+   "visualLayout": "tool",
+   "visualSprite": "star"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 600,
+     "h": 80,
+     "color": 65535,
+     "text_at": "line"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 110,
+     "w": 600,
+     "h": 40,
+     "color": 65535,
+     "text_at": "far"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 400,
+     "w": 200,
+     "h": 64,
+     "color": 2016,
+     "text": "Next",
+     "action": "page.next"
+    },
+    {
+     "type": "button",
+     "x": 240,
+     "y": 400,
+     "w": 200,
+     "h": 64,
+     "color": 2016,
+     "text": "Back",
+     "action": "page.prev"
+    }
+   ]
+  }
+ },
+ "reject": [
+  {
+   "name": "more than 64 entries",
+   "path": "/texts",
+   "value": [
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x",
+    "x"
+   ]
+  },
+  {
+   "name": "entry above 120 bytes",
+   "path": "/texts/0",
+   "value": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+  },
+  {
+   "name": "total above 4096 bytes",
+   "path": "/texts",
+   "value": [
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+   ]
+  },
+  {
+   "name": "control characters are refused",
+   "path": "/texts/1",
+   "value": "tab\there"
+  },
+  {
+   "name": "entries must be strings",
+   "path": "/texts/2",
+   "value": 7
+  },
+  {
+   "name": "an empty table is not a table",
+   "path": "/texts",
+   "value": []
+  },
+  {
+   "name": "text_at must name an int var",
+   "path": "/surface/elements/0/text_at",
+   "value": "name"
+  },
+  {
+   "name": "text_at must name a declared var",
+   "path": "/surface/elements/0/text_at",
+   "value": "missing"
+  },
+  {
+   "name": "text_at excludes text",
+   "path": "/surface/elements/0/text",
+   "value": "literal"
+  },
+  {
+   "name": "text_at excludes var_bind",
+   "path": "/surface/elements/0/var_bind",
+   "value": "line"
+  },
+  {
+   "name": "dashboard text_at must name an int var",
+   "path": "/dashboard/headline",
+   "value": {
+    "text_at": "name"
+   }
+  },
+  {
+   "name": "texts need the bounded runtime v4",
+   "path": "/engine",
+   "value": "p4-bounded-runtime-v3"
+  }
+ ],
+ "cases": [
+  {
+   "name": "index 0 shows the first entry and an out-of-range index is empty",
+   "events": [],
+   "expected": {
+    "vars": {
+     "line": 0,
+     "far": 99
+    },
+    "nodeText": [
+     "You wake in a quiet dock.",
+     ""
+    ],
+    "headline": "You wake in a quiet dock.",
+    "note": ""
+   }
+  },
+  {
+   "name": "next advances through the table",
+   "events": [
+    {
+     "action": "page.next"
+    },
+    {
+     "action": "page.next"
+    }
+   ],
+   "expected": {
+    "vars": {
+     "line": 2,
+     "far": 99
+    },
+    "nodeText": [
+     "The water is cold and still.",
+     ""
+    ],
+    "headline": "The water is cold and still.",
+    "note": ""
+   }
+  },
+  {
+   "name": "limits clamp the index at the last entry",
+   "events": [
+    {
+     "action": "page.far"
+    },
+    {
+     "action": "page.next"
+    }
+   ],
+   "expected": {
+    "vars": {
+     "line": 3,
+     "far": 100
+    },
+    "nodeText": [
+     "Morning. The pet is waiting.",
+     ""
+    ],
+    "headline": "Morning. The pet is waiting.",
+    "note": ""
+   }
+  },
+  {
+   "name": "prev clamps at zero",
+   "events": [
+    {
+     "action": "page.prev"
+    }
+   ],
+   "expected": {
+    "vars": {
+     "line": 0,
+     "far": 99
+    },
+    "nodeText": [
+     "You wake in a quiet dock.",
+     ""
+    ],
+    "headline": "You wake in a quiet dock.",
+    "note": ""
+   }
+  }
+ ]
+}

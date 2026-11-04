@@ -8,7 +8,8 @@
  * [Sync] If this file changes, update `pc/src/component-center/.folder.md`.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {previewOwnedValue} from './preview-lifecycle.js';
 import StockScreenPreview from "./StockScreenPreview.jsx";
 import WoodenFishPreview from "./WoodenFishPreview.jsx";
 import FruitSlicePreview from "./FruitSlicePreview.jsx";
@@ -678,9 +679,12 @@ function drawScenePreviewEntity(
   context.restore();
 }
 
+const EMPTY_SPRITE_IMAGES = new Map();
 function PixelGameGrid({ type, step, scene, visualStyle, sprites }) {
   const canvasRef = useRef(null);
-  const [spriteImages, setSpriteImages] = useState(() => new Map());
+  const spriteOwner = useMemo(() => ({}), [scene, sprites, type]);
+  const [loadedSprites, setLoadedSprites] = useState(null);
+  const spriteImages = previewOwnedValue(loadedSprites, spriteOwner, EMPTY_SPRITE_IMAGES);
   const frame = useMemo(
     () => (
       scene
@@ -713,12 +717,12 @@ function PixelGameGrid({ type, step, scene, visualStyle, sprites }) {
       image.src = sprite.dataUrl;
     }));
     Promise.all(pending).then(() => {
-      if (!disposed) setSpriteImages(next);
+      if (!disposed) setLoadedSprites({ owner: spriteOwner, value: next });
     });
     return () => { disposed = true; };
-  }, [sprites]);
+  }, [sprites, spriteOwner]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || typeof document === "undefined") return;
     const style = getComputedStyle(canvas);
@@ -768,7 +772,7 @@ function PixelGameGrid({ type, step, scene, visualStyle, sprites }) {
         step,
       );
     });
-  }, [frame, type, visualStyle, spriteImages, step]);
+  }, [frame, type, visualStyle, spriteImages, spriteOwner, step]);
 
   return (
     <canvas
@@ -907,9 +911,9 @@ function PixelToolPreview({ component, dashboard, progress }) {
   );
 }
 
-export default function DeviceScreenPreview({ component, className = "", interactive = false, cover = false }) {
+export default function DeviceScreenPreview({ component, className = "", interactive = false, cover = false, active = true }) {
   const previewRef = useRef(null);
-  const animationActive = usePreviewAnimationAllowed(previewRef, Boolean(component) && !cover);
+  const animationActive = usePreviewAnimationAllowed(previewRef, Boolean(component) && !cover && active);
   if (!component) return null;
   const dashboard = component.dashboard || {};
   const isStocks = component.dataSource === "stocks.watchlist" || component.id === "stock-watchlist";

@@ -1,0 +1,42 @@
+{
+  "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "bindings": "p4-variable-bindings-v1",
+    "background": 0,
+    "viewports": {"engine": "p4-app-viewports-v1", "items": [
+      {"id": "left", "x": 16, "y": 64, "w": 288, "h": 320, "content_height": 720, "offset_var": "left_offset"},
+      {"id": "right", "x": 336, "y": 64, "w": 288, "h": 320, "content_height": 640, "offset_var": "right_offset"}
+    ]},
+    "elements": [
+      {"type": "button", "view": "left", "x": 20, "y": 300, "w": 120, "h": 60, "color": 65535, "text": "Left", "action": "left.row"},
+      {"type": "button", "view": "right", "x": 20, "y": 480, "w": 120, "h": 60, "color": 65535, "text": "Right", "action": "right.row"},
+      {"type": "button", "x": 20, "y": 8, "w": 120, "h": 44, "color": 65535, "text": "Fixed", "action": "fixed"}
+    ]
+  },
+  "cases": [
+    {"vars": {"left_offset": 0, "right_offset": 0}, "positions": [[36,364],null,[20,8]], "hits": [[40,370,"left.row"],[40,390,null],[360,370,null],[24,12,"fixed"]]},
+    {"vars": {"left_offset": 120, "right_offset": 0}, "positions": [[36,244],null,[20,8]], "hits": [[40,250,"left.row"],[40,370,null],[360,370,null]]},
+    {"vars": {"left_offset": 120, "right_offset": 200}, "positions": [[36,244],[356,344],[20,8]], "hits": [[40,250,"left.row"],[360,350,"right.row"],[360,390,null],[330,350,null]]},
+    {"vars": {"left_offset": -900, "right_offset": 999999}, "positions": [[36,364],[356,224],[20,8]], "hits": [[40,370,"left.row"],[360,230,"right.row"],[360,284,null]]},
+    {"vars": {"left_offset": 400, "right_offset": 320}, "positions": [null,[356,224],[20,8]], "hits": [[40,64,null],[360,230,"right.row"],[24,12,"fixed"]]}
+  ],
+  "invalid": [
+    {"pointer": "/viewports/engine", "value": "p4-app-viewport-v1"},
+    {"pointer": "/viewports/items", "value": []},
+    {"pointer": "/viewports/items/1/id", "value": "left"},
+    {"pointer": "/viewports/items/1/id", "value": "../../bad"},
+    {"pointer": "/viewports/items/1/offset_var", "value": "left_offset"},
+    {"pointer": "/viewports/items/1/x", "value": 303},
+    {"pointer": "/viewports/items/1/w", "value": 305},
+    {"pointer": "/viewports/items/1/h", "value": true},
+    {"pointer": "/viewports/items/1/content_height", "value": 2049},
+    {"pointer": "/viewports/items/1/content_height", "value": 319},
+    {"pointer": "/elements/0/view", "value": "missing"},
+    {"pointer": "/elements/0/view", "value": true},
+    {"pointer": "/elements/0/x", "value": 180},
+    {"pointer": "/elements/0/y", "value": 700},
+    {"pointer": "/elements/0/h", "value": 481},
+    {"pointer": "/elements/0/w", "value": 0}
+  ]
+}

@@ -12,9 +12,11 @@ import {
   deviceSessionTerminalUntilMs,
   deviceSessionTransitionRevision,
   filterActiveDeviceSessions,
+  hasVerifiedUnknownActivity,
 } from "../lib/session-display.js";
 import {
   buildP4DeviceSessionTransportPayload,
+  enqueueP4SessionBinding,
   p4SessionDisplayTitle,
   p4SessionActivitySignature,
 } from "../lib/p4-session-service.js";
@@ -96,6 +98,7 @@ export function formatDeviceSessionContent(session, title = "") {
   if (normalizeText(session?.state).toLowerCase() === "stopped") return "已停止";
   const liveContent = normalizeText(session?.displayContent);
   if (liveContent) return clampUtf8Text(liveContent, 383);
+  if (hasVerifiedUnknownActivity(session)) return "运行中 · 具体阶段未确认";
   const summary = normalizeText(session?.summary);
   if (!summary || summary.startsWith("<recommended_plugins>")) return "";
   if (summary === normalizeText(title)) return "";
@@ -107,6 +110,8 @@ export function useP4SessionSync({
   boardDeviceId,
   agentId,
   usbConnected,
+  usbConnectionId = "",
+  usbBootId = "",
   displayEnabled,
   sessions,
   routingSessions,
@@ -127,6 +132,13 @@ export function useP4SessionSync({
     missingSessionNoticeRef.current = createMissingSessionNoticeGate();
   }
   const bindingQueueRef = useRef(Promise.resolve());
+  const bindingScope = useMemo(() => ({}), [enabled, boardDeviceId, agentId, usbConnected, usbConnectionId, usbBootId]);
+  const bindingScopeRef = useRef(bindingScope);
+  bindingScopeRef.current = bindingScope;
+  useEffect(() => {
+    bindingScopeRef.current = bindingScope;
+    return () => { if (bindingScopeRef.current === bindingScope) bindingScopeRef.current = null; };
+  }, [bindingScope]);
   const sessionId = selection.sessionId;
 
   const visibleSessions = useMemo(() => (
@@ -140,14 +152,15 @@ export function useP4SessionSync({
     [displayEnabled, visibleSessions],
   );
   const switchCandidates = selectableSessions;
-  const autoRoutingSession = selectableSessions[0] || routingSessions?.[0] || sessions?.[0];
+  const explicitDshSessionRequired = agentId === "deepseek-harness" && (!sessionId || sessionId === "auto");
+  const autoRoutingSession = explicitDshSessionRequired ? null : selectableSessions[0] || routingSessions?.[0] || sessions?.[0];
   const selectedRoutingSession = (sessionId === "auto"
     ? autoRoutingSession
     : (routingSessions || []).find(
       (session) => normalizeText(session?.id) === normalizeText(sessionId),
     )) || null;
   const selectedVisibleSession = sessionId === "auto"
-    ? (selectableSessions[0] || null)
+    ? (explicitDshSessionRequired ? null : selectableSessions[0] || null)
     : selectableSessions.find(
       (session) => normalizeText(session?.id) === normalizeText(sessionId),
     ) || null;
@@ -173,7 +186,9 @@ export function useP4SessionSync({
       title: clampUtf8Text(title, 191),
       cwd: clampUtf8Text(normalizeText(session?.cwd), 2048),
       content: formatDeviceSessionContent(session, title),
-      state: normalizeText(session?.state).toLowerCase() || "idle",
+      // Device's generic active visual is not a claimed lifecycle stage. The
+      // source row remains state=unknown with its independent live evidence.
+      state: hasVerifiedUnknownActivity(session) ? "working" : normalizeText(session?.state).toLowerCase() || "idle",
       transitionRevision: deviceSessionTransitionRevision(session),
       terminalUntilMs: deviceSessionTerminalUntilMs(session),
     };
@@ -217,11 +232,12 @@ export function useP4SessionSync({
       onSessionChange("auto");
       return undefined;
     }
+    if (agentId === "deepseek-harness") return undefined;
     const elapsed = Date.now() - selection.selectedAt;
     const delay = Math.max(0, P4_MANUAL_SESSION_TIMEOUT_MS - elapsed);
     const timer = setTimeout(() => onSessionChange("auto"), delay);
     return () => clearTimeout(timer);
-  }, [onSessionChange, selection.selectedAt, sessionId, switchCandidates]);
+  }, [agentId, onSessionChange, selection.selectedAt, sessionId, switchCandidates]);
 
   useEffect(() => {
     if (!enabled || !boardDeviceId || !agentId) return;
@@ -239,12 +255,14 @@ export function useP4SessionSync({
       ? normalizeText(selectedRoutingSession?.id)
       : sessionId;
     if (matchedNotice) pendingNoticeRef.current = null;
-    const bindingPromise = bindingQueueRef.current
-      .catch(() => undefined)
-      .then(() => invoke("set_p4_session_binding", {
+    const isCurrent = () => bindingScopeRef.current === bindingScope;
+    const bindingPromise = enqueueP4SessionBinding(bindingQueueRef.current, isCurrent,
+      () => invoke("set_p4_session_binding", {
         input: {
           boardDeviceId,
           agentId,
+          expectedConnectionId: usbConnectionId,
+          expectedBootId: usbBootId,
           sessionId: requestedSessionId,
           autoFollow,
           sessionTitle: selectedSessionTitle,
@@ -263,6 +281,7 @@ export function useP4SessionSync({
     bindingQueueRef.current = bindingPromise.catch(() => undefined);
     bindingPromise
       .then((result) => {
+        if (!isCurrent() || !result) return;
         const resultSessionId = normalizeText(result?.sessionId) || "auto";
         if (resultSessionId !== requestedSessionId || !matchedNotice) return;
         const location = normalizeText(result?.desktopLocation).toLowerCase();
@@ -285,6 +304,7 @@ export function useP4SessionSync({
         });
       })
       .catch((error) => {
+        if (!isCurrent()) return;
         console.warn("[p4] failed to update target session", error);
         if (matchedNotice) {
           push?.({ tone: "error", title: "会话切换失败", message: String(error) });
@@ -292,6 +312,7 @@ export function useP4SessionSync({
       });
   }, [
     activeSessionIdsSignature,
+    bindingScope,
     agentId,
     bindingSyncRevision,
     boardDeviceId,
@@ -309,6 +330,8 @@ export function useP4SessionSync({
     sessionId,
     sessionsLoaded,
     usbConnected,
+    usbConnectionId,
+    usbBootId,
   ]);
 
   useEffect(() => {

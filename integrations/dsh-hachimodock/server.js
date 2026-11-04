@@ -235,6 +235,9 @@ class BridgeServer {
     this.webClients = new Map()
     this.origins = new Set(options.allowedOrigins || [])
     for (const origin of this.origins) {
+      // Desktop scheme + issuer is a protocol contract, not a version pin.
+      // URL.origin is "null" for this scheme; never accept that string itself.
+      if (origin === 'dsh-app://app') continue
       const u = new URL(origin)
       if (!['http:', 'https:'].includes(u.protocol) || u.origin !== origin) throw new Error('exact Origin required')
     }
@@ -631,6 +634,8 @@ class BridgeServer {
     checkBody(b, ['sessionId', 'utteranceId', 'revision', 'text', 'epoch', 'lease'])
     if (!validId(b.sessionId) || !validId(b.utteranceId)) throw httpError(400, 'exact-target-required')
     for (const [id, u] of this.utterances) if (Date.now() - u.created > 120000) this.utterances.delete(id)
+    const currentSession = this.listSessions().find(s => s.id === b.sessionId)
+    if (currentSession?.state === 'waiting_user' && currentSession.waitKind === 'question') throw httpError(409, 'question-pending')
     const owner = this.voiceOwners.get(b.sessionId)
     if (!owner || owner.ended || owner.expires <= Date.now()) throw httpError(409, 'composer-unavailable')
     let u = this.utterances.get(b.utteranceId)
@@ -713,7 +718,7 @@ class BridgeServer {
     }
     req.caller = this.authenticate(req)
     if (!req.caller) return sendJson(res, 401, { ok: false, error: 'unpaired' })
-    const routes = { relay: ['/events', '/approval/decision', '/relay/close'], bus: ['/sessions', '/inject', '/interrupt'], voice: ['/voice/begin', '/voice/draft', '/voice/submit', '/interrupt', '/pair/ticket'], web: ['/events', '/voice/ack'] }
+    const routes = { relay: ['/events', '/approval/decision', '/relay/close'], bus: ['/sessions', '/inject', '/interrupt'], voice: ['/voice/status', '/voice/begin', '/voice/draft', '/voice/submit', '/interrupt', '/pair/ticket'], web: ['/events', '/voice/ack'] }
     if (!Object.values(routes).some(r => r.includes(path)) && path !== '/health') return sendJson(res, 404, { ok: false, error: 'not-found' })
     if (path === '/health') return sendJson(res, 405, { ok: false, error: 'method-not-allowed' })
     if (!routes[req.caller.role].includes(path)) return sendJson(res, 403, { ok: false, error: 'forbidden' })
@@ -724,12 +729,33 @@ class BridgeServer {
       this.closeSubscriber(s)
       return sendJson(res, 200, { ok: true })
     }
+    if (path === '/voice/status' && method === 'POST') {
+      const b = await readJsonBody(req); checkBody(b, ['sessionId'])
+      if (b.sessionId !== '' && !validId(b.sessionId)) throw httpError(400, 'exact-session-required')
+      const session = validId(b.sessionId) ? this.listSessions().find(s => s.id === b.sessionId) : null
+      const sessionKnown = !!session
+      const questionStateKnown = !!session && session.state !== 'unknown' && typeof session.state === 'string'
+      const questionPending = questionStateKnown ? session.state === 'waiting_user' && session.waitKind === 'question' : null
+      const owner = sessionKnown ? this.voiceOwners.get(b.sessionId) : null
+      const composerMounted = !!owner && !owner.ended && owner.expires > Date.now()
+      const composerReady = composerMounted && !questionPending
+      const caps = typeof this.capabilities === 'function' ? this.capabilities() : null
+      return sendJson(res, 200, {
+        ok: true, protocol: 'hachimodock-scoped-input-v1', epoch: this.epoch,
+        sessionId: b.sessionId, hostReady: true, sessionKnown, composerReady, questionPending, questionStateKnown,
+        clientBundleAvailable: caps?.clientBundle === true,
+        composerMount: composerMounted ? "paired-connected" : "unverified",
+        scopedInput: { capture: composerReady, insert: composerReady, submit: composerReady },
+        capabilities: caps || { sessions: false, sessionList: false, liveState: false, events: false, readonlyStatus: false, approval: false },
+        reason: !sessionKnown ? 'exact-session-required' : questionPending ? 'question-pending' : !composerReady ? 'composer-unpaired' : 'ready',
+      })
+    }
     if (path === '/pair/ticket' && method === 'POST') {
       const b = await readJsonBody(req); checkBody(b, ['sessionId', 'origin'])
       if (!this.origins.has(b.origin) || !validId(b.sessionId) || !this.listSessions().some(s => s.id === b.sessionId)) throw httpError(400, 'exact-pair-target-required')
       this.pairingCode = secret(); this.pairingExpires = Date.now() + 120000; this.pairingAttempts = 0
       this.pairingSessionId = b.sessionId; this.pairingOrigin = b.origin
-      return sendJson(res, 200, { ok: true, code: this.pairingCode, expiresAtMs: this.pairingExpires })
+      return sendJson(res, 200, { ok: true, epoch: this.epoch, code: this.pairingCode, expiresAtMs: this.pairingExpires })
     }
     if (path === '/voice/ack' && method === 'POST') return this.handleVoiceAck(req, res)
     if (['/voice/begin', '/voice/draft', '/voice/submit'].includes(path) && method === 'POST') return this.handleVoice(req, res, path)
@@ -830,6 +856,7 @@ class BridgeServer {
    * @returns {Promise<void>} settles after the response.
    */
   async handleInterrupt(req, res) {
+    if (typeof this.capabilities === 'function' && this.capabilities().interrupt !== true) return sendJson(res, 503, { ok: false, error: 'control-contract-unsupported' })
     let body
     try {
       body = await readJsonBody(req)
@@ -863,6 +890,7 @@ class BridgeServer {
    * @returns {Promise<void>} settles after the injection finishes.
    */
   async handleInject(req, res) {
+    if (typeof this.capabilities === 'function' && this.capabilities().backgroundPrompt !== true) return sendJson(res, 503, { ok: false, error: 'control-contract-unsupported' })
     let body
     try {
       body = await readJsonBody(req)
@@ -878,8 +906,6 @@ class BridgeServer {
     const sessionId = body.sessionId
     if (!validId(sessionId) || !validId(body.requestId) || !this.listSessions().some(s => s.id === sessionId)) throw httpError(400, 'exact-session-required')
     if (this.activeInjects >= 8 || this.injecting.has(body.requestId)) throw httpError(409, 'request-already-used')
-    this.injecting.set(body.requestId, Date.now())
-    while (this.injecting.size > 256) this.injecting.delete(this.injecting.keys().next().value)
     const text = typeof body.text === 'string' ? body.text : ''
     if (text.trim() === '') {
       sendJson(res, 400, { ok: false, error: 'invalid-request', message: 'text must be a non-empty string' })
@@ -894,6 +920,14 @@ class BridgeServer {
       return
     }
 
+    // Invalid requests must not consume receipts; bounded history may evict
+    // completed entries, but never an admission that is still in flight.
+    const receipt = { pending: true }
+    this.injecting.set(body.requestId, receipt)
+    for (const [id, retained] of this.injecting) {
+      if (this.injecting.size <= 256) break
+      if (!retained.pending) this.injecting.delete(id)
+    }
     this.activeInjects += 1
     sendSseHeaders(res)
     const controller = new AbortController()
@@ -984,6 +1018,7 @@ class BridgeServer {
       clearTimeout(deadlineTimer)
       this.injectControllers.delete(controller)
       this.activeInjects -= 1
+      receipt.pending = false
       if (!doneSent && !errored && !finished) emit({ type: 'done', sessionId, tokens: 0 })
       stop()
     }

@@ -1,6 +1,7 @@
 //! Media has priority over replaceable widget snapshots, but never interleaves
 //! with a bulk transaction. Only lock acquisition is retried: a transmitted
-//! audio chunk with an uncertain ACK must not be replayed.
+//! audio chunk with an uncertain ACK must not be replayed. Diagnostic categories
+//! are fixed identifiers; device messages and private payloads are never logged.
 use std::sync::{atomic::{AtomicUsize, Ordering}, Mutex, MutexGuard, TryLockError};
 use std::time::{Duration, Instant};
 
@@ -78,5 +79,29 @@ mod tests {
         let other = lock.clone();
         let _ = std::thread::spawn(move || { let _guard = other.lock().unwrap(); panic!("test"); }).join();
         assert!(acquire(&lock, WAIT_BUDGET).unwrap_err().contains("锁异常"));
+    }
+}
+
+// Keep raw device text out of diagnostics, including unrecognized messages.
+pub(super) fn rejection_category(message: &str) -> &'static str {
+    match message {
+        "音乐格式或参数无效" => "format_parameters",
+        "麦克风或语音正在使用，音乐未启动" => "audio_busy",
+        "音乐会话已结束" => "session_ended",
+        "音乐会话不匹配" => "session_mismatch",
+        "音乐数据顺序或格式无效" => "chunk_order_format",
+        "音乐缓冲区已满" => "buffer_full",
+        "播放列表格式无效" => "library_format",
+        "其他组件正在播放" => "other_owner",
+        "请先打开对应组件" | "media view instance expired" => "view_expired",
+        _ => "other_rejection",
+    }
+}
+#[cfg(test)] mod diagnostic_tests {
+    #[test] fn radio_rejection_logs_only_fixed_categories() {
+        assert_eq!(super::rejection_category("音乐缓冲区已满"), "buffer_full");
+        assert_eq!(super::rejection_category("音乐数据顺序或格式无效"), "chunk_order_format");
+        assert_eq!(super::rejection_category("音乐会话已结束"), "session_ended");
+        assert_eq!(super::rejection_category("arbitrary private message"), "other_rejection");
     }
 }

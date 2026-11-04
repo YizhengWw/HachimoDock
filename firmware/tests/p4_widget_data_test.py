@@ -2,6 +2,7 @@
 from pathlib import Path
 import subprocess
 import tempfile
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,11 +15,12 @@ def test_list_header_date_and_price_only_tone():
     assert "draw_text_line(r->detail, 465, y + 2, 153, tone," in renderer
     assert "draw_text_line(r->meta, 24, y + 29, 592, muted," in renderer
 
-def test_widget_data_runtime():
+@pytest.mark.parametrize("data_rows", [0, 1])
+def test_widget_data_runtime(data_rows):
     cjson = ROOT / "tests/vendor/cjson"
     with tempfile.TemporaryDirectory() as tmp:
         exe = Path(tmp) / "widget-data-test"
-        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+        subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-error=deprecated-declarations", "-fsanitize=address,undefined", f"-DPET_P4_DATA_ROWS={data_rows}",
                         "-I", str(ROOT / "main"), "-I", str(ROOT / "tests/stubs/widget_data"), "-I", str(cjson),
                         str(ROOT / "main/pet_p4_widget_data.c"), str(cjson / "cJSON.c"),
                         str(ROOT / "tests/p4_widget_data_test.c"), "-lm", "-o", str(exe)], check=True)

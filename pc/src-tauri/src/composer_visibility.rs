@@ -39,19 +39,32 @@ pub fn sole_exposed(states: &[Exposure]) -> Option<usize> {
 /// This fallback requires all of that evidence, not simply the lowest field.
 pub fn stacked_chat_composer(bounds:&[Option<Bounds>], rich:&[bool], exposures:&[Exposure],
     related:&[Vec<bool>], window:Option<Bounds>)->Option<usize>{
-    let (_,wy,_,wh)=window?;
-    if wh<=0||bounds.len()!=rich.len()||bounds.len()!=exposures.len()||related.len()!=bounds.len(){return None;}
-    let candidates=(0..bounds.len()).filter(|&i|rich[i]&&exposures[i]==Exposure::Exposed).collect::<Vec<_>>();
-    let &chosen=candidates.iter().max_by_key(|&&i|bounds[i].map(|(_,y,_,h)|y.saturating_add(h)))?;
-    let (x,y,w,h)=bounds[chosen]?;let bottom=y.saturating_add(h);let edge=wy.saturating_add(wh);
-    if w<120||h<=0||bottom>edge||edge-bottom>96{return None;}
+    let edges=|(x,y,w,h):Bounds|->Option<(i64,i64)>{
+        if w<=0||h<=0{return None;}
+        Some((x.checked_add(w)?,y.checked_add(h)?))
+    };
+    let (_,edge)=edges(window?)?;
+    if bounds.len()!=rich.len()||bounds.len()!=exposures.len()||related.len()!=bounds.len(){return None;}
+    // max_by_key chose the last equal bottom; retain that ordering without
+    // saturating invalid geometry into a selectable candidate.
+    let mut best=None;
+    for i in 0..bounds.len(){
+        if rich[i]&&exposures[i]==Exposure::Exposed{
+            let (_,bottom)=edges(bounds[i]?)?;
+            if best.map_or(true,|(_,previous)|bottom>=previous){best=Some((i,bottom));}
+        }
+    }
+    let (chosen,bottom)=best?;
+    let (x,y,w,_)=bounds[chosen]?;let (right,_)=edges(bounds[chosen]?)?;
+    if w<120||bottom>edge||edge.checked_sub(bottom)?>96{return None;}
     for i in 0..bounds.len(){
         if i==chosen||exposures[i]==Exposure::Covered{continue;}
         if exposures[i]==Exposure::Unknown{return None;}
-        let (ox,oy,ow,oh)=bounds[i]?;
-        let overlap=(x+w).min(ox+ow)-x.max(ox);
+        let (ox,_,ow,_)=bounds[i]?;
+        let (other_right,other_bottom)=edges(bounds[i]?)?;
+        let overlap=right.min(other_right).checked_sub(x.max(ox))?;
         if rich[i]{
-            if !related[chosen].get(i).copied().unwrap_or(false)||oy+oh>y
+            if !related[chosen].get(i).copied().unwrap_or(false)||other_bottom>y
                 ||overlap<w.min(ow)/2{return None;}
         }else if overlap>0{return None;}
     }
@@ -126,5 +139,49 @@ mod tests {
                 assert_eq!(sole_exposed(&states),None);
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod checked_geometry_tests {
+    use super::*;
+    fn one(bound:Bounds,window:Bounds)->Option<usize>{
+        stacked_chat_composer(&[Some(bound)],&[true],&[Exposure::Exposed],&[vec![true]],Some(window))
+    }
+    #[test]fn overflow_gap_must_be_unknown(){
+        // Both y+h endpoints individually fit; edge-bottom does not.
+        assert_eq!(one((0,i64::MIN+10,200,20),(0,i64::MAX-100,640,100)),None);
+    }
+    #[test]fn overflowing_window_or_candidate_edges_are_unknown(){
+        assert_eq!(one((0,0,200,20),(0,i64::MAX-5,640,20)),None);
+        assert_eq!(one((0,0,200,20),(i64::MAX-5,0,640,20)),None);
+        assert_eq!(one((i64::MAX-5,0,200,20),(0,0,640,20)),None);
+        assert_eq!(one((0,i64::MAX-5,200,20),(0,i64::MAX-100,640,100)),None);
+    }
+    #[test]fn other_edges_and_overlap_distance_are_checked(){
+        let links=vec![vec![true,false],vec![false,true]];
+        for other in [(i64::MAX-5,0,20,20),(300,i64::MAX-5,20,20)]{
+            assert_eq!(stacked_chat_composer(&[Some((0,100,200,20)),Some(other)],&[true,false],&[Exposure::Exposed;2],&links,Some((0,0,640,120))),None);
+        }
+        assert_eq!(stacked_chat_composer(&[Some((i64::MIN+10,100,200,20)),Some((i64::MAX-100,0,20,20))],&[true,false],&[Exposure::Exposed;2],&links,Some((0,0,640,120))),None);
+    }
+    #[test]fn nonpositive_relevant_dimensions_never_select(){
+        for (w,h) in [(0,20),(-1,20),(200,0),(200,-1)]{
+            assert_eq!(one((0,0,w,h),(0,0,640,20)),None);
+            assert_eq!(one((0,0,200,20),(0,0,w,h)),None);
+            assert_eq!(stacked_chat_composer(&[Some((0,100,200,20)),Some((300,0,w,h))],&[true,false],&[Exposure::Exposed;2],&[vec![true,false],vec![false,true]],Some((0,0,640,120))),None);
+        }
+    }
+    #[test]fn valid_negative_and_extreme_display_coordinates_still_select(){
+        let b=[Some((-286,-104,641,20)),Some((-275,0,443,36)),Some((555,-608,579,664))];
+        let links=vec![vec![true,true,false],vec![true,true,false],vec![false,false,true]];
+        assert_eq!(stacked_chat_composer(&b,&[true,true,false],&[Exposure::Exposed;3],&links,Some((-700,-700,1865,760))),Some(1));
+        assert_eq!(one((i64::MIN+100,i64::MIN+60,200,20),(i64::MIN+1,i64::MIN+1,640,100)),Some(0));
+        assert_eq!(one((i64::MAX-300,i64::MAX-100,200,80),(i64::MAX-500,i64::MAX-200,500,200)),Some(0));
+    }
+    #[test]fn covered_irrelevant_nodes_and_existing_ambiguity_policy_remain(){
+        assert_eq!(stacked_chat_composer(&[Some((0,100,200,20)),Some((i64::MAX,0,-1,0))],&[true,false],&[Exposure::Exposed,Exposure::Covered],&[vec![true,false],vec![false,true]],Some((0,0,640,120))),Some(0));
+        assert_eq!(stacked_chat_composer(&[Some((0,100,200,20))],&[],&[Exposure::Exposed],&[vec![true]],Some((0,0,640,120))),None);
     }
 }

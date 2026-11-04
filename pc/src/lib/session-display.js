@@ -32,8 +32,15 @@ const normalizedSessionText = (value) => typeof value === "string"
   ? value.replace(/\s+/g, " ").trim()
   : "";
 
+export function hasVerifiedUnknownActivity(session) {
+  return normalizedSessionState(session) === "unknown" && session?.active === true
+    && session?.status === "running" && session?.activitySource === "live-agent-status"
+    && session?.stateDetailUnknown === true;
+}
+
 export function isActiveDeviceSession(session) {
-  return ACTIVE_DEVICE_SESSION_STATE_SET.has(normalizedSessionState(session));
+  return hasVerifiedUnknownActivity(session)
+    || ACTIVE_DEVICE_SESSION_STATE_SET.has(normalizedSessionState(session));
 }
 
 export function isTerminalDeviceSession(session) {
@@ -53,7 +60,9 @@ function canonicalTerminalState(session) {
 }
 
 function isImplicitTerminalDeviceSession(session) {
-  return IMPLICIT_TERMINAL_DEVICE_SESSION_STATE_SET.has(normalizedSessionState(session));
+  // Registry inactivity is independent of lifecycle completion for DSH.
+  return session?.activitySource !== "live-agent-status"
+    && IMPLICIT_TERMINAL_DEVICE_SESSION_STATE_SET.has(normalizedSessionState(session));
 }
 
 function normalizedSessionId(session) {
@@ -261,7 +270,7 @@ export function reconcileDeviceSessionQueue(
           ...previous,
           [DEVICE_SESSION_SNAPSHOT_MISSING_SINCE_KEY]: missingSince,
         });
-      } else {
+      } else if (previous?.activitySource !== "live-agent-status") {
         // Some Agent surfaces remove a completed Session from their snapshot
         // without ever exposing done/error. Count the hold from its first
         // absence so a transient scan miss does not restart or extend the TTL.

@@ -9,10 +9,12 @@ fn normalized(s: &str) -> String {
 }
 pub fn select(e: &Extension, rows: &[Value], location: Option<&Value>) -> Result<Catalog,String> {
     let d=e.discovery.as_ref().ok_or("未声明自动目录")?;
-    let city=location.filter(|v|v.pointer(&d.country_field).and_then(Value::as_str)==Some(d.country.as_str()))
+    let city=location.filter(|v|v.pointer(&d.country_field).and_then(Value::as_str).is_some_and(|c|c.eq_ignore_ascii_case(&d.country)))
         .and_then(|v|v.pointer(&d.city_field)).and_then(Value::as_str).filter(|s|!s.is_empty()&&s.len()<=80)
         .map(|s|d.aliases.get(s).map(String::as_str).unwrap_or(s)).unwrap_or("");
     let city_key=normalized(city);
+    // Province-level rows: a city is local when its declared region alias matches.
+    let region_key=d.region_aliases.get(city).or_else(||d.region_aliases.get(city.trim_end_matches('市'))).map(|s|normalized(s)).unwrap_or_default();
     let mut ranked=Vec::new();
     let mut urls=HashSet::new();let mut names=HashSet::new();
     let mut ordered:Vec<_>=rows.iter().collect();
@@ -23,8 +25,9 @@ pub fn select(e: &Extension, rows: &[Value], location: Option<&Value>) -> Result
         if e.search.items_path.is_empty(){mapped=serde_json::json!([row]);}
         let Some(mut station)=e.map_results(&mapped, "全国").into_iter().next() else {continue};
         if !urls.insert(station.url.clone()) || !names.insert(normalized(&station.name)){continue;}
+        let region=normalized(row.pointer(&d.station_region).and_then(Value::as_str).unwrap_or(""));
         let local=!city_key.is_empty()&&(normalized(&station.name).contains(&city_key)
-            || normalized(row.pointer(&d.station_region).and_then(Value::as_str).unwrap_or(""))==city_key);
+            || region==city_key || (!region_key.is_empty()&&region==region_key));
         if local {station.city=city.into();}
         ranked.push((station,local));
     }
@@ -42,7 +45,12 @@ pub fn discover(e: &Extension) -> Result<Catalog,String> {
     e.validate()?;
     let d=e.discovery.as_ref().ok_or("未声明自动目录")?;
     // Location failure never prevents country-wide discovery. No IP is persisted.
-    let location=net::scoped_json(&d.location_endpoint,&e.permissions.network_hosts,16384).ok();
+    let location=if d.location_endpoint.is_empty(){None}else{net::scoped_json(&d.location_endpoint,&e.permissions.network_hosts,16384).ok()};
+    if e.search.catalog.is_some(){
+        // Bundled rows: the only network use is the optional city estimate.
+        if e.catalog_rows.is_empty(){return Err("包内电台目录尚未加载".into());}
+        return select(e,&e.catalog_rows,location.as_ref());
+    }
     let mut last="目录服务暂不可用".to_string();
     let start=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as usize % d.endpoints.len();
     for index in 0..d.endpoints.len() {
@@ -53,7 +61,7 @@ pub fn discover(e: &Extension) -> Result<Catalog,String> {
             url.query_pairs_mut().extend_pairs(&e.search.params).append_pair("limit","250");
             let national=net::scoped_json(url.as_str(),&e.permissions.network_hosts,2*1024*1024)?;
             let mut rows=national.as_array().ok_or("目录格式无效")?.clone();
-            let city=location.as_ref().filter(|v|v.pointer(&d.country_field).and_then(Value::as_str)==Some(d.country.as_str()))
+            let city=location.as_ref().filter(|v|v.pointer(&d.country_field).and_then(Value::as_str).is_some_and(|c|c.eq_ignore_ascii_case(&d.country)))
                 .and_then(|v|v.pointer(&d.city_field)).and_then(Value::as_str).unwrap_or("");
             let city=d.aliases.get(city).map(String::as_str).unwrap_or(city).trim_end_matches('市');
             if !city.is_empty() && city.len()<=80 {
@@ -77,8 +85,49 @@ pub fn discover(e: &Extension) -> Result<Catalog,String> {
 }
 #[cfg(test)] mod tests {
     use super::*;
-    fn ext()->Extension {crate::component_extension::parse(include_bytes!("../../tests/fixtures/media-sample/pc/extension.json")).unwrap()}
-    fn rows()->Vec<Value>{(0..70).map(|i|serde_json::json!({"stationuuid":format!("s{i}"),"name":format!("{}广播{i}",if i<12{"北京"}else{"其他"}),"url_resolved":format!("https://example.com/{i}"),"lastcheckok":1,"clickcount":70-i,"votes":1,"state":""})).collect()}
+    fn ext()->Extension {
+        let mut e=crate::component_extension::parse(include_bytes!("../../builtin-clawpkgs/city-radio/pc/extension.json")).unwrap();
+        // Synthetic fixtures keep their provider-independent flat location shape.
+        let d=e.discovery.as_mut().unwrap();d.city_field="/city".into();d.country_field="/country_code".into();e
+    }
+    #[test] fn domestic_location_response_uses_declared_paths_and_country_case(){
+        let e=crate::component_extension::parse(include_bytes!("../../builtin-clawpkgs/city-radio/pc/extension.json")).unwrap();
+        let c=select(&e,&rows(),Some(&serde_json::json!({"data":{"city":"北京","country_code":"cn"}}))).unwrap();
+        assert_eq!(c.location,"北京");assert_eq!(c.stations.len(),22);
+        let c=select(&e,&rows(),Some(&serde_json::json!({"data":{"city":"北京","country_code":"us"}}))).unwrap();
+        assert_eq!(c.location,"全国");
+    }
+    // Rows use the bundled-catalog field names declared by the city-radio package.
+    fn rows()->Vec<Value>{(0..70).map(|i|serde_json::json!({"id":format!("s{i}"),"name":format!("{}广播{i}",if i<12{"北京"}else{"其他"}),"url":format!("https://example.com/{i}"),"available":true,"rank":70-i,"votes":1,"region":""})).collect()}
     #[test] fn city_all_plus_ten_and_national_thirty(){let e=ext();let r=rows();let c=select(&e,&r,Some(&serde_json::json!({"city":"Beijing","country_code":"CN"}))).unwrap();assert_eq!(c.stations.len(),22);assert_eq!(c.location,"北京");for v in [None,Some(serde_json::json!({"city":"Beijing","country_code":"US"})),Some(serde_json::json!({"city":"未收录","country_code":"CN"}))]{let c=select(&e,&r,v.as_ref()).unwrap();assert_eq!(c.stations.len(),30);assert_eq!(c.location,"全国");}}
-    #[test] fn deduplicates_and_filters_invalid(){let e=ext();let mut r=rows();r.push(r[0].clone());r[1]["lastcheckok"]=0.into();r[2]["url_resolved"]="file:///etc/passwd".into();let c=select(&e,&r,None).unwrap();assert_eq!(c.stations.len(),30);assert!(!c.stations.iter().any(|s|s.id=="s1"||s.id=="s2"));}
+    #[test] fn deduplicates_and_filters_invalid(){let e=ext();let mut r=rows();r.push(r[0].clone());r[1]["available"]=false.into();r[2]["url"]="file:///etc/passwd".into();let c=select(&e,&r,None).unwrap();assert_eq!(c.stations.len(),30);assert!(!c.stations.iter().any(|s|s.id=="s1"||s.id=="s2"));}
+    #[test] fn province_level_rows_are_local_through_region_aliases(){
+        let e=ext();let mut r=rows();
+        r.push(serde_json::json!({"id":"js","name":"江苏新闻广播","url":"https://example.com/js","available":true,"rank":900,"votes":0,"region":"江苏"}));
+        r.push(serde_json::json!({"id":"nj","name":"城市之声","url":"https://example.com/nj","available":true,"rank":1,"votes":0,"region":"南京"}));
+        r.push(serde_json::json!({"id":"xz","name":"交通广播","url":"https://example.com/xz","available":true,"rank":1,"votes":0,"region":"徐州"}));
+        let c=select(&e,&r,Some(&serde_json::json!({"city":"Nanjing","country_code":"CN"}))).unwrap();
+        assert_eq!(c.location,"南京");
+        let ids:Vec<_>=c.stations.iter().map(|s|s.id.as_str()).collect();
+        assert!(ids.contains(&"js")&&ids.contains(&"nj"),"{ids:?}");
+        // Another prefecture of the same province is not local; it can only enter as a national supplement.
+        assert_eq!(c.stations.iter().filter(|s|s.city=="南京").count(),2);
+        assert_eq!(c.stations.len(),2+10);
+    }
+    #[test] fn bundled_catalog_selects_mainland_national_list_without_network(){
+        let mut e=ext();
+        let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/city-radio");
+        e.load_catalog(&root).unwrap();
+        assert!(e.catalog_rows.len()>500);
+        let c=select(&e,&e.catalog_rows,None).unwrap();
+        assert_eq!(c.location,"全国");assert_eq!(c.stations.len(),30);
+        assert!(c.stations.iter().any(|s|s.name.contains("中国之声")));
+        for s in &e.catalog_rows {
+            let text=s.to_string();
+            assert!(!text.contains("香港")&&!text.contains("澳门")&&!text.contains("台湾")&&!text.contains("CGTN")&&!text.contains("rfi.fr"),"{text}");
+            let url=s["url"].as_str().unwrap();
+            assert!(url.starts_with("http://")||url.starts_with("https://"));
+        }
+    }
+    #[test] #[ignore="Uses public catalogue and IP city endpoints, no audio"] fn live_catalog(){let c=discover(&ext()).unwrap();eprintln!("automatic catalogue: location={}, count={}",c.location,c.stations.len());assert!(c.stations.len()>=10);if c.location=="全国"{assert_eq!(c.stations.len(),30);}for s in c.stations.iter().take(5){eprintln!("{}",s.name);}}
 }

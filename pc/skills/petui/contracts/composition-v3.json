@@ -1,0 +1,43 @@
+{
+  "runtime": {
+    "schema_version": 1, "engine": "p4-bounded-runtime-v4", "host": true,
+    "host_context": "p4-host-context-v1", "input": {"engine": "p4-input-v1"},
+    "vars": {"points": {"type": "int", "init": 0}, "phase": {"type": "string", "init": "idle"}, "progress": {"type": "int", "init": 0}},
+    "states": ["ready"], "initial_state": "ready", "tick": [],
+    "transitions": [{"from": "*", "on": "host.start"}, {"from": "*", "on": "host.resume"}, {"from": "*", "on": "host.cancel"}, {"from": "*", "on": "host.increment"}],
+    "dashboard": {"title": "Public data workflow"},
+    "surface": {"engine": "p4-app-surface-v1", "graphics": "p4-app-graphics-v1", "bindings": "p4-variable-bindings-v1", "background": 0,
+      "elements": [{"type": "text", "x": 20, "y": 20, "w": 300, "h": 48, "color": 65535, "var_bind": "phase"}, {"type": "meter", "x": 20, "y": 90, "w": 300, "h": 20, "color": 65535, "var_bind": "progress"}]}
+  },
+  "declaration": {
+    "schemaVersion": 1, "engine": "pc-app-composition-v3", "service": "composition",
+    "actions": {"host.start": "task:start", "host.resume": "task:resume", "host.cancel": "task:cancel", "host.increment": "count:increment"},
+    "content": [{
+      "sources": {"task": {"kind": "workflow", "workflow": "fetch"}, "count": {"kind": "counter", "initial": 0, "min": 0, "max": 1000, "step": 1}, "records": {"kind": "document", "initial": {"rows": []}}},
+      "bindings": {"points": {"source": "count", "pointer": "/value", "fallback": 0}, "phase": {"source": "task", "pointer": "/phase", "fallback": "unavailable"}, "progress": {"source": "task", "pointer": "/progress", "fallback": 0}},
+      "asyncWorkflows": {"fetch": [
+        {"target": "count:increment"},
+        {"get": {"endpoint": "https://example.com/public.json", "hosts": ["example.com"], "pointer": "/record"}, "result": "public"},
+        {"target": "records:append", "pointer": "/rows", "value": {"ref": "/event/results/public"}},
+        {"target": "count:increment"}
+      ]}
+    }]
+  },
+  "rejections": [
+    {"pointer": "/engine", "value": "pc-app-composition-v2"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/method", "value": "POST"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/headers", "value": {"Authorization": "not-a-credential"}},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/endpoint", "value": "https://example.com/data?api_key=not-a-key"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/endpoint", "value": "http://example.com/data"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/hosts", "value": ["127.0.0.1"]},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/get/pointer", "value": "not-pointer"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/1/result", "value": "bad/name"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/0/target", "value": "count:reset"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/2/target", "value": "records:remove"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/2/target", "value": "records:set"},
+    {"pointer": "/content/0/asyncWorkflows/fetch/2/pointer", "value": ""},
+    {"pointer": "/content/0/asyncWorkflows/fetch/0/target", "value": "task:start"},
+    {"pointer": "/actions/host.resume", "value": "count:increment"},
+    {"pointer": "/content/0/sources/task/workflow", "value": "missing"}
+  ]
+}

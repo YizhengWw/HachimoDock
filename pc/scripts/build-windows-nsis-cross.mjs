@@ -20,19 +20,20 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { verifyVoiceRuntime, verifyVoiceBundle } from "./voice-runtime-resources.mjs";
+import { copyDependencyLicenses, copyNodeRuntimeLicense, dependencyLicenseResources } from "./dependency-license-resources.mjs";
+import {desktopBuildPaths,windowsExeIdentity,verifyBuildReceipt,readBuildReceipt,receiptArgument} from './desktop-build-artifact.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "../..");
 const refRoot = join(repositoryRoot, "pc");
 const tauriRoot = join(refRoot, "src-tauri");
-const releaseRoot = join(
-  tauriRoot,
-  "target",
-  "x86_64-pc-windows-msvc",
-  "release",
-);
+const releaseRoot=desktopBuildPaths({repositoryRoot,target:'windows'}).releaseRoot;
 const bundleRoot = join(releaseRoot, "bundle", "nsis");
 const stageRoot = join(releaseRoot, "bundle", "nsis-cross-stage");
+// Historical non-P4 service is opt-in; native P4 ASR has no Node-service dependency.
+const includeLegacyVoice=Boolean(process.env.PET_MANAGER_VOICE_SERVICE_SOURCE);
+if(includeLegacyVoice)verifyVoiceRuntime(join(tauriRoot,"generated-runtime","voice-service"),{target:"windows",arch:"x64"});
 const stopOwnedRuntimesScript = join(
   tauriRoot,
   "installer",
@@ -44,6 +45,9 @@ const appExeSource = resolve(
   process.env.PET_MANAGER_WINDOWS_EXE
     || join(releaseRoot, "pet-manager-tauri.exe"),
 );
+const appIdentity=windowsExeIdentity(appExeSource,version);
+const receiptPath=receiptArgument(process.argv.slice(2));
+if(receiptPath)verifyBuildReceipt(appIdentity,readBuildReceipt(receiptPath));
 const appExeName = "HachimiDock.exe";
 const flavor = process.env.PET_MANAGER_WINDOWS_INSTALLER_FLAVOR || "";
 if (flavor && flavor !== "DEVELOPMENT") throw new Error("Unsupported Windows installer flavor");
@@ -129,6 +133,7 @@ const bundledFirmwareDestination = join(
 rmSync(stageRoot, { recursive: true, force: true });
 mkdirSync(stageRoot, { recursive: true });
 copyFileSync(appExeSource, join(stageRoot, appExeName));
+verifyBuildReceipt(windowsExeIdentity(join(stageRoot,appExeName),version),appIdentity,{relocated:true});
 mkdirSync(dirname(bundledFirmwareDestination), { recursive: true });
 copyFileSync(bundledFirmwareSource, bundledFirmwareDestination);
 assertExactFileCopy(
@@ -191,15 +196,11 @@ copyTree(
 );
 mkdirSync(join(stageRoot, "bridge", "runtime"), { recursive: true });
 copyFileSync(windowsNode, join(stageRoot, "bridge", "runtime", "node.exe"));
+copyNodeRuntimeLicense(windowsNode, join(repositoryRoot, "licenses"), join(stageRoot, "bridge", "runtime"));
 mkdirSync(join(stageRoot, "tools"), { recursive: true });
 mkdirSync(join(stageRoot, "licenses"), { recursive: true });
 copyFileSync(join(repositoryRoot, "THIRD_PARTY_NOTICES.md"), join(stageRoot, "THIRD_PARTY_NOTICES.md"));
-copyFileSync(join(repositoryRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"), join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"));
-copyFileSync(join(repositoryRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"), join(stageRoot, "licenses", "Espressif-ESP-SR-LICENSE.txt"));
-copyFileSync(join(repositoryRoot, "licenses", "sysinfo-LICENSE.txt"), join(stageRoot, "licenses", "sysinfo-LICENSE.txt"));
-for (const notice of ["MiSans-Font-License-Agreement.pdf", "MiSans-Embedded-Fonts-NOTICE.txt"]) {
-  copyFileSync(join(repositoryRoot, "licenses", notice), join(stageRoot, "licenses", notice));
-}
+copyDependencyLicenses(join(repositoryRoot, "licenses"), join(stageRoot, "licenses"));
 copyFileSync(windowsFfmpeg, join(stageRoot, "tools", "ffmpeg.exe"));
 for (const notice of ["ffmpeg.LICENSE", "ffmpeg.README", "ffmpeg.SOURCE.txt", "zlib.LICENSE"]) {
   copyFileSync(
@@ -220,11 +221,9 @@ copyTree(
 const requiredResources = [
   bundledFirmwareDestination,
   join(stageRoot, "THIRD_PARTY_NOTICES.md"),
-  join(stageRoot, "licenses", "Xiaomi-Miloco-LICENSE.md"),
-  join(stageRoot, "licenses", "sysinfo-LICENSE.txt"),
-  join(stageRoot, "licenses", "MiSans-Font-License-Agreement.pdf"),
-  join(stageRoot, "licenses", "MiSans-Embedded-Fonts-NOTICE.txt"),
+  ...dependencyLicenseResources.map(({ name }) => join(stageRoot, "licenses", name)),
   join(stageRoot, "bridge", "runtime", "node.exe"),
+  join(stageRoot, "bridge", "runtime", "node.LICENSE"),
   join(stageRoot, "tools", "ffmpeg.exe"),
   join(stageRoot, "tools", "ffmpeg.LICENSE"),
   join(stageRoot, "tools", "ffmpeg.README"),
@@ -248,6 +247,13 @@ const requiredResources = [
 for (const path of requiredResources) {
   if (!existsSync(path)) throw new Error(`NSIS staging 缺少必要资源：${path}`);
 }
+
+if(includeLegacyVoice)copyTree(join(tauriRoot,"generated-runtime","voice-service"),join(stageRoot,"voice-service"));
+copyTree(join(scriptDir,"voice-runtime-resources.mjs"),join(stageRoot,"tools","voice-runtime-resources.mjs"));
+copyTree(join(scriptDir,"check-voice-runtime-windows.ps1"),join(stageRoot,"tools","check-voice-runtime-windows.ps1"));
+mkdirSync(bundleRoot,{recursive:true});
+const voiceRuntimeProof=verifyVoiceBundle(stageRoot,{target:"windows",arch:"x64"});
+writeFileSync(join(bundleRoot,`voice-runtime-proof-${Date.now()}.json`),JSON.stringify(voiceRuntimeProof,null,2)+"\n",{flag:"wx"});
 
 if (!existsSync(stopOwnedRuntimesScript)) {
   throw new Error(`NSIS runtime cleanup helper is missing: ${stopOwnedRuntimesScript}`);

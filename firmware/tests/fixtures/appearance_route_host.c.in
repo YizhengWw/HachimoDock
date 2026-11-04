@@ -1,0 +1,192 @@
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdatomic.h>
+#include "cJSON.h"
+#include "pet_p4_appearance_session.h"
+#include "pet_p4_resources.h"
+#include "pet_p4_assets.h"
+#define PET_P4_PACK_ID_MAX 65
+#define PET_P4_ASSET_MANIFEST_MAX 65536
+#define PET_P4_RAW_APPEARANCE_SLOT 1
+#define PET_APPEARANCE_SERIAL 1
+#define PET_APPEARANCE_NATIVE 2
+typedef void (*pet_p4_send_line_fn)(const char *,void *);
+typedef struct {char board_device_id[64];char screen_page[16];char asset_manifest_json[65536];pet_p4_asset_catalog_t asset_catalog;unsigned asset_family_count,asset_revision;bool asset_transfer_active;} pet_p4_runtime_state_t;
+typedef struct {bool(*begin)(void*);void(*end)(void*);bool(*current)(void*);void*context;} pet_appearance_commit_io_t;
+typedef enum {PET_APPEARANCE_COMMIT_FAILED,PET_APPEARANCE_COMMIT_OK,PET_APPEARANCE_COMMIT_UNKNOWN} pet_appearance_commit_result_t;
+typedef struct {pet_resource_owner_t owner;pet_resource_lease_t lease;pet_appearance_commit_io_t io;pet_p4_send_line_fn sender;void*route;uint64_t generation;unsigned revision,kind;int active_slot,target_slot;char id[64];bool active;} pet_appearance_phase_t;
+static pet_appearance_session_t g_appearance_session;
+static pet_resource_broker_t broker;
+static _Atomic int g_asset_active_slot;
+static uint64_t g_asset_activation_generation;
+static pet_p4_runtime_state_t state;
+static bool held=true,raw_present;
+static unsigned connection=1,opens,reads,raw_writes,ready_writes,marker_writes,workspace,borrows,close_calls,acks;
+static bool ack_ok;
+static int disk_marker,staging=1234;
+static const char *case_name;
+static const char PACK[]="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+enum {NONE,PREPARE,RAW,READY,MARKER,BEGIN1,BEGIN2,BEGIN3};
+static int event;
+#define CHECK(x) do {if(!(x)){fprintf(stderr,"CHECK_FAIL %s line=%d expr=%s connection=%u raw=%u ready=%u marker=%u active=%d disk=%d revision=%u blocked=%d\n",case_name,__LINE__,#x,connection,raw_writes,ready_writes,marker_writes,g_asset_active_slot,disk_marker,state.asset_revision,g_appearance_session.recovery_blocked);exit(101);}}while(0)
+static void change_at(int point){if(event==point){connection++;event=NONE;}}
+static bool pet_p4_native_usb_route_current(void *route){return route&&(uintptr_t)route==connection;}
+static void observe_ack(const char *line){cJSON*r=cJSON_Parse(line);ack_ok=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(r,"payload"),"ok"));cJSON_Delete(r);}
+static void native_sender(const char *line,void *route){if(pet_p4_native_usb_route_current(route)){observe_ack(line);acks++;}}
+#define pet_p4_native_usb_send_json_line native_sender
+static void uart_sender(const char *line,void *route){(void)route;observe_ack(line);acks++;}
+typedef struct {char *line;}pet_p4_query_reply_t;
+typedef void *TaskHandle_t;
+static TaskHandle_t xTaskGetCurrentTaskHandle(void){return (void*)7;}
+#define PET_P4_MUTATION_ACK_DEFERRED 1
+#define PET_P4_LARGE_REPLY_DEFERRED 1
+static pet_p4_query_reply_t *g_deferred_reply;
+static TaskHandle_t g_deferred_reply_owner;
+static bool begin(void *ctx){(void)ctx;CHECK(held);held=false;borrows++;change_at(borrows==1?BEGIN1:borrows==2?BEGIN2:BEGIN3);return true;}
+static void end(void *ctx){(void)ctx;CHECK(!held);held=true;}
+static bool current(void *ctx){return (uintptr_t)ctx==connection;}
+static bool(*g_asset_query_io_begin)(void*)=begin;
+static void(*g_asset_query_io_end)(void*)=end;
+static void *g_asset_query_io_context;
+@@OBSERVATION@@
+typedef struct {bool transfer_active,receiving,worker_pending;uint32_t epoch;} pet_p4_native_io_snapshot_t;
+static struct {bool active;}g_raw_asset_chunk;
+static FILE *g_asset_chunk_file;
+static int g_asset_transfer_slot=-1;
+static bool pending(void *context){(void)context;return false;}
+static bool(*g_asset_query_pending)(void*)=pending;
+static void *g_asset_query_pending_context;
+static pet_p4_native_io_snapshot_t pet_p4_native_usb_io_snapshot(void){return (pet_p4_native_io_snapshot_t){.epoch=connection};}
+static bool pet_p4_miniapp_storage_busy(void){return false;}
+static bool pet_p4_ota_transfer_active(void){return false;}
+static bool pet_p4_diagnostics_reboot_pending(void){return false;}
+static pet_resource_result_t pet_resources_device_owner_open(uint32_t m,pet_resource_owner_t*out){CHECK(held);opens++;return pet_resources_owner_open(&broker,m,out);}
+static pet_resource_result_t pet_resources_device_acquire(pet_resource_owner_t o,pet_resource_kind_t k,uint32_t u,pet_resource_lease_t*out){CHECK(held);return pet_resources_try_acquire(&broker,o,k,u,out);}
+static bool pet_resources_device_current(pet_resource_lease_t l){return pet_resources_current(&broker,l);}
+static void pet_resources_device_revoke(pet_resource_owner_t o){CHECK(held);(void)pet_resources_owner_revoke(&broker,o);}
+static pet_resource_finish_t pet_resources_device_finish(pet_resource_lease_t l){CHECK(held);return pet_resources_finish(&broker,l);}
+static bool slot_is_valid(int slot){return slot==0||slot==1;}
+@@SNAPSHOT@@
+/* Storage/parser boundary only: ownership, control flow, publish, quarantine,
+ * resource admission and release below are extracted production C. */
+static bool prepare_asset_snapshot(int slot,const char *expected,asset_activation_snapshot_t *out){CHECK(!held&&slot==1);CHECK(!expected||!strcmp(expected,PACK));reads++;strcpy(out->manifest,"{\"fixture\":\"candidate\"}");strcpy(out->pack_id,PACK);out->catalog.count=1;change_at(PREPARE);return true;}
+static bool prepare_asset_activation(int slot,const char *expected,asset_activation_snapshot_t *out){return prepare_asset_snapshot(slot,expected,out);}
+static bool close_asset_chunk_file(void){CHECK(!held);close_calls++;return true;}
+static bool pet_p4_raw_assets_available(void){return true;}
+static bool pet_p4_raw_assets_committed_pack_id_for_slot(int slot,char*out,size_t size){CHECK(!held&&slot==1);if(!raw_present)return false;snprintf(out,size,"%s",PACK);return true;}
+static bool pet_p4_raw_assets_commit_observed(const char *pack,char*error,size_t capacity,bool*changed){(void)error;(void)capacity;CHECK(!held&&!strcmp(pack,PACK));*changed=true;raw_writes++;raw_present=true;change_at(RAW);return true;}
+static bool write_ready_pack_exact(int slot,const char *pack,bool *changed){CHECK(!held&&slot==1&&!strcmp(pack,PACK));*changed=true;ready_writes++;change_at(READY);return true;}
+static bool write_asset_activation_marker(int slot){CHECK(!held&&slot==1);marker_writes++;disk_marker=slot;change_at(MARKER);return true;}
+static void *workspace_calloc(size_t n,size_t size){CHECK(!held);workspace++;return calloc(n,size);}
+static void workspace_free(void *p){CHECK(!held);free(p);}
+#define calloc workspace_calloc
+#define free workspace_free
+@@ACTUAL@@
+#undef calloc
+#undef free
+static unsigned business_effects,queue_line_frees,fallbacks;
+static bool pet_p4_protocol_source_valid(const char *line){cJSON*p=cJSON_ParseWithOpts(line,NULL,true);bool ok=cJSON_IsObject(p);cJSON_Delete(p);return ok;}
+static void send_protocol_ack(pet_p4_send_line_fn sender,void*route,const char*topic,const cJSON*payload,bool ok,const char*code,const char*error){(void)sender;(void)route;(void)topic;(void)payload;(void)ok;(void)code;(void)error;}
+static bool pet_p4_miniapp_active(void){return true;}
+static void send_protocol_ack_if_requested(pet_p4_send_line_fn sender,void*route,const char*topic,const cJSON*payload){(void)sender;(void)route;(void)topic;(void)payload;}
+static void pet_app_host_transport(pet_p4_send_line_fn sender,void*route,const char*board){(void)sender;(void)route;(void)board;business_effects++;}
+static void pet_p4_media_transport(pet_p4_send_line_fn sender,void*route){(void)sender;(void)route;business_effects++;}
+@@ENTRY@@
+static pet_p4_runtime_state_t *g_state=&state;
+static _Atomic uint32_t g_connection_generation;
+static uint32_t g_native_dispatch_connection;
+static bool retire_in_json;
+static unsigned json_dispatch_calls,enqueue_calls;
+static void *observed_ingress_route;
+static bool (*g_enqueue_protocol)(const char*,pet_p4_send_line_fn,void*,void*);
+static void *g_enqueue_protocol_ctx;
+static bool pet_json_source_bounded_text_bytes(const uint8_t *data,size_t size){char*p=malloc(size+1);CHECK(p);memcpy(p,data,size);p[size]=0;cJSON*v=cJSON_ParseWithOpts(p,NULL,true);bool ok=cJSON_IsObject(v);cJSON_Delete(v);free(p);return ok;}
+static bool handle_asset_abort_json(const uint8_t *data,uint32_t size){(void)data;(void)size;if(retire_in_json){connection++;atomic_store(&g_connection_generation,connection-1);retire_in_json=false;}return false;}
+static bool pet_p4_handle_line(pet_p4_runtime_state_t*s,const char*line,pet_p4_send_line_fn sender,void*route){json_dispatch_calls++;observed_ingress_route=route;CHECK(sender==native_sender);return entry_probe(s,line,sender,route,NULL);}
+static bool enqueue_probe(const char*line,pet_p4_send_line_fn sender,void*route,void*context){(void)line;(void)context;enqueue_calls++;observed_ingress_route=route;CHECK(sender==native_sender);return true;}
+#define PET_P4_NATIVE_KIND_JSON 1
+@@FALLBACK@@
+typedef struct {char*line;pet_p4_send_line_fn send_line;void*reply_ctx;}queue_request_t;
+static void drop_queue_line(void *p){queue_line_frees++;free(p);}
+static void queue_probe(pet_p4_send_line_fn sender,void*route){
+ queue_request_t request={malloc(128),sender,route};CHECK(request.line);strcpy(request.line,"{\"topic\":\"control/screen-page\",\"payload\":{\"page\":\"main\"}}");
+ for(unsigned once=0;once<1;once++){
+#define free drop_queue_line
+@@QUEUE_GUARD@@
+#undef free
+  business_effects++; /* First debug/trace/ordinary-business boundary only. */
+ }
+ if(!queue_line_frees)free(request.line);
+}
+static cJSON *request(void){cJSON*p=cJSON_CreateObject();CHECK(p);CHECK(cJSON_AddStringToObject(p,"transferId","route-test"));CHECK(cJSON_AddStringToObject(p,"packId",PACK));CHECK(cJSON_AddNumberToObject(p,"slot",1));return p;}
+static void resources_released(void){pet_resource_usage_t u;pet_resources_usage(&broker,&u);CHECK(!u.live_owners&&!u.leases[PET_RESOURCE_STORAGE_WORK]);CHECK(held);CHECK(staging==1234);}
+static void quarantine(void){CHECK(g_appearance_session.active&&g_appearance_session.recovery_blocked&&!g_appearance_session.operation_active);CHECK(!pet_p4_appearance_claim(native_sender,(void*)(uintptr_t)connection,"new-intent",PET_APPEARANCE_SERIAL));}
+int main(int argc,char **argv){
+ CHECK(argc==2);case_name=argv[1];state.asset_revision=9;disk_marker=0;strcpy(state.asset_manifest_json,"original");
+ bool activate=!strncmp(case_name,"activate-",9);bool uart=strstr(case_name,"uart")!=NULL;
+ state.asset_transfer_active=!activate;
+ pet_p4_send_line_fn sender=uart?uart_sender:native_sender;void *route=(void*)(uintptr_t)1;
+ pet_p4_query_reply_t deferred={0};
+ if(strstr(case_name,"deferred")){pet_p4_protocol_set_deferred_reply(&deferred);send_topic_payload(sender,route,"widget-install-ack",cJSON_CreateObject());CHECK(deferred.line);}
+ if(strstr(case_name,"retired"))connection=2;
+ if(strstr(case_name,"prepare"))event=PREPARE;
+ if(strstr(case_name,"raw"))event=RAW;
+ if(strstr(case_name,"ready"))event=READY;
+ if(strstr(case_name,"marker"))event=MARKER;
+ if(strstr(case_name,"begin1"))event=BEGIN1;
+ if(strstr(case_name,"begin2"))event=BEGIN2;
+ if(strstr(case_name,"begin3"))event=BEGIN3;
+ if(!strncmp(case_name,"fallback-",9)){
+  connection=1;atomic_store(&g_connection_generation,0);g_native_dispatch_connection=0;
+  if(strstr(case_name,"at-frame")){connection=2;atomic_store(&g_connection_generation,1);}
+  if(strstr(case_name,"between"))retire_in_json=true;
+  if(strstr(case_name,"enqueue"))g_enqueue_protocol=enqueue_probe;
+  const char*line="{\"topic\":\"control/screen-page\",\"payload\":{\"page\":\"main\"}}";
+  handle_complete_frame(PET_P4_NATIVE_KIND_JSON,(const uint8_t*)line,(uint32_t)strlen(line));
+  if(strstr(case_name,"at-frame")){CHECK(!json_dispatch_calls&&!enqueue_calls&&!business_effects&&!observed_ingress_route);}
+  else{
+   CHECK(observed_ingress_route==(void*)(uintptr_t)1);
+   if(strstr(case_name,"enqueue")){CHECK(enqueue_calls==1&&!json_dispatch_calls&&!business_effects);}
+   else if(strstr(case_name,"between")){CHECK(json_dispatch_calls==1&&!business_effects&&!state.screen_page[0]);}
+   else{CHECK(json_dispatch_calls==1&&business_effects==2&&!strcmp(state.screen_page,"main"));}
+  }
+ }else if(!strncmp(case_name,"phase-",6)){
+  CHECK(pet_p4_appearance_claim(sender,route,"phase-test",PET_APPEARANCE_SERIAL));
+  pet_appearance_phase_t phase={0};pet_appearance_commit_io_t io={begin,end,strstr(case_name,"io-current")?current:NULL,route};
+  bool entered=pet_p4_appearance_phase_begin(&phase,&state,sender,route,"phase-test",PET_APPEARANCE_SERIAL,1,&io);
+  if(strstr(case_name,"begin1")){CHECK(!entered&&held&&!phase.active&&!g_appearance_session.operation_active);CHECK(!business_effects&&!raw_writes&&!ready_writes&&!marker_writes);}
+  else{CHECK(entered&&!held&&phase.active);business_effects++;CHECK(pet_p4_appearance_phase_end(&phase,&state,1,true,false)==PET_APPEARANCE_COMMIT_OK);}
+ }else if(!strncmp(case_name,"entry-",6)){
+  bool consumed=entry_probe(&state,"{\"topic\":\"control/screen-page\",\"payload\":{\"page\":\"main\"}}",sender,route,NULL);if(!consumed)fallbacks++;
+  CHECK(consumed&&!fallbacks);CHECK(business_effects==(uart||connection==1?2:0));
+  CHECK(!strcmp(state.screen_page,uart||connection==1?"main":""));
+ }else if(!strncmp(case_name,"queue-",6)){
+  queue_probe(sender,route);CHECK(business_effects==(uart||connection==1?1:0));CHECK(queue_line_frees==(uart||connection==1?0:1));
+ }else if(activate){
+  cJSON *p=request();handle_asset_activate(&state,p,sender,route);cJSON_Delete(p);
+  if(strstr(case_name,"retired")){CHECK(!opens&&!workspace&&!borrows&&!reads&&!raw_writes&&!ready_writes&&!marker_writes);CHECK(g_asset_active_slot==0&&state.asset_revision==9);}
+  else if(!uart&&(strstr(case_name,"prepare")||strstr(case_name,"begin2"))){CHECK(!marker_writes&&disk_marker==0&&g_asset_active_slot==0&&state.asset_revision==9);CHECK(!g_appearance_session.active&&!g_appearance_session.recovery_blocked);}
+  else if(!uart&&strstr(case_name,"marker")){CHECK(marker_writes==1&&disk_marker==1);CHECK(g_asset_active_slot==0&&state.asset_revision==9);quarantine();}
+  else{CHECK(marker_writes==1&&g_asset_active_slot==1&&state.asset_revision==10&&ack_ok);CHECK(!g_appearance_session.active);}
+ }else{
+  CHECK(pet_p4_appearance_claim(sender,route,"route-test",PET_APPEARANCE_SERIAL));char error[160]={0};const pet_appearance_commit_io_t io={begin,end,NULL,NULL};
+  pet_appearance_commit_result_t r=pet_p4_appearance_commit_slot(&state,1,sender,route,"route-test",PET_APPEARANCE_SERIAL,false,&io,error,sizeof(error));
+  if(strstr(case_name,"retired")){CHECK(r==PET_APPEARANCE_COMMIT_FAILED&&!opens&&!borrows&&!workspace&&!close_calls&&!raw_writes&&!ready_writes&&!marker_writes);CHECK(g_asset_active_slot==0&&state.asset_revision==9);}
+  else if((event==NONE&&connection==1)||uart){CHECK(r==PET_APPEARANCE_COMMIT_OK&&marker_writes==1&&g_asset_active_slot==1&&state.asset_revision==10);CHECK(!g_appearance_session.recovery_blocked);}
+  else{
+   CHECK(r==PET_APPEARANCE_COMMIT_UNKNOWN&&g_asset_active_slot==0&&state.asset_revision==9);quarantine();
+   if(strstr(case_name,"prepare")||strstr(case_name,"begin1")||strstr(case_name,"begin2")){CHECK(!raw_writes&&!ready_writes&&!marker_writes);}
+   if(strstr(case_name,"raw")){CHECK(raw_writes==1&&!ready_writes&&!marker_writes&&raw_present);}
+   if(strstr(case_name,"ready")||strstr(case_name,"begin3")){CHECK(raw_writes==1&&ready_writes==1&&!marker_writes);}
+   if(strstr(case_name,"marker")){CHECK(raw_writes==1&&ready_writes==1&&marker_writes==1&&disk_marker==1);}
+   unsigned writes=raw_writes+ready_writes+marker_writes;
+   CHECK(pet_p4_appearance_commit_slot(&state,1,sender,route,"route-test",PET_APPEARANCE_SERIAL,false,&io,error,sizeof(error))==PET_APPEARANCE_COMMIT_FAILED);
+   CHECK(raw_writes+ready_writes+marker_writes==writes);
+  }
+ }
+ pet_p4_protocol_set_deferred_reply(NULL);cJSON_free(deferred.line);
+ resources_released();printf("PASS %s raw=%u ready=%u marker=%u active=%d disk=%d revision=%u quarantine=%d effects=%u\n",case_name,raw_writes,ready_writes,marker_writes,g_asset_active_slot,disk_marker,state.asset_revision,g_appearance_session.recovery_blocked,business_effects);return 0;
+}

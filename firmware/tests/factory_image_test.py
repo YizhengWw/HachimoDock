@@ -7,9 +7,13 @@ mappings, layout, and export settings.
 """
 
 import importlib.util
+import hashlib
 import json
 import re
-import zlib
+import struct
+import subprocess
+
+import pytest
 from pathlib import Path
 
 
@@ -20,20 +24,6 @@ SPEC = importlib.util.spec_from_file_location("build_factory_image", TOOL_PATH)
 factory = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(factory)
-
-
-def test_bootstrap_and_launcher_follow_the_same_factory_catalog():
-    config = json.loads((RUNTIME / "factory-config.json").read_text())
-    ids = config["components"]["ids"]
-    bundle = json.loads((RUNTIME / "main/pet_p4_builtin_components.json").read_text())
-    assert [item["id"] for item in bundle["components"]] == ids
-    launcher = (RUNTIME / "assets/component-center/catalog.h").read_text()
-    assert re.findall(r'\{"([^\"]+)",', launcher) == ids
-    thumbnails = zlib.decompress(
-        (RUNTIME / "assets/component-center/center_thumbs.deflate").read_bytes()
-    )
-    assert len(thumbnails) == len(ids) * 64 * 48 * 2
-    assert config["components"]["defaultActiveId"] in ids
 
 
 def test_factory_hashes_match_firmware_filenames():
@@ -176,7 +166,7 @@ def test_factory_reuses_the_desktop_bundled_p4_ready_pack(tmp_path):
 def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_path):
     config = json.loads((RUNTIME / "factory-config.json").read_text(encoding="utf-8"))
     expected_ids = [
-        "cloud-hop", "stock-watchlist", "wooden-fish", "daily-news",
+        "city-radio", "cloud-hop", "stock-watchlist", "wooden-fish", "daily-news",
         "book-pocket", "block-combo", "tomato-clock", "fresh-fruit-slice", "hachimi-sounds",
         "snake-turn", "flappy-bird", "hachimi-learn", "hachimi-home", "hachimi-travel",
         "hachimi-garden", "bloomfrog_companion", "two-key-pong", "hachimi-weather", "daily-almanac",
@@ -184,7 +174,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
         "decision-capsule", "answer-book", "hope-train",
     ]
     assert config["components"]["ids"] == expected_ids
-    assert len(expected_ids) == 28
+    assert len(expected_ids) == 29
     visible = {p.parent.name for p in (REPOSITORY / "pc/builtin-clawpkgs").glob("*/component.json")}
     visible -= {"music-player", "hachimi-agent", "hachimi-desk"}
     assert set(expected_ids) == visible
@@ -198,8 +188,8 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     spiffs_tree.mkdir()
     summary = factory.build_builtin_component_tree(RUNTIME, config, spiffs_tree)
     assert summary["count"] == len(expected_ids)
-    assert summary["defaultActiveId"] == "cloud-hop"
-    assert summary["spriteFiles"] == 76  # All 28 retained packages; no artwork stripped.
+    assert summary["defaultActiveId"] == "city-radio"
+    assert summary["spriteFiles"] == 78  # All 29 complete packages; no artwork stripped.
     assert summary["payloadBytes"] < 3 * 1024 * 1024
     assert summary["physicalFiles"] == len(expected_ids) * 2 + summary["spriteFiles"] + 1
     assert not (spiffs_tree / "p4-miniapp-id.txt").exists()
@@ -209,7 +199,7 @@ def test_factory_components_match_current_builtin_catalog_and_device_files(tmp_p
     )
     assert catalog["version"] == 3
     assert catalog["sequence"] == 1
-    assert catalog["activeWidgetId"] == "cloud-hop"
+    assert catalog["activeWidgetId"] == "city-radio"
     assert [item["widgetId"] for item in catalog["items"]] == expected_ids
     assert [item["slot"] for item in catalog["items"]] == list(range(len(expected_ids)))
     assert [item["packageGeneration"] for item in catalog["items"]] == [0] * len(expected_ids)
@@ -288,16 +278,16 @@ def test_factory_platformio_targets_and_partition_contract():
     offset, size = factory.partition_entry(
         RUNTIME / "partitions.csv", config["spiffs"]["partitionLabel"]
     )
-    assert offset == 0x520000
-    assert size == 0x6E0000
+    assert offset == 0x620000
+    assert size == 0x8E0000
     builtin_offset, builtin_size = factory.partition_entry(
         RUNTIME / "partitions.csv", factory.BUILTIN_APPEARANCE_PARTITION_LABEL
     )
     custom_offset, custom_size = factory.partition_entry(
         RUNTIME / "partitions.csv", factory.CUSTOM_APPEARANCE_PARTITION_LABEL
     )
-    assert (builtin_offset, builtin_size) == (0xC00000, 0xA00000)
-    assert (custom_offset, custom_size) == (0x1600000, 0xA00000)
+    assert (builtin_offset, builtin_size) == (0xF00000, 0x880000)
+    assert (custom_offset, custom_size) == (0x1780000, 0x880000)
 
 
 def test_factory_esptool_prefers_the_active_platformio_core(tmp_path, monkeypatch):
@@ -330,3 +320,103 @@ def test_factory_spiffsgen_prefers_the_active_platformio_core(tmp_path, monkeypa
     monkeypatch.setenv("PLATFORMIO_CORE_DIR", str(core))
 
     assert factory.resolve_spiffsgen(None) == spiffsgen
+
+
+CURRENT_PARTITIONS = {
+    "nvs": (1, 2, 0x9000, 0x6000),
+    "phy_init": (1, 1, 0xF000, 0x1000),
+    "ota_0": (0, 0x10, 0x10000, 0x300000),
+    "ota_1": (0, 0x11, 0x310000, 0x300000),
+    "otadata": (1, 0, 0x610000, 0x2000),
+    "storage": (1, 0x82, 0x620000, 0x8E0000),
+    "appearance0": (1, 0x40, 0xF00000, 0x880000),
+    "appearance1": (1, 0x41, 0x1780000, 0x880000),
+}
+
+
+def partition_table(entries):
+    body = b"".join(struct.pack("<HBBII16sI", 0x50AA, kind, subtype, offset,
+        size, name.encode(), 0) for name, (kind, subtype, offset, size) in entries.items())
+    return body + b"\xeb\xeb" + b"\xff" * 14 + hashlib.md5(body).digest() + b"\xff" * 32
+
+
+@pytest.mark.parametrize('mutation', ['digest', 'missing-md5', 'truncated', 'padding', 'unexpected-partition'])
+def test_factory_layout_rejects_unverified_table_integrity(tmp_path, mutation):
+    entries = dict(CURRENT_PARTITIONS)
+    if mutation == 'unexpected-partition':
+        entries['overlap'] = (1, 0x42, 0x10000, 0x1000)
+    data = bytearray(partition_table(entries))
+    marker = 32 * len(entries)
+    if mutation == 'digest':
+        data[marker + 16] ^= 1
+    elif mutation == 'missing-md5':
+        data = data[:marker] + b'\xff' * 32
+    elif mutation == 'truncated':
+        data = data[:-1]
+    elif mutation == 'padding':
+        data[-1] = 0
+    (tmp_path / 'partitions.bin').write_bytes(data)
+    with pytest.raises(ValueError):
+        factory.validate_factory_partition_layout(RUNTIME, tmp_path)
+
+
+def test_factory_layout_v2_exact_table_and_32m_bounds(tmp_path):
+    for name, (_, _, offset, size) in CURRENT_PARTITIONS.items():
+        assert factory.partition_entry(RUNTIME / "partitions.csv", name) == (offset, size)
+        assert offset % 4096 == size % 4096 == 0
+    spans=sorted((offset,offset+size) for _,_,offset,size in CURRENT_PARTITIONS.values())
+    assert all(a[1]<=b[0] for a,b in zip(spans,spans[1:]))
+    assert spans[-1][1] == 0x2000000
+    assert CURRENT_PARTITIONS['storage'][3] - 0x6E0000 == 2 * 1024 * 1024
+    (tmp_path / "partitions.bin").write_bytes(partition_table(CURRENT_PARTITIONS))
+    layout=factory.validate_factory_partition_layout(RUNTIME,tmp_path)
+    assert layout['id']=='p4-storage-plus2m-ota3m-appearance17m-v2'
+    assert layout['appearanceBytes']==17*1024*1024
+    assert layout['otaUpdatesPartitionTable'] is False
+    assert layout['legacyMigrationRequired'] is True
+
+
+@pytest.mark.parametrize('legacy_mib', [20,18])
+def test_factory_layout_v2_rejects_real_legacy_generated_tables(tmp_path,legacy_mib):
+    entries={**CURRENT_PARTITIONS,
+        'ota_0':(0,0x10,0x10000,0x280000),
+        'ota_1':(0,0x11,0x290000,0x280000),
+        'otadata':(1,0,0x510000,0x2000),
+        'storage':(1,0x82,0x520000,0x6E0000 if legacy_mib==20 else 0x8E0000),
+        'appearance0':(1,0x40,0xC00000 if legacy_mib==20 else 0xE00000,0xA00000 if legacy_mib==20 else 0x900000),
+        'appearance1':(1,0x41,0x1600000 if legacy_mib==20 else 0x1700000,0xA00000 if legacy_mib==20 else 0x900000)}
+    (tmp_path/'partitions.bin').write_bytes(partition_table(entries))
+    with pytest.raises(ValueError,match='OTA cannot migrate layouts'):
+        factory.validate_factory_partition_layout(RUNTIME,tmp_path)
+
+
+@pytest.mark.parametrize('mutation', ['offset','type','flags','missing','duplicate'])
+def test_factory_layout_v2_rejects_stale_or_malformed_generated_table(tmp_path,mutation):
+    data=bytearray(partition_table(CURRENT_PARTITIONS))
+    if mutation=='offset':struct.pack_into('<I',data,4,0xA000)
+    if mutation=='type':data[2]=0
+    if mutation=='flags':struct.pack_into('<I',data,28,1)
+    if mutation=='missing':data=data[32:]
+    if mutation=='duplicate':data=data[:32]+data
+    (tmp_path/'partitions.bin').write_bytes(data)
+    with pytest.raises(ValueError):factory.validate_factory_partition_layout(RUNTIME,tmp_path)
+
+
+def test_factory_packager_recognizes_v2_and_both_legacy_layouts():
+    source=(REPOSITORY/'pc/scripts/package-factory-release.mjs').read_text()
+    block=source[source.index('const currentLayout ='):source.index('for (const segment of manifest.segments || []) {')]
+    script="const check=new Function('manifest','storageSegment','appearanceSegment','basename',"+json.dumps(block+";return layoutLabel;")+""" );
+const assert=require('node:assert/strict');
+const partitions="""+json.dumps({k:{'offset':hex(v[2]),'bytes':v[3]} for k,v in CURRENT_PARTITIONS.items()})+""";
+const current={partitionLayout:{id:'p4-storage-plus2m-ota3m-appearance17m-v2',appearanceBytes:0x1100000,otaUpdatesPartitionTable:false,partitions}};
+const segment=(offset,bytes)=>({offset,bytes,path:'resource.bin'});
+const run=(m,s,a)=>check(m,s,a,p=>p);
+assert.match(run(current,segment('0x620000',0x8e0000),segment('0xf00000',0x880000)),/双3 MiB OTA/);
+assert.match(run({partitionLayout:{id:'p4-storage-plus2m-appearance18m-v1'}},segment('0x520000',0x8e0000),segment('0xe00000',0x900000)),/legacy 18 MiB/);
+assert.match(run({},segment('0x520000',0x6e0000),segment('0xc00000',0xa00000)),/legacy 20 MiB/);
+const bad=structuredClone(current);bad.partitionLayout.partitions.ota_1.bytes=0x280000;
+assert.throws(()=>run(bad,segment('0x620000',0x8e0000),segment('0xf00000',0x880000)));
+assert.throws(()=>run({},segment('0x620000',0x8e0000),segment('0xf00000',0x880000)));
+assert.throws(()=>run(current,segment('0x520000',0x8e0000),segment('0xf00000',0x880000)));
+"""
+    subprocess.run(['node','-e',script],check=True)

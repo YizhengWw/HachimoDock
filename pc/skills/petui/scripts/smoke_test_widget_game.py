@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from validate_generated_widget import load_capabilities, validate_widget
+from bounded_app import condition_holds
 
 
 MAX_SEARCH_DEPTH = 32
@@ -134,6 +135,7 @@ class SceneSimulator:
             "stop",
             "restart",
             "tone",
+            "var",
         }
         visible: set[str] = set()
         for action in self.actions:
@@ -214,15 +216,25 @@ class SceneSimulator:
         }
 
     def apply_effects(self, state: PlayState, effect: dict[str, Any]) -> None:
+        original = dict(state.variables)
         for name, value in effect.get("set", {}).items():
-            state.variables[name] = value
+            state.variables[name] = original[value["var"]] if isinstance(value, dict) else value
         for name, value in effect.get("inc", {}).items():
-            state.variables[name] = int(state.variables.get(name, 0)) + int(value)
+            amount = original[value["var"]] if isinstance(value, dict) else int(value)
+            state.variables[name] = clamp(int(state.variables.get(name, 0)) + int(amount), -1_000_000_000, 1_000_000_000)
+        for name, bounds in self.runtime.get("limits", {}).items():
+            if name in state.variables:
+                state.variables[name] = clamp(state.variables[name], bounds[0], bounds[1])
 
     def apply_transition(self, state: PlayState, action: str) -> bool:
-        for transition in self.transitions:
-            if not self.transition_matches(transition, state, action):
+        for found in self.transitions:
+            if not self.transition_matches(found, state, action):
                 continue
+            # p4-logic-v1: false guard selects else or keeps searching.
+            taken = condition_holds(found.get("when"), state.variables)
+            if not taken and not found.get("else"):
+                continue
+            transition = found if taken else {**found["else"]}
             if isinstance(transition.get("to"), str):
                 state.runtime_state = transition["to"]
             page = transition.get("page")
@@ -278,7 +290,7 @@ class SceneSimulator:
                 entity=entity,
                 other=other,
                 edge=edge,
-            ):
+            ) and condition_holds(rule.get("when"), state.variables):
                 for operation in rule.get("do", []):
                     self.apply_operation(state, operation)
 
@@ -397,6 +409,14 @@ class SceneSimulator:
                 entity["vy"] = -entity["vy"]
         elif name == "tone" and entity:
             entity["tone"] = operation["tone"]
+        elif name == "sfx":
+            pass  # audible only; never counts as visible feedback
+        elif name == "var":
+            # p4-logic-v1: scene rules write a runtime int var slot, clamped to the global bound.
+            variable = operation["name"]
+            current = int(state.variables.get(variable, 0))
+            value = int(operation["set"]) if "set" in operation else current + int(operation["inc"])
+            state.variables[variable] = clamp(value, -1_000_000_000, 1_000_000_000)
 
     @staticmethod
     def overlap(left: dict[str, Any], right: dict[str, Any]) -> bool:
@@ -630,11 +650,23 @@ def smoke_test_game(widget_dir: Path) -> dict[str, Any]:
     runtime = load_json(widget_dir / "runtime" / "widget.json")
     manifest = load_json(widget_dir / "component.json")
     buttons = load_json(widget_dir / "buttons.json")
+    if runtime.get('scene',{}).get('engine')=='p4-side-scene-v1':
+        import subprocess,shutil
+        node=shutil.which('node')
+        if not node:return {'ok':False,'errors':['横版场景自测需要 Node.js 同源核心']}
+        result=subprocess.run([node,str(Path(__file__).with_name('smoke_side.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
+        return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
     if runtime.get('local'):
         import subprocess,shutil
         node=shutil.which('node')
         if not node:return {'ok':False,'errors':['离线工具自测需要 Node.js']}
         result=subprocess.run([node,str(Path(__file__).with_name('smoke_local.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
+        return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
+    if 'bodies' in runtime.get('scene',{}):
+        import subprocess,shutil
+        node=shutil.which('node')
+        if not node:return {'ok':False,'errors':['刚体自测需要 Node.js 同源核心']}
+        result=subprocess.run([node,str(Path(__file__).with_name('smoke_bodies.mjs')),str(widget_dir/'runtime/widget.json'),str(widget_dir/'buttons.json')],capture_output=True,text=True,timeout=30)
         return json.loads(result.stdout) if result.returncode==0 else {'ok':False,'errors':[result.stderr[-1500:]]}
     if runtime.get('scene',{}).get('motion'):
         import subprocess,shutil

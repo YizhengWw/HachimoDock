@@ -14,6 +14,9 @@
 #include "pet_p4_stats.h"
 #include "pet_p4_assets.h"
 #include "pet_p4_slice_core.h"
+#include "pet_p4_query_reply.h"
+#include "pet_p4_appearance_session.h"
+#include "pet_p4_resources.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +62,11 @@ typedef struct {
 } pet_p4_conversation_cue_t;
 
 typedef void (*pet_p4_send_line_fn)(const char *line, void *ctx);
+/* Boot-configured paired callbacks. begin admits only the current locked
+ * protocol command; on success the slot-query owns an unlocked read/TX window
+ * and must call end before returning to its dispatcher. No new IO owner. */
+bool pet_p4_protocol_asset_query_io_configure(bool (*begin)(void *),
+  void (*end)(void *), void *context);
 
 typedef struct {
   char id[PET_P4_SESSION_QUEUE_ID_MAX];
@@ -140,6 +148,10 @@ typedef struct {
 } pet_p4_runtime_state_t;
 
 void pet_p4_state_init(pet_p4_runtime_state_t *state, const char *board_device_id);
+/* Trusted single-thread startup only. Repeated starts cannot replace a boot ID. */
+void pet_p4_boot_identity_start(uint32_t first,uint32_t second);
+const char *pet_p4_boot_identity(void);
+bool pet_p4_protocol_asset_query_pending_configure(bool (*pending)(void *), void *context);
 void pet_p4_state_process(pet_p4_runtime_state_t *state, unsigned long long now_ms);
 /* DSH R5 approval pending state: set by approval/request, consumed exactly once
  * by SW1/SW3, cleared without an outgoing decision when it expires. */
@@ -204,12 +216,62 @@ bool pet_p4_asset_read_all(
 );
 bool pet_p4_asset_fs_path_for_slot(int slot, const char *logical_path, bool tmp, char *out, size_t out_size);
 int pet_p4_asset_active_slot(void);
+/* Read-only audio overlay lookup; caller owns physical playback realtime IO. */
+bool pet_p4_asset_audio_override_path(const char *family,char *out,size_t capacity);
 int pet_p4_asset_inactive_slot(void);
 bool pet_p4_asset_set_active_slot(int slot);
 bool pet_p4_asset_slot_has_pack_id(int slot);
 bool pet_p4_asset_mark_slot_ready(int slot);
 void pet_p4_asset_clean_legacy_files(void);
 void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn send_line, void *ctx);
+/* Immutable native board identity only; no runtime/model lock during TX. */
+void pet_p4_send_hello_for_board(const char *board_id, pet_p4_send_line_fn send_line, void *ctx);
+/* All calls below require the existing state mutex. Separate serial and
+ * native transactions share one physical appearance mutation owner. */
+enum {PET_APPEARANCE_SERIAL=1,PET_APPEARANCE_NATIVE=2};
+bool pet_p4_appearance_claim(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind);
+bool pet_p4_appearance_owned(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind);
+bool pet_p4_appearance_end(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind);
+bool pet_p4_appearance_active(void);
+/* All callbacks use the caller's existing state mutex; begin borrows it for
+ * physical IO, end reacquires it. current is a RAM-only connection-generation
+ * check. No caller may retire the route/slot while operation_active is set.
+ * UNKNOWN retains the appearance owner and blocks mutation/timeout cleanup. */
+typedef struct {
+  bool (*begin)(void *); void (*end)(void *);
+  bool (*current)(void *); void *context;
+} pet_appearance_commit_io_t;
+typedef enum {PET_APPEARANCE_COMMIT_FAILED, PET_APPEARANCE_COMMIT_OK,
+              PET_APPEARANCE_COMMIT_UNKNOWN} pet_appearance_commit_result_t;
+bool pet_p4_appearance_mutation_blocked(void);
+pet_appearance_commit_result_t pet_p4_appearance_commit_slot(
+  pet_p4_runtime_state_t *state,int slot,pet_p4_send_line_fn send,void *route,
+  const char *id,unsigned kind,bool patch,const pet_appearance_commit_io_t *io,
+  char *error,size_t capacity);
+
+/* Every appearance upload phase uses the caller's actual task/mutex adapter.
+ * The operation owns all mutable staging bytes until end revalidates the exact
+ * route/generation/slot/revision/connection and physical STORAGE_WORK lease.
+ * No callbacks or IO run under the state lock except the short broker calls. */
+typedef struct {
+  pet_resource_owner_t owner; pet_resource_lease_t lease;
+  pet_appearance_commit_io_t io;
+  pet_p4_send_line_fn sender; void *route;
+  uint64_t generation; unsigned revision,kind; int active_slot,target_slot;
+  char id[64]; bool active;
+} pet_appearance_phase_t;
+bool pet_p4_appearance_phase_begin(pet_appearance_phase_t *phase,
+  pet_p4_runtime_state_t *state,pet_p4_send_line_fn send,void *route,
+  const char *id,unsigned kind,int target_slot,const pet_appearance_commit_io_t *io);
+pet_appearance_commit_result_t pet_p4_appearance_phase_end(pet_appearance_phase_t *phase,
+  pet_p4_runtime_state_t *state,int target_slot,bool ok,bool write_attempted);
+bool pet_p4_appearance_native_active(void);
+void pet_p4_asset_transfer_cleanup_worker(pet_p4_runtime_state_t *state);
+size_t pet_p4_consume_raw_asset_bytes_scoped(pet_p4_runtime_state_t *state,
+  const unsigned char *data,size_t len,pet_p4_send_line_fn send,void *route,
+  const pet_appearance_commit_io_t *io);
+
+bool pet_p4_raw_asset_chunk_active_for_route(pet_p4_send_line_fn send,void *ctx);
 bool pet_p4_raw_asset_chunk_active(void);
 size_t pet_p4_consume_raw_asset_bytes(
   const unsigned char *data,
@@ -223,6 +285,28 @@ bool pet_p4_handle_line(
   pet_p4_send_line_fn send_line,
   void *ctx
 );
+/* Same parser, host registration and dispatch. Only the immutable diagnostic
+ * query response may be detached; all mutation/audio/media paths stay direct.
+ * An optional reply must be empty; NULL retains the synchronous old behavior.
+ * Caller retains the original send/ctx route.
+ * On return, release the state lock before sending/freeing reply->line once. */
+bool pet_p4_handle_line_with_reply(
+  pet_p4_runtime_state_t *state,
+  const char *line,
+  pet_p4_send_line_fn send_line,
+  void *ctx,
+  pet_p4_query_reply_t *reply
+);
+/* Same nonrecursive bounded Unicode/depth preflight as the ordinary entry.
+ * Pure source representation check, not schema validation or authorization. */
+bool pet_p4_protocol_source_valid(const char *line);
+/* State-locked RAM query lane; send/free reply after unlocking. */
+bool pet_p4_handle_storage_query(pet_p4_runtime_state_t *state,
+  const char *line, pet_p4_query_reply_t *reply);
+#if PET_P4_MUTATION_ACK_DEFERRED
+/* Dispatcher-owned slot for the current locked dispatch; see pet_p4_query_reply.h. */
+void pet_p4_protocol_set_deferred_reply(pet_p4_query_reply_t *reply);
+#endif
 
 #ifdef __cplusplus
 }

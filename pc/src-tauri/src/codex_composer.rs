@@ -1,7 +1,7 @@
 /*
- * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, a current-visible WorkBuddy composer, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
+ * [Input] A bound or current-visible ChatGPT（Codex）/Claude session, a current-visible WorkBuddy/DeepSeek Harness composer, or a captured MiMoCode terminal caret, plus staged voice text and an explicit confirm action.
  * [Output] Read-only frontmost-Agent detection, exact desktop-session navigation, bounded composer lookup, per-recording appended draft updates, and explicit-confirm submission without automatic send on ASR finalization.
- * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, stale-focus recovery, and Windows minimized-Claude restoration.
+ * [Pos] Cross-platform foreground input bridge with session, draft, clipboard, stale-focus recovery, Windows minimized-Claude restoration, and runtime-compatible UIA pattern lookup.
  * [Sync] If this file changes, update pc/.folder.md.
  */
 
@@ -26,6 +26,7 @@ pub fn diagnose_current_composer(agent_id: &str) -> Result<Value, String> {
             "codex" => macos::MacosAgent::Codex,
             "claude-code" => macos::MacosAgent::Claude,
             "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
             _ => return Err("此 Agent 不支持 macOS 输入框定位检查".into()),
         };
         macos::diagnose_current_composer(agent)
@@ -63,6 +64,7 @@ const WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
 fn composer_startup_timeout_message(agent: &str, stage: &str) -> String {
     let label = match agent {
         "workbuddy" => "WorkBuddy",
+        "deepseek-harness" => "DeepSeek Harness",
         "claude" | "claude-code" => "Claude",
         "codex" => "ChatGPT（Codex）",
         _ => "Agent",
@@ -94,6 +96,7 @@ fn read_windows_composer_response(
                 Some("ready_runtime") => "等待输入框定位命令",
                 Some("resolve_window") => "定位目标应用窗口",
                 Some("focused") => "读取当前聚焦输入框",
+                Some("native_query") => "查询原生辅助功能输入框",
                 Some("control") => "查找可写输入框",
                 Some("raw") => "读取 Chromium 辅助功能树",
                 Some("probe") => "检查输入区域",
@@ -137,7 +140,7 @@ struct WindowsComposerJob {
 
 #[cfg(windows)]
 impl WindowsComposerJob {
-    fn new() -> Result<Self, String> {
+    fn new(contain_descendants: bool) -> Result<Self, String> {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::JobObjects::{
             CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
@@ -156,7 +159,7 @@ impl WindowsComposerJob {
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
             | JOB_OBJECT_LIMIT_PROCESS_MEMORY
-            | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+            | if contain_descendants { 0 } else { JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK };
         limits.ProcessMemoryLimit = WINDOWS_COMPOSER_PROCESS_MEMORY_LIMIT_BYTES;
         let configured = unsafe {
             SetInformationJobObject(
@@ -196,6 +199,60 @@ impl WindowsComposerJob {
         Ok(())
     }
 }
+
+#[cfg(windows)]
+impl WindowsComposerJob {
+    fn terminate(&self) -> Result<(), String> {
+        use windows_sys::Win32::{Foundation::HANDLE, System::JobObjects::TerminateJobObject};
+        if unsafe { TerminateJobObject(self.handle as HANDLE, 1) } == 0 {
+            return Err("Windows helper job teardown unconfirmed".into());
+        }
+        Ok(())
+    }
+    fn active_processes(&self) -> Result<u32, String> {
+        use windows_sys::Win32::{Foundation::HANDLE, System::JobObjects::{QueryInformationJobObject, JobObjectBasicAccountingInformation, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION}};
+        let mut info=JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        if unsafe { QueryInformationJobObject(self.handle as HANDLE,JobObjectBasicAccountingInformation,(&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),std::mem::size_of_val(&info) as u32,std::ptr::null_mut()) } == 0 {
+            return Err("Windows helper job accounting unavailable".into());
+        }
+        Ok(info.ActiveProcesses)
+    }
+}
+
+#[cfg(windows)]
+struct WindowsComposerProcess {
+    child: std::sync::Mutex<std::process::Child>,
+    job: WindowsComposerJob,
+    strict: bool,
+}
+#[cfg(windows)]
+impl crate::device_voice_lifecycle::OwnedProcessTree for WindowsComposerProcess {
+    fn terminate(&self) -> Result<(), String> {
+        // No business command or input replay. Kill failures alone prove nothing;
+        // subsequent actual wait + job accounting decide whether it is quiescent.
+        if self.strict { let _ = self.job.terminate(); }
+        let mut child=self.child.lock().map_err(|_|"Windows helper child owner unavailable")?;
+        if child.try_wait().map_err(|_|"Windows helper wait failed")?.is_none() { let _=child.kill(); }
+        Ok(())
+    }
+    fn reaped_and_empty(&self) -> Result<bool, String> {
+        if !self.strict { return Ok(false); }
+        let mut child=self.child.lock().map_err(|_|"Windows helper child owner unavailable")?;
+        if child.try_wait().map_err(|_|"Windows helper wait failed")?.is_none() { return Ok(false); }
+        drop(child);
+        Ok(self.job.active_processes()? == 0)
+    }
+}
+
+/// This error is returned only before any native worker/child exists.
+#[cfg(any(windows, target_os = "macos"))]
+pub struct ComposerNoWriterError(String);
+#[cfg(any(windows, target_os = "macos"))]
+impl From<String> for ComposerNoWriterError { fn from(error: String) -> Self { Self(error) } }
+#[cfg(any(windows, target_os = "macos"))]
+impl From<&str> for ComposerNoWriterError { fn from(error: &str) -> Self { Self(error.to_owned()) } }
+#[cfg(any(windows, target_os = "macos"))]
+impl ComposerNoWriterError { pub fn into_message(self) -> String { self.0 } }
 
 #[cfg(windows)]
 impl Drop for WindowsComposerJob {
@@ -509,6 +566,9 @@ pub struct CodexComposerBridge {
     sender: std::sync::mpsc::Sender<ComposerCommand>,
     failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    release_result: std::sync::Mutex<Option<Result<(), String>>>,
+    #[cfg(any(windows, target_os = "macos"))]
+    termination: Option<crate::device_voice_lifecycle::WriterTermination>,
 }
 
 #[cfg(any(windows, target_os = "macos"))]
@@ -517,9 +577,9 @@ impl CodexComposerBridge {
         Self::start_current_task_for("codex")
     }
     pub fn start_current_task_for(agent_id: &str) -> Result<Self, String> {
-        if !matches!(agent_id,"codex"|"workbuddy") {return Err("Unsupported desktop task adapter".into());}
+        if !matches!(agent_id,"codex"|"workbuddy"|"deepseek-harness") {return Err("Unsupported desktop task adapter".into());}
         #[cfg(target_os = "macos")]
-        let agent = if agent_id=="workbuddy" {macos::MacosAgent::WorkBuddy} else {macos::MacosAgent::Codex};
+        let agent = match agent_id { "workbuddy" => macos::MacosAgent::WorkBuddy, "deepseek-harness" => macos::MacosAgent::DeepSeekHarness, _ => macos::MacosAgent::Codex };
         #[cfg(windows)]
         let agent = agent_id;
         Self::start_with_purpose(agent, "", "", "", "", "current_task", |_| {})
@@ -585,15 +645,97 @@ impl CodexComposerBridge {
     /// Drain this recording's queued writes before a new recording reads its base.
     /// Closing without cancellation must never erase the previous voice segment.
     pub fn preserve_draft(&self) -> Result<(), String> {
+        if self.termination.is_some() { return self.preserve_macos_draft(); }
+        #[cfg(target_os = "macos")]
+        { return Err("native worker owner is unavailable".into()); }
+        #[cfg(windows)]
+        {
         use std::sync::atomic::Ordering;
-        if self.closed.swap(true, Ordering::SeqCst) { return Ok(()); }
+        // Only cleanup/startup workers call this waiting operation. Serialize
+        // concurrent callers and keep the actual ACK/error, including timeout.
+        // `closed` rejects new writes; it is never evidence of release success.
+        let mut cached = self.release_result.lock()
+            .map_err(|_| "上一段语音释放状态不可用，释放未确认".to_string())?;
+        if let Some(result) = cached.as_ref() { return result.clone(); }
+        self.closed.store(true, Ordering::SeqCst);
+        let result: Result<(), String> = (|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.sender.send(ComposerCommand {
+                payload: json!({ "kind": "release" }), started: None, response: Some(tx),
+            }).map_err(|_| "上一段语音输入已关闭，释放未确认".to_string())?;
+            rx.recv_timeout(std::time::Duration::from_secs(8))
+                .map_err(|_| "等待上一段语音完成写入超时，释放未确认".to_string())??;
+            Ok(())
+        })();
+        *cached = Some(result.clone());
+        result
+            }
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    pub(crate) fn writer_termination_proof(&self) -> Result<Option<crate::device_voice_lifecycle::WriterTerminationProof>, String> {
+        match self.termination.as_ref() {
+            Some(worker) => worker.observe(),
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn reap_owned_writer(&self, timeout: std::time::Duration) -> Result<Option<crate::device_voice_lifecycle::WriterTerminationProof>, String> {
+        match self.termination.as_ref() {
+            Some(worker) => { worker.terminate_process()?; worker.wait(timeout) },
+            None => Ok(None),
+        }
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    fn preserve_macos_draft(&self) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        let mut cached = self.release_result.lock()
+            .map_err(|_| "上一段语音释放状态不可用，释放未确认".to_string())?;
+        self.closed.store(true, Ordering::SeqCst);
+        // A cached failure is never retried. Only actual joined termination
+        // of this same worker may independently establish ownership release.
+        if self.writer_termination_proof()?.is_some() {
+            *cached = Some(Ok(()));
+            return Ok(());
+        }
+        if let Some(result) = cached.as_ref() {
+            if result.is_err() {
+                if let Some(worker) = self.termination.as_ref() {
+                    worker.terminate_process()?;
+                    if worker.wait(std::time::Duration::from_secs(8))?.is_some() {
+                        *cached = Some(Ok(())); return Ok(());
+                    }
+                }
+            }
+            return result.clone();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
         let (tx, rx) = std::sync::mpsc::channel();
-        self.sender.send(ComposerCommand {
+        // Exactly one release command; no confirm/cancel/audio replay.
+        let sent = self.sender.send(ComposerCommand {
             payload: json!({ "kind": "release" }), started: None, response: Some(tx),
-        }).map_err(|_| "上一段语音输入已关闭".to_string())?;
-        rx.recv_timeout(std::time::Duration::from_secs(8))
-            .map_err(|_| "等待上一段语音完成写入超时".to_string())??;
-        Ok(())
+        }).is_ok();
+        if sent {
+            // This ACK is distinct from terminal quiescence. Once the worker
+            // stops, its actual join also covers a lost business/release ACK.
+            let grace = deadline.saturating_duration_since(std::time::Instant::now());
+            #[cfg(windows)] let grace = grace.min(std::time::Duration::from_secs(4));
+            let _ = rx.recv_timeout(grace);
+        }
+        #[cfg(windows)]
+        if let Some(worker) = self.termination.as_ref() { worker.terminate_process()?; }
+        let result = loop {
+            if self.writer_termination_proof()?.is_some() { break Ok(()); }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break Err("上一段语音worker尚未确认退出，未启动新writer".to_string());
+            }
+            std::thread::sleep(remaining.min(std::time::Duration::from_millis(2)));
+        };
+        *cached = Some(result.clone());
+        result
     }
 }
 
@@ -612,6 +754,7 @@ impl CodexComposerBridge {
             "codex" => &["chatgpt.exe", "codex.exe"],
             "claude-code" => &["claude.exe"],
             "workbuddy" => &["workbuddy.exe"],
+            "deepseek-harness" => &["deepseek harness.exe"],
             _ => return false,
         };
         unsafe {
@@ -655,13 +798,34 @@ impl CodexComposerBridge {
             "codex" => "codex",
             "claude-code" => "claude",
             "workbuddy" => "workbuddy",
+            "deepseek-harness" => "deepseek-harness",
             _ => {
                 return Err(
-                    "Current visible composer requires ChatGPT（Codex）, Claude or WorkBuddy".to_string(),
+                    "Current visible composer requires ChatGPT（Codex）, Claude, WorkBuddy or DeepSeek Harness".to_string(),
                 )
             }
         };
         Self::start_with_purpose(agent, "", "", "", "", "current_voice", callback)
+    }
+
+    pub fn start_current_retained(
+        agent_id: &str,
+        callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
+    ) -> Result<RetainedComposerStartup, ComposerNoWriterError> {
+        let agent=match agent_id.trim() {
+            "codex"=>"codex", "claude-code"=>"claude", "workbuddy"=>"workbuddy", "deepseek-harness"=>"deepseek-harness",
+            _=>return Err("Unsupported current visible composer".to_string().into()),
+        };
+        Self::start_with_purpose_retained(agent,"","","","","current_voice",callback)
+    }
+    fn retained_windows_failure(process: std::sync::Arc<WindowsComposerProcess>, error: String) -> RetainedComposerStartup {
+        use crate::device_voice_lifecycle::OwnedProcessTree;
+        let _=process.terminate();
+        let(sender,receiver)=std::sync::mpsc::channel(); drop(receiver);
+        RetainedComposerStartup {
+            bridge: Self { sender, failed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)), closed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)), release_result: std::sync::Mutex::new(None), termination: Some(crate::device_voice_lifecycle::WriterTermination::owned_process(None,process)) },
+            readiness: Err(error),
+        }
     }
 
     pub fn start(
@@ -759,6 +923,21 @@ impl CodexComposerBridge {
         purpose: &str,
         callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
     ) -> Result<Self, String> {
+        let startup=Self::start_with_purpose_retained(agent,session_id,deep_link,session_title,session_cwd,purpose,callback)
+            .map_err(ComposerNoWriterError::into_message)?;
+        startup.readiness?;
+        Ok(startup.bridge)
+    }
+
+    fn start_with_purpose_retained(
+        agent: &str,
+        session_id: &str,
+        deep_link: &str,
+        session_title: &str,
+        session_cwd: &str,
+        purpose: &str,
+        callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
+    ) -> Result<RetainedComposerStartup, ComposerNoWriterError> {
         use std::fs;
         use std::io::{BufReader, Write};
         use std::process::Stdio;
@@ -770,30 +949,32 @@ impl CodexComposerBridge {
         let session_id = session_id.trim();
         let deep_link = deep_link.trim();
         let session_title = session_title.trim();
-        if !matches!(agent, "codex" | "claude" | "workbuddy") {
-            return Err("visible composer agent is invalid".to_string());
+        if !matches!(agent, "codex" | "claude" | "workbuddy" | "deepseek-harness") {
+            return Err("visible composer agent is invalid".to_string().into());
         }
         let current_visible = matches!(purpose, "current_voice" | "current_task");
-        if agent == "workbuddy" && !current_visible {
+        if matches!(agent, "workbuddy" | "deepseek-harness") && !current_visible {
             return Err("WorkBuddy 仅向当前可见对话输入，不回退到其他 Agent".into());
         }
         if !current_visible
             && agent == "claude"
             && (session_id.is_empty() || !valid_claude_desktop_session_id(deep_link))
         {
-            return Err("Claude visible composer requires a bound session ID".to_string());
+            return Err("Claude visible composer requires a bound session ID".to_string().into());
         }
         if !current_visible && session_title.is_empty() {
-            return Err("visible composer requires a non-empty bound session title".to_string());
+            return Err("visible composer requires a non-empty bound session title".to_string().into());
         }
         if !matches!(purpose, "voice" | "locate" | "current_voice" | "current_task") {
-            return Err("Visible Agent composer purpose is invalid".to_string());
+            return Err("Visible Agent composer purpose is invalid".to_string().into());
         }
 
         const SCRIPT: &str = r#"
 $ErrorActionPreference = 'Stop'
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+# Native parent assigns the process to its containment job before opening this gate.
+if ([Console]::In.ReadLine() -cne 'HACHIMODOCK_CONTAINED_HELPER_V1') { exit 1 }
 function Write-ComposerProgress([string]$stage) {
   [Console]::Out.WriteLine((@{ phase = 'progress'; stage = $stage } | ConvertTo-Json -Compress))
   [Console]::Out.Flush()
@@ -863,6 +1044,15 @@ public static class CodexVoiceNative {
 
   [DllImport("user32.dll", SetLastError = true)]
   private static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+  [DllImport("user32.dll")]
+  private static extern short GetAsyncKeyState(int virtualKey);
+  private static readonly object InputGate = new object();
+  private static bool InputUnconfirmed;
+  private static bool InputNotInserted;
+  // Survives every command in this helper, including Enter/click/release.
+  public static bool InputOutcomeUnknown { get { lock (InputGate) { return InputUnconfirmed; } } }
+  public static bool LastInputRejectedBeforeSend { get { lock (InputGate) { return InputNotInserted && !InputUnconfirmed; } } }
 
   [DllImport("user32.dll")]
   private static extern bool SetForegroundWindow(IntPtr window);
@@ -992,16 +1182,89 @@ public static class CodexVoiceNative {
     };
   }
 
+  // A token describes only an event identity, never the user text or target.
+  private static ulong InputToken(INPUT input) {
+    if (input.type == INPUT_MOUSE) {
+      if (input.data.mouse.flags != MOUSEEVENTF_LEFTDOWN && input.data.mouse.flags != MOUSEEVENTF_LEFTUP)
+        throw new InvalidOperationException("Unsupported mouse input; nothing inserted");
+      return 2UL << 32;
+    }
+    if (input.type != INPUT_KEYBOARD || (input.data.keyboard.flags & ~(KEYEVENTF_KEYUP | KEYEVENTF_UNICODE | 0x0001U)) != 0)
+      throw new InvalidOperationException("Unsupported keyboard input; nothing inserted");
+    if ((input.data.keyboard.flags & KEYEVENTF_UNICODE) != 0) {
+      if (input.data.keyboard.virtualKey != 0) throw new InvalidOperationException("Invalid Unicode input");
+      return (1UL << 32) | input.data.keyboard.scanCode;
+    }
+    if (input.data.keyboard.virtualKey == 0 || input.data.keyboard.virtualKey > 255 || input.data.keyboard.scanCode != 0)
+      throw new InvalidOperationException("Invalid virtual-key input");
+    return ((ulong)(input.data.keyboard.flags & 0x0001U) << 24) | input.data.keyboard.virtualKey;
+  }
+
+  private static bool InputIsUp(INPUT input) {
+    return input.type == INPUT_MOUSE ? input.data.mouse.flags == MOUSEEVENTF_LEFTUP
+      : (input.data.keyboard.flags & KEYEVENTF_KEYUP) != 0;
+  }
+
+  private static INPUT InputRelease(INPUT input) {
+    if (input.type == INPUT_MOUSE) input.data.mouse.flags = MOUSEEVENTF_LEFTUP;
+    else input.data.keyboard.flags |= KEYEVENTF_KEYUP; // retains Unicode scan/extended identity
+    return input;
+  }
+
   private static void Send(List<INPUT> inputs) {
     if (inputs.Count == 0) return;
-    INPUT[] values = inputs.ToArray();
-    uint sent = SendInput((uint)values.Length, values, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != values.Length) {
+    lock (InputGate) {
+      if (InputUnconfirmed) throw new InvalidOperationException("Previous native input is unknown; no further injection");
+      InputNotInserted = true;
+      if (inputs.Count > 131080) throw new InvalidOperationException("Native input budget exceeded");
+      var pressed = new HashSet<ulong>();
+      var watched = new HashSet<ulong>();
+      foreach (INPUT input in inputs) {
+        ulong token = InputToken(input); watched.Add(token);
+        if (InputIsUp(input)) {
+          if (!pressed.Remove(token)) throw new InvalidOperationException("Unowned key release; nothing inserted");
+        } else if (!pressed.Add(token)) throw new InvalidOperationException("Duplicate key down; nothing inserted");
+      }
+      if (pressed.Count != 0) throw new InvalidOperationException("Unbalanced key input; nothing inserted");
+      foreach (int modifier in new int[] { 0x10, 0x11, 0x12, 0x5b, 0x5c }) {
+        if (GetAsyncKeyState(modifier) < 0) throw new InvalidOperationException("Release held modifiers before native input; nothing inserted");
+      }
+      foreach (ulong token in watched) {
+        if ((token >> 32) == 1) continue; // Unicode packets have no physical key to snapshot.
+        int vk = (token >> 32) == 2 ? 1 : (int)(token & 0xffff);
+        if (GetAsyncKeyState(vk) < 0) throw new InvalidOperationException("Release held input before native input; nothing inserted");
+      }
+      INPUT[] values = inputs.ToArray();
+      uint sent;
+      InputNotInserted = false; // From here, exceptions do not establish zero insertion.
+      try { sent = SendInput((uint)values.Length, values, Marshal.SizeOf(typeof(INPUT))); }
+      catch { InputUnconfirmed = true; throw; }
+      if (sent == values.Length) return; // insertion only, never target action completion
       int error = Marshal.GetLastWin32Error();
-      throw new Win32Exception(
-        error,
-        "Windows rejected Agent voice keyboard input (" + sent + "/" + values.Length + ", win32=" + error + ")"
-      );
+      InputUnconfirmed = true;
+      var outstanding = new List<INPUT>();
+      if (sent <= values.Length) {
+        for (int i = 0; i < (int)sent; i++) {
+          INPUT input = values[i]; ulong token = InputToken(input);
+          if (InputIsUp(input)) {
+            for (int j = outstanding.Count - 1; j >= 0; j--) {
+              if (InputToken(outstanding[j]) == token) { outstanding.RemoveAt(j); break; }
+            }
+          } else outstanding.Add(input);
+        }
+      }
+      int released = 0;
+      // Only release this accepted prefix's outstanding downs. Each release
+      // gets one call; even rejection must not prevent releasing other keys.
+      for (int i = outstanding.Count - 1; i >= 0; i--) {
+        try {
+          INPUT[] up = new INPUT[] { InputRelease(outstanding[i]) };
+          if (SendInput(1, up, Marshal.SizeOf(typeof(INPUT))) == 1) released++;
+        } catch { /* retain Unknown, continue bounded releases; never replay action */ }
+      }
+      throw new Win32Exception(error,
+        "Windows input outcome unknown (inserted " + sent + "/" + values.Length
+        + ", releases " + released + "/" + outstanding.Count + "); stopped without replay");
     }
   }
 
@@ -1036,6 +1299,30 @@ public static class CodexVoiceNative {
 
   public static bool RestoreWindow(IntPtr window) {
     return IsWindow(window) && ShowWindowAsync(window, SW_RESTORE);
+  }
+
+  public static void AppendFocusedText(IntPtr window, int expectedProcessId, string text) {
+    lock (InputGate) {
+      if (InputUnconfirmed) throw new InvalidOperationException("Previous native input is unknown; no further injection");
+      InputNotInserted = true;
+      uint actualProcessId;
+      GetWindowThreadProcessId(window, out actualProcessId);
+      if (actualProcessId != (uint)expectedProcessId || !IsForeground(window))
+        throw new InvalidOperationException("DESKTOP_TASK_TARGET_CHANGED");
+      if (text == null || text.Length == 0 || text.Length > 65536)
+        throw new InvalidOperationException("Invalid native append text; nothing inserted");
+      var inputs = new List<INPUT>(text.Length * 2 + 4);
+      inputs.Add(Key(VK_CONTROL, false));
+      inputs.Add(Key(0x23, false)); // End: collapse selection at document end.
+      inputs.Add(Key(0x23, true));
+      inputs.Add(Key(VK_CONTROL, true));
+      foreach (char value in text) { inputs.Add(Unicode(value, false)); inputs.Add(Unicode(value, true)); }
+      Send(inputs); // existing balanced-input/partial-release/Unknown contract
+      if (!IsForeground(window)) {
+        InputUnconfirmed = true;
+        throw new InvalidOperationException("Native append target changed; result unknown, no replay");
+      }
+    }
   }
 
   public static void ReplaceFocusedText(string text) {
@@ -1117,7 +1404,22 @@ internal interface IWorkBuddyUia {
   IWorkBuddyUiaTreeWalker GetControlViewWalker();
   IWorkBuddyUiaTreeWalker GetContentViewWalker();
   IWorkBuddyUiaTreeWalker GetRawViewWalker();
+  IWorkBuddyUiaCondition GetRawViewCondition();
+  void GetControlViewCondition();
+  void GetContentViewCondition();
+  void CreateCacheRequest();
+  void CreateTrueCondition();
+  void CreateFalseCondition();
+  IWorkBuddyUiaCondition CreatePropertyCondition(int propertyId, [MarshalAs(UnmanagedType.Struct)] object value);
+  IWorkBuddyUiaCondition CreatePropertyConditionEx(int propertyId, [MarshalAs(UnmanagedType.Struct)] object value, int flags);
+  void CreateAndCondition();
+  void CreateAndConditionFromArray();
+  void CreateAndConditionFromNativeArray();
+  IWorkBuddyUiaCondition CreateOrCondition(IWorkBuddyUiaCondition left, IWorkBuddyUiaCondition right);
 }
+
+[ComImport, Guid("352ffba8-0973-437c-a61f-f64cafd81df9"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaCondition {}
 
 [ComImport, Guid("4042c624-389c-4afc-a630-9df854a541fc"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface IWorkBuddyUiaTreeWalker {
@@ -1133,7 +1435,7 @@ internal interface IWorkBuddyUiaElement {
   [return: MarshalAs(UnmanagedType.SafeArray, SafeArraySubType = VarEnum.VT_I4)]
   int[] GetRuntimeId();
   void FindFirst();
-  void FindAll();
+  IWorkBuddyUiaElementArray FindAll(int scope, IWorkBuddyUiaCondition condition);
   void FindFirstBuildCache();
   void FindAllBuildCache();
   void BuildUpdatedCache();
@@ -1160,7 +1462,7 @@ internal interface IWorkBuddyUiaValuePattern {
 [ComImport, Guid("32eba289-3583-42c9-9c59-3b6d9a1e9b6a"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 internal interface IWorkBuddyUiaTextPattern {
   void RangeFromPoint();
-  void RangeFromChild();
+  IWorkBuddyUiaTextRange RangeFromChild(IWorkBuddyUiaElement child);
   void GetSelection();
   void GetVisibleRanges();
   IWorkBuddyUiaTextRange GetDocumentRange();
@@ -1177,9 +1479,37 @@ internal interface IWorkBuddyUiaTextRange {
   [return: MarshalAs(UnmanagedType.Struct)]
   object GetAttributeValue(int attributeId);
   void GetBoundingRectangles();
-  void GetEnclosingElement();
+  IWorkBuddyUiaElement GetEnclosingElement();
   [return: MarshalAs(UnmanagedType.BStr)]
   string GetText(int maxLength);
+  void Move();
+  void MoveEndpointByUnit();
+  void MoveEndpointByRange();
+  void Select();
+  void AddToSelection();
+  void RemoveFromSelection();
+  void ScrollIntoView();
+  IWorkBuddyUiaElementArray GetChildren();
+}
+
+[ComImport, Guid("14314595-b4bc-4055-95f2-58f2e42c9855"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaElementArray {
+  int GetLength();
+  IWorkBuddyUiaElement GetElement(int index);
+}
+
+[ComImport, Guid("828055ad-355b-4435-86d5-3b51c14a9b1b"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+internal interface IWorkBuddyUiaLegacyPattern {
+  void Select(int flags);
+  void DoDefaultAction();
+  void SetValue();
+  int GetCurrentChildId();
+  void GetCurrentName();
+  [return: MarshalAs(UnmanagedType.BStr)]
+  string GetCurrentValue();
+  void GetCurrentDescription();
+  uint GetCurrentRole();
+  uint GetCurrentState();
 }
 
 [ComImport, Guid("fb377fbe-8ea6-46d5-9c73-6499642d3059"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -1209,7 +1539,7 @@ public sealed class WorkBuddyUiaRect {
 public sealed class WorkBuddyUiaValueState {
   private readonly IWorkBuddyUiaValuePattern pattern;
   internal WorkBuddyUiaValueState(IWorkBuddyUiaValuePattern pattern) { this.pattern = pattern; }
-  public string Value { get { return pattern.GetCurrentValue() ?? string.Empty; } }
+  public string Value { get { return pattern.GetCurrentValue(); } }
   public bool IsReadOnly { get { return pattern.GetCurrentIsReadOnly(); } }
 }
 
@@ -1222,14 +1552,39 @@ public sealed class WorkBuddyUiaValuePattern {
 public sealed class WorkBuddyUiaTextRange {
   private readonly IWorkBuddyUiaTextRange range;
   internal WorkBuddyUiaTextRange(IWorkBuddyUiaTextRange range) { this.range = range; }
-  public string GetText(int maxLength) { return range.GetText(maxLength) ?? string.Empty; }
+  public string GetText(int maxLength) { return range.GetText(maxLength); }
   public object GetAttributeValue(object attribute) { return range.GetAttributeValue(WorkBuddyUia.IdOf(attribute)); }
+  public WorkBuddyUiaElement GetEnclosingElement() { return new WorkBuddyUiaElement(range.GetEnclosingElement()); }
+  public WorkBuddyUiaElement[] GetChildren() {
+    IWorkBuddyUiaElementArray children = range.GetChildren();
+    if (children == null) { throw new InvalidOperationException("Composer text children unavailable"); }
+    int count = children.GetLength();
+    if (count < 0 || count > 64) { throw new InvalidOperationException("Composer text child budget exceeded"); }
+    WorkBuddyUiaElement[] result = new WorkBuddyUiaElement[count];
+    for (int i = 0; i < count; i++) { result[i] = new WorkBuddyUiaElement(children.GetElement(i)); }
+    return result;
+  }
 }
 
 public sealed class WorkBuddyUiaTextPattern {
   private readonly IWorkBuddyUiaTextPattern pattern;
   internal WorkBuddyUiaTextPattern(IWorkBuddyUiaTextPattern pattern) { this.pattern = pattern; }
   public WorkBuddyUiaTextRange DocumentRange { get { return new WorkBuddyUiaTextRange(pattern.GetDocumentRange()); } }
+  public WorkBuddyUiaTextRange RangeFromChild(WorkBuddyUiaElement child) { return new WorkBuddyUiaTextRange(pattern.RangeFromChild(child.Native)); }
+}
+
+public sealed class WorkBuddyUiaLegacyState {
+  private readonly IWorkBuddyUiaLegacyPattern pattern;
+  internal WorkBuddyUiaLegacyState(IWorkBuddyUiaLegacyPattern pattern) { this.pattern = pattern; }
+  public string Value { get { return pattern.GetCurrentValue(); } }
+  public uint Role { get { return pattern.GetCurrentRole(); } }
+  public uint State { get { return pattern.GetCurrentState(); } }
+}
+
+public sealed class WorkBuddyUiaLegacyPattern {
+  private readonly IWorkBuddyUiaLegacyPattern pattern;
+  internal WorkBuddyUiaLegacyPattern(IWorkBuddyUiaLegacyPattern pattern) { this.pattern = pattern; }
+  public WorkBuddyUiaLegacyState Current { get { return new WorkBuddyUiaLegacyState(pattern); } }
 }
 
 public sealed class WorkBuddyUiaInvokePattern {
@@ -1251,12 +1606,12 @@ public sealed class WorkBuddyUiaCurrent {
   }
   public int ProcessId { get { return element.Int(30002); } }
   public string Name { get { return element.Text(30005); } }
-  public bool HasKeyboardFocus { get { return element.Flag(30008); } }
-  public bool IsKeyboardFocusable { get { return element.Flag(30009); } }
-  public bool IsEnabled { get { return element.Flag(30010); } }
+  public bool HasKeyboardFocus { get { return element.FocusFlag(); } }
+  public bool IsKeyboardFocusable { get { return element.KeyboardReachable(); } }
+  public bool IsEnabled { get { return element.EnabledFlag(); } }
   public string ClassName { get { return element.Text(30012); } }
   public int NativeWindowHandle { get { return element.Int(30020); } }
-  public bool IsOffscreen { get { return element.Flag(30022); } }
+  public bool IsOffscreen { get { return element.OffscreenFlag(); } }
 }
 
 public sealed class WorkBuddyUiaElement {
@@ -1267,13 +1622,23 @@ public sealed class WorkBuddyUiaElement {
   public int[] GetRuntimeId() {
     try { return element.GetRuntimeId() ?? new int[0]; } catch { return new int[0]; }
   }
-  public void SetFocus() { element.SetFocus(); }
+  public void SetFocus() {
+    try { element.SetFocus(); }
+    catch {
+      uint state;
+      if(!TryLegacyTextState(out state) || (state & 0x100000U)==0) throw;
+      IWorkBuddyUiaLegacyPattern legacy=element.GetCurrentPattern(10018) as IWorkBuddyUiaLegacyPattern;
+      if(legacy==null) throw;
+      legacy.Select(1); // SELFLAG_TAKEFOCUS, never SetValue/keyboard/clipboard
+    }
+  }
   public object GetCurrentPropertyValue(object property) { return Property(WorkBuddyUia.IdOf(property)); }
   public bool TryGetCurrentPattern(object pattern, out object patternObject) {
     patternObject = null;
     int patternId = WorkBuddyUia.IdOf(pattern);
     object raw;
-    try { raw = element.GetCurrentPattern(patternId); } catch { return false; }
+    try { raw = element.GetCurrentPattern(patternId); }
+    catch (Exception e) { WorkBuddyUia.PatternFailure(Marshal.GetHRForException(e)); return false; }
     if (raw == null) { return false; }
     if (patternId == 10002) {
       IWorkBuddyUiaValuePattern value = raw as IWorkBuddyUiaValuePattern;
@@ -1281,14 +1646,50 @@ public sealed class WorkBuddyUiaElement {
     } else if (patternId == 10014) {
       IWorkBuddyUiaTextPattern text = raw as IWorkBuddyUiaTextPattern;
       if (text != null) { patternObject = new WorkBuddyUiaTextPattern(text); }
+    } else if (patternId == 10018) {
+      IWorkBuddyUiaLegacyPattern legacy = raw as IWorkBuddyUiaLegacyPattern;
+      if (legacy != null) { patternObject = new WorkBuddyUiaLegacyPattern(legacy); }
     } else if (patternId == 10000) {
       IWorkBuddyUiaInvokePattern invoke = raw as IWorkBuddyUiaInvokePattern;
       if (invoke != null) { patternObject = new WorkBuddyUiaInvokePattern(invoke); }
     }
+    if(patternObject==null) WorkBuddyUia.PatternInterfaceFailure();
     return patternObject != null;
   }
   internal object Property(int propertyId) {
-    try { return element.GetCurrentPropertyValue(propertyId); } catch { return null; }
+    try { return element.GetCurrentPropertyValue(propertyId); }
+    catch (Exception e) { WorkBuddyUia.PropertyFailure(Marshal.GetHRForException(e)); return null; }
+  }
+  public bool TryLegacyTextState(out uint state) {
+    state=0;
+    object available=Property(30090), role=Property(30095), raw=Property(30096);
+    if (!(available is bool) || !(bool)available ||
+        (!(role is int) && !(role is uint)) || (role is int ? (int)role!=42 : (uint)role!=42) ||
+        (!(raw is int) && !(raw is uint))) return false;
+    try {
+      state=Convert.ToUInt32(raw);
+      // Unavailable/read-only/invisible/offscreen/protected never authorizes input.
+      return (state & 0x20018041U)==0;
+    } catch { return false; }
+  }
+  public bool HasWritableLegacyText() { uint state; return TryLegacyTextState(out state); }
+  internal bool FocusFlag() {
+    if (Flag(30008)) return true;
+    uint state; return TryLegacyTextState(out state) && (state & 4U)!=0;
+  }
+  internal bool KeyboardReachable() {
+    if (Flag(30009) || FocusFlag()) return true;
+    uint state; return TryLegacyTextState(out state) && (state & 0x100000U)!=0;
+  }
+  internal bool EnabledFlag() {
+    object value=Property(30010);
+    if(value is bool) return (bool)value; // explicit disabled cannot be overridden
+    uint state; return TryLegacyTextState(out state);
+  }
+  internal bool OffscreenFlag() {
+    object value=Property(30022);
+    if(value is bool) return (bool)value;
+    uint state; return !TryLegacyTextState(out state); // unknown is not visible
   }
   internal int Int(int propertyId) {
     object value = Property(propertyId);
@@ -1296,6 +1697,7 @@ public sealed class WorkBuddyUiaElement {
   }
   internal bool Flag(int propertyId) {
     object value = Property(propertyId);
+    if (!(value is bool)) WorkBuddyUia.UnknownFlag();
     return value is bool && (bool)value;
   }
   internal string Text(int propertyId) {
@@ -1305,6 +1707,74 @@ public sealed class WorkBuddyUiaElement {
 
 public static class WorkBuddyUia {
   private static IWorkBuddyUia automation;
+  public static int Visited, Discovered, TimeTruncated, NodeTruncated, DepthTruncated;
+  public static int ProviderQueries, ProviderMatches, ProviderTruncated, ProviderFailures;
+  public static int PropertyFailures, PatternFailures, PatternInterfaceFailures, UnknownFlags, LastHResult;
+  public static void ResetDiagnostics() {
+    Visited=Discovered=TimeTruncated=NodeTruncated=DepthTruncated=0;
+    ProviderQueries=ProviderMatches=ProviderTruncated=ProviderFailures=0;
+    PropertyFailures=PatternFailures=PatternInterfaceFailures=UnknownFlags=LastHResult=0;
+  }
+  internal static void PropertyFailure(int code){PropertyFailures++;LastHResult=code;}
+  internal static void PatternFailure(int code){PatternFailures++;LastHResult=code;}
+  internal static void PatternInterfaceFailure(){PatternInterfaceFailures++;}
+  internal static void UnknownFlag(){UnknownFlags++;}
+  public static string DiagnosticSummary() {
+    return "visited="+Visited+",discovered="+Discovered+",timeCut="+TimeTruncated+
+      ",nodeCut="+NodeTruncated+",depthCut="+DepthTruncated+",queries="+ProviderQueries+
+      ",queryMatches="+ProviderMatches+",queryCut="+ProviderTruncated+",queryFailures="+ProviderFailures+
+      ",propertyFailures="+PropertyFailures+",patternFailures="+PatternFailures+
+      ",patternInterfaces="+PatternInterfaceFailures+",unknownFlags="+UnknownFlags+",hr="+LastHResult;
+  }
+
+  // Provider-side query on THIS app window only. Never scan desktop descendants.
+  // Matching alone grants nothing: caller revalidates semantics/owner/writability.
+  public static WorkBuddyUiaElement[] FindEditable(IntPtr window,int budgetMs,int maxMatches) {
+    ProviderQueries++;
+    var clock=System.Diagnostics.Stopwatch.StartNew();
+    try {
+      IWorkBuddyUiaElement root=Automation.ElementFromHandle(window);
+      if(root==null) return new WorkBuddyUiaElement[0];
+      IWorkBuddyUiaCondition edit=Automation.CreatePropertyCondition(30003,50004);
+      IWorkBuddyUiaCondition textbox=Automation.CreatePropertyCondition(30101,"textbox");
+      IWorkBuddyUiaCondition legacy=Automation.CreatePropertyCondition(30095,42);
+      IWorkBuddyUiaCondition prose=Automation.CreatePropertyConditionEx(30012,"ProseMirror",2);
+      IWorkBuddyUiaCondition tiptap=Automation.CreatePropertyConditionEx(30012,"tiptap",2);
+      IWorkBuddyUiaCondition condition=Automation.CreateOrCondition(
+        Automation.CreateOrCondition(Automation.CreateOrCondition(edit,textbox),legacy),
+        Automation.CreateOrCondition(prose,tiptap));
+      IWorkBuddyUiaElementArray found=root.FindAll(4,condition); // TreeScope_Descendants, not desktop
+      int count=found==null?0:found.GetLength();
+      ProviderMatches+=Math.Max(0,count);
+      if(count<0 || count>maxMatches || clock.ElapsedMilliseconds>budgetMs) {
+        ProviderTruncated++;return new WorkBuddyUiaElement[0];
+      }
+      var result=new List<WorkBuddyUiaElement>();
+      for(int i=0;i<count;i++) {
+        if(clock.ElapsedMilliseconds>=budgetMs){ProviderTruncated++;return new WorkBuddyUiaElement[0];}
+        IWorkBuddyUiaElement element=found.GetElement(i);
+        if(element!=null)result.Add(new WorkBuddyUiaElement(element));
+      }
+      if(clock.ElapsedMilliseconds>budgetMs){ProviderTruncated++;return new WorkBuddyUiaElement[0];}
+      return result.ToArray();
+    } catch(Exception e){ProviderFailures++;LastHResult=Marshal.GetHRForException(e);return new WorkBuddyUiaElement[0];}
+  }
+
+  public static WorkBuddyUiaElement[] FocusedAncestors(IntPtr window) {
+    var result=new List<WorkBuddyUiaElement>();
+    try {
+      IWorkBuddyUiaElement current=Automation.GetFocusedElement();
+      IWorkBuddyUiaTreeWalker walker=Automation.GetRawViewWalker();
+      for(int depth=0;depth<12&&current!=null;depth++) {
+        var wrapped=new WorkBuddyUiaElement(current);
+        if(!IsOwnedBy(window,wrapped)) break;
+        result.Add(wrapped);
+        if((long)HandleOf(current)==window.ToInt64())break;
+        current=walker.GetParentElement(current);
+      }
+    } catch(Exception e){PropertyFailure(Marshal.GetHRForException(e));}
+    return result.ToArray();
+  }
 
   [DllImport("user32.dll")]
   private static extern bool IsChild(IntPtr parent, IntPtr child);
@@ -1380,19 +1850,21 @@ public static class WorkBuddyUia {
     int discovered = 1;
     while (pending.Count > 0 && clock.ElapsedMilliseconds < budgetMs) {
       KeyValuePair<IWorkBuddyUiaElement, int> node = pending.Dequeue();
+      Visited++;
       if (node.Value > 0) {
         int typeId = 0;
         try {
           object type = node.Key.GetCurrentPropertyValue(30003);
           if (type is int) { typeId = (int)type; }
         } catch {}
-        // Edit, Button, Group, Custom, Document, Pane.
+        // Edit, Button, Group, Custom, Document, Pane, Text (conversation header).
         if (typeId == 50004 || typeId == 50000 || typeId == 50026 ||
-            typeId == 50025 || typeId == 50030 || typeId == 50033) {
+            typeId == 50025 || typeId == 50030 || typeId == 50033 || typeId == 50020) {
           matches.Add(new WorkBuddyUiaElement(node.Key));
         }
       }
-      if (node.Value >= 48 || discovered >= maxNodes) { continue; }
+      if(node.Value>=48){DepthTruncated++;continue;}
+      if(discovered>=maxNodes){NodeTruncated++;continue;}
       try {
         IWorkBuddyUiaElement child = walker.GetFirstChildElement(node.Key);
         while (child != null && discovered < maxNodes && clock.ElapsedMilliseconds < budgetMs) {
@@ -1400,8 +1872,14 @@ public static class WorkBuddyUia {
           discovered += 1;
           child = walker.GetNextSiblingElement(child);
         }
+        if(child!=null) {
+          if(discovered>=maxNodes)NodeTruncated++;
+          if(clock.ElapsedMilliseconds>=budgetMs)TimeTruncated++;
+        }
       } catch {}
     }
+    Discovered+=discovered;
+    if(pending.Count>0 && clock.ElapsedMilliseconds>=budgetMs)TimeTruncated++;
     return matches.ToArray();
   }
 
@@ -2326,7 +2804,7 @@ function Open-CodexSessionById(
 }
 
 function Normalize-ComposerText([string]$text) {
-  return $text.Replace("`r`n", "`n")
+  return $text.Replace("`r`n", "`n").Replace("`r", "`n")
 }
 
 function Join-VoiceDraft([string]$base, [string]$transcript) {
@@ -2336,26 +2814,388 @@ function Join-VoiceDraft([string]$base, [string]$transcript) {
   return ($base + ' ' + $text)
 }
 
-function Get-ComposerText($element) {
+function Get-ComposerProperty($element, [int]$id) {
+  # Native COM accepts a real numeric property ID. Managed LookupById can be
+  # null for identifiers not registered by that managed assembly/provider.
+  if ($element -is [WorkBuddyUiaElement]) { return $element.GetCurrentPropertyValue($id) }
+  $property = [System.Windows.Automation.AutomationProperty]::LookupById($id)
+  if ($null -eq $property) { return $null }
+  return $element.GetCurrentPropertyValue($property)
+}
+
+# UIA3 LegacyIAccessible has no managed type in Windows PowerShell 5.1.
+# Native Chromium elements accept the SDK ID directly; managed clients may
+# only use identifiers actually registered by their loaded UIA assembly.
+function Get-ComposerPattern($element, [int]$id) {
+  $identifier = if ($element -is [WorkBuddyUiaElement]) { $id }
+    else { [System.Windows.Automation.AutomationPattern]::LookupById($id) }
+  if ($null -eq $identifier) { return $null }
   $pattern = $null
-  $value = ''
+  if ($element.TryGetCurrentPattern($identifier, [ref]$pattern)) { return $pattern }
+  return $null
+}
+
+function Test-ComposerEditor($element) {
+  # Names/help/labels describe controls; none is evidence of an editor value.
+  # In particular, a readable Document/Group ancestor of a textbox is not the
+  # textbox. Require native Edit semantics or an explicit rich-textbox surface.
+  $current = $element.Current
+  # Password surfaces must never be admitted as a voice composer.
+  $password = (Get-ComposerProperty $element 30019)
+  if ($password -is [bool] -and $password) { return $false }
+  if (-not $current.IsEnabled -or $current.IsOffscreen -or
+      -not $current.IsKeyboardFocusable) { return $false }
+  $type = $current.ControlType.Id
+  if ($element -is [WorkBuddyUiaElement] -and $element.HasWritableLegacyText()) { return $true }
+  if ($type -eq [System.Windows.Automation.ControlType]::Edit.Id) { return $true }
+  if ($type -ne [System.Windows.Automation.ControlType]::Document.Id -and
+      $type -ne [System.Windows.Automation.ControlType]::Group.Id -and
+      $type -ne [System.Windows.Automation.ControlType]::Custom.Id) { return $false }
+  $role = ''
+  try { $role = [string](Get-ComposerProperty $element 30101) } catch {}
+  return $role -ceq 'textbox' -or
+    ([string]$current.ClassName) -match '(?i)(^|\s)(ProseMirror|tiptap)(\s|$)'
+}
+
+function Assert-ComposerEditableRange($range) {
+  $readOnly = $range.GetAttributeValue([System.Windows.Automation.TextPattern]::IsReadOnlyAttribute)
+  $hidden = $range.GetAttributeValue([System.Windows.Automation.TextPattern]::IsHiddenAttribute)
+  # MixedAttributeValue/NotSupported/null are not false. Do not reconstruct a
+  # draft by deleting arbitrary read-only spans (which may be user attachments,
+  # mentions or code). Without an authoritative value such a draft is unknown.
+  if ($readOnly -isnot [bool] -or $readOnly -or $hidden -isnot [bool] -or $hidden) {
+    throw 'Visible composer text includes read-only, hidden or unknown content; no draft was changed'
+  }
+}
+
+function Get-ComposerValuePropertySnapshot($element) {
+  # Some UIA bridges expose the typed Value properties even when the managed
+  # pattern object cannot be marshalled. Never fall back to displayed text in
+  # that case. This is a read snapshot, not an alternate injection mechanism.
+  $availableProperty = 30043
+  $valueProperty = 30045
+  $readOnlyProperty = 30046
+  $available = (Get-ComposerProperty $element $availableProperty)
+  if ($available -isnot [bool] -or -not $available) { return $null }
+  $readOnly = (Get-ComposerProperty $element $readOnlyProperty)
+  $value = (Get-ComposerProperty $element $valueProperty)
+  if ($readOnly -isnot [bool] -or $readOnly -or $value -isnot [string] -or $value.Length -gt 65536) {
+    throw 'Visible composer Value properties are not writable or are unknown'
+  }
+  $againReadOnly = (Get-ComposerProperty $element $readOnlyProperty)
+  $againAvailable = (Get-ComposerProperty $element $availableProperty)
+  if ($againReadOnly -isnot [bool] -or $againReadOnly -or
+      $againAvailable -isnot [bool] -or -not $againAvailable -or
+      (Get-ComposerProperty $element $valueProperty) -cne $value) {
+    throw 'Visible composer Value properties changed while its draft was read'
+  }
+  return [pscustomobject]@{
+    PSTypeName = 'Hachimi.ComposerValueSnapshot'
+    Current = [pscustomobject]@{ IsReadOnly = $false; Value = $value }
+  }
+}
+
+function Assert-ComposerFallbackText($element, [string]$text) {
+  if ([string]::IsNullOrEmpty($text)) { return }
+  # UIA HelpText is Chromium's placeholder channel. Name can also be derived
+  # from a placeholder/title. Neither is an editable value. A fallback that
+  # equals either is ambiguous: refuse it, do not delete a guessed hint or
+  # assume an empty draft. Real ValuePattern/Value properties bypass this test.
+  # Ignore only provider-added terminal newlines for this *comparison*; never
+  # trim or remove a prefix/suffix from a real user's value.
+  $comparison = (Normalize-ComposerText $text).TrimEnd([char[]]"`n")
+  if ([string]::IsNullOrEmpty($comparison)) { return }
+  foreach ($id in @(30005, 30013)) {
+    $hint = $element.GetCurrentPropertyValue([System.Windows.Automation.AutomationProperty]::LookupById($id))
+    if ($hint -is [string] -and -not [string]::IsNullOrEmpty($hint) -and
+        (Normalize-ComposerText $hint).TrimEnd([char[]]"`n") -ceq $comparison) {
+      throw 'COMPOSER_DRAFT_SEMANTICS_UNKNOWN: displayed prompt metadata is not an editable draft; no input was sent'
+    }
+  }
+}
+
+function Read-ComposerTextPattern($element, $pattern) {
+  $range = $pattern.DocumentRange
+  $enclosing = $range.GetEnclosingElement()
+  $editorId = @($element.GetRuntimeId()) -join '.'
+  $rangeId = @($enclosing.GetRuntimeId()) -join '.'
+  if (-not $editorId -or $rangeId -cne $editorId) {
+    throw 'Visible composer text range belongs to another container'
+  }
+  Assert-ComposerEditableRange $range
+  $children = @($range.GetChildren())
+  if ($children.Count -gt 64) { throw 'Visible composer text child budget exceeded' }
+  foreach ($child in $children) {
+    # GetText includes embedded-object text. Check its actual child range,
+    # never the Name/HelpText, foreground color, or a list of prompt strings.
+    if ($child.Current.ControlType.Id -eq [System.Windows.Automation.ControlType]::Button.Id) {
+      throw 'Visible composer text includes an accessory control; no draft was changed'
+    }
+    Assert-ComposerEditableRange ($pattern.RangeFromChild($child))
+  }
+  $text = $range.GetText(65537)
+  if ($text -isnot [string] -or $text.Length -gt 65536) {
+    throw 'Visible composer text is unavailable or exceeds the read budget'
+  }
+  Assert-ComposerEditableRange $range
+  if ($range.GetText(65537) -cne $text) { throw 'Visible composer changed while its draft was read' }
+  Assert-ComposerFallbackText $element $text
+  return Normalize-ComposerText $text
+}
+
+function Get-ComposerText($element) {
+  if (-not (Test-ComposerEditor $element)) { throw 'Visible target is not an editable composer' }
+  $pattern = $null
   if ($element.TryGetCurrentPattern(
       [System.Windows.Automation.ValuePattern]::Pattern,
       [ref]$pattern
   )) {
-    $value = Normalize-ComposerText ([string]$pattern.Current.Value)
-  } elseif ($element.TryGetCurrentPattern(
+    $current = $pattern.Current
+    if ($current.IsReadOnly -isnot [bool] -or $current.IsReadOnly -or $current.Value -isnot [string]) {
+      throw 'Visible composer value is not writable or is unknown'
+    }
+    if ($current.Value.Length -gt 65536) { throw 'Visible composer value exceeds the read budget' }
+    $again = $pattern.Current
+    if ($again.IsReadOnly -isnot [bool] -or $again.IsReadOnly -or
+        $again.Value -isnot [string] -or $again.Value -cne $current.Value) {
+      throw 'Visible composer value changed while its draft was read'
+    }
+    # A real value wins even when empty, equal to a prompt, or beginning with
+    # U+FEFF. Never replace it with a display label or trim real user content.
+    return @($pattern, (Normalize-ComposerText $current.Value))
+  }
+  $valueSnapshot = Get-ComposerValuePropertySnapshot $element
+  if ($null -ne $valueSnapshot) {
+    return @($valueSnapshot, (Normalize-ComposerText $valueSnapshot.Current.Value))
+  }
+  $pattern = Get-ComposerPattern $element 10018 # UIA_LegacyIAccessiblePatternId
+  if ($null -ne $pattern) {
+    $current = $pattern.Current
+    # MSAA ROLE_SYSTEM_TEXT + no READONLY/UNAVAILABLE state. Legacy Name/Help
+    # and Value on generic document/accessory roles are not draft authorities.
+    if ($current.Role -eq 42) {
+      if (($current.State -isnot [int] -and $current.State -isnot [uint32]) -or
+          ($current.State -band 0x41) -ne 0 -or $current.Value -isnot [string]) {
+        throw 'Visible composer legacy editor value is not writable or is unknown'
+      }
+      if ($current.Value.Length -gt 65536) { throw 'Visible composer legacy value exceeds the read budget' }
+      Assert-ComposerFallbackText $element $current.Value
+      # A legacy value may include CSS-generated/read-only hint children. When
+      # TextPattern exists, require its actual editable range to agree instead
+      # of trusting the legacy role/state alone. Never reconstruct mixed text.
+      $textPattern = $null
+      if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$textPattern)) {
+        $editable = Read-ComposerTextPattern $element $textPattern
+        if ($editable -cne (Normalize-ComposerText $current.Value)) {
+          throw 'Visible composer legacy and editable text disagree; no draft was changed'
+        }
+      }
+      return @($pattern, (Normalize-ComposerText $current.Value))
+    }
+  }
+  if ($element.TryGetCurrentPattern(
       [System.Windows.Automation.TextPattern]::Pattern,
       [ref]$pattern
   )) {
-    $value = Normalize-ComposerText ([string]$pattern.DocumentRange.GetText(-1))
-  } else {
-    throw 'Visible composer exposes neither ValuePattern nor TextPattern'
+    return @($pattern, (Read-ComposerTextPattern $element $pattern))
   }
-  $value = $value.TrimStart([char]0xFEFF)
-  if ($value.Trim() -eq '今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令') { $value = '' }
-  if ($value -match '^(?i:随心输入|输入消息|message codex|ask anything|write your prompt to claude|type / for commands|write a message\W*|send a message\W*)$') { $value = '' }
-  return @($pattern, $value)
+  $legacySnapshot = Get-NativeLegacyComposerSnapshot $element $true
+  if ($null -ne $legacySnapshot) { return @($legacySnapshot, (Normalize-ComposerText $legacySnapshot.Current.Value)) }
+  throw 'Visible composer exposes no unambiguous editable value'
+}
+
+function Get-NativeLegacyComposerSnapshot($element, [bool]$readValue = $false) {
+  if ($element -isnot [WorkBuddyUiaElement] -or -not $element.HasWritableLegacyText()) { return $null }
+  $role = $element.GetCurrentPropertyValue(30095)
+  $state = $element.GetCurrentPropertyValue(30096)
+  $current = @{ Role=$role; State=$state }
+  if ($readValue) {
+    $value = $element.GetCurrentPropertyValue(30093)
+    if ($value -isnot [string] -or $value.Length -gt 65536 -or
+        $element.GetCurrentPropertyValue(30093) -cne $value -or -not $element.HasWritableLegacyText()) { return $null }
+    $current.Value = $value
+  }
+  return [pscustomobject]@{ PSTypeName='Hachimi.ComposerLegacySnapshot'; Current=[pscustomobject]$current }
+}
+
+function Get-NativeComposerInputPattern($element) {
+  if (-not (Test-ComposerEditor $element)) { throw 'Visible target is not an editable composer' }
+  foreach ($kind in @(10002, 10018, 10014)) { # Value, LegacyIAccessible, Text
+    $pattern = Get-ComposerPattern $element $kind
+    if ($null -ne $pattern -and (Test-WorkBuddyWritablePattern $pattern)) { return $pattern }
+  }
+  # A provider can expose typed Value capability properties without a
+  # marshalable pattern. Read only capability/read-only flags, never Value.
+  $availableProperty = 30043
+  $readOnlyProperty = 30046
+  $available = (Get-ComposerProperty $element $availableProperty)
+  $readOnly = (Get-ComposerProperty $element $readOnlyProperty)
+  $againAvailable = (Get-ComposerProperty $element $availableProperty)
+  $againReadOnly = (Get-ComposerProperty $element $readOnlyProperty)
+  if ($available -is [bool] -and $available -and $readOnly -is [bool] -and -not $readOnly -and
+      $againAvailable -is [bool] -and $againAvailable -and $againReadOnly -is [bool] -and -not $againReadOnly) {
+    return [pscustomobject]@{
+      PSTypeName = 'Hachimi.ComposerInputCapability'
+      Current = [pscustomobject]@{ IsReadOnly = $false }
+    }
+  }
+  $legacyCapability = Get-NativeLegacyComposerSnapshot $element
+  if ($null -ne $legacyCapability) { return $legacyCapability }
+  throw 'Visible composer has no confirmed writable native input surface'
+}
+
+function Get-NativeVoiceConversationAnchor($root, [string]$agent) {
+  # Optional witness only: a real selected navigation item paired with the
+  # current content title. Incidental header/status texts are never identity.
+  $titles = @((Get-TaskWindowIdentity $root $agent).Split([char]31) | ForEach-Object { Normalize-Label $_ })
+  $elements = if ($root -is [WorkBuddyUiaElement]) {
+    @([WorkBuddyUia]::FindBounded([IntPtr]$root.Current.NativeWindowHandle, $true, 400, 3500))
+  } else { @(Find-BoundedComposerElements $root $true 400) }
+  $selected = @{}; $rect = $root.Current.BoundingRectangle
+  foreach ($element in $elements) {
+    try {
+      $type = $element.Current.ControlType.Id
+      if ($type -ne [System.Windows.Automation.ControlType]::ListItem.Id -and
+          $type -ne [System.Windows.Automation.ControlType]::TreeItem.Id) { continue }
+      if ($element.Current.IsOffscreen -or -not $element.Current.IsEnabled -or
+          -not (Test-ComposerElementOwner $root $element)) { continue }
+      $r = $element.Current.BoundingRectangle
+      if (-not (Test-FiniteWindowRectangle $r) -or $r.Left -lt $rect.Left -or
+          $r.Right -gt ($rect.Left + [Math]::Min(420, $rect.Width * 0.45))) { continue }
+      $available = (Get-ComposerProperty $element 30036)
+      $isSelected = (Get-ComposerProperty $element 30079)
+      if ($available -isnot [bool] -or -not $available -or $isSelected -isnot [bool] -or -not $isSelected) { continue }
+      $name = Normalize-Label ([string]$element.Current.Name)
+      if ($name.Length -lt 2 -or @('chatgpt','codex','workbuddy','deepseek harness','claude') -contains $name.ToLowerInvariant()) { continue }
+      if (-not @($titles | Where-Object { $_ -ceq $name }).Count) { continue }
+      $id = Get-ElementRuntimeId $element
+      if ($id) { $selected[$id] = @{ Element=$element; RuntimeId=$id; Name=$name } }
+    } catch {}
+  }
+  if ($selected.Count -ne 1) { return $null }
+  return @($selected.Values)[0]
+}
+
+function Assert-NativeVoiceConversation($state, $root) {
+  if (-not $state.CurrentVisible) { return } # Get-BoundComposerRoot already checks the bound session.
+  $anchor = $state.NativeVoiceAnchor
+  if ($null -eq $anchor) { throw 'Visible conversation identity is unavailable; no submit or editor replacement was attempted; draft preserved' }
+  $element = $anchor.Element
+  $selected = (Get-ComposerProperty $element 30079)
+  if ($selected -isnot [bool] -or -not $selected -or $element.Current.IsOffscreen -or
+      -not $element.Current.IsEnabled -or -not (Test-ComposerElementOwner $root $element) -or
+      (Get-ElementRuntimeId $element) -cne $anchor.RuntimeId -or
+      (Normalize-Label ([string]$element.Current.Name)) -cne $anchor.Name) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+}
+
+function Test-NativeVoiceEditorIdentity($state) {
+  try {
+    $element = $state.Composer
+    $id = Get-ElementRuntimeId $element
+    return -not [string]::IsNullOrEmpty($id) -and $id -ceq $state.ComposerRuntimeId -and
+      (Test-ComposerElementOwner $state.Root $element) -and (Test-ComposerEditor $element)
+  } catch { return $false }
+}
+
+function Assert-NativeVoiceComposer($state) {
+  $root = Get-BoundComposerRoot $state
+  if (-not (Test-NativeVoiceEditorIdentity $state)) { throw 'Native voice editor needs reacquisition' }
+  if ($null -ne $state.NativeVoiceAnchor) { Assert-NativeVoiceConversation $state $root }
+  $state.Pattern = Get-NativeComposerInputPattern $state.Composer
+}
+
+function Get-NativeVoiceValueHash([string]$value) {
+  $hasher = [System.Security.Cryptography.SHA256]::Create()
+  try { return [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($value))).Replace('-', '').ToLowerInvariant() }
+  finally { $hasher.Dispose() }
+}
+
+function Read-NativeVoiceOwnedDraft($state, [int]$budgetMs = 900) {
+  $deadline = (Get-MonotonicMilliseconds) + $budgetMs
+  $previous = $null; $previousEditor = ''
+  do {
+    try {
+      [void](Get-BoundComposerRoot $state)
+      if (-not (Test-NativeVoiceEditorIdentity $state)) { Reacquire-BoundComposer $state $null 150 }
+      Assert-NativeVoiceComposer $state
+      if (-not $state.Composer.Current.HasKeyboardFocus) { return $false }
+      $value = [string](Get-ComposerText $state.Composer)[1]
+      # Corroborate this segment in the actual provider readback only. A
+      # provider-added terminal paragraph is allowed for comparison, not removed
+      # from the stored full snapshot. This value is NEVER pasted or rewritten.
+      $matches = $value.EndsWith($state.NativeVoiceText, [StringComparison]::Ordinal) -or
+        $value.EndsWith(($state.NativeVoiceText + "`n"), [StringComparison]::Ordinal)
+      $editor = Get-ElementRuntimeId $state.Composer
+      if ($matches -and $null -ne $previous -and $value -ceq $previous -and $editor -ceq $previousEditor) {
+        [void](Get-BoundComposerRoot $state)
+        $state.NativeVoiceOwnedValue = $value
+        $state.NativeVoiceOwnedHash = Get-NativeVoiceValueHash $value
+        $state.NativeVoiceOwnedRuntimeId = $editor
+        return $true
+      }
+      $previous = if ($matches) { $value } else { $null }; $previousEditor = $editor
+    } catch { $previous = $null }
+    Start-Sleep -Milliseconds 40
+  } while ((Get-MonotonicMilliseconds) -lt $deadline)
+  return $false
+}
+
+function Assert-NativeVoiceOwnedDraft($state, [bool]$allowReacquire = $false) {
+  $root = Get-BoundComposerRoot $state
+  if (-not (Test-NativeVoiceEditorIdentity $state)) {
+    if (-not $allowReacquire) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+    Reacquire-BoundComposer $state $null 150 # positive conversation witness required
+  }
+  Assert-NativeVoiceComposer $state
+  if ($state.ComposerRuntimeId -cne $state.NativeVoiceOwnedRuntimeId) {
+    if (-not $allowReacquire) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+    Assert-NativeVoiceConversation $state $root
+  }
+  if (-not $state.Composer.Current.HasKeyboardFocus) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  $focused = if ($state.NativeUia) { [WorkBuddyUia]::FocusedElement() }
+    else { [System.Windows.Automation.AutomationElement]::FocusedElement }
+  if ($null -eq $focused -or (Get-ElementRuntimeId $focused) -cne $state.ComposerRuntimeId -or
+      -not (Test-ComposerElementOwner $state.Root $focused)) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  $actual = [string](Get-ComposerText $state.Composer)[1]
+  if ([string]::IsNullOrEmpty($state.NativeVoiceOwnedHash) -or
+      $actual -cne $state.NativeVoiceOwnedValue -or
+      (Get-NativeVoiceValueHash $actual) -cne $state.NativeVoiceOwnedHash) {
+    throw 'Owned voice draft changed or is unreadable; no submit was attempted; current draft preserved'
+  }
+  [void](Get-BoundComposerRoot $state)
+  $state.NativeVoiceOwnedRuntimeId = $state.ComposerRuntimeId
+}
+
+function Append-ComposerVoiceText($state, [string]$text) {
+  $text = Normalize-ComposerText $text
+  if ([string]::IsNullOrEmpty($text)) { throw 'No final voice text to append' }
+  if ($state.NativeVoiceWritten) {
+    if ($text -ceq $state.NativeVoiceText) { return } # exact duplicate: zero wire/input
+    throw 'COMPOSER_WRITE_ACK_UNKNOWN: A different final segment followed an appended segment; no rewrite or replay'
+  }
+  if ($state.NativeVoiceAttempted) { throw 'COMPOSER_WRITE_ACK_UNKNOWN: This segment was already attempted; no replay' }
+  # Retain the exact admitted editor while it remains valid. No dynamic header
+  # comparison or unconditional whole-tree rebind can reject a first utterance.
+  if (-not (Test-NativeVoiceEditorIdentity $state)) { Reacquire-BoundComposer $state $null 400 }
+  Assert-NativeVoiceComposer $state
+  if ($state.CurrentVisible -and $null -eq $state.NativeVoiceAnchor -and -not $state.Composer.Current.HasKeyboardFocus) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  Focus-Composer $state
+  Assert-NativeVoiceComposer $state
+  [void](Get-BoundComposerRoot $state)
+  $state.NativeVoiceText = $text
+  $state.NativeVoiceAttempted = $true
+  $state.WriteAttempted = $true
+  try {
+    [CodexVoiceNative]::AppendFocusedText([IntPtr]$state.WindowHandle, [int]$state.ProcessId, $text)
+    if (-not (Read-NativeVoiceOwnedDraft $state)) {
+      throw 'COMPOSER_WRITE_ACK_UNKNOWN: Native append was accepted but its owned readback could not be proven; no replay'
+    }
+    $state.NativeVoiceWritten = $true
+    $state.WriteAttempted = $false
+  } catch {
+    if ([CodexVoiceNative]::LastInputRejectedBeforeSend) { $state.WriteAttempted = $false; throw }
+    throw 'COMPOSER_WRITE_ACK_UNKNOWN: Native append may be partial; no replay. Existing draft was not replaced.'
+  }
 }
 
 function Test-AllowedComposerValue([string]$value, [string[]]$allowedValues) {
@@ -2452,6 +3292,7 @@ function Find-BoundedComposerElements($root, [bool]$rawView = $false, [int]$budg
           $typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Custom.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Document.Id -or
+          $typeId -eq [System.Windows.Automation.ControlType]::Text.Id -or
           $typeId -eq [System.Windows.Automation.ControlType]::Pane.Id) {
         Add-UniqueComposerElement $element $elements $seen
       }
@@ -2474,9 +3315,26 @@ function Find-BoundedComposerElements($root, [bool]$rawView = $false, [int]$budg
 
 function Test-WorkBuddyWritablePattern($pattern) {
   try {
+    if ($pattern.PSObject.TypeNames -contains 'Hachimi.ComposerLegacySnapshot') {
+      return $pattern.Current.Role -eq 42 -and
+        ($pattern.Current.State -is [int] -or $pattern.Current.State -is [uint32]) -and
+        ($pattern.Current.State -band 0x20018041) -eq 0
+    }
+    if ($pattern.PSObject.TypeNames -contains 'Hachimi.ComposerInputCapability') {
+      return $pattern.Current.IsReadOnly -is [bool] -and -not $pattern.Current.IsReadOnly
+    }
+    if ($pattern.PSObject.TypeNames -contains 'Hachimi.ComposerValueSnapshot') {
+      return $pattern.Current.IsReadOnly -is [bool] -and -not $pattern.Current.IsReadOnly -and
+        $pattern.Current.Value -is [string]
+    }
     if ($pattern -is [System.Windows.Automation.ValuePattern] -or
         $pattern -is [WorkBuddyUiaValuePattern]) {
-      return -not $pattern.Current.IsReadOnly
+      return $pattern.Current.IsReadOnly -is [bool] -and -not $pattern.Current.IsReadOnly
+    }
+    if ($pattern -is [WorkBuddyUiaLegacyPattern]) {
+      $current = $pattern.Current
+      return $current.Role -eq 42 -and
+        ($current.State -is [int] -or $current.State -is [uint32]) -and ($current.State -band 0x41) -eq 0
     }
     if ($pattern -is [System.Windows.Automation.TextPattern] -or
         $pattern -is [WorkBuddyUiaTextPattern]) {
@@ -2496,6 +3354,22 @@ function Test-WorkBuddyElementOwner($root, $element) {
   return [WorkBuddyUia]::IsOwnedBy([IntPtr]$root.Current.NativeWindowHandle, $element)
 }
 
+function Test-ComposerElementOwner($root, $element) {
+  if ($element -is [WorkBuddyUiaElement]) { return Test-WorkBuddyElementOwner $root $element }
+  $rootId = Get-ElementRuntimeId $root
+  if (-not $rootId) { return $false }
+  $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+  try {
+    for ($depth = 0; $depth -lt 64 -and $null -ne $element; $depth += 1) {
+      if ((Get-ElementRuntimeId $element) -ceq $rootId) { return $true }
+      $element = $walker.GetParent($element)
+    }
+  } catch {}
+  return $false
+}
+
+function Record-ComposerReject([string]$stage) { $script:ComposerRejects[$stage] += 1 }
+
 function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [bool]$workbuddy = $false) {
   $rootRect = $root.Current.BoundingRectangle
   if (-not (Test-FiniteWindowRectangle $rootRect)) {
@@ -2507,43 +3381,43 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [boo
   $writableCount = 0
   foreach ($element in @($elements)) {
     try { $current = $element.Current } catch { continue }
-    if (-not $current.IsEnabled -or $current.IsOffscreen -or
-        -not $current.IsKeyboardFocusable) { continue }
+    if (-not $current.IsEnabled) { Record-ComposerReject 'disabled';continue }
+    if ($current.IsOffscreen) { Record-ComposerReject 'offscreen';continue }
+    if (-not $current.IsKeyboardFocusable) { Record-ComposerReject 'focusable';continue }
+    if (-not (Test-ComposerElementOwner $root $element)) { Record-ComposerReject 'owner';continue }
     $rect = $current.BoundingRectangle
-    if (-not (Test-FiniteWindowRectangle $rect)) { continue }
-    if ($rect.Width -lt 240 -or $rect.Height -lt 22) { continue }
-    if ($rect.Bottom -lt ($rootRect.Top + ($rootRect.Height * 0.40))) { continue }
+    if (-not (Test-FiniteWindowRectangle $rect) -or $rect.Width -lt 240 -or $rect.Height -lt 22 -or
+        $rect.Bottom -lt ($rootRect.Top + ($rootRect.Height * 0.40))) { Record-ComposerReject 'geometry';continue }
 
     $className = [string]$current.ClassName
     $name = Normalize-Label ([string]$current.Name)
     $typeId = $current.ControlType.Id
     $classHint = $className -match '(?i)(^|\s)(ProseMirror|tiptap)(\s|$)'
     $nameHint = $name -match '(?i)prompt|message|ask|write|输入|消息|提问'
-    $documentHint = $false
+    $ariaRole = ''
+    try { $ariaRole = [string](Get-ComposerProperty $element 30101) } catch {}
+    if ($ariaRole -match '^(?i:searchbox)$') { Record-ComposerReject 'search';continue }
+    $legacyText = $element -is [WorkBuddyUiaElement] -and $element.HasWritableLegacyText()
+    $documentHint = $typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and
+      ($classHint -or $ariaRole -ceq 'textbox' -or $legacyText)
+    if ($typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and -not $documentHint) { Record-ComposerReject 'semantic';continue }
     if ($workbuddy) {
-      if ($name -match '(?i)search|搜索') { continue }
-      if (-not (Test-WorkBuddyElementOwner $root $element)) { continue }
+      if ($name -match '(?i)search|搜索') { Record-ComposerReject 'search';continue }
       # Rich contenteditables may appear as Document rather than Edit. Require
       # explicit textbox/editor semantics, not merely a readable chat document.
-      $ariaRole = ''
-      try {
-        $ariaRoleProperty = [System.Windows.Automation.AutomationProperty]::LookupById(30101)
-        if ($null -ne $ariaRoleProperty) { $ariaRole = [string]$element.GetCurrentPropertyValue($ariaRoleProperty) }
-      } catch {}
-      if ($ariaRole -match '^(?i:searchbox)$') { continue }
-      $documentHint = $typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and
-        ($classHint -or $ariaRole -match '^(?i:textbox)$')
-      if ($typeId -eq [System.Windows.Automation.ControlType]::Document.Id -and -not $documentHint) { continue }
     }
     $typeHint = $typeId -eq [System.Windows.Automation.ControlType]::Edit.Id -or
       $typeId -eq [System.Windows.Automation.ControlType]::Group.Id -or
       $typeId -eq [System.Windows.Automation.ControlType]::Custom.Id
-    if (-not $classHint -and -not $nameHint -and -not $typeHint -and -not $documentHint) { continue }
+    if (-not $classHint -and -not $nameHint -and -not $typeHint -and -not $documentHint -and -not $legacyText) { Record-ComposerReject 'semantic';continue }
 
     $valueInfo = $null
-    try { $valueInfo = Get-ComposerText $element } catch { continue }
+    try {
+      $valueInfo = if ($script:NativeVoiceAppendOnly) { @((Get-NativeComposerInputPattern $element), '') }
+        else { Get-ComposerText $element }
+    } catch { Record-ComposerReject 'capability';continue }
     $readableCount += 1
-    if ($workbuddy -and -not (Test-WorkBuddyWritablePattern $valueInfo[0])) { continue }
+    if (-not (Test-WorkBuddyWritablePattern $valueInfo[0])) { Record-ComposerReject 'writable';continue }
     $writableCount += 1
     $score = 0
     if ($classHint) { $score += 8 }
@@ -2554,7 +3428,8 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [boo
     if ($current.HasKeyboardFocus) { $score += 3 }
     if ($rect.Bottom -ge ($rootRect.Top + ($rootRect.Height * 0.72))) { $score += 2 }
     if ($rect.Width -ge ($rootRect.Width * 0.45)) { $score += 1 }
-    if ($score -lt 5) { continue }
+    if ($legacyText) { $score += 5 }
+    if ($score -lt 5) { Record-ComposerReject 'score';continue }
 
     $candidate = [pscustomobject]@{
       Element = $element
@@ -2564,6 +3439,7 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [boo
       Bottom = [double]$rect.Bottom
       Width = [double]$rect.Width
       BoundsKey = "$([int]$rect.Left),$([int]$rect.Top),$([int]$rect.Width),$([int]$rect.Height)"
+      SemanticKey = "$typeId`:$className`:$ariaRole"
     }
     if (Test-AllowedComposerValue $candidate.Value $allowedValues) {
       $candidates += $candidate
@@ -2580,6 +3456,16 @@ function Get-ComposerCandidates($root, $elements, [string[]]$allowedValues, [boo
 }
 
 function Find-Composer($root, [string[]]$allowedValues) {
+  # Codex rich textboxes can be Document nodes and can exist only in raw view.
+  # A focused *owned* editor is stronger evidence than a screen point probe.
+  try {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -ne $focused -and $focused.Current.HasKeyboardFocus) {
+      $focusedSet = Get-ComposerCandidates $root @($focused) $allowedValues
+      if (@($focusedSet.UnexpectedCandidates).Count -gt 0) { throw 'COMPOSER_DRAFT_CHANGED' }
+      if (@($focusedSet.Candidates).Count -eq 1) { return $focusedSet.Candidates[0] }
+    }
+  } catch { if ($_.Exception.Message -eq 'COMPOSER_DRAFT_CHANGED') { throw } }
   $pointElements = @(Find-PointComposerElements $root)
   $candidateSet = Get-ComposerCandidates $root $pointElements $allowedValues
   $candidates = @($candidateSet.Candidates)
@@ -2587,6 +3473,12 @@ function Find-Composer($root, [string[]]$allowedValues) {
   if ($candidates.Count -eq 0 -and $unexpectedCandidates.Count -eq 0) {
     $boundedElements = @(Find-BoundedComposerElements $root)
     $candidateSet = Get-ComposerCandidates $root $boundedElements $allowedValues
+    $candidates = @($candidateSet.Candidates)
+    $unexpectedCandidates = @($candidateSet.UnexpectedCandidates)
+  }
+  if ($candidates.Count -eq 0 -and $unexpectedCandidates.Count -eq 0) {
+    $rawElements = @(Find-BoundedComposerElements $root $true)
+    $candidateSet = Get-ComposerCandidates $root $rawElements $allowedValues
     $candidates = @($candidateSet.Candidates)
     $unexpectedCandidates = @($candidateSet.UnexpectedCandidates)
   }
@@ -2692,7 +3584,7 @@ function Find-WorkBuddyFocusedComposer($root, [string[]]$allowedValues) {
     $focused = [WorkBuddyUia]::FocusedElement()
     if ($null -eq $focused -or -not $focused.Current.HasKeyboardFocus) { return $null }
   } catch { return $null }
-  $set = Get-ComposerCandidates $root @($focused) $allowedValues $true
+  $set = Get-ComposerCandidates $root @([WorkBuddyUia]::FocusedAncestors([IntPtr]$root.Current.NativeWindowHandle)) $allowedValues $true
   return Select-WorkBuddyComposer $set
 }
 
@@ -2731,10 +3623,17 @@ function Initialize-WorkBuddyAccessibility([IntPtr]$handle, [int]$ownerProcessId
   return $info
 }
 
-function Get-WorkBuddyTarget([string[]]$allowedValues) {
+function Test-CurrentElectronAgent([string]$agent) {
+  return @('workbuddy','deepseek-harness') -contains $agent -or ($agent -eq 'codex' -and $script:NativeVoiceAppendOnly)
+}
+
+function Get-WorkBuddyTarget([string[]]$allowedValues, [string]$agent = 'workbuddy') {
   Write-ComposerProgress 'resolve_window'
-  $windows = @(Get-Process -Name WorkBuddy -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
-  if ($windows.Count -ne 1) { throw '请保留一个 WorkBuddy 主窗口并打开目标对话，再重新开始语音输入' }
+  $processName = if ($agent -eq 'deepseek-harness') { 'DeepSeek Harness' } elseif ($agent -eq 'codex') { 'ChatGPT' } else { 'WorkBuddy' }
+  $processNames = if ($agent -eq 'codex') { @('ChatGPT','Codex') } else { @($processName) }
+  $windows = @(Get-Process -Name $processNames -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 })
+  if ($agent -eq 'codex' -and $windows.Count -gt 1) { $windows = @($windows | Where-Object { [CodexVoiceNative]::IsForeground([IntPtr]$_.MainWindowHandle) }) }
+  if ($windows.Count -ne 1) { throw '请保留唯一目标 Agent 主窗口并打开目标对话，再重新开始语音输入' }
   $process = $windows[0]
   $handle = [IntPtr]$process.MainWindowHandle
   if (-not [CodexVoiceNative]::ActivateWindow($handle)) { throw '无法激活 WorkBuddy 目标窗口' }
@@ -2759,6 +3658,12 @@ function Get-WorkBuddyTarget([string[]]$allowedValues) {
       $seen = @{}
       Write-ComposerProgress 'focused'
       $composer = Find-WorkBuddyFocusedComposer $root $allowedValues
+      if ($null -eq $composer) {
+        Write-ComposerProgress 'native_query'
+        foreach ($element in @([WorkBuddyUia]::FindEditable($handle, 1000, 256))) { Add-UniqueComposerElement $element $elements $seen }
+        $candidateSet = Get-ComposerCandidates $root @($elements.ToArray()) $allowedValues $true
+        $composer = Select-WorkBuddyComposer $candidateSet
+      }
       if ($null -eq $composer) {
         Write-ComposerProgress 'control'
         foreach ($element in @([WorkBuddyUia]::FindBounded($handle, $false, 1500, 3500))) { Add-UniqueComposerElement $element $elements $seen }
@@ -2790,7 +3695,8 @@ function Get-WorkBuddyTarget([string[]]$allowedValues) {
       if ($null -ne $composer) {
         Write-ComposerProgress 'validate'
         Start-Sleep -Milliseconds 120
-        $current = Get-ComposerText $composer.Element
+        $current = if ($script:NativeVoiceAppendOnly) { @((Get-NativeComposerInputPattern $composer.Element), '') }
+          else { Get-ComposerText $composer.Element }
         if ([CodexVoiceNative]::IsForeground($handle) -and
             (Test-WorkBuddyElementOwner $root $composer.Element) -and
             $composer.Element.Current.IsEnabled -and -not $composer.Element.Current.IsOffscreen -and
@@ -2809,15 +3715,22 @@ function Get-WorkBuddyTarget([string[]]$allowedValues) {
   $activation = if ($null -ne $accessibilityInfo) {
     "，辅助功能请求=$($accessibilityInfo.Requested)，MSAA应答=$($accessibilityInfo.Msaa)，渲染窗口=$($accessibilityInfo.Renderers)，激活应答=$($accessibilityInfo.Detected)"
   } else { '' }
-  throw "WorkBuddy 输入框未就绪（节点=$lastCount，可读=$readableCount，可写=$writableCount$activation）；未取得可写编辑器，已停止写入。请保持目标对话可见。尚未写入或发送文字"
+  $stages = @($script:ComposerRejects.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ','
+  $native = [WorkBuddyUia]::DiagnosticSummary()
+  throw "Visible Agent 输入框未就绪（节点=$lastCount，可读=$readableCount，可写=$writableCount$activation；$native；$stages）；未取得唯一可写编辑器，尚未写入或发送文字"
 }
 
 function Get-CurrentVisibleTarget([string]$agent, [string[]]$allowedValues) {
-  if ($agent -eq 'workbuddy') {
-    return Get-WorkBuddyTarget $allowedValues
+  if (Test-CurrentElectronAgent $agent) {
+    return Get-WorkBuddyTarget $allowedValues $agent
   }
   if ($agent -eq 'codex') {
-    $windows = @(Get-OrLaunchCodexWindows)
+    $windows = @(Get-CodexWindows)
+    if ($windows.Count -eq 0) { throw 'Open the intended Codex window before current-visible voice input; no application was launched' }
+    if ($windows.Count -gt 1) {
+      $windows = @($windows | Where-Object { [CodexVoiceNative]::IsForeground([IntPtr]$_.Root.Current.NativeWindowHandle) })
+      if ($windows.Count -ne 1) { throw 'Multiple Codex windows are open; keep the intended conversation foreground' }
+    }
     $errors = @()
     foreach ($window in $windows) {
       try {
@@ -2837,7 +3750,8 @@ function Get-CurrentVisibleTarget([string]$agent, [string[]]$allowedValues) {
     throw "ChatGPT（Codex）窗口已找到，但前台输入框无法定位: $($errors -join '; ')"
   }
   if ($agent -eq 'claude') {
-    $windows = @(Get-OrLaunchClaudeWindows)
+    $windows = @(Get-ClaudeWindows)
+    if ($windows.Count -eq 0) { throw 'Open the intended Claude window before current-visible voice input; no application was launched' }
     $window = $windows[0]
     $activated = [CodexVoiceNative]::ActivateWindow([IntPtr]$window.WindowHandle)
     if (-not $activated) {
@@ -2871,6 +3785,11 @@ function Assert-WorkBuddyComposerCurrent($state) {
   # stay owned, enabled, visible and writable; the caller then requires the
   # exact last voice-controlled text.
   $handle = [IntPtr]$state.WindowHandle
+  if ($state.Agent -eq 'deepseek-harness' -and
+      (-not [CodexVoiceNative]::IsForeground($handle) -or
+       (Get-Process -Id $state.ProcessId -ErrorAction Stop).ProcessName -ine 'DeepSeek Harness')) {
+    throw 'DESKTOP_TASK_TARGET_CHANGED'
+  }
   if (-not [CodexVoiceNative]::IsForeground($handle) -and
       -not [CodexVoiceNative]::ActivateWindow($handle)) {
     throw 'WorkBuddy 已失去前台焦点，未写入文字'
@@ -2888,9 +3807,11 @@ function Assert-WorkBuddyComposerCurrent($state) {
 function Get-TaskWindowIdentity($root, [string]$agent = 'codex') {
   $rect = $root.Current.BoundingRectangle
   $labels = @([string]$root.Current.Name)
-  $all = if ($agent -eq 'workbuddy') {
-    @([WorkBuddyUia]::FindBounded([IntPtr]$root.Current.NativeWindowHandle, $false, 1000, 1200) | Where-Object { $_.Current.ControlType.Id -eq 50020 })
-  } else { Find-DescendantsByControlTypes $root @([System.Windows.Automation.ControlType]::Text) }
+  $all = if (Test-CurrentElectronAgent $agent) {
+    @([WorkBuddyUia]::FindBounded([IntPtr]$root.Current.NativeWindowHandle, $false, 150, 256) | Where-Object { $_.Current.ControlType.Id -eq 50020 })
+  } else {
+    @(Find-BoundedComposerElements $root $false 150 | Where-Object { $_.Current.ControlType.Id -eq 50020 })
+  }
   foreach ($element in $all) {
     $r = $element.Current.BoundingRectangle
     if (-not $element.Current.IsOffscreen -and (Test-FiniteWindowRectangle $r) -and
@@ -2902,8 +3823,92 @@ function Get-TaskWindowIdentity($root, [string]$agent = 'codex') {
   return ($labels -join [char]31)
 }
 
+function Test-SpecificComposerIdentity([string]$identity) {
+  $parts = @($identity.Split([char]31) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+  if ($parts.Count -gt 1) { return $true }
+  if ($parts.Count -ne 1) { return $false }
+  # A process/application title alone cannot authorize a different UIA editor.
+  return @('chatgpt','codex','workbuddy','deepseek harness','claude') -notcontains $parts[0].Trim().ToLowerInvariant()
+}
+
+function Get-BoundComposerRoot($state, [bool]$forReacquire = $false) {
+  [void](Get-Process -Id $state.ProcessId -ErrorAction Stop)
+  $handle = [IntPtr]$state.WindowHandle
+  if (-not [CodexVoiceNative]::IsWindow($handle) -or -not [CodexVoiceNative]::IsForeground($handle)) {
+    throw 'DESKTOP_TASK_TARGET_CHANGED'
+  }
+  $root = if ($state.NativeUia) { [WorkBuddyUia]::FromHandle([IntPtr]$state.RootHandle) }
+    else { [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$state.RootHandle) }
+  if ($null -eq $root -or $root.Current.NativeWindowHandle -ne $state.RootHandle -or
+      $root.Current.ProcessId -ne $state.ProcessId) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  if ($state.NativeVoiceAppendOnly) {
+    $process = Get-Process -Id $state.ProcessId -ErrorAction Stop
+    if ($process.StartTime.ToUniversalTime().Ticks -ne $state.ProcessStartTicks) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+    if (-not $state.CurrentVisible) {
+      $matches = if ($state.Agent -eq 'claude') {
+        Test-ClaudeWindowSession $root $state.SessionId $state.DesktopSessionId $state.SessionTitle
+      } else { Test-SelectedSessionTitle $root $state.SessionTitle }
+      if (-not $matches) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+    } elseif ($forReacquire) { Assert-NativeVoiceConversation $state $root }
+  } elseif ($state.CurrentVisible) {
+    if (-not $state.TaskIdentity -or (Get-TaskWindowIdentity $root $state.Agent) -cne $state.TaskIdentity) {
+      throw 'DESKTOP_TASK_TARGET_CHANGED'
+    }
+    if ($forReacquire -and -not (Test-SpecificComposerIdentity $state.TaskIdentity)) {
+      throw 'Visible conversation identity is insufficient to reacquire its editor'
+    }
+  } else {
+    $matches = if ($state.Agent -eq 'claude') {
+      Test-ClaudeWindowSession $root $state.SessionId $state.DesktopSessionId $state.SessionTitle
+    } else { Test-SelectedSessionTitle $root $state.SessionTitle }
+    if (-not $matches) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+  }
+  return $root
+}
+
+function Reacquire-BoundComposer($state, [string]$expectedValue, [int]$budgetMs = 150) {
+  # Read-only recovery: never enumerate/activate another application window,
+  # navigate to a conversation, click, type, or choose a latest session.
+  $root = Get-BoundComposerRoot $state $true
+  $elements = [System.Collections.Generic.List[object]]::new()
+  $seen = @{}
+  if ($state.NativeUia) {
+    $focused = [WorkBuddyUia]::FocusedElement()
+    if ($null -ne $focused) { Add-UniqueComposerElement $focused $elements $seen }
+    foreach ($e in @([WorkBuddyUia]::FindEditable([IntPtr]$state.RootHandle, $budgetMs, 256))) { Add-UniqueComposerElement $e $elements $seen }
+    foreach ($e in @([WorkBuddyUia]::FindBounded([IntPtr]$state.RootHandle, $true, $budgetMs, 256))) {
+      Add-UniqueComposerElement $e $elements $seen
+    }
+  } else {
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($null -ne $focused) { Add-UniqueComposerElement $focused $elements $seen }
+    foreach ($e in @(Find-BoundedComposerElements $root $true $budgetMs)) {
+      Add-UniqueComposerElement $e $elements $seen
+    }
+  }
+  $allowed = if ($state.NativeVoiceAppendOnly) { $null } else { @($expectedValue) }
+  $set = Get-ComposerCandidates $root @($elements.ToArray()) $allowed ([bool]$state.NativeUia)
+  $matching = @($set.Candidates | Where-Object { $_.SemanticKey -ceq $state.ComposerSemanticKey })
+  $unexpected = @($set.UnexpectedCandidates | Where-Object { $_.SemanticKey -ceq $state.ComposerSemanticKey })
+  if (($state.NativeVoiceAppendOnly -and @($set.Candidates).Count -ne 1) -or $matching.Count -ne 1 -or $unexpected.Count -gt 0) {
+    throw 'The bound conversation did not expose one matching semantic editor'
+  }
+  $candidate = $matching[0]
+  $runtimeId = Get-ElementRuntimeId $candidate.Element
+  if (-not $runtimeId) { throw 'The replacement editor has no stable runtime identity' }
+  # Recheck conversation and actual draft after tree traversal, before adopting.
+  [void](Get-BoundComposerRoot $state $true)
+  $value = if ($state.NativeVoiceAppendOnly) { @((Get-NativeComposerInputPattern $candidate.Element), '') }
+    else { Get-ComposerText $candidate.Element }
+  if (-not $state.NativeVoiceAppendOnly -and [string]$value[1] -cne $expectedValue) { throw 'Visible draft changed during editor reacquisition' }
+  $state.Root = $root
+  $state.Composer = $candidate.Element
+  $state.ComposerRuntimeId = $runtimeId
+  $state.Pattern = $value[0]
+}
+
 function Get-CurrentTaskTarget([string[]]$allowedValues, [string]$agent = 'codex') {
-  if ($agent -eq 'workbuddy') { return Get-WorkBuddyTarget $allowedValues }
+  if (Test-CurrentElectronAgent $agent) { return Get-WorkBuddyTarget $allowedValues $agent }
   $windows = @(Get-CodexWindows)
   if ($windows.Count -ne 1) { throw 'Please open the target Codex conversation in one main window; nothing was sent' }
   $root = Ensure-CodexForeground $windows[0].Root 'for current task'
@@ -2916,14 +3921,19 @@ function Get-CurrentTaskTarget([string[]]$allowedValues, [string]$agent = 'codex
 }
 
 function Assert-TargetCurrent($state, [bool]$checkSession, [bool]$checkDraft = $true) {
+  if ($state.NativeVoiceAppendOnly) {
+    if (-not (Test-NativeVoiceEditorIdentity $state)) { Reacquire-BoundComposer $state $null }
+    Assert-NativeVoiceComposer $state
+    return
+  }
   [void](Get-Process -Id $state.ProcessId -ErrorAction Stop)
   if (-not [CodexVoiceNative]::IsWindow([IntPtr]$state.WindowHandle) -or
       $state.Root.Current.NativeWindowHandle -ne $state.RootHandle) {
     throw 'Visible Agent window changed during voice input'
   }
-  if ($state.CurrentVisible -and $state.Agent -eq 'workbuddy') {
+  if ($state.CurrentVisible -and (Test-CurrentElectronAgent $state.Agent)) {
     Assert-WorkBuddyComposerCurrent $state
-    if ($state.CurrentTask -and (Get-TaskWindowIdentity $state.Root $state.Agent) -cne $state.TaskIdentity) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
+    if (($state.CurrentTask -or $state.Agent -eq 'deepseek-harness') -and (Get-TaskWindowIdentity $state.Root $state.Agent) -cne $state.TaskIdentity) { throw 'DESKTOP_TASK_TARGET_CHANGED' }
   } elseif ($state.CurrentVisible) {
     if ($checkSession) {
       $allowedValues = if ($checkDraft) { @($state.LastValue) } else { @('', $state.LastValue) }
@@ -2960,6 +3970,9 @@ function Assert-TargetCurrent($state, [bool]$checkSession, [bool]$checkDraft = $
 
 function Focus-Composer($state) {
   Write-ComposerProgress 'focus'
+  if (($state.NativeVoiceAppendOnly -or $state.Agent -eq 'deepseek-harness') -and -not [CodexVoiceNative]::IsForeground([IntPtr]$state.WindowHandle)) {
+    throw 'DESKTOP_TASK_TARGET_CHANGED'
+  }
   $activated = [CodexVoiceNative]::ActivateWindow([IntPtr]$state.WindowHandle)
   if (-not $activated) {
     try {
@@ -2972,10 +3985,24 @@ function Focus-Composer($state) {
   if (-not $activated) {
     throw 'Agent window could not become foreground; unlock Windows and keep the client visible'
   }
-  $state.Composer.SetFocus()
-  Start-Sleep -Milliseconds 30
-  if (-not $state.Composer.Current.HasKeyboardFocus) {
-    throw 'Visible composer could not receive keyboard focus'
+  for ($attempt = 0; $attempt -lt 2; $attempt += 1) {
+    try {
+      if (-not $state.Composer.Current.HasKeyboardFocus) { $state.Composer.SetFocus() }
+      Start-Sleep -Milliseconds 30
+      if (-not $state.Composer.Current.HasKeyboardFocus) { throw 'Composer focus was not confirmed' }
+      $focused = if ($state.NativeUia) { [WorkBuddyUia]::FocusedElement() }
+        else { [System.Windows.Automation.AutomationElement]::FocusedElement }
+      if ($null -eq $focused -or (Get-ElementRuntimeId $focused) -cne $state.ComposerRuntimeId -or
+          -not (Test-ComposerElementOwner $state.Root $focused)) {
+        throw 'Composer focus no longer belongs to the bound editor'
+      }
+      return
+    } catch {
+      if ($attempt -ne 0) { throw }
+      # Focusing a contenteditable may replace its accessibility node. Recover
+      # only before input, with the exact original draft in the same conversation.
+      Reacquire-BoundComposer $state $state.LastValue
+    }
   }
 }
 
@@ -3006,6 +4033,7 @@ function Wait-ComposerText($state, [string]$expectedText, [int]$timeoutMs) {
   $deadline = (Get-MonotonicMilliseconds) + $timeoutMs
   do {
     try {
+      [void](Get-BoundComposerRoot $state)
       $updatedInfo = Get-ComposerText $state.Composer
       $updatedValue = [string]$updatedInfo[1]
       if ($updatedValue -ceq $expectedText) {
@@ -3013,6 +4041,15 @@ function Wait-ComposerText($state, [string]$expectedText, [int]$timeoutMs) {
         return $true
       }
     } catch {}
+    # A successful key injection may rerender the old UIA node. Only re-read a
+    # replacement; this function never repeats the write or changes LastValue.
+    $remaining = $deadline - (Get-MonotonicMilliseconds)
+    if ($remaining -gt 0) {
+      try {
+        Reacquire-BoundComposer $state $expectedText ([Math]::Min(150, $remaining))
+        return $true
+      } catch {}
+    }
     if ((Get-MonotonicMilliseconds) -ge $deadline) { break }
     Start-Sleep -Milliseconds 25
   } while ($true)
@@ -3025,44 +4062,47 @@ function Set-ComposerText($state, [string]$text, [bool]$forceSessionCheck, [bool
     Assert-TargetCurrent $state $forceSessionCheck
     return
   }
-  $lastError = ''
-  # Never replay an uncertain WorkBuddy rich-editor insertion.
-  $attempts = if ($state.Agent -eq 'workbuddy') { 1 } else { 2 }
-  for ($attempt = 0; $attempt -lt $attempts; $attempt += 1) {
-    try {
-      if ($attempt -gt 0) {
-        Rebind-CodexTarget $state @($state.LastValue, $normalizedText)
-        if ($state.LastValue -ceq $normalizedText) { return }
-      }
-      $now = Get-MonotonicMilliseconds
-      $checkSession = $forceSessionCheck -or (($now - $state.LastSessionCheck) -ge 900)
-      Assert-TargetCurrent $state $checkSession
-      if ($checkSession) { $state.LastSessionCheck = $now }
-      Focus-Composer $state
-      Assert-TargetCurrent $state $false
+  $now = Get-MonotonicMilliseconds
+  $checkSession = $forceSessionCheck -or (($now - $state.LastSessionCheck) -ge 900)
+  try { Assert-TargetCurrent $state $checkSession }
+  catch {
+    Reacquire-BoundComposer $state $state.LastValue
+    Assert-TargetCurrent $state $true
+  }
+  if ($checkSession) { $state.LastSessionCheck = $now }
+  Focus-Composer $state
+  Assert-TargetCurrent $state $false
+  [void](Get-BoundComposerRoot $state)
+  # Exactly one write attempt for every Windows agent. Any partial SendInput or
+  # unreadable ACK is uncertain, even when the API throws before returning.
+  $state.WriteAttempted = $true
+  try {
       [CodexVoiceNative]::ReplaceFocusedText($normalizedText)
       # Chromium can block a synchronous TextPattern read while committing the
       # just-injected ProseMirror update. Let the accessibility tree settle.
       Start-Sleep -Milliseconds 120
       # WorkBuddy receives the whole final transcript as one burst of typed
       # characters; allow for its length. Readback returns on first match.
-      $confirmMs = if ($state.Agent -eq 'workbuddy') {
+      $confirmMs = if ((Test-CurrentElectronAgent $state.Agent)) {
         [Math]::Min(3000, 350 + (10 * $normalizedText.Length))
       } else { 350 }
       if (-not (Wait-ComposerText $state $normalizedText $confirmMs)) {
-        throw 'Visible composer did not confirm the voice transcript in time'
+        throw 'Composer readback was not confirmed'
       }
       $state.LastValue = $normalizedText
-      return
-    } catch {
-      $lastError = $_.Exception.Message
-      if ($attempt + 1 -lt $attempts) { Start-Sleep -Milliseconds 40 }
+      $state.WriteAttempted = $false
+  } catch {
+    if ([CodexVoiceNative]::LastInputRejectedBeforeSend) {
+      # Validated Held/Invalid before SendInput is known not to have written.
+      $state.WriteAttempted = $false
+      throw
     }
+    throw 'COMPOSER_WRITE_ACK_UNKNOWN: Windows may have inserted part or all of this segment; stopped without repeating input. Keep the local transcript and inspect the target draft.'
   }
-  throw "Visible composer update failed: $lastError"
 }
 
 function Clear-ComposerVoiceText($state) {
+  if ($state.NativeVoiceAppendOnly) { return } # release preserves both old and newly appended draft
   if ($state.LastValue -ceq $state.BaseValue) { return }
   Assert-TargetCurrent $state (-not [bool]$state.CurrentVisible)
   Focus-Composer $state
@@ -3072,6 +4112,13 @@ function Clear-ComposerVoiceText($state) {
 }
 
 function Assert-ComposerHasText($state) {
+  if ($state.NativeVoiceAppendOnly) {
+    if (-not $state.NativeVoiceWritten -or [string]::IsNullOrEmpty($state.NativeVoiceText)) { throw 'No acknowledged native voice append to submit' }
+    # No title is required for an unchanged exact editor. Full post-append
+    # owned value+hash corroborates the same draft before this explicit confirm.
+    Assert-NativeVoiceOwnedDraft $state $true
+    return
+  }
   Assert-TargetCurrent $state (-not [bool]$state.CurrentVisible)
   $currentInfo = Get-ComposerText $state.Composer
   $currentValue = Normalize-ComposerText ([string]$currentInfo[1])
@@ -3099,7 +4146,7 @@ function Get-ComposerSubmitLabelScore([string]$value) {
 }
 
 function Get-TaskDraftSnapshot($state) {
-  if ($null -eq $state -or -not $state.CurrentTask -or @('codex','workbuddy') -notcontains $state.Agent) {
+  if ($null -eq $state -or -not $state.CurrentTask -or @('codex','workbuddy','deepseek-harness') -notcontains $state.Agent) {
     throw 'DESKTOP_TASK_TARGET_CHANGED'
   }
   # Edits made between voice requests are intentional. Pin the current value
@@ -3173,6 +4220,59 @@ function Invoke-CodexTaskSubmit($state, $candidate) {
   [CodexVoiceNative]::ClickSubmit([IntPtr]$state.WindowHandle, $x, $y)
 }
 
+function Wait-NativeVoiceSubmitClear($state, [int]$budgetMs = 1800) {
+  $deadline = (Get-MonotonicMilliseconds) + $budgetMs
+  $stableSince = $null; $stableEditor = ''
+  do {
+    try {
+      $root = Get-BoundComposerRoot $state
+      if (-not (Test-NativeVoiceEditorIdentity $state)) { Reacquire-BoundComposer $state $null 150 }
+      Assert-NativeVoiceComposer $state
+      $value = Get-ComposerText $state.Composer
+      if ([string]$value[1] -ceq $state.NativeVoiceOwnedValue) {
+        $stableSince = $null
+        Start-Sleep -Milliseconds 40
+        continue # old draft still pending; do not mistake API ACK for delivery
+      }
+      if ([string]$value[1] -cne '') { return $false } # preserve a new draft; unknown, no write
+      $r = $state.Composer.Current.BoundingRectangle
+      $all = if ($state.NativeUia) {
+        @([WorkBuddyUia]::FindBounded([IntPtr]$state.RootHandle, $false, 150, 3500))
+      } else { @(Find-BoundedComposerElements $root $false 150) }
+      $buttons = @($all | Where-Object {
+        $_.Current.ControlType.Id -eq [System.Windows.Automation.ControlType]::Button.Id -and
+        -not $_.Current.IsOffscreen -and (Get-ComposerSubmitLabelScore ([string]$_.Current.Name)) -eq 0 -and
+        (Test-ComposerElementOwner $root $_) -and (Test-FiniteWindowRectangle $_.Current.BoundingRectangle) -and
+        $_.Current.BoundingRectangle.Top -le ($r.Bottom + 80) -and $_.Current.BoundingRectangle.Bottom -ge ($r.Top - 12) -and
+        $_.Current.BoundingRectangle.Left -le ($r.Right + 120) -and $_.Current.BoundingRectangle.Right -ge ($r.Left - 12)
+      })
+      $editor = Get-ElementRuntimeId $state.Composer
+      $disabled = $false
+      if ($buttons.Count -eq 1) {
+        # Native Current.Flag maps missing properties to false. Missing is NOT
+        # evidence of disabled/visible: inspect the actual typed properties.
+        $enabled = (Get-ComposerProperty $buttons[0] 30010)
+        $offscreen = (Get-ComposerProperty $buttons[0] 30022)
+        $disabled = $enabled -is [bool] -and -not $enabled -and $offscreen -is [bool] -and -not $offscreen
+      }
+      if ($disabled) {
+        if ($stableSince -ne $null -and $stableEditor -ceq $editor -and ((Get-MonotonicMilliseconds) - $stableSince) -ge 150) {
+          Assert-NativeVoiceComposer $state
+          [void](Get-BoundComposerRoot $state)
+          if ([string](Get-ComposerText $state.Composer)[1] -cne '' -or
+              (Get-ElementRuntimeId $state.Composer) -cne $editor) { return $false }
+          $enabledAgain = (Get-ComposerProperty $buttons[0] 30010)
+          if ($enabledAgain -isnot [bool] -or $enabledAgain) { return $false }
+          return $true
+        }
+        if ($stableSince -eq $null -or $stableEditor -cne $editor) { $stableSince = Get-MonotonicMilliseconds; $stableEditor = $editor }
+      } else { $stableSince = $null }
+    } catch { return $false }
+    Start-Sleep -Milliseconds 40
+  } while ((Get-MonotonicMilliseconds) -lt $deadline)
+  return $false
+}
+
 function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButton = $false) {
   $nativeTaskClick = $strictButton -and $state.CurrentTask -and $state.Agent -eq 'codex'
   $composerRect = $state.Composer.Current.BoundingRectangle
@@ -3182,7 +4282,7 @@ function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButto
   # Reuse the bounded breadth-first surface walk. A live task transcript can
   # make an unbounded descendant Button query stall just like the old Edit
   # query did during startup; Enter remains the verified fallback.
-  $all = if ($state.Agent -eq 'workbuddy') {
+  $all = if ((Test-CurrentElectronAgent $state.Agent)) {
     @([WorkBuddyUia]::FindBounded([IntPtr]$state.WindowHandle, $false, 1800, 3500))
   } else {
     @(Find-BoundedComposerElements $state.Root)
@@ -3225,6 +4325,16 @@ function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButto
     if ($nativeTaskClick) {
       Invoke-CodexTaskSubmit $state $buttons[0]
     } else {
+      if ($state.NativeVoiceAppendOnly) {
+        # Enumeration can outlive a redraw. Do not adopt another editor while
+        # holding a button from the old tree, or submit in a changed window.
+        Assert-NativeVoiceOwnedDraft $state
+        if (-not (Test-ComposerElementOwner $state.Root $buttons[0].Element) -or
+            -not $buttons[0].Element.Current.IsEnabled -or $buttons[0].Element.Current.IsOffscreen) {
+          throw 'DESKTOP_TASK_TARGET_CHANGED'
+        }
+        $state.NativeVoiceSubmitAttempted = $true
+      }
       $buttons[0].Pattern.Invoke()
     }
     return $buttons[0].Submission
@@ -3233,10 +4343,15 @@ function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButto
     throw "Expected one enabled send button near the composer; found $($buttons.Count)"
   }
 
-  if ($strictButton -or -not $allowQueue) { throw 'DESKTOP_TASK_SEND_UNAVAILABLE' }
+  if ($state.Agent -eq 'deepseek-harness' -or $strictButton -or -not $allowQueue) { throw 'DESKTOP_TASK_SEND_UNAVAILABLE' }
 
   Focus-Composer $state
+  if ($state.NativeVoiceAppendOnly) {
+    Assert-NativeVoiceOwnedDraft $state
+    $state.NativeVoiceSubmitAttempted = $true
+  }
   [CodexVoiceNative]::PressEnter()
+  if ($state.NativeVoiceAppendOnly) { return 'enter' } # native action ACK, not a UIA value/delivery assertion
   Start-Sleep -Milliseconds 180
   $afterSubmit = Get-ComposerText $state.Composer
   if (-not [string]::IsNullOrEmpty([string]$afterSubmit[1])) {
@@ -3245,6 +4360,7 @@ function Invoke-SendButton($state, [bool]$allowQueue = $true, [bool]$strictButto
 }
 $state = $null
 $script:WorkBuddyAccessibilityRequests = @{}
+$script:CurrentComposerAgent = ''
 while ($null -ne ($line = [Console]::In.ReadLine())) {
   if ([string]::IsNullOrWhiteSpace($line)) { continue }
   $command = $null
@@ -3255,12 +4371,16 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         Write-ComposerProgress 'resolve_window'
         $agent = Normalize-Label ([string]$command.agent)
         if (-not $agent) { $agent = 'codex' }
+        $script:CurrentComposerAgent = $agent
+        [WorkBuddyUia]::ResetDiagnostics()
+        $script:ComposerRejects = @{disabled=0;offscreen=0;focusable=0;owner=0;geometry=0;semantic=0;search=0;capability=0;writable=0;score=0}
         $sessionId = Normalize-Label ([string]$command.sessionId)
         $desktopSessionId = Normalize-Label ([string]$command.desktopSessionId)
         $title = Normalize-Label ([string]$command.sessionTitle)
         $purpose = Normalize-Label ([string]$command.purpose)
         $workspaceLabel = Normalize-Label ([string]$command.workspaceLabel)
         $currentVisible = $purpose -eq 'current_voice' -or $purpose -eq 'current_task'
+        $script:NativeVoiceAppendOnly = $purpose -eq 'voice' -or $purpose -eq 'current_voice'
         $locatedCodexRoot = $null
         if (-not $currentVisible) {
           if ($agent -eq 'claude') {
@@ -3308,7 +4428,22 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
           SessionTitle = $title
           CurrentVisible = $currentVisible
           CurrentTask = $purpose -eq 'current_task'
-          TaskIdentity = if ($purpose -eq 'current_task') { Get-TaskWindowIdentity $root $agent } else { '' }
+          TaskIdentity = if ($currentVisible -and -not $script:NativeVoiceAppendOnly) { Get-TaskWindowIdentity $root $agent } else { '' }
+          NativeUia = $composer.Element -is [WorkBuddyUiaElement]
+          ComposerSemanticKey = [string]$composer.SemanticKey
+          WriteAttempted = $false
+          NativeVoiceAppendOnly = [bool]$script:NativeVoiceAppendOnly
+          NativeVoiceAnchor = if ($script:NativeVoiceAppendOnly -and $currentVisible) {
+            try { Get-NativeVoiceConversationAnchor $root $agent } catch { $null }
+          } else { $null }
+          ProcessStartTicks = if ($script:NativeVoiceAppendOnly) { (Get-Process -Id $(if ($agent -eq 'claude') { [int]$target.ProcessId } else { [int]$root.Current.ProcessId }) -ErrorAction Stop).StartTime.ToUniversalTime().Ticks } else { 0 }
+          NativeVoiceAttempted = $false
+          NativeVoiceWritten = $false
+          NativeVoiceText = ''
+          NativeVoiceOwnedValue = $null
+          NativeVoiceOwnedHash = ''
+          NativeVoiceOwnedRuntimeId = ''
+          NativeVoiceSubmitAttempted = $false
           Composer = $composer.Element
           ComposerRuntimeId = $composerRuntimeId
           Pattern = $composer.Pattern
@@ -3321,13 +4456,18 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
       }
       'update' {
         if ($null -eq $state) { throw 'Visible composer is not ready' }
-        Set-ComposerText $state ([string]$command.text) $false
-        Write-ComposerReply @{ ok = $true; phase = 'updated'; revision = $command.revision; mode = 'visible' }
+        if ($state.NativeVoiceAppendOnly) { Append-ComposerVoiceText $state ([string]$command.text) }
+        else { Set-ComposerText $state ([string]$command.text) $false }
+        Write-ComposerReply @{ ok = $true; phase = 'updated'; revision = $command.revision; mode = 'visible'; inputEvidence = if ($state.NativeVoiceAppendOnly) { 'native-append-owned-readback' } else { 'editor-readback' } }
       }
       'confirm' {
         if ($null -eq $state) { throw 'Visible composer is not ready' }
+        if ($state.NativeVoiceAppendOnly -and $state.NativeVoiceSubmitAttempted) { throw 'COMPOSER_SUBMIT_UNCONFIRMED: Submit was already attempted; no replay' }
         Assert-ComposerHasText $state
         $null = Invoke-SendButton $state
+        if ($state.NativeVoiceAppendOnly -and -not (Wait-NativeVoiceSubmitClear $state)) {
+          throw 'COMPOSER_SUBMIT_UNCONFIRMED: Native submit was attempted but application readback was not confirmed; no replay; draft preserved'
+        }
         Write-ComposerReply @{ ok = $true; phase = 'submitted'; revision = $command.revision; mode = 'visible' }
         break
       }
@@ -3337,7 +4477,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         break
       }
       'dispatch' {
-        if ($null -eq $state -or @('codex','workbuddy') -notcontains $state.Agent) { throw 'Desktop composer is not ready' }
+        if ($null -eq $state -or @('codex','workbuddy','deepseek-harness') -notcontains $state.Agent) { throw 'Desktop composer is not ready' }
         Assert-TargetCurrent $state $true
         if ($null -ne $command.draftSnapshot) {
           Assert-TaskDraftSnapshot $state $command.draftSnapshot
@@ -3363,6 +4503,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         break
       }
       'release' {
+        if ([CodexVoiceNative]::InputOutcomeUnknown) {
+          throw 'COMPOSER_WRITE_ACK_UNKNOWN: Native input remains unconfirmed; writer release was not acknowledged.'
+        }
         Write-ComposerReply @{ ok = $true; phase = 'released'; mode = 'visible' }
         break
       }
@@ -3376,11 +4519,21 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
       default { throw "Unknown composer command: $($command.kind)" }
     }
   } catch {
+    $errorMessage = $_.Exception.Message
+    # SendInput uncertainty applies to EVERY native input path, not just text.
+    # The Rust worker treats this prefix as fatal, drains no queued release,
+    # and preserve_draft caches Err, retaining the parent's old-writer barrier.
+    if ($null -ne $state -and $state.NativeVoiceAppendOnly -and $state.NativeVoiceSubmitAttempted -and [string]$command.kind -eq 'confirm' -and
+        -not [CodexVoiceNative]::LastInputRejectedBeforeSend) {
+      $errorMessage = 'COMPOSER_SUBMIT_UNCONFIRMED: Native submit result is unknown; no replay and the current draft is preserved.'
+    } elseif ([CodexVoiceNative]::InputOutcomeUnknown) {
+      $errorMessage = 'COMPOSER_WRITE_ACK_UNKNOWN: Native input may be partial; no injection replay or confirmed writer release.'
+    }
     Write-ComposerReply @{
       ok = $false
       phase = if ($null -ne $command) { [string]$command.kind } else { 'error' }
       mode = 'fallback'
-      error = $_.Exception.Message
+      error = $errorMessage
     }
     $state = $null
   }
@@ -3397,15 +4550,16 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         fs::write(&script_path, script_bytes)
             .map_err(|error| format!("failed to stage visible Agent composer script: {error}"))?;
 
-        let composer_job = match WindowsComposerJob::new() {
+        let composer_job = match WindowsComposerJob::new(current_visible) {
             Ok(job) => job,
             Err(error) => {
                 let _ = fs::remove_file(&script_path);
-                return Err(error);
+                return Err(error.into());
             }
         };
 
         let mut child = match hidden_powershell()
+            .arg("-Mta")
             .arg("-File")
             .arg(&script_path)
             .stdin(Stdio::piped())
@@ -3418,24 +4572,22 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                 let _ = fs::remove_file(&script_path);
                 return Err(format!(
                     "failed to start visible Agent composer bridge: {error}"
-                ));
+                ).into());
             }
         };
-        if let Err(error) = composer_job.assign(&child) {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = fs::remove_file(&script_path);
-            return Err(error);
+        let assignment = composer_job.assign(&child);
+        let pipes = child.stdin.take().zip(child.stdout.take());
+        let process = Arc::new(WindowsComposerProcess { child: Mutex::new(child), job: composer_job, strict: current_visible });
+        if let Err(error)=assignment {
+            // Gate was not opened: retain actual child owner for administrative reap.
+            return Ok(Self::retained_windows_failure(process,error));
         }
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| "Visible Agent composer bridge has no stdin".to_string())?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Visible Agent composer bridge has no stdout".to_string())?;
-        let child = Arc::new(Mutex::new(child));
+        let Some((mut stdin,stdout))=pipes else {
+            return Ok(Self::retained_windows_failure(process,"Visible helper pipes unavailable".into()));
+        };
+        if stdin.write_all(b"HACHIMODOCK_CONTAINED_HELPER_V1\n").and_then(|_|stdin.flush()).is_err() {
+            return Ok(Self::retained_windows_failure(process,"Visible helper containment startup failed".into()));
+        }
 
         let callback: Arc<dyn Fn(CodexComposerEvent) + Send + Sync> = Arc::new(callback);
         let failed = Arc::new(AtomicBool::new(false));
@@ -3444,19 +4596,22 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         let worker_callback = callback.clone();
         let worker_failed = failed.clone();
         let worker_closed = closed.clone();
-        let worker_child = child.clone();
+        let worker_process = process.clone();
         let startup_stage = Arc::new(Mutex::new("启动 Windows 输入桥"));
         let worker_startup_stage = startup_stage.clone();
-        let worker_job = composer_job;
-        thread::Builder::new()
+        let voice_append_only = matches!(purpose, "voice" | "current_voice");
+        let worker = match thread::Builder::new()
             .name("pet-codex-visible-composer".to_string())
             .spawn(move || {
-                let _worker_job = worker_job;
+
                 let mut stdout = BufReader::new(stdout);
                 let mut pending_command = None;
                 while let Some(mut command) =
                     receive_latest_composer_command(&receiver, &mut pending_command)
                 {
+                    if voice_append_only && composer_command_kind(&command)=="update" && command.response.is_none() {
+                        continue; // nonfinal recognition: never claim an editor write
+                    }
                     if let Some(started) = command.started.take() {
                         let _ = started.send(());
                     }
@@ -3498,6 +4653,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                         .and_then(Value::as_str)
                         .unwrap_or("error")
                         .to_string();
+                    let fatal_begin = result.is_err() && composer_command_failure_is_fatal(&command);
+                    let write_ack_unknown = result.as_ref().err()
+                        .is_some_and(|error| error.starts_with("COMPOSER_WRITE_ACK_UNKNOWN:"));
                     match &result {
                         Ok(value) => worker_callback(CodexComposerEvent {
                             phase: value
@@ -3509,7 +4667,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                             error: String::new(),
                         }),
                         Err(error) => {
-                            if composer_command_failure_is_fatal(&command) {
+                            if composer_command_failure_is_fatal(&command) || write_ack_unknown {
                                 worker_failed.store(true, Ordering::SeqCst);
                             }
                             worker_callback(CodexComposerEvent {
@@ -3522,32 +4680,36 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                     if let Some(response) = command.response {
                         let _ = response.send(result);
                     }
+                    // A partial/unknown Windows write terminates this helper;
+                    // queued updates cannot re-paste the same utterance. The
+                    // caller retains its transcript and starts no replay here.
+                    if write_ack_unknown || fatal_begin { break; }
                     if command.payload.get("kind").and_then(Value::as_str) == Some("release") { break; }
                 }
                 worker_closed.store(true, Ordering::SeqCst);
-                if let Ok(mut child) = worker_child.lock() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
+                use crate::device_voice_lifecycle::OwnedProcessTree;
+                let _=worker_process.terminate();
                 let _ = fs::remove_file(&script_path);
-            })
-            .map_err(|error| {
-                if let Ok(mut child) = child.lock() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                format!("failed to start visible Agent composer worker: {error}")
-            })?;
+            }) {
+                Ok(worker)=>worker,
+                Err(error)=>return Ok(Self::retained_windows_failure(process,format!("failed to start visible composer worker: {error}"))),
+            };
 
         let bridge = Self {
             sender,
             failed,
             closed,
+            release_result: std::sync::Mutex::new(None),
+            #[cfg(any(windows, target_os = "macos"))]
+            // Historical bound-navigation helpers may launch desktop applications
+            // outside their job. Preserve their existing release-ACK contract;
+            // never manufacture a descendant-termination proof for that mode.
+            termination: if current_visible { Some(crate::device_voice_lifecycle::WriterTermination::owned_process(Some(worker),process)) } else { drop(worker); None },
         };
         let desktop_session_id = if agent == "claude" { deep_link } else { "" };
         let navigation_deep_link = if agent == "codex" { deep_link } else { "" };
         let (ready_sender, ready_receiver) = mpsc::channel();
-        bridge
+        let begin_send = bridge
             .sender
             .send(ComposerCommand {
                 payload: json!({
@@ -3563,25 +4725,28 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
                 started: None,
                 response: Some(ready_sender),
             })
-            .map_err(|_| "Visible Agent composer bridge closed during startup".to_string())?;
-        match ready_receiver.recv_timeout(std::time::Duration::from_secs(
+            ;
+        if begin_send.is_err() {
+            bridge.failed.store(true,Ordering::SeqCst);
+            return Ok(RetainedComposerStartup { bridge, readiness: Err("Visible Agent composer bridge closed during startup".into()) });
+        }
+        let readiness=match ready_receiver.recv_timeout(std::time::Duration::from_secs(
             CODEX_COMPOSER_STARTUP_TIMEOUT_SECS,
         )) {
-            Ok(Ok(_)) => Ok(bridge),
-            Ok(Err(error)) => Err(error),
-            Err(mpsc::RecvTimeoutError::Timeout) => {
-                if let Ok(mut child) = child.lock() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
-                let stage = startup_stage.lock().map(|stage| *stage)
-                    .unwrap_or("读取输入框状态");
-                Err(composer_startup_timeout_message(agent, stage))
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err("Visible Agent composer closed during startup".to_string())
-            }
+            Ok(Ok(_))=>Ok(()),
+            Ok(Err(error))=>Err(error),
+            Err(mpsc::RecvTimeoutError::Timeout)=>{
+                let stage=startup_stage.lock().map(|stage|*stage).unwrap_or("读取输入框状态");
+                Err(composer_startup_timeout_message(agent,stage))
+            },
+            Err(mpsc::RecvTimeoutError::Disconnected)=>Err("Visible Agent composer closed during startup".into()),
+        };
+        if readiness.is_err() {
+            bridge.failed.store(true,Ordering::SeqCst);
+            // Readiness/business unknown is preserved, but retained ownership
+            // permits independent actual helper/job teardown on cleanup.
         }
+        Ok(RetainedComposerStartup { bridge, readiness })
     }
 
     fn send(&self, payload: Value) -> Result<(), String> {
@@ -3645,8 +4810,20 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 #[cfg(windows)]
 impl Drop for CodexComposerBridge {
     fn drop(&mut self) {
-        self.cancel();
+        // Dropping an owned helper is administrative teardown, never a draft
+        // rollback/cancel replay after an unknown business result.
+        self.closed.store(true,std::sync::atomic::Ordering::SeqCst);
+        if let Some(worker)=self.termination.as_ref() { let _=worker.terminate_process(); }
     }
+}
+
+/// Own the already spawned native worker even when its read-only lookup failed.
+/// Readiness is not a release ACK; callers must store `bridge` in the existing
+/// writer barrier, close write admission on error, then obtain a real release.
+#[cfg(any(windows, target_os = "macos"))]
+pub struct RetainedComposerStartup {
+    pub bridge: CodexComposerBridge,
+    pub readiness: Result<(), String>,
 }
 
 #[cfg(target_os = "macos")]
@@ -3656,6 +4833,7 @@ impl CodexComposerBridge {
             "codex" => macos::MacosAgent::Codex,
             "claude-code" => macos::MacosAgent::Claude,
             "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
             _ => return false,
         };
         macos::agent_is_frontmost(agent)
@@ -3677,13 +4855,28 @@ impl CodexComposerBridge {
             "codex" => macos::MacosAgent::Codex,
             "claude-code" => macos::MacosAgent::Claude,
             "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
             _ => {
                 return Err(
-                    "Current visible composer requires ChatGPT（Codex）, Claude or WorkBuddy".to_string(),
+                    "Current visible composer requires ChatGPT（Codex）, Claude, WorkBuddy or DeepSeek Harness".to_string(),
                 )
             }
         };
         Self::start_with_purpose(agent, "", "", "", "", "current_voice", callback)
+    }
+
+    pub fn start_current_retained(
+        agent_id: &str,
+        callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
+    ) -> Result<RetainedComposerStartup, ComposerNoWriterError> {
+        let agent = match agent_id.trim() {
+            "codex" => macos::MacosAgent::Codex,
+            "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
+            _ => return Err("Unsupported current visible composer".into()),
+        };
+        Self::start_with_purpose_retained(agent, "", "", "", "", "current_voice", callback)
     }
 
     #[cfg(debug_assertions)]
@@ -3802,6 +4995,21 @@ impl CodexComposerBridge {
         purpose: &str,
         callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
     ) -> Result<Self, String> {
+        let startup = Self::start_with_purpose_retained(
+            agent, deep_link, session_id, session_title, session_cwd, purpose, callback).map_err(ComposerNoWriterError::into_message)?;
+        startup.readiness?;
+        Ok(startup.bridge)
+    }
+
+    fn start_with_purpose_retained(
+        agent: macos::MacosAgent,
+        deep_link: &str,
+        session_id: &str,
+        session_title: &str,
+        session_cwd: &str,
+        purpose: &str,
+        callback: impl Fn(CodexComposerEvent) + Send + Sync + 'static,
+    ) -> Result<RetainedComposerStartup, ComposerNoWriterError> {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::{mpsc, Arc};
         use std::thread;
@@ -3809,11 +5017,14 @@ impl CodexComposerBridge {
         let session_id = session_id.trim();
         let session_title = session_title.trim();
         let current_visible = matches!(purpose, "current_voice" | "current_task");
+        if agent == macos::MacosAgent::DeepSeekHarness && !current_visible {
+            return Err("DeepSeek Harness 仅支持当前可见输入框".into());
+        }
         if !current_visible && session_id.is_empty() && session_title.is_empty() {
-            return Err("Visible composer requires a bound task ID or title".to_string());
+            return Err("Visible composer requires a bound task ID or title".into());
         }
         if !matches!(purpose, "voice" | "locate" | "current_voice" | "current_task") {
-            return Err("Visible composer purpose is invalid".to_string());
+            return Err("Visible composer purpose is invalid".into());
         }
 
         let deep_link = deep_link.to_string();
@@ -3828,7 +5039,7 @@ impl CodexComposerBridge {
         let worker_callback = callback.clone();
         let worker_failed = failed.clone();
         let worker_closed = closed.clone();
-        thread::Builder::new()
+        let worker = thread::Builder::new()
             .name("pet-visible-agent-composer".to_string())
             .spawn(move || {
                 let mut pending_command = None;
@@ -3968,20 +5179,27 @@ impl CodexComposerBridge {
             sender,
             failed,
             closed,
+            release_result: std::sync::Mutex::new(None),
+            #[cfg(any(windows, target_os = "macos"))]
+            termination: Some(crate::device_voice_lifecycle::WriterTermination::new(worker)),
         };
         let (ready_sender, ready_receiver) = mpsc::channel();
-        bridge
+        let begin_send = bridge
             .sender
             .send(ComposerCommand {
                 payload: json!({ "kind": "begin" }),
                 started: None,
                 response: Some(ready_sender),
             })
-            .map_err(|_| "Visible Agent composer bridge closed during startup".to_string())?;
-        match ready_receiver.recv_timeout(std::time::Duration::from_secs(
+            ;
+        if begin_send.is_err() {
+            bridge.failed.store(true, Ordering::SeqCst);
+            return Ok(RetainedComposerStartup { bridge, readiness: Err("Visible Agent composer bridge closed during startup".into()) });
+        }
+        let readiness = match ready_receiver.recv_timeout(std::time::Duration::from_secs(
             CODEX_COMPOSER_STARTUP_TIMEOUT_SECS,
         )) {
-            Ok(Ok(_)) => Ok(bridge),
+            Ok(Ok(_)) => Ok(()),
             Ok(Err(error)) => Err(error),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 Err("Visible Agent composer startup timed out".to_string())
@@ -3989,7 +5207,15 @@ impl CodexComposerBridge {
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 Err("Visible Agent composer closed during startup".to_string())
             }
+        };
+        // Close ordinary writes BEFORE the retained Bridge becomes observable.
+        // A finalizer may already have passed the context admission check.
+        // Failed is sticky; late begin success cannot reopen update/confirm.
+        // preserve_draft still bypasses this gate to obtain the real release ACK.
+        if readiness.is_err() {
+            bridge.failed.store(true, Ordering::SeqCst);
         }
+        Ok(RetainedComposerStartup { bridge, readiness })
     }
 
     fn send(&self, payload: Value) -> Result<(), String> {
@@ -4212,6 +5438,44 @@ mod tests {
     }
 
     #[test]
+    fn windows_all_emitted_progress_stages_match_parser_and_replay_to_real_ack() {
+        use std::collections::BTreeSet;
+        let source = include_str!("codex_composer.rs");
+        let script = source.split("        const SCRIPT: &str = r#\"").nth(1)
+            .expect("embedded Windows helper").split("\"#;").next().unwrap();
+        let emitted: Vec<&str> = script.lines().filter_map(|line| {
+            let argument = line.trim().strip_prefix("Write-ComposerProgress ")?;
+            assert!(argument.starts_with('\'') && argument.ends_with('\''),
+                "progress must remain a literal stage, never dynamic data");
+            let stage = &argument[1..argument.len()-1];
+            assert!(stage.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'));
+            Some(stage)
+        }).collect();
+        assert!(!emitted.is_empty());
+        let parser = source.split("fn read_windows_composer_response(").nth(1).unwrap()
+            .split("\n#[cfg(").next().unwrap();
+        let accepted: BTreeSet<&str> = parser.lines().filter_map(|line|
+            line.trim().strip_prefix("Some(\"").and_then(|tail| tail.split_once("\") =>").map(|v| v.0))
+        ).collect();
+        assert_eq!(emitted.iter().copied().collect::<BTreeSet<_>>(), accepted);
+        let mut wire = String::new();
+        for stage in &emitted {
+            wire.push_str(&json!({"phase":"progress", "stage":stage}).to_string());
+            wire.push('\n');
+        }
+        wire.push_str("{\"ok\":true,\"phase\":\"ready\"}\n");
+        wire.push_str("{\"ok\":true,\"phase\":\"updated\",\"revision\":7}\n");
+        let mut reader = std::io::Cursor::new(wire);
+        let mut callbacks = Vec::new();
+        let ready = read_windows_composer_response(&mut reader, |v| callbacks.push(v)).unwrap();
+        assert_eq!(ready["phase"], "ready");
+        assert_eq!(callbacks.len(), emitted.len());
+        assert!(callbacks.iter().all(|v| !v.is_empty()));
+        let updated = read_windows_composer_response(&mut reader, |_| panic!("no progress after ready")).unwrap();
+        assert_eq!(updated["revision"], 7);
+    }
+
+    #[test]
     fn windows_progress_retains_errors_and_rejects_incomplete_or_unknown_replies() {
         let mut reader = std::io::Cursor::new(concat!(
             "{\"phase\":\"progress\",\"stage\":\"control\"}\n",
@@ -4232,8 +5496,11 @@ mod tests {
     fn releasing_a_recording_drains_updates_without_cancel_or_send() {
         use std::sync::{mpsc, Arc, Mutex, atomic::AtomicBool};
         let (sender, receiver) = mpsc::channel();
-        let bridge = CodexComposerBridge {
+        let mut bridge = CodexComposerBridge {
             sender, failed: Arc::new(AtomicBool::new(false)), closed: Arc::new(AtomicBool::new(false)),
+            release_result: std::sync::Mutex::new(None),
+            #[cfg(any(windows, target_os = "macos"))]
+            termination: None,
         };
         let value = Arc::new(Mutex::new("已经输入\n".to_string()));
         let worker_value = value.clone();
@@ -4254,11 +5521,14 @@ mod tests {
                 }
             }
         });
+        #[cfg(target_os = "macos")]
+        { bridge.termination = Some(crate::device_voice_lifecycle::WriterTermination::new(worker)); }
         bridge.update(1, "部分").unwrap();
         bridge.update(2, "完整的一句话").unwrap();
         bridge.preserve_draft().unwrap();
         assert!(bridge.update(3, "迟到的旧结果").is_err());
         drop(bridge);
+        #[cfg(windows)]
         worker.join().unwrap();
         let next = crate::voice_draft::VoiceDraft::new(value.lock().unwrap().clone());
         assert_eq!(next.desired("第二句话"), "已经输入\n完整的一句话 第二句话");
@@ -4283,7 +5553,7 @@ mod tests {
     fn realtime_delegation_submits_one_exact_atomic_command_and_waits_for_ack() {
         use std::sync::{Arc,atomic::AtomicBool,mpsc};
         let (sender,receiver)=mpsc::channel::<ComposerCommand>();
-        let bridge=CodexComposerBridge {sender,failed:Arc::new(AtomicBool::new(false)),closed:Arc::new(AtomicBool::new(false))};
+        let bridge=CodexComposerBridge {sender,failed:Arc::new(AtomicBool::new(false)),closed:Arc::new(AtomicBool::new(false)),release_result:std::sync::Mutex::new(None),termination:None};
         let text=format!("语音对话数据（JSON）：\n{}",serde_json::json!({"conversation":[{"speaker":"user","text":"然后搜索AI硬件这个关键词"},{"speaker":"pet","text":"在抖音搜索吗？"}],"current_user_request":"是的"}));
         let expected=text.clone();
         let worker=std::thread::spawn(move || {
@@ -4303,7 +5573,7 @@ mod tests {
     fn task_draft_snapshot_roundtrip_preserves_exact_text_and_native_mode() {
         use std::sync::{Arc, atomic::AtomicBool, mpsc};
         let (sender, receiver) = mpsc::channel::<ComposerCommand>();
-        let bridge = CodexComposerBridge { sender, failed:Arc::new(AtomicBool::new(false)), closed:Arc::new(AtomicBool::new(false)) };
+        let bridge = CodexComposerBridge { sender, failed:Arc::new(AtomicBool::new(false)), closed:Arc::new(AtomicBool::new(false)), release_result:std::sync::Mutex::new(None), termination:None };
         let snapshot = json!({"target":{"composerId":"pinned"},"text":"  manually edited\n    prefix"});
         let expected = snapshot.clone();
         let text = "  manually edited\n    prefix\n\nnew request";
@@ -4333,14 +5603,31 @@ mod tests {
         assert!(dispatch.contains("DESKTOP_TASK_READBACK_CHANGED"));
         assert!(dispatch.contains("Assert-TargetCurrent $state $true"));
         assert!(dispatch.contains("Invoke-SendButton $state $true $true"));
-        assert!(windows.contains("if ($strictButton -or -not $allowQueue)"));
+        assert!(windows.contains("if ($state.Agent -eq 'deepseek-harness' -or $strictButton -or -not $allowQueue)"));
         let mac=include_str!("codex_composer_macos.rs");
         assert!(mac.contains("!state.draft.base.is_empty() || !target.value.is_empty()"));
         assert!(mac.contains("confirm_voice_inner(state, Some(text))"));
         assert!(mac.contains("expected.is_some_and(|text| target.value != text)"));
         assert!(mac.contains("expected.get(\"text\") != current.get(\"text\")"));
         assert!(dispatch.contains("Assert-TaskDraftSnapshot $state $command.draftSnapshot"));
-        assert!(mac.contains("if expected.is_none() {"));
+        let confirm=mac.split("fn confirm_voice_inner(").nth(1).unwrap()
+            .split("\npub(super) fn cancel_voice(").next().unwrap();
+        let ordinary=confirm.rsplit_once("\n    } else {\n").unwrap().1
+            .split("\n    match wait_for_submit_readback(").next().unwrap();
+        assert_eq!(ordinary.matches("submit_once(").count(),1);
+        assert!(ordinary.contains("press_unique_submission(&target, true)"));
+        assert!(ordinary.contains("assert_submission_target(&target)?; press_enter(target.agent, &target.app)"));
+        let policy=mac.split("fn submit_once(").nth(1).unwrap()
+            .split("\nfn press_unique_submission(").next().unwrap();
+        assert!(policy.contains("match button()?"));
+        assert!(policy.contains("Some(mode) => Ok(mode)"));
+        assert!(policy.contains("None => { enter()?; Ok(\"enter\") }"));
+        let unchanged=confirm.split("Ok(SubmitReadback::DraftUnchanged) => {").nth(1).unwrap()
+            .split("\n        }").next().unwrap();
+        // The old ordinary-confirm resend body must stay empty apart from
+        // comments: an unchanged draft never authorizes a second submission.
+        assert!(unchanged.lines().filter(|line| !line.trim().starts_with("//"))
+            .all(|line| line.trim().is_empty()));
     }
 
     #[cfg(windows)]
@@ -4460,14 +5747,22 @@ mod tests {
         assert!(source.contains("[System.Windows.Automation.ControlType]::Edit"));
         assert!(source.contains("[System.Windows.Automation.ControlType]::ListItem"));
         assert!(source.contains("[System.Windows.Automation.ControlType]::Button"));
-        assert!(source.contains("let worker_child = child.clone();"));
+        assert!(source.contains("let worker_process = process.clone();"));
+        assert!(source.contains("WriterTermination::owned_process(Some(worker),process)"));
     }
 
     #[cfg(windows)]
     #[test]
-    fn windows_claude_command_hint_is_treated_as_an_empty_composer() {
+    fn windows_draft_reader_uses_semantic_values_instead_of_prompt_strings() {
         let source = include_str!("codex_composer.rs");
-        assert!(source.contains("type / for commands"));
+        let reader = source.split("function Get-ComposerText($element) {").nth(1).unwrap()
+            .split("function Get-NativeLegacyComposerSnapshot").next().unwrap();
+        assert!(reader.contains("UIA_LegacyIAccessiblePatternId"));
+        assert!(reader.contains("Read-ComposerTextPattern $element $pattern"));
+        assert!(!reader.contains("Current.Name"));
+        assert!(!reader.contains("HelpText"));
+        assert!(!reader.contains("TrimStart"));
+        assert!(!reader.contains("type / for commands"));
         assert!(source.contains("$rect.Right -lt ($composerRect.Left - 12)"));
     }
 
@@ -4537,7 +5832,12 @@ mod tests {
         assert!(source.contains("JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE"));
         assert!(source.contains("JOB_OBJECT_LIMIT_PROCESS_MEMORY"));
         assert!(source.contains("JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK"));
-        assert!(source.contains("let _worker_job = worker_job;"));
+        assert!(source.contains("WindowsComposerJob::new(current_visible)"));
+        assert!(source.contains("if contain_descendants { 0 } else { JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK }"));
+        assert!(source.contains("self.job.active_processes()? == 0"));
+        let gate=source.find("if ([Console]::In.ReadLine() -cne 'HACHIMODOCK_CONTAINED_HELPER_V1')").unwrap();
+        assert!(source.find("[Console]::InputEncoding =").unwrap() < gate);
+        assert!(gate < source.find("Add-Type -AssemblyName UIAutomationClient").unwrap());
 
         let fallback_start = source
             .find("function Find-BoundedComposerElements")
@@ -4779,6 +6079,9 @@ mod tests {
                 sender,
                 failed: Arc::new(AtomicBool::new(false)),
                 closed: Arc::new(AtomicBool::new(false)),
+                release_result: std::sync::Mutex::new(None),
+            #[cfg(any(windows, target_os = "macos"))]
+            termination: None,
             };
             let worker = std::thread::spawn(move || {
                 let command = receiver.recv().unwrap();

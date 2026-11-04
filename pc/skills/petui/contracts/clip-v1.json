@@ -1,0 +1,376 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-clip-v1",
+ "notes": "Shared p4-clip-v1 vectors: one clip node per package, assets/<id>.mp4 compiled by the PC to runtime/clips/<id>.h264 (P4V1, Annex-B, 160x120 or 320x240, 15 fps, <= 5 s, <= 512 KiB). Node w/h equal the clip size; no rotation. Vectors marked firmware=surface are rejected on the device by pet_surface (node structure); the pet_p4_component_ext harness only sees the declaration level.",
+ "limits": {
+  "nodes": 1,
+  "sizes": [
+   [
+    160,
+    120
+   ],
+   [
+    320,
+    240
+   ]
+  ],
+  "fps": 15,
+  "seconds": 5,
+  "bytes": 524288
+ },
+ "vectors": [
+  {
+   "name": "one 320x240 clip node",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/intro.mp4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "one 160x120 clip node",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 160,
+       "h": 120,
+       "color": 0,
+       "asset": "assets/intro.mp4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "two clip nodes",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/intro.mp4"
+      },
+      {
+       "type": "clip",
+       "x": 0,
+       "y": 0,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/b.mp4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "unsupported size",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 200,
+       "h": 150,
+       "color": 0,
+       "asset": "assets/intro.mp4"
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "asset is not an mp4",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/intro.mov"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "asset outside assets/",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "intro.mp4"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "clip node with an action",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "panel",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 4226
+      },
+      {
+       "type": "clip",
+       "x": 160,
+       "y": 120,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/intro.mp4",
+       "action": "pet"
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "clip outside the app surface",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "background": 0,
+     "elements": [
+      {
+       "type": "clip",
+       "x": 0,
+       "y": 0,
+       "w": 320,
+       "h": 240,
+       "color": 0,
+       "asset": "assets/intro.mp4"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -8,6 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync} from 'node:fs';
 import {
   CLAWPKG_FILES,
   COMPONENT_BUTTON_EVENTS,
@@ -26,6 +27,50 @@ import {
   P4_WIDGET_JSON_MAX_BYTES,
   validateClawpkgManifest,
 } from "./clawpkg-contract.js";
+
+const profileManifest=runtime=>({
+  'component.json':{id:'profile-check',name:'Profile',version:'1',kind:'tool'},
+  'negative-screen.json':{dashboard:{title:'Profile'}},'buttons.json':[],
+  'runtime/':{},'assets/':{},'share.json':{title:'Profile'},'runtime/widget.json':runtime,
+});
+test('manifest variable and UTF-8 string ceilings follow only explicitly declared v4 quotas',()=>{
+  for(const [quota,maxVars,maxString] of [[undefined,8,63],['p4-quota-v2',16,63],['p4-quota-v3',32,127]]){
+    for(const count of [8,9,16,17,32,33]){
+      const runtime={engine:'p4-bounded-runtime-v4',...(quota?{quota}:{}),vars:Object.fromEntries(Array.from({length:count},(_,i)=>[`v${i}`,{type:'int',init:0}]))};
+      assert.equal(validateClawpkgManifest(profileManifest(runtime)).valid,count<=maxVars,`${quota} vars ${count}`);
+    }
+    for(const bytes of [63,64,127,128]){
+      const text='字'.repeat(Math.floor(bytes/3))+'x'.repeat(bytes%3);
+      const runtime={engine:'p4-bounded-runtime-v4',...(quota?{quota}:{}),vars:{text:{type:'string',init:text}}};
+      assert.equal(validateClawpkgManifest(profileManifest(runtime)).valid,bytes<=maxString,`${quota} UTF8 ${bytes}`);
+    }
+  }
+  for(const runtime of [{engine:'p4-bounded-runtime-v3',quota:'p4-quota-v3',vars:{}},
+    {engine:'p4-bounded-runtime-v4',quota:'unknown',vars:{}},
+    {engine:'p4-bounded-runtime-v4',quota:'p4-quota-v2',vars:{},game:{}}]){
+    assert.equal(validateClawpkgManifest(profileManifest(runtime)).valid,false);
+  }
+});
+test('manifest compact byte check keeps legacy, graphics, quota-v2 and quota-v3 boundaries distinct',()=>{
+  for(const [extra,limit] of [[{},4095],[{surface:{graphics:'p4-app-graphics-v1'}},8191],[{quota:'p4-quota-v2'},8191],[{quota:'p4-quota-v3'},12287]]){
+    // Padding isolates the compact-size admission check, not full runtime schema validation.
+    const runtime={engine:'p4-bounded-runtime-v4',vars:{},...extra,padding:''};
+    const base=Buffer.byteLength(JSON.stringify(runtime));runtime.padding='x'.repeat(limit-base);
+    assert.equal(validateClawpkgManifest(profileManifest(runtime)).valid,true);
+    runtime.padding+='x';assert.equal(validateClawpkgManifest(profileManifest(runtime)).valid,false);
+  }
+});
+test('manifest accepts the real form-v3 shared declaration while preserving specialized eight-slot contracts',()=>{
+  const fixture=name=>JSON.parse(readFileSync(new URL(`../../skills/petui/contracts/${name}.json`,import.meta.url)));
+  const v3=fixture('app-form-v3'),manifest=profileManifest(v3.runtime);manifest['buttons.json']=v3.buttons;
+  assert.deepEqual(validateClawpkgManifest(manifest).errors,[]);
+  for(const name of ['app-form-v1','app-form-v2','component-program-v1','variable-owners-v1']){
+    const runtime=structuredClone(fixture(name).runtime);runtime.quota='p4-quota-v3';
+    if(name==='variable-owners-v1')delete runtime.program;
+    while(Object.keys(runtime.vars).length<9)runtime.vars[`extra${Object.keys(runtime.vars).length}`]={type:'int',init:0};
+    assert.match(validateClawpkgManifest(profileManifest(runtime)).errors.join(' '),/最多允许 8 个变量/,name);
+  }
+});
 
 test("clawpkg 六件套结构齐全", () => {
   assert.deepEqual(
@@ -326,7 +371,7 @@ test("组件按钮契约限制 8 个动作、唯一事件/action 与 30 字节�
 });
 
 test("P4 动态游戏只接受有界 blocks/snake/flappy 配置并校验动作对齐", () => {
-  assert.deepEqual(COMPONENT_GAME_TYPES, ["blocks", "snake", "flappy"]);
+  assert.deepEqual(COMPONENT_GAME_TYPES, ["blocks", "snake", "flappy", "gomoku"]);
   const buttons = [
     { action: "snake.start", control: "前方旋钮", event: "button.encoder.short_press", label: "开始" },
     { action: "snake.left", control: "前方旋钮", event: "knob.rotate_ccw", label: "左转" },

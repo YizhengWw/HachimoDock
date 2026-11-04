@@ -70,6 +70,10 @@ typedef struct {
 static const esp_partition_t *g_partitions[PET_P4_RAW_SLOT_COUNT];
 static pet_p4_raw_transfer_t g_transfer;
 static pet_p4_raw_cache_t g_caches[PET_P4_RAW_SLOT_COUNT];
+static portMUX_TYPE g_raw_cache_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint64_t g_cache_epochs[PET_P4_RAW_SLOT_COUNT];
+static bool g_cache_loading[PET_P4_RAW_SLOT_COUNT];
+static bool g_cache_mutating[PET_P4_RAW_SLOT_COUNT];
 
 static void set_error(char *error, size_t error_size, const char *message) {
   if (!error || error_size == 0) return;
@@ -130,14 +134,21 @@ static const esp_partition_t *raw_partition_for_slot(int slot) {
     "appearance1",
   };
   if (slot < 0 || slot >= PET_P4_RAW_SLOT_COUNT) return NULL;
-  if (!g_partitions[slot]) {
-    g_partitions[slot] = esp_partition_find_first(
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  const esp_partition_t *partition = g_partitions[slot];
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  if (!partition) {
+    partition = esp_partition_find_first(
       ESP_PARTITION_TYPE_DATA,
       ESP_PARTITION_SUBTYPE_ANY,
       labels[slot]
     );
+    portENTER_CRITICAL(&g_raw_cache_mux);
+    if (!g_partitions[slot]) g_partitions[slot] = partition;
+    partition = g_partitions[slot];
+    portEXIT_CRITICAL(&g_raw_cache_mux);
   }
-  return g_partitions[slot];
+  return partition;
 }
 
 static const esp_partition_t *raw_partition(void) {
@@ -191,9 +202,33 @@ static bool pack_id_is_valid(const char *pack_id) {
   return true;
 }
 
-static void invalidate_cache(int slot) {
-  if (slot < 0 || slot >= PET_P4_RAW_SLOT_COUNT) return;
+static void invalidate_cache_locked(int slot) {
+  g_cache_epochs[slot]++;
   memset(&g_caches[slot], 0, sizeof(g_caches[slot]));
+  /* Do not release an in-flight loader: its physical read still owns the one
+   * bounded temporary allocation. Its old epoch cannot publish afterwards. */
+}
+
+/* Admit one physical header writer per slot. Rejected writers never own or
+ * clear the latch. Readers cannot start/publish between invalidation and I/O,
+ * including when a failed erase/write leaves a partial header on flash. */
+static bool begin_cache_mutation(int slot) {
+  if (slot < 0 || slot >= PET_P4_RAW_SLOT_COUNT) return false;
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  bool admitted = !g_cache_mutating[slot];
+  if (admitted) {
+    g_cache_mutating[slot] = true;
+    invalidate_cache_locked(slot);
+  }
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  return admitted;
+}
+
+static void end_cache_mutation(int slot) {
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  invalidate_cache_locked(slot);
+  g_cache_mutating[slot] = false;
+  portEXIT_CRITICAL(&g_raw_cache_mux);
 }
 
 void pet_p4_raw_assets_reset_transfer(void) {
@@ -216,6 +251,13 @@ unsigned long long pet_p4_raw_assets_slot_capacity_bytes(int slot) {
   const esp_partition_t *partition = raw_partition_for_slot(slot);
   if (!partition || partition->size <= PET_P4_RAW_HEADER_BYTES) return 0;
   return (unsigned long long) partition->size - PET_P4_RAW_HEADER_BYTES;
+}
+
+bool pet_p4_raw_assets_component_media_path(const char *logical_path) {
+  static const char *const prefixes[] = {"runtime/samples/", "runtime/clips/", "runtime/big/"};
+  if (!logical_path) return false;
+  for (unsigned i = 0; i < 3U; i += 1U) if (strncmp(logical_path, prefixes[i], strlen(prefixes[i])) == 0) return true;
+  return false;
 }
 
 bool pet_p4_raw_assets_supports_path(const char *logical_path) {
@@ -257,23 +299,34 @@ bool pet_p4_raw_assets_prepare(
   }
   erase_bytes = align_up((uint32_t) requested, PET_P4_RAW_ERASE_BYTES);
   if (erase_bytes > partition->size) erase_bytes = partition->size;
+  if (!begin_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT)) {
+    set_error(error, error_size, "appearance partition header is busy");
+    return false;
+  }
   pet_p4_raw_assets_reset_transfer();
-  invalidate_cache(PET_P4_RAW_APPEARANCE_SLOT);
-  if (!erase_range_yielding(partition, 0, erase_bytes)) {
+  bool erased = erase_range_yielding(partition, 0, erase_bytes);
+  if (erased) {
+    g_transfer.prepared = true;
+    g_transfer.cursor = PET_P4_RAW_HEADER_BYTES;
+  }
+  end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
+  if (!erased) {
     set_error(error, error_size, "appearance partition erase failed");
     return false;
   }
-  g_transfer.prepared = true;
-  g_transfer.cursor = PET_P4_RAW_HEADER_BYTES;
   return true;
 }
 
 bool pet_p4_raw_assets_invalidate(char *error, size_t error_size) {
   const esp_partition_t *partition = raw_partition();
+  if (!begin_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT)) {
+    set_error(error, error_size, "appearance partition header is busy");
+    return false;
+  }
   pet_p4_raw_assets_reset_transfer();
-  invalidate_cache(PET_P4_RAW_APPEARANCE_SLOT);
-  if (!partition) return true;
-  if (!erase_range_yielding(partition, 0, PET_P4_RAW_ERASE_BYTES)) {
+  bool erased = !partition || erase_range_yielding(partition, 0, PET_P4_RAW_ERASE_BYTES);
+  end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
+  if (!erased) {
     set_error(error, error_size, "appearance partition header erase failed");
     return false;
   }
@@ -407,20 +460,26 @@ bool pet_p4_raw_assets_finish_file(
   return true;
 }
 
-bool pet_p4_raw_assets_commit(
-  const char *pack_id,
-  char *error,
-  size_t error_size
+bool pet_p4_raw_assets_commit_observed(
+  const char *pack_id,char *error,size_t error_size,bool *may_have_changed
 ) {
+  if (!may_have_changed) {set_error(error,error_size,"missing commit outcome observation");return false;}
+  *may_have_changed=false;
   const esp_partition_t *partition = raw_partition();
   unsigned char *header;
+  if (!begin_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT)) {
+    set_error(error, error_size, "appearance partition header is busy");
+    return false;
+  }
   if (!partition || !g_transfer.prepared || g_transfer.file_active
       || g_transfer.entry_count == 0 || !pack_id_is_valid(pack_id)) {
+    end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
     set_error(error, error_size, "raw appearance commit state is invalid");
     return false;
   }
   header = (unsigned char *) malloc(PET_P4_RAW_HEADER_BYTES);
   if (!header) {
+    end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
     set_error(error, error_size, "raw appearance header allocation failed");
     return false;
   }
@@ -439,35 +498,53 @@ bool pet_p4_raw_assets_commit(
     put_u32(encoded + 12U, g_transfer.entries[i].size);
     put_u64(encoded + 16U, g_transfer.entries[i].checksum);
   }
+  *may_have_changed=true;
   if (esp_partition_write(partition, 0, header, PET_P4_RAW_HEADER_BYTES) != ESP_OK) {
     free(header);
+    end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
     set_error(error, error_size, "raw appearance header commit failed");
     return false;
   }
   free(header);
   pet_p4_raw_assets_reset_transfer();
-  invalidate_cache(PET_P4_RAW_APPEARANCE_SLOT);
+  end_cache_mutation(PET_P4_RAW_APPEARANCE_SLOT);
   return true;
+}
+
+bool pet_p4_raw_assets_commit(const char *pack_id,char *error,size_t error_size) {
+  bool may_have_changed=false;
+  return pet_p4_raw_assets_commit_observed(pack_id,error,error_size,&may_have_changed);
 }
 
 static bool load_cache(int slot) {
   const esp_partition_t *partition = raw_partition_for_slot(slot);
-  pet_p4_raw_cache_t *cache;
+  pet_p4_raw_cache_t *cache = NULL;
   unsigned char *header;
   uint32_t count;
   uint32_t data_end;
   if (slot < 0 || slot >= PET_P4_RAW_SLOT_COUNT) return false;
-  cache = &g_caches[slot];
-  if (cache->attempted) return cache->valid;
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  bool attempted = g_caches[slot].attempted, valid = g_caches[slot].valid;
+  bool loading = g_cache_loading[slot];
+  bool mutating = g_cache_mutating[slot];
+  uint64_t epoch = g_cache_epochs[slot];
+  if (!attempted && !loading && !mutating) g_cache_loading[slot] = true;
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  if (mutating) return false;
+  if (attempted) return valid;
+  if (loading) return false;
+  if (!partition) goto complete;
+  /* Keep the 4KiB header and <1KiB parsed snapshot off the renderer stack.
+   * At most one loader per slot; never allocate or read under the cache mux. */
+  _Static_assert(sizeof(pet_p4_raw_cache_t) <= 1024, "raw cache snapshot is bounded");
+  cache = calloc(1, sizeof(*cache) + PET_P4_RAW_HEADER_BYTES);
+  if (!cache) goto complete;
   cache->attempted = true;
-  if (!partition) return false;
-  header = (unsigned char *) malloc(PET_P4_RAW_HEADER_BYTES);
-  if (!header) return false;
+  header = (unsigned char *) (cache + 1);
   if (esp_partition_read(partition, 0, header, PET_P4_RAW_HEADER_BYTES) != ESP_OK
       || memcmp(header, PET_P4_RAW_MAGIC, sizeof(PET_P4_RAW_MAGIC)) != 0
       || get_u32(header + 8U) != PET_P4_RAW_HEADER_VERSION) {
-    free(header);
-    return false;
+    goto complete;
   }
   count = get_u32(header + 12U);
   data_end = get_u32(header + 16U);
@@ -476,8 +553,7 @@ static bool load_cache(int slot) {
   if (count == 0 || count > PET_P4_RAW_MAX_FILES
       || data_end < PET_P4_RAW_HEADER_BYTES || data_end > partition->size
       || !pack_id_is_valid(cache->pack_id)) {
-    free(header);
-    return false;
+    goto complete;
   }
   for (unsigned int i = 0; i < count; i += 1U) {
     const unsigned char *encoded = header + PET_P4_RAW_HEADER_ENTRY_OFFSET
@@ -489,17 +565,27 @@ static bool load_cache(int slot) {
     entry->checksum = get_u64(encoded + 16U);
     if (entry->offset < PET_P4_RAW_HEADER_BYTES || entry->size == 0
         || (unsigned long long) entry->offset + entry->size > data_end) {
-      free(header);
       memset(cache, 0, sizeof(*cache));
       cache->attempted = true;
-      return false;
+      goto complete;
     }
   }
-  free(header);
   cache->entry_count = count;
   cache->data_end = data_end;
   cache->valid = true;
-  return true;
+complete:
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  bool current = !g_cache_mutating[slot] && epoch == g_cache_epochs[slot];
+  if (current) {
+    if (cache) g_caches[slot] = *cache;
+    /* An unavailable workspace says nothing about the immutable header. Leave
+     * it unattempted so a later read can recover after memory pressure clears. */
+  }
+  g_cache_loading[slot] = false;
+  valid = current && g_caches[slot].valid;
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  free(cache);
+  return valid;
 }
 
 bool pet_p4_raw_assets_committed_pack_id(char *out, size_t out_size) {
@@ -516,8 +602,11 @@ bool pet_p4_raw_assets_committed_pack_id_for_slot(
   size_t out_size
 ) {
   if (!out || out_size < PET_P4_RAW_PACK_ID_BYTES + 1U || !load_cache(slot)) return false;
-  snprintf(out, out_size, "%s", g_caches[slot].pack_id);
-  return true;
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  bool valid = g_caches[slot].valid;
+  if (valid) memcpy(out, g_caches[slot].pack_id, PET_P4_RAW_PACK_ID_BYTES + 1U);
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  return valid;
 }
 
 bool pet_p4_raw_assets_read_all(
@@ -540,19 +629,52 @@ bool pet_p4_raw_assets_read_all_from_slot(
   size_t expected_size
 ) {
   const esp_partition_t *partition = raw_partition_for_slot(slot);
-  pet_p4_raw_cache_t *cache;
-  unsigned long long hash;
+  uint32_t offset;
   if (slot < 0 || slot >= PET_P4_RAW_SLOT_COUNT
       || !partition || !logical_path || !out || expected_size == 0
-      || !load_cache(slot)) {
+      || !pet_p4_raw_assets_locate(slot, logical_path, expected_size, &offset)) {
     return false;
   }
-  cache = &g_caches[slot];
-  hash = path_hash(logical_path);
-  for (unsigned int i = 0; i < cache->entry_count; i += 1U) {
-    const pet_p4_raw_entry_t *entry = &cache->entries[i];
-    if (entry->path_hash != hash || entry->size != expected_size) continue;
-    return esp_partition_read(partition, entry->offset, out, expected_size) == ESP_OK;
+  return esp_partition_read(partition, offset, out, expected_size) == ESP_OK;
+}
+
+bool pet_p4_raw_assets_stat_for_slot(int slot,const char *pack,const char *path,
+    size_t expected_size,uint32_t *size,unsigned long long *checksum){
+  if(slot<0||slot>=PET_P4_RAW_SLOT_COUNT||!pack||strlen(pack)!=64U
+      ||!path||!path[0]||!expected_size||!size||!checksum||!load_cache(slot))return false;
+  unsigned long long hash=path_hash(path);unsigned matches=0;
+  uint32_t actual_size=0;unsigned long long actual_checksum=0;
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  const pet_p4_raw_cache_t *cache=&g_caches[slot];
+  if(cache->valid&&!g_cache_mutating[slot]&&!strcmp(cache->pack_id,pack)){
+    for(unsigned i=0;i<cache->entry_count;i++){
+      const pet_p4_raw_entry_t *entry=&cache->entries[i];
+      if(entry->path_hash==hash){matches++;actual_size=entry->size;actual_checksum=entry->checksum;}
+    }
   }
-  return false;
+  bool ok=matches==1U&&actual_size==expected_size;
+  if(ok){*size=actual_size;*checksum=actual_checksum;}
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  return ok;
+}
+
+bool pet_p4_raw_assets_locate(int slot,const char *logical_path,size_t expected_size,uint32_t *offset){
+  if(!logical_path||!offset||!expected_size||!load_cache(slot))return false;
+  unsigned long long hash=path_hash(logical_path);
+  bool found=false;
+  portENTER_CRITICAL(&g_raw_cache_mux);
+  const pet_p4_raw_cache_t *cache=&g_caches[slot];
+  for(unsigned i=0;cache->valid&&i<cache->entry_count;i++){
+    const pet_p4_raw_entry_t *entry=&cache->entries[i];
+    if(entry->path_hash==hash&&entry->size==expected_size){*offset=entry->offset;found=true;break;}
+  }
+  portEXIT_CRITICAL(&g_raw_cache_mux);
+  return found;
+}
+
+bool pet_p4_raw_assets_read_range(int slot,uint32_t base,size_t total,size_t offset,unsigned char *out,size_t len){
+  const esp_partition_t *partition=raw_partition_for_slot(slot);
+  if(!partition||!out||!len||len>16384U||base<PET_P4_RAW_HEADER_BYTES
+     ||offset>total||len>total-offset||base>partition->size||total>partition->size-base)return false;
+  return esp_partition_read(partition,(size_t)base+offset,out,len)==ESP_OK;
 }

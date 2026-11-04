@@ -1,0 +1,1 @@
+[{"action":"set","control":"SW1","event":"button.sw1.short_press","label":"set"},{"action":"cancel","control":"SW2","event":"button.sw2.short_press","label":"cancel"}]

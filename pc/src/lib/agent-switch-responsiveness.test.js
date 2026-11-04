@@ -30,7 +30,8 @@ test("startup runs the same serialized Bridge implementation on its own worker",
 
 test("asynchronous session updates retain the frontend ordering queue", () => {
   const hook = readFileSync(new URL("../dashboard/useP4SessionSync.js", import.meta.url), "utf8");
-  assert.match(hook, /const bindingPromise = bindingQueueRef.current[\s\S]*?\.then\(\(\) => invoke\("set_p4_session_binding"/);
+  assert.match(hook, /const bindingPromise = enqueueP4SessionBinding\(bindingQueueRef.current, isCurrent,[\s\S]*?invoke\("set_p4_session_binding"/);
+  assert.match(hook, /const isCurrent = \(\) => bindingScopeRef.current === bindingScope/);
   assert.match(hook, /bindingQueueRef.current = bindingPromise.catch/);
 });
 

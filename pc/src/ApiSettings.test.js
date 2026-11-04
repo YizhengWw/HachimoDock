@@ -118,7 +118,7 @@ test("LLM scope explanation belongs to header and usage spacing is page-scoped",
 test("API settings owns voice and generation credential inputs", () => {
   const source = readSource("ApiSettings.jsx");
 
-  assert.match(source, /title="API 配置"/);
+  assert.match(source, /title="设置"/);
   assert.match(source, /load_device_asr_settings/);
   assert.match(source, /save_device_asr_settings/);
   assert.match(source, /test_device_asr_settings/);
@@ -159,7 +159,7 @@ test("app exposes API configuration as a first-level sidebar page", () => {
 
   assert.match(app, /const ApiSettings = lazy\(\(\) => import\("\.\/ApiSettings"\)\)/);
   assert.match(app, /activeTab = view === "api"/);
-  assert.match(app, /title="API 配置"/);
+  assert.match(app, /title="设置"/);
   assert.match(app, /view === "api"[\s\S]*<ApiSettings/);
   assert.match(app, /onOpenApiSettings/);
 });

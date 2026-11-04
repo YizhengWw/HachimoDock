@@ -28,6 +28,8 @@ bool pet_app_host_enabled(const char*,const char*,uint64_t);
 #include <assert.h>
 static char sent[2048];static int count;
 static void send(const char *line,void *ctx){(void)ctx;snprintf(sent,sizeof(sent),"%s",line);count++;}
+/* Model a newly emitted status sequence while exercising reply validation. */
+static void next_reply(cJSON *reply){cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(reply,"sequence"),++sequence);}
 int main(void){
  pet_app_host_transport(send,NULL,"test-board");
  pet_app_host_tick("test-app",1,0,true,2100);assert(count==1);
@@ -39,6 +41,19 @@ int main(void){
  j=cJSON_CreateObject();cJSON_AddStringToObject(j,"componentId","test-app");cJSON_AddStringToObject(j,"instance",token);cJSON_AddNumberToObject(j,"sequence",1);cJSON_AddObjectToObject(j,"values");
  assert(!pet_app_host_apply(j,2300)); // old status cannot overwrite a newer action
  cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(j,"sequence"),2);assert(pet_app_host_apply(j,2300));
+ assert(!pet_app_host_apply(j,2301)); // duplicate action receipt cannot refresh freshness
+ cJSON *vars=cJSON_AddObjectToObject(j,"variables");cJSON_AddStringToObject(vars,"temperature","24.5 C");cJSON_AddNumberToObject(vars,"level",25);
+ next_reply(j);assert(pet_app_host_apply(j,2310));char text[64];int32_t number;
+ assert(pet_app_host_variable("test-app","temperature",false,text,&number,2311)&&!strcmp(text,"24.5 C"));
+ assert(pet_app_host_variable("test-app","level",true,text,&number,2311)&&number==25&&!strcmp(text,"25"));
+ assert(!pet_app_host_variable("test-app","temperature",true,text,&number,2311));
+ assert(!pet_app_host_variable("test-app","level",false,text,&number,2311));
+ assert(!pet_app_host_variable("other-app","level",true,text,&number,2311));
+ assert(!pet_app_host_variable("test-app","level",true,text,&number,13011));
+ next_reply(j);cJSON_AddNumberToObject(vars,"bad",1.5);assert(!pet_app_host_apply(j,2312));cJSON_DeleteItemFromObjectCaseSensitive(vars,"bad");
+ cJSON_AddNumberToObject(vars,"level",3);assert(!pet_app_host_apply(j,2313));cJSON_DeleteItemFromObjectCaseSensitive(vars,"level");
+ cJSON_AddStringToObject(vars,"bad","control\\nline");assert(!pet_app_host_apply(j,2314));cJSON_DeleteItemFromObjectCaseSensitive(vars,"bad");
+ cJSON_AddBoolToObject(vars,"bad",true);assert(!pet_app_host_apply(j,2315));cJSON_DeleteItemFromObjectCaseSensitive(vars,"bad");
  cJSON *ui=cJSON_AddObjectToObject(j,"ui");cJSON_AddNumberToObject(ui,"mode",5);
  cJSON *a=cJSON_AddArrayToObject(ui,"actions");cJSON_AddItemToArray(a,cJSON_CreateString("host.delete"));
  cJSON_AddStringToObject(ui,"context","abc123");assert(pet_app_host_apply(j,2400));
@@ -50,15 +65,28 @@ int main(void){
  cJSON *event=cJSON_Parse(sent),*ep=cJSON_GetObjectItemCaseSensitive(event,"payload");
  assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ep,"confirmed")));assert(!strcmp(str(ep,"context"),"abc123"));cJSON_Delete(event);
  assert(pet_app_host_mode("test-app",2403)==6);assert(!pet_app_host_enabled("test-app","host.delete",2403));
- cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(j,"sequence"),3);assert(pet_app_host_apply(j,2405));
- cJSON_AddItemToArray(a,cJSON_CreateString("host.delete"));assert(!pet_app_host_apply(j,2406));
+ cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(j,"sequence"),sequence);assert(pet_app_host_apply(j,2405));
+ assert(!pet_app_host_apply(j,2406));
+ next_reply(j);cJSON_AddItemToArray(a,cJSON_CreateString("host.delete"));assert(!pet_app_host_apply(j,2406));
  cJSON_DeleteItemFromArray(a,1);cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(ui,"mode"),8);assert(!pet_app_host_apply(j,2407));
  assert(pet_app_host_mode("test-app",13000)==7);assert(!pet_app_host_enabled("test-app","host.delete",13000));
- pet_app_host_tick("other-app",2,0,true,2500);assert(!pet_app_host_apply(j,2501));cJSON_Delete(j);
+ assert(pet_app_host_action("test-app",1,0,"host.delete",2600));
+ event=cJSON_Parse(sent);ep=cJSON_GetObjectItemCaseSensitive(event,"payload");
+ assert(!strcmp(str(ep,"context"),"abc123"));assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ep,"confirmed")));cJSON_Delete(event);
+ pet_app_host_tick("other-app",2,0,true,2700);assert(!pet_app_host_apply(j,2701));cJSON_Delete(j);
+ /* Execute the production D emitter over the actual configured line sink. */
+ cJSON *notice=cJSON_CreateObject();cJSON_AddStringToObject(notice,"componentId","test-app");cJSON_AddStringToObject(notice,"title","Done");int before=count;
+ assert(pet_app_host_emit("widget/notify",notice)&&count==before+1);
+ event=cJSON_Parse(sent);assert(!strcmp(str(event,"topic"),"widget/notify"));ep=cJSON_GetObjectItemCaseSensitive(event,"payload");assert(!strcmp(str(ep,"title"),"Done")&&!cJSON_HasObjectItem(ep,"boardDeviceId"));cJSON_Delete(event);
+ assert(!pet_app_host_emit("shell/exec",notice)&&count==before+1);cJSON_Delete(notice);
+ notice=cJSON_CreateObject();cJSON_AddStringToObject(notice,"componentId","test-app");cJSON_AddStringToObject(notice,"source","todos.upcoming");
+ assert(pet_app_host_emit("widget/data/refresh",notice));assert(!cJSON_HasObjectItem(notice,"boardDeviceId"));
+ event=cJSON_Parse(sent);ep=cJSON_GetObjectItemCaseSensitive(event,"payload");assert(!strcmp(str(ep,"boardDeviceId"),"test-board"));cJSON_Delete(event);
+ pet_app_host_transport(NULL,NULL,"");before=count;assert(!pet_app_host_emit("widget/data/refresh",notice)&&count==before);cJSON_Delete(notice);
  return 0;
 }
 '''
     source=tmp_path/'host.c';source.write_text(code);exe=tmp_path/'host'
     vendor=ROOT/'tests/vendor/cjson'
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-error=deprecated-declarations','-fsanitize=address,undefined','-I',str(tmp_path),'-I',str(vendor),str(source),str(vendor/'cJSON.c'),'-lm','-o',str(exe)],check=True)
+    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-error=deprecated-declarations','-fsanitize=address,undefined','-I',str(tmp_path),'-I',str(vendor),'-I',str(ROOT/'main'),str(source),str(ROOT/'main/pet_p4_resources.c'),str(ROOT/'main/pet_p4_resources_device.c'),str(vendor/'cJSON.c'),'-lm','-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)

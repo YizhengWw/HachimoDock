@@ -5,7 +5,7 @@
  * [Sync] If this file changes, update `pc/src/dashboard/.folder.md`.
  */
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Activity,
@@ -24,12 +24,13 @@ import {
 import { API_CONFIGURATION_UPDATED_EVENT } from "../lib/api-configuration.js";
 import Switch from "../shell/Switch";
 import VoiceComposerCheck from "./VoiceComposerCheck.jsx";
+import { ensureOptionalDshDesktop } from "./DshConnectionPanel.jsx";
 import { composerFailureEvidence, withoutComposerEvidence } from "./composer-failure-evidence.js";
 import UsageHelp from "../UsageHelp.jsx";
 import { useUsageHelp } from "../shell/DeviceContext.jsx";
 import { friendlyControlLabel } from "../lib/usage-help.js";
 import { deviceVoicePlatformWarning, deviceVoiceTransportReady } from "../lib/agent-voice-capabilities.js";
-import { voiceFlowMessage } from "./useDeviceVoiceRouter.js";
+import { voiceFlowMessage, voiceFlowTone } from "./useDeviceVoiceRouter.js";
 
 export function buildVoiceSummary(voiceConfig, selectedTrigger) {
   if (!voiceConfig?.enabled) return "未开启";
@@ -81,9 +82,9 @@ export function needsVisibleComposerGuidance(state) {
     flow.message,
     flow.composerError,
   ].filter((value) => typeof value === "string").join("\n");
-  const isVisibleDesktopAgent = ["codex", "claude-code", "workbuddy"].includes(state?.selectedAgentId)
-    || ["codex", "claude-code", "workbuddy"].includes(flow.agentId)
-    || /ChatGPT|Codex|Claude|WorkBuddy/i.test(details);
+  const isVisibleDesktopAgent = ["codex", "claude-code", "workbuddy", "deepseek-harness"].includes(state?.selectedAgentId)
+    || ["codex", "claude-code", "workbuddy", "deepseek-harness"].includes(flow.agentId)
+    || /ChatGPT|Codex|Claude|WorkBuddy|DeepSeek/i.test(details);
   const isMimocode = state?.selectedAgentId === "mimocode"
     || flow.agentId === "mimocode"
     || /\bMiMoCode\b/i.test(details);
@@ -91,8 +92,8 @@ export function needsVisibleComposerGuidance(state) {
     /(macOS|Windows).*辅助功能/i.test(details)
     || /(macOS|Windows).*输入焦点无法确认/i.test(details)
     || /(macOS|Windows).*输入框已有用户草稿/i.test(details)
-    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy) 前台会话未定位/i.test(details)
-    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy) 前台提交失败/i.test(details)
+    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy|DeepSeek(?: Harness)?) 前台会话未定位/i.test(details)
+    || /(ChatGPT（Codex）|Codex|Claude|WorkBuddy|DeepSeek(?: Harness)?) 前台提交失败/i.test(details)
   );
 }
 
@@ -150,6 +151,7 @@ function voicePhaseLabel(phase) {
     done: "已发送",
     cancelled: "已取消",
     error: "发送失败",
+    submit_unknown: "发送结果未确认",
   })[phase] || "处理中";
 }
 
@@ -165,6 +167,13 @@ export default function VoiceAssistantPanel({
   onOpenApiSettings,
 }) {
   const usageHelp = useUsageHelp();
+  const dshTarget = state.selectedAgentId === "deepseek-harness";
+  const optionalDshEnsure = useRef(null);
+  useEffect(() => {
+    if (!dshTarget) { optionalDshEnsure.current = null; return; }
+    // Once on entry, shared across StrictMode replay; never an input gate.
+    if (!optionalDshEnsure.current) optionalDshEnsure.current = ensureOptionalDshDesktop();
+  }, [dshTarget]);
   const [asrState, setAsrState] = useState({
     loading: true,
     configured: false,
@@ -188,13 +197,8 @@ export default function VoiceAssistantPanel({
       invoke("load_device_asr_settings")
         .then((status) => {
           if (cancelled) return;
-          dispatch({
-            type: "set_voice_runtime",
-            value: {
-              ...status,
-              running: status?.configured === true,
-            },
-          });
+          // Credential readiness is not a device runtime/start acknowledgement.
+          // Only the target-bound dashboard poller owns voiceRuntime.
           setAsrState({
             loading: false,
             configured: status?.configured === true,
@@ -229,9 +233,14 @@ export default function VoiceAssistantPanel({
   const desktopPlatform = detectDesktopPlatform();
   const platformWarning = deviceVoicePlatformWarning(state.selectedAgentId, desktopPlatform);
   const ready = deviceVoiceTransportReady(state.selectedAgentId, desktopPlatform, selectedAgent?.ready) && !platformWarning;
-  const voiceRunning = state.voiceRuntime?.running === true;
+  const runtimeCurrent = state.voiceRuntimeTargetReady === true
+    && state.voiceRuntime?.targetKey === state.voiceRuntimeTargetKey;
+  const listening = runtimeCurrent && state.audioBridgeEnabled;
+  const voiceRunning = runtimeCurrent && state.voiceRuntime?.running === true;
   let audioBlockingReason = null;
-  if (!state.selectedAgentId) {
+  if (!runtimeCurrent || state.voiceRuntime?.mode === "waiting_device") {
+    audioBlockingReason = "正在等待设备握手确认";
+  } else if (!state.selectedAgentId) {
     audioBlockingReason = "请先在「当前展示」里选择一个渠道";
   } else if (platformWarning) {
     audioBlockingReason = platformWarning;
@@ -254,15 +263,17 @@ export default function VoiceAssistantPanel({
   const isMimocodeVoice = state.selectedAgentId === "mimocode"
     || state.deviceVoiceFlow?.agentId === "mimocode";
   const visibleVoiceAgentId = state.deviceVoiceFlow?.agentId || state.selectedAgentId;
-  const visibleVoiceAgentLabel = visibleVoiceAgentId === "workbuddy" ? "WorkBuddy" : visibleVoiceAgentId === "claude-code"
+  const visibleVoiceAgentLabel = visibleVoiceAgentId === "deepseek-harness" ? "DeepSeek Harness" : visibleVoiceAgentId === "workbuddy" ? "WorkBuddy" : visibleVoiceAgentId === "claude-code"
     ? "Claude"
     : "ChatGPT（Codex）";
   const hasLiveActivity = voicePhase !== "idle"
     || Boolean(state.deviceVoiceFlow?.text)
     || Boolean(state.deviceVoiceFlow?.reply)
     || showAccessibilityGuidance;
-  const formattedAudioBridgeMessage = formatVoiceUserMessage(state.audioBridgeMessage);
-  const listenHint = state.audioBridgeEnabled
+  const formattedAudioBridgeMessage = runtimeCurrent ? formatVoiceUserMessage(state.audioBridgeMessage) : "";
+  const listenHint = !runtimeCurrent || state.voiceRuntime?.mode === "waiting_device"
+    ? "正在等待设备握手确认"
+    : listening
     ? "设备麦克风监听中，等待已配置按键触发"
     : state.audioBridgePending
       ? "正在把监听状态同步到设备"
@@ -409,13 +420,14 @@ export default function VoiceAssistantPanel({
         <button
           type="button"
           className="btn-primary btn-sm voice-panel__listen-btn"
-          onClick={() => toggleAudioBridge(state.audioBridgeEnabled ? "stop" : "start")}
+          onClick={() => toggleAudioBridge(listening ? "stop" : "start")}
           disabled={
-            state.audioBridgePending
-            || (!state.audioBridgeEnabled && (!!audioBlockingReason || !voiceConfig.enabled))
+            !runtimeCurrent || state.voiceRuntime?.mode === "waiting_device"
+            || state.audioBridgePending
+            || (!listening && (!!audioBlockingReason || !voiceConfig.enabled))
           }
           title={
-            state.audioBridgeEnabled
+            listening
               ? "停止设备麦克风监听"
               : !voiceConfig.enabled
                 ? "请先启用按键语音"
@@ -424,14 +436,14 @@ export default function VoiceAssistantPanel({
         >
           {state.audioBridgePending ? (
             <Loader size={14} className="spin" aria-hidden="true" />
-          ) : state.audioBridgeEnabled ? (
+          ) : listening ? (
             <MicOff size={14} aria-hidden="true" />
           ) : (
             <Mic size={14} aria-hidden="true" />
           )}
           {state.audioBridgePending
             ? "同步中…"
-            : state.audioBridgeEnabled
+            : listening
               ? "停止语音监听"
               : "启动语音监听"}
         </button>
@@ -450,6 +462,7 @@ export default function VoiceAssistantPanel({
           </div>
         )}
       </section>
+
 
       <div className="voice-panel__advanced-grid">
         <button
@@ -494,7 +507,7 @@ export default function VoiceAssistantPanel({
             />
           </summary>
           <div className="voice-panel__advanced-body voice-panel__diagnostics-body">
-          {desktopPlatform === "macos" && ["codex", "claude-code", "workbuddy"].includes(state.selectedAgentId) &&
+          {desktopPlatform === "macos" && ["codex", "claude-code", "workbuddy", "deepseek-harness"].includes(state.selectedAgentId) &&
             <VoiceComposerCheck agentId={state.selectedAgentId}
               disabled={state.mockInjectPending || ["listening", "partial", "finalizing", "draft_ready"].includes(voicePhase)} />}
           <div className="voice-panel__mock voice-panel__compose">
@@ -581,13 +594,7 @@ export default function VoiceAssistantPanel({
           </div>
           {voicePhase !== "idle" && (
             <div
-              className={`message-banner voice-panel__message ${
-                voicePhase === "done"
-                  ? "message-banner--success"
-                  : voicePhase === "error"
-                    ? "message-banner--error"
-                    : "message-banner--muted"
-              }`}
+              className={`message-banner voice-panel__message message-banner--${voiceFlowTone(state.deviceVoiceFlow)}`}
             >
               {`设备语音状态：${
                 voicePhaseLabel(voicePhase)
@@ -610,6 +617,11 @@ export default function VoiceAssistantPanel({
           {state.selectedAgentId === "workbuddy" && (
             <p className="muted">
               请先在 WorkBuddy 打开目标对话，并保留一个主窗口。松开语音键后，完整识别结果会一次追加到输入框，确认后发送；写入完成前请保持该对话在前台。设备切换气泡不会自动切换 WorkBuddy 桌面对话。
+            </p>
+          )}
+          {dshTarget && (
+            <p className="muted">
+              打开 DeepSeek 目标对话，语音会追加到当前输入框，按确认键发送。
             </p>
           )}
 

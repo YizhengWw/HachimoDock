@@ -1,0 +1,4727 @@
+{
+  "schemaVersion": 1,
+  "notes": "PC contract regressions. Array order and runtime.vars object insertion order are part of the scene ABI. App quotas do not expand its eight slots. Pure inputs; no hardware/services.",
+  "sceneGuards": [
+    {
+      "name": "p4-quota-v2 slot-eight-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "eighth",
+                "op": "eq",
+                "value": 2
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v2 slot-eight-right",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "lt",
+                "value": {
+                  "var": "eighth"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v2 slot-nine-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "ninth",
+                "op": "eq",
+                "value": 1
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v2 slot-nine-right-not-literal-zero",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "eq",
+                "value": {
+                  "var": "ninth"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v2 string-slot-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "caption",
+                "op": "eq",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v2 string-slot-right",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "eq",
+                "value": {
+                  "var": "caption"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v2 first-slot-nonalphabetic-order",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "zulu",
+                "op": "eq",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v3 slot-eight-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "eighth",
+                "op": "eq",
+                "value": 2
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v3 slot-eight-right",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "lt",
+                "value": {
+                  "var": "eighth"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v3 slot-nine-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "ninth",
+                "op": "eq",
+                "value": 1
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 slot-nine-right-not-literal-zero",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "eq",
+                "value": {
+                  "var": "ninth"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 string-slot-left",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "caption",
+                "op": "eq",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 string-slot-right",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "alpha",
+                "op": "eq",
+                "value": {
+                  "var": "caption"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 first-slot-nonalphabetic-order",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "var": "zulu",
+                "op": "eq",
+                "value": 0
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v2 slot-eight-left wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "eighth",
+                    "op": "eq",
+                    "value": 2
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v2 slot-nine-left wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "ninth",
+                    "op": "eq",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v2 slot-nine-right-not-literal-zero wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v2",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "alpha",
+                    "op": "eq",
+                    "value": {
+                      "var": "ninth"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 slot-eight-left wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "eighth",
+                    "op": "eq",
+                    "value": 2
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": true,
+      "expectedX": 2
+    },
+    {
+      "name": "p4-quota-v3 slot-nine-left wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "ninth",
+                    "op": "eq",
+                    "value": 1
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    },
+    {
+      "name": "p4-quota-v3 slot-nine-right-not-literal-zero wrapped-one-condition",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "quota": "p4-quota-v3",
+        "logic": "p4-logic-v1",
+        "states": [
+          "play"
+        ],
+        "initial_state": "play",
+        "vars": {
+          "zulu": {
+            "type": "int",
+            "init": 0
+          },
+          "alpha": {
+            "type": "int",
+            "init": 0
+          },
+          "caption": {
+            "type": "string",
+            "init": "text slot"
+          },
+          "omega": {
+            "type": "int",
+            "init": 0
+          },
+          "beta": {
+            "type": "int",
+            "init": 0
+          },
+          "theta": {
+            "type": "int",
+            "init": 0
+          },
+          "eta": {
+            "type": "int",
+            "init": 0
+          },
+          "eighth": {
+            "type": "int",
+            "init": 2
+          },
+          "ninth": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go"
+          }
+        ],
+        "tick": [],
+        "dashboard": {
+          "title": "Contract",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "arcade",
+          "visualSprite": "star"
+        },
+        "scene": {
+          "tick_ms": 100,
+          "active_state": "play",
+          "auto_start": true,
+          "grid": {
+            "width": 8,
+            "height": 8
+          },
+          "entities": [
+            {
+              "id": "p",
+              "x": 1,
+              "y": 1
+            }
+          ],
+          "rules": [
+            {
+              "on": "go",
+              "do": [
+                {
+                  "op": "move",
+                  "entity": "p",
+                  "dx": 1,
+                  "dy": 0
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "var": "alpha",
+                    "op": "eq",
+                    "value": {
+                      "var": "ninth"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "expectedOk": false
+    }
+  ],
+  "navigation": [
+    {
+      "name": "root back false guard executes else",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 1,
+        "history": []
+      }
+    },
+    {
+      "name": "root back true guard is unavailable",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 1
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": false,
+        "page": "home",
+        "hits": 0,
+        "history": []
+      }
+    },
+    {
+      "name": "false guard without else tries next matching action",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            }
+          },
+          {
+            "from": "*",
+            "on": "go",
+            "inc": {
+              "hits": 2
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 2,
+        "history": []
+      }
+    },
+    {
+      "name": "blocked true navigation tries next matching action",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 1
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          },
+          {
+            "from": "*",
+            "on": "go",
+            "inc": {
+              "hits": 2
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 2,
+        "history": []
+      }
+    },
+    {
+      "name": "wrong from_page excludes else and tries next action",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            },
+            "from_page": "edit"
+          },
+          {
+            "from": "*",
+            "on": "go",
+            "inc": {
+              "hits": 3
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 3,
+        "history": []
+      }
+    },
+    {
+      "name": "wrong from_page cannot execute else",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            },
+            "from_page": "edit"
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": false,
+        "page": "home",
+        "hits": 0,
+        "history": []
+      }
+    },
+    {
+      "name": "full push false guard executes else",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "push": "edit"
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          }
+        ]
+      },
+      "initialHistory": [
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home"
+      ],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 1,
+        "history": [
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home"
+        ]
+      }
+    },
+    {
+      "name": "full push true guard stays blocked",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 1
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "push": "edit"
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          }
+        ]
+      },
+      "initialHistory": [
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home",
+        "home"
+      ],
+      "action": "go",
+      "expected": {
+        "enabled": false,
+        "page": "home",
+        "hits": 0,
+        "history": [
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home",
+          "home"
+        ]
+      }
+    },
+    {
+      "name": "else string page does not execute blocked main back",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "page": "next"
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "edit",
+        "hits": 0,
+        "history": []
+      }
+    },
+    {
+      "name": "matching from_page applies else",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 0
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            },
+            "from_page": "home"
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 1,
+        "history": []
+      }
+    },
+    {
+      "name": "true back pops history",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 1
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            }
+          }
+        ]
+      },
+      "initialHistory": [
+        "edit"
+      ],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "edit",
+        "hits": 0,
+        "history": []
+      }
+    },
+    {
+      "name": "wrong from_page excludes true branch and tries next action",
+      "runtime": {
+        "schema_version": 1,
+        "engine": "p4-bounded-runtime-v4",
+        "logic": "p4-logic-v1",
+        "navigation": "p4-app-navigation-v1",
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "flag": {
+            "type": "int",
+            "init": 1
+          },
+          "hits": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "pages": [
+          {
+            "id": "home"
+          },
+          {
+            "id": "edit"
+          },
+          {
+            "id": "settings"
+          }
+        ],
+        "initial_page": "home",
+        "tick": [],
+        "dashboard": {
+          "title": "Review",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "star"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "w": 100,
+              "h": 32,
+              "color": 65535,
+              "text": "Review"
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "go",
+            "when": {
+              "var": "flag",
+              "op": "eq",
+              "value": 1
+            },
+            "page": {
+              "back": true
+            },
+            "else": {
+              "inc": {
+                "hits": 1
+              }
+            },
+            "from_page": "edit"
+          },
+          {
+            "from": "*",
+            "on": "go",
+            "inc": {
+              "hits": 3
+            }
+          }
+        ]
+      },
+      "initialHistory": [],
+      "action": "go",
+      "expected": {
+        "enabled": true,
+        "page": "home",
+        "hits": 3,
+        "history": []
+      }
+    }
+  ],
+  "dataPaging": [
+    {
+      "name": "raw6-keep0-page0-next-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "drop",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "drop",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "drop",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "drop",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "drop",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "drop",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 0,
+        "pages": 1,
+        "page": 0,
+        "enabled": false,
+        "storedPage": 0
+      }
+    },
+    {
+      "name": "raw6-keep1-page0-next-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "drop",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "drop",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "drop",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "drop",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "drop",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 1,
+        "pages": 1,
+        "page": 0,
+        "enabled": false,
+        "storedPage": 0
+      }
+    },
+    {
+      "name": "raw6-keep5-page0-next-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "drop",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 5,
+        "pages": 1,
+        "page": 0,
+        "enabled": false,
+        "storedPage": 0
+      }
+    },
+    {
+      "name": "raw6-keep6-page0-next-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 6,
+        "pages": 2,
+        "page": 0,
+        "enabled": true,
+        "storedPage": 1
+      }
+    },
+    {
+      "name": "raw11-keep6-page-1-home-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": -1
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "drop",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "drop",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "drop",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "drop",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "drop",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "home",
+      "expected": {
+        "count": 6,
+        "pages": 2,
+        "page": 1,
+        "enabled": true,
+        "storedPage": 0
+      }
+    },
+    {
+      "name": "raw11-keep6-page-1-prev-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": -1
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "drop",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "drop",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "drop",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "drop",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "drop",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "prev",
+      "expected": {
+        "count": 6,
+        "pages": 2,
+        "page": 1,
+        "enabled": true,
+        "storedPage": -2
+      }
+    },
+    {
+      "name": "raw11-keep6-page0-next-filter0-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "drop",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "drop",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "drop",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "drop",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "drop",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 11,
+        "pages": 3,
+        "page": 0,
+        "enabled": true,
+        "storedPage": 1
+      }
+    },
+    {
+      "name": "raw25-keep25-page0-next-filter1-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "keep",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "keep",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "keep",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "keep",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "keep",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "11",
+          "meta": "keep",
+          "label": "11",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "12",
+          "meta": "keep",
+          "label": "12",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "13",
+          "meta": "keep",
+          "label": "13",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "14",
+          "meta": "keep",
+          "label": "14",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "15",
+          "meta": "keep",
+          "label": "15",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "16",
+          "meta": "keep",
+          "label": "16",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "17",
+          "meta": "keep",
+          "label": "17",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "18",
+          "meta": "keep",
+          "label": "18",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "19",
+          "meta": "keep",
+          "label": "19",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "20",
+          "meta": "keep",
+          "label": "20",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "21",
+          "meta": "keep",
+          "label": "21",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "22",
+          "meta": "keep",
+          "label": "22",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "23",
+          "meta": "keep",
+          "label": "23",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "24",
+          "meta": "keep",
+          "label": "24",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 20,
+        "pages": 4,
+        "page": 0,
+        "enabled": true,
+        "storedPage": 1
+      }
+    },
+    {
+      "name": "raw11-keep6-page0-next-filter1-limit[0, 0]",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 1
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ],
+        "limits": {
+          "page": [
+            0,
+            0
+          ]
+        }
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "drop",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "drop",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "drop",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "drop",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "drop",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 6,
+        "pages": 2,
+        "page": 0,
+        "enabled": false,
+        "storedPage": 0
+      }
+    },
+    {
+      "name": "raw11-keep6-page0-next-filter2-limitNone",
+      "runtime": {
+        "input": {
+          "engine": "p4-input-v1"
+        },
+        "vars": {
+          "page": {
+            "type": "int",
+            "init": 0
+          },
+          "filter": {
+            "type": "int",
+            "init": 2
+          }
+        },
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "tick": [],
+        "data": {
+          "page_var": "page",
+          "filters": [
+            {
+              "var": "filter",
+              "field": "meta",
+              "values": [
+                "keep"
+              ]
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "next",
+            "inc": {
+              "page": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "prev",
+            "inc": {
+              "page": -1
+            }
+          },
+          {
+            "from": "*",
+            "on": "home",
+            "set": {
+              "page": 0
+            }
+          }
+        ]
+      },
+      "rows": [
+        {
+          "id": "0",
+          "meta": "keep",
+          "label": "0",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "1",
+          "meta": "keep",
+          "label": "1",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "2",
+          "meta": "keep",
+          "label": "2",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "3",
+          "meta": "keep",
+          "label": "3",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "4",
+          "meta": "keep",
+          "label": "4",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "5",
+          "meta": "keep",
+          "label": "5",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "6",
+          "meta": "drop",
+          "label": "6",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "7",
+          "meta": "drop",
+          "label": "7",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "8",
+          "meta": "drop",
+          "label": "8",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "9",
+          "meta": "drop",
+          "label": "9",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        },
+        {
+          "id": "10",
+          "meta": "drop",
+          "label": "10",
+          "value": "",
+          "detail": "",
+          "tone": 0
+        }
+      ],
+      "action": "next",
+      "expected": {
+        "count": 0,
+        "pages": 1,
+        "page": 0,
+        "enabled": false,
+        "storedPage": 0
+      }
+    }
+  ]
+}

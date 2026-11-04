@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "host": true,
+    "host_context": "p4-host-context-v1",
+    "input": {"engine": "p4-input-v1"},
+    "vars": {"rowa":{"type":"string"},"rowb":{"type":"string"},"chosen":{"type":"string"},"count":{"type":"int"}},
+    "states": ["ready"],
+    "initial_state": "ready",
+    "transitions": [
+      {"from":"*","on":"host.row_a"},{"from":"*","on":"host.row_b"},
+      {"from":"*","on":"host.next"},{"from":"*","on":"host.previous"},
+      {"from":"*","on":"host.up"},{"from":"*","on":"host.down"},{"from":"*","on":"host.clear"}
+    ],
+    "tick": [],
+    "dashboard": {"title":"Collection contract"},
+    "surface": {"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1"}
+  },
+  "declaration": {
+    "schemaVersion": 1,
+    "engine": "pc-app-composition-v2",
+    "service": "composition",
+    "actions": {"host.row_a":"list:row_0","host.row_b":"list:row_1","host.next":"list:page_next","host.previous":"list:page_previous","host.up":"list:up","host.down":"list:down","host.clear":"list:clear_selection"},
+    "content": [{
+      "sources": {
+        "records":{"kind":"document","initial":[{"id":"a","label":"A"},{"id":"b","label":"B"},{"id":"c","label":"C"}]},
+        "list":{"kind":"collection","expression":{"ref":"/sources/records"},"view":{"key":"/id","label":"/label","page_size":2}}
+      },
+      "bindings": {
+        "rowa":{"source":"list","pointer":"/rows/0/label","fallback":""},
+        "rowb":{"source":"list","pointer":"/rows/1/label","fallback":""},
+        "chosen":{"source":"list","pointer":"/selectedLabel","fallback":""},
+        "count":{"source":"list","pointer":"/count","fallback":0}
+      }
+    }]
+  },
+  "initial": {"rowa":"A","rowb":"B","chosen":"","count":3},
+  "rejections": [
+    {"pointer":"/content/0/sources/list/view/page_size","value":0},
+    {"pointer":"/content/0/sources/list/view/page_size","value":9},
+    {"pointer":"/content/0/sources/list/view/key","value":""},
+    {"pointer":"/content/0/sources/list/view/label","value":"/bad~2"},
+    {"pointer":"/content/0/sources/list/view/extra","value":true},
+    {"pointer":"/content/0/sources/list/expression","value":{"ref":"/event/rows"}},
+    {"pointer":"/content/0/sources/records","value":{"kind":"clock"}},
+    {"pointer":"/content/0/sources/list/expression","value":{"ref":"/sources/list"}},
+    {"pointer":"/actions/host.row_a","value":"list:row_8"},
+    {"pointer":"/actions/host.row_a","value":"list:remove"}
+  ]
+}

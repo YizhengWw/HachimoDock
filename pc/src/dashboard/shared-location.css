@@ -1,0 +1,76 @@
+.shared-location {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text, #14151a);
+  font-size: 13px;
+}
+.shared-location__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 34px;
+  margin: 0;
+}
+.shared-location__label { flex: 0 0 56px; font-weight: 600; }
+.shared-location__city { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shared-location__mode { color: var(--text-muted, #7c818d); font-size: 12px; }
+.shared-location input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 6px 10px;
+  color: inherit;
+  font: inherit;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line-strong, #d8dadf);
+  border-radius: 8px;
+}
+.shared-location input[aria-invalid="true"] { border-color: var(--danger, #d24a3d); }
+.shared-location button {
+  flex: 0 0 auto;
+  min-width: 72px;
+  height: 34px;
+  padding: 6px 12px;
+  color: inherit;
+  font: inherit;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line-strong, #d8dadf);
+  border-radius: 8px;
+}
+.shared-location button.shared-location__save { color: var(--text-on-accent, #fff); background: var(--accent, #ff6700); border-color: var(--accent, #ff6700); }
+.shared-location button:disabled, .shared-location input:disabled { opacity: .6; cursor: default; }
+.shared-location :is(button, input):focus-visible { outline: 3px solid var(--accent, #ff6700); outline-offset: 2px; }
+.shared-location__feedback { color: var(--text-muted, #7c818d); font-size: 12px; }
+.shared-location__feedback[role="alert"] { color: var(--danger, #d24a3d); }
+.shared-location__feedback > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.shared-location__suggest-field { position: relative; flex: 1; min-width: 0; }
+.shared-location__suggest-field > input { display: block; width: 100%; box-sizing: border-box; }
+.shared-location__suggestions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  color: var(--text, #14151a);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line-strong, #d8dadf);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #0002;
+}
+.shared-location__suggestion {
+  padding: 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.shared-location__suggestion:hover,
+.shared-location__suggestion--active { background: var(--accent-soft, #fff0e4); }

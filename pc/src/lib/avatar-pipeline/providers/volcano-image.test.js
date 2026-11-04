@@ -56,7 +56,7 @@ test("Seedream 5 image edit preserves one input and requests one PNG result", ()
   assert.equal(payload.model, "doubao-seedream-5-0-flash-260915");
   assert.deepEqual(payload.image, ["data:image/png;base64,iVBORw0KGgo="]);
   assert.equal(payload.sequential_image_generation, undefined);
-  assert.equal(payload.response_format, "b64_json");
+  assert.equal(payload.response_format, "url");
   assert.equal(payload.output_format, "png");
   assert.equal(payload.watermark, false);
   assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /严格保留输入图片中的主体/);
@@ -65,7 +65,8 @@ test("Seedream 5 image edit preserves one input and requests one PNG result", ()
   assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /不要误删拟人角色自己的肢体/);
   assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /最小必要补全/);
   assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /不要裁切耳朵、头部、脚、尾巴、球拍等相关物件或一体化底座/);
-  assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /不输出头像或半身特写/);
+  assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /原图设计本就是头像、无身体物体或抽象角色时/);
+  assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /不补造躯干四肢/);
   assert.match(BLACK_BACKGROUND_EDIT_PROMPT, /约10%的安全空间/);
 });
 

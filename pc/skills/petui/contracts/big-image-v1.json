@@ -1,0 +1,580 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-big-image-v1",
+ "notes": "Shared p4-big-image-v1 vectors: surface.big_images (<= 2, PNG up to 1280x960 with ceil(w/240)*ceil(h/240) <= 16 tiles, 1 MiB per package after P4T1 tiling) and image nodes that reference them with two int offset vars. Device draws only the tiles under the node window. Vectors marked firmware=surface are rejected on the device by pet_surface (node structure); the pet_p4_component_ext harness only sees the declaration level.",
+ "limits": {
+  "images": 2,
+  "tiles": 16,
+  "tile": 240,
+  "maxWidth": 1280,
+  "maxHeight": 960,
+  "budgetBytes": 1048576
+ },
+ "vectors": [
+  {
+   "name": "960x720 map in a full window",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 960,
+       "height": 720
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "1280x480 banner (6x2 tiles)",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 240,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 1280,
+       "height": 480
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "1280x960 needs 24 tiles",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 1280,
+       "height": 960
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "width that fits a plain image",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 240,
+       "h": 240,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 240,
+       "height": 240
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "offset var is a string",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "string",
+      "init": ""
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 960,
+       "height": 720
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "missing offset var",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 960,
+       "height": 720
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "unknown big id",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "atlas",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 960,
+       "height": 720
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "id differs from the asset basename",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/world.png",
+       "width": 960,
+       "height": 720
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "window larger than the image",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "map",
+       "asset": "assets/map.png",
+       "width": 480,
+       "height": 400
+      }
+     ]
+    }
+   },
+   "firmware": "surface"
+  },
+  {
+   "name": "three big images",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "ox": {
+      "type": "int",
+      "init": 0
+     },
+     "oy": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "elements": [
+      {
+       "type": "image",
+       "big": "map",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 480,
+       "color": 0,
+       "offset_x_var": "ox",
+       "offset_y_var": "oy"
+      }
+     ],
+     "big_images": [
+      {
+       "id": "m0",
+       "asset": "assets/m0.png",
+       "width": 480,
+       "height": 480
+      },
+      {
+       "id": "m1",
+       "asset": "assets/m1.png",
+       "width": 480,
+       "height": 480
+      },
+      {
+       "id": "m2",
+       "asset": "assets/m2.png",
+       "width": 480,
+       "height": 480
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

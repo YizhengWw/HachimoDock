@@ -20,6 +20,12 @@ mod voice_receipt;
 #[path = "composer_visibility.rs"]
 mod composer_visibility;
 
+#[path = "pasteboard_ownership.rs"]
+mod pasteboard_ownership;
+
+#[path = "workbuddy_voice_wake.rs"]
+mod workbuddy_voice_wake;
+
 use accessibility::{AXAttribute, AXUIElement, AXUIElementActions, AXUIElementAttributes};
 use accessibility_sys::{
     error_string, kAXErrorSuccess, kAXTrustedCheckOptionPrompt, kAXValueTypeCGPoint,
@@ -111,14 +117,17 @@ pub(super) enum MacosAgent {
     Codex,
     Claude,
     WorkBuddy,
+    DeepSeekHarness,
 }
 
 impl MacosAgent {
+    fn current_electron(self) -> bool { matches!(self, Self::WorkBuddy | Self::DeepSeekHarness) }
     fn label(self) -> &'static str {
         match self {
             Self::Codex => "ChatGPT（Codex）",
             Self::Claude => "Claude",
             Self::WorkBuddy => "WorkBuddy",
+            Self::DeepSeekHarness => "DeepSeek Harness",
         }
     }
 }
@@ -146,6 +155,7 @@ fn agent_bundle_identifiers(agent: MacosAgent) -> &'static [&'static str] {
         MacosAgent::Codex => &["com.openai.codex", "com.openai.chat", "com.openai.chatgpt"],
         MacosAgent::Claude => &["com.anthropic.claudefordesktop", "com.anthropic.claude"],
         MacosAgent::WorkBuddy => &["com.tencent.workbuddy.mac"],
+        MacosAgent::DeepSeekHarness => &["com.deepseek.dsh"],
     }
 }
 
@@ -154,6 +164,7 @@ fn agent_application_names(agent: MacosAgent) -> &'static [&'static str] {
         MacosAgent::Codex => &["Codex", "ChatGPT"],
         MacosAgent::Claude => &["Claude"],
         MacosAgent::WorkBuddy => &["WorkBuddy"],
+        MacosAgent::DeepSeekHarness => &["DeepSeek Harness"],
     }
 }
 
@@ -164,6 +175,8 @@ pub(super) struct MacosComposerState {
     draft: crate::voice_draft::VoiceDraft,
     current_visible_target: Option<ComposerTarget>,
     task_identity: Option<Vec<String>>,
+    // Last acknowledged draft's confirm-only fingerprint; never an AX URL.
+    confirmation_identity: Option<Vec<String>>,
     native_voice_text: String,
 }
 
@@ -191,8 +204,11 @@ impl PasteboardField {
     }
 }
 
-#[derive(Default)]
-struct PasteboardSnapshot(Vec<Vec<PasteboardField>>);
+struct PasteboardSnapshot {
+    items: Vec<Vec<PasteboardField>>,
+    ownership: pasteboard_ownership::ChangeOwner,
+    _lease: pasteboard_ownership::InputLease,
+}
 
 fn is_equivalent_plain_text_type(data_type: &str) -> bool {
     matches!(
@@ -308,10 +324,13 @@ fn ensure_accessibility_permission() -> Result<(), String> {
 
 impl PasteboardSnapshot {
     fn capture() -> Result<Self, String> {
-        run_on_main(|_| {
+        let lease = pasteboard_ownership::InputLease::try_claim()
+            .ok_or("另一次前台输入正在使用剪贴板，请稍后重试")?;
+        let (items, change) = run_on_main(|_| {
             let pasteboard = NSPasteboard::generalPasteboard();
+            let change = pasteboard.changeCount();
             let Some(items) = pasteboard.pasteboardItems() else {
-                return Ok(Self::default());
+                return Ok((Vec::new(), change));
             };
             let mut snapshot = Vec::new();
             for item in items.iter() {
@@ -351,15 +370,47 @@ impl PasteboardSnapshot {
                 }
                 snapshot.push(fields);
             }
-            Ok(Self(snapshot))
+            if pasteboard.changeCount() != change {
+                return Err("备份期间剪贴板已变化，未执行输入".into());
+            }
+            Ok((snapshot, change))
+        })?;
+        Ok(Self { items, ownership: pasteboard_ownership::ChangeOwner::captured(change), _lease: lease })
+    }
+
+    fn set_text(&mut self, text: &str) -> Result<(), String> {
+        let ownership = self.ownership;
+        let (change, written) = run_on_main(|_| {
+            let pasteboard = NSPasteboard::generalPasteboard();
+            if !ownership.may_write(pasteboard.changeCount()) {
+                return Err("剪贴板已被其他操作修改，本次未粘贴".to_string());
+            }
+            let _ = pasteboard.clearContents();
+            let written = pasteboard.setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString });
+            Ok((pasteboard.changeCount(), written))
+        })?;
+        // clearContents already changed our temporary board even if setting text
+        // failed. Only that exact change count may subsequently be restored.
+        self.ownership.wrote(change);
+        if written { Ok(()) } else { Err("无法准备 macOS 前台 Agent 输入框安全检查".into()) }
+    }
+
+    fn verify_written(&self) -> Result<(), String> {
+        let ownership = self.ownership;
+        run_on_main(|_| {
+            if ownership.owns_written(NSPasteboard::generalPasteboard().changeCount()) { Ok(()) }
+            else { Err("粘贴前剪贴板已变化，本次未发送粘贴按键".into()) }
         })
     }
 
     fn restore(self) {
+        let Self { items, ownership, _lease } = self;
         run_on_main(move |_| {
             let pasteboard = NSPasteboard::generalPasteboard();
-            let items = self
-                .0
+            // Do not undo a user copy during focus/readback, or touch the board
+            // at all when this operation failed before its temporary write.
+            if !ownership.owns_written(pasteboard.changeCount()) { return; }
+            let items = items
                 .into_iter()
                 .map(|fields| {
                     let item = NSPasteboardItem::new();
@@ -380,6 +431,8 @@ impl PasteboardSnapshot {
                     ProtocolObject::<dyn NSPasteboardWriting>::from_retained(item)
                 })
                 .collect::<Vec<_>>();
+            // Rebuilding a rich snapshot can take time; recheck at publication.
+            if !ownership.owns_written(pasteboard.changeCount()) { return; }
             let _ = pasteboard.clearContents();
             if !items.is_empty() {
                 let items = NSArray::from_retained_slice(&items);
@@ -387,20 +440,6 @@ impl PasteboardSnapshot {
             }
         });
     }
-}
-
-fn set_pasteboard_text(text: &str) -> Result<(), String> {
-    run_on_main(|_| {
-        let pasteboard = NSPasteboard::generalPasteboard();
-        let _ = pasteboard.clearContents();
-        if pasteboard
-            .setString_forType(&NSString::from_str(text), unsafe { NSPasteboardTypeString })
-        {
-            Ok(())
-        } else {
-            Err("无法准备 macOS 前台 Agent 输入框安全检查".to_string())
-        }
-    })
 }
 
 fn post_keyboard_event(keycode: u16, flags: CGEventFlags) -> Result<(), String> {
@@ -421,8 +460,9 @@ fn post_command_key(keycode: u16) -> Result<(), String> {
     post_keyboard_event(keycode, CGEventFlags::CGEventFlagCommand)
 }
 
-fn paste_focused_text(text: &str) -> Result<(), String> {
-    set_pasteboard_text(text)?;
+fn paste_focused_text(snapshot: &mut PasteboardSnapshot, text: &str) -> Result<(), String> {
+    snapshot.set_text(text)?;
+    snapshot.verify_written()?;
     post_command_key(MAC_KEYCODE_V)?;
     thread::sleep(KEYBOARD_READBACK_DELAY);
     Ok(())
@@ -548,17 +588,14 @@ fn focused_text_target_matches(captured: &FocusedTextTarget, current: &FocusedTe
     captured.pid == current.pid
         && captured.role == current.role
         && captured.subrole == current.subrole
+        // Losing previously captured identity is uncertainty, not a match.
         && (captured.identifier.is_empty()
-            || current.identifier.is_empty()
             || captured.identifier == current.identifier)
         && (captured.window_title.is_empty()
-            || current.window_title.is_empty()
             || captured.window_title == current.window_title)
         && (captured.element_bounds.is_none()
-            || current.element_bounds.is_none()
             || captured.element_bounds == current.element_bounds)
         && (captured.window_bounds.is_none()
-            || current.window_bounds.is_none()
             || captured.window_bounds == current.window_bounds)
 }
 
@@ -579,7 +616,7 @@ pub(super) fn insert_at_focused_text_target(
                 .to_string(),
         );
     }
-    let snapshot = PasteboardSnapshot::capture()?;
+    let mut snapshot = PasteboardSnapshot::capture()?;
     let current = match capture_focused_text_target_unchecked() {
         Ok(current) => current,
         Err(error) => {
@@ -595,7 +632,7 @@ pub(super) fn insert_at_focused_text_target(
         );
     }
     let result: Result<(), String> = (|| {
-        paste_focused_text(text)?;
+        paste_focused_text(&mut snapshot, text)?;
         Ok(())
     })();
     snapshot.restore();
@@ -681,8 +718,8 @@ fn session_deeplink(
     if agent == MacosAgent::Codex {
         return thread_deeplink(session_id);
     }
-    if agent == MacosAgent::WorkBuddy {
-        return Err("请在 WorkBuddy 中打开目标对话；不使用未验证的会话深链".into());
+    if agent.current_electron() {
+        return Err("请在目标客户端 中打开目标对话；不使用未验证的会话深链".into());
     }
     let requested_deep_link = requested_deep_link.trim();
     if requested_deep_link.starts_with("claude://code/")
@@ -1145,7 +1182,7 @@ fn prime_agent_accessibility_once(app: &AXUIElement, pid: i32) -> bool {
 }
 
 fn should_recover_workbuddy_tree(agent: MacosAgent, count: usize, attempted: bool) -> bool {
-    agent == MacosAgent::WorkBuddy && count == 0 && !attempted
+    agent.current_electron() && count == 0 && !attempted
 }
 
 fn wait_for_agent_windows(app: &AXUIElement) -> bool {
@@ -1212,6 +1249,7 @@ fn is_agent_primary_window_title(agent: MacosAgent, title: &str) -> bool {
         MacosAgent::Codex => matches!(title.as_str(), "codex" | "chatgpt"),
         MacosAgent::Claude => title == "claude",
         MacosAgent::WorkBuddy => title == "workbuddy",
+        MacosAgent::DeepSeekHarness => title == "deepseek harness",
     }
 }
 
@@ -1250,7 +1288,7 @@ fn primary_agent_window(agent: MacosAgent) -> Result<CodexWindow, String> {
     } else {
         preferred
     };
-    if agent == MacosAgent::WorkBuddy && candidates.len() != 1 {
+    if agent.current_electron() && candidates.len() != 1 {
         return Err("请保留一个 WorkBuddy 主窗口并打开目标对话，再重新开始语音输入".into());
     }
     candidates
@@ -1724,12 +1762,53 @@ fn composer_value(element: &AXUIElement) -> String {
     normalize_element_composer_value(element, &element_value(element))
 }
 
+/// Every hint an editor can show while it is empty: its own placeholder / title /
+/// description / help, plus the static-text children rich editors (Chromium,
+/// Electron) draw the gray hint with. None of these is user input.
+fn element_hint_texts(element: &AXUIElement) -> Vec<String> {
+    let mut hints: Vec<String> = [
+        cf_string(element.title()),
+        cf_string(element.description()),
+        cf_string(element.help()),
+        cf_string(element.placeholder_value()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|text| normalize_text(&text))
+    .filter(|text| !text.is_empty())
+    .collect();
+    if let Ok(children) = element.children() {
+        for child in children.iter().take(24) {
+            if element_role(&child) != "AXStaticText" { continue; }
+            for text in [Some(element_value(&child)), cf_string(child.title()), cf_string(child.description())].into_iter().flatten() {
+                let text = normalize_text(&text);
+                if !text.is_empty() && !hints.contains(&text) { hints.push(text); }
+            }
+        }
+    }
+    hints
+}
+
 fn normalize_element_composer_value(element: &AXUIElement, raw: &str) -> String {
     let placeholder = cf_string(element.placeholder_value());
     let characters = element.attribute(&AXAttribute::new(&CFString::new("AXNumberOfCharacters")))
         .ok().and_then(|value: CFType| value.downcast::<CFNumber>())
         .and_then(|value| value.to_i64());
-    composer_value_with_placeholder(raw, placeholder.as_deref(), characters)
+    let value = composer_value_with_placeholder(raw, placeholder.as_deref(), characters);
+    // Generic rule: text that only mirrors one of the editor's own hints is the
+    // gray placeholder, not a draft. Chromium-based editors may count the hint
+    // in AXNumberOfCharacters, so the character count cannot vouch for it here.
+    if !value.is_empty()
+        && (is_workbuddy_hint(&value) || composer_value_is_hint(&value, &element_hint_texts(element)))
+    {
+        return String::new();
+    }
+    value
+}
+
+fn composer_value_is_hint(value: &str, hints: &[String]) -> bool {
+    let value = normalize_text(value.trim_start_matches('\u{feff}'));
+    !value.is_empty() && hints.iter().any(|hint| hint == &value)
 }
 
 fn composer_value_with_placeholder(raw: &str, placeholder: Option<&str>, characters: Option<i64>) -> String {
@@ -1747,9 +1826,21 @@ fn composer_value_with_placeholder(raw: &str, placeholder: Option<&str>, charact
     normalize_composer_value(value)
 }
 
+/// WorkBuddy's empty composer exposes its hint as AXValue without placeholder
+/// metadata. The hint's middle segment has changed across releases
+/// ("@ 引用对话文件，/ 调用技能与指令" → "@ 添加上下文，/调用技能与指令"), so match
+/// the stable opening question plus the skills-and-commands tail instead of one
+/// exact release string; real drafts never start with that question.
+fn is_workbuddy_hint(value: &str) -> bool {
+    let text = normalize_text(value);
+    // The whole value must be the hint: a real draft that merely begins with
+    // the question (or one polluted by an earlier hint paste) keeps its text.
+    text.starts_with("今天帮你做些什么？") && text.ends_with("调用技能与指令") && text.contains('@')
+}
+
 fn normalize_composer_value(value: &str) -> String {
     let value = value.trim_start_matches('\u{feff}');
-    if value.trim() == "今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令" {
+    if is_workbuddy_hint(value) {
         return String::new();
     }
     if is_placeholder(&value) {
@@ -2118,6 +2209,7 @@ pub(super) fn diagnose_current_composer(agent: MacosAgent) -> Result<serde_json:
 }
 
 fn find_stable_current_target(agent: MacosAgent, current_task: bool) -> Result<ComposerTarget, String> {
+    let current_task = current_task || agent == MacosAgent::DeepSeekHarness;
     let _evidence_scope = ComposerEvidenceScope::begin(agent == MacosAgent::Codex);
     // Tasks share voice input's cold-webview recovery, but must never launch,
     // select another window, or bypass a modal while waiting for the editor.
@@ -2164,9 +2256,9 @@ fn find_stable_current_target(agent: MacosAgent, current_task: bool) -> Result<C
                 // Do not reinitialize a healthy or ambiguous editor, send keys,
                 // select another conversation, or write until stability checks pass.
                 let enabled = enable_agent_accessibility(&target.app);
-                eprintln!("[composer] WorkBuddy empty tree: foreground recovery accepted={enabled}");
+                eprintln!("[composer] {} empty tree: foreground recovery accepted={enabled}", agent.label());
                 thread::sleep(COMPOSER_STABILITY_DELAY);
-                return Err("WorkBuddy 输入框尚未就绪，正在恢复辅助功能树".to_string());
+                return Err(format!("{} 输入框尚未就绪，正在恢复辅助功能树", agent.label()));
               }
               select_window_composer(agent, &target, candidates)?
             };
@@ -2222,6 +2314,85 @@ fn find_stable_current_target(agent: MacosAgent, current_task: bool) -> Result<C
     }
 }
 
+fn stable_confirmation_identity(before: Option<Vec<String>>, after: Option<Vec<String>>) -> Option<Vec<String>> {
+    before.filter(|prior| after.as_ref() == Some(prior))
+}
+
+fn client_foreground_return_allowed(is_current_electron: bool, user_intent: bool,
+    foreground_pid: Option<i32>, client_pid: u32, client_active: bool) -> bool {
+    is_current_electron && user_intent && client_active && client_pid > 0
+        && i32::try_from(client_pid).ok().filter(|pid| *pid > 0)
+            .is_some_and(|pid| foreground_pid == Some(pid))
+}
+
+// One activation, surrounded by real native pin/draft checks. No write/submit
+// callback or retry exists here; failure never clears a writer/Unknown owner.
+fn return_to_pinned_once<T>(allowed: bool,
+    before: impl FnOnce() -> Result<T, String>,
+    activate: impl FnOnce() -> Result<(), String>,
+    after: impl FnOnce(T) -> Result<(), String>) -> Result<(), String> {
+    if !allowed { return Err("DESKTOP_TASK_TARGET_CHANGED".into()); }
+    let proof = before()?;
+    activate()?;
+    after(proof)
+}
+
+fn current_foreground_pid() -> Option<i32> {
+    let application = ax_element_attribute(&AXUIElement::system_wide(), "AXFocusedApplication")?;
+    let mut pid = 0;
+    (unsafe { AXUIElementGetPid(application.as_concrete_TypeRef(), &mut pid) } == kAXErrorSuccess
+        && pid > 0).then_some(pid)
+}
+
+fn restore_exact_pinned_electron_from_current_client(state: &MacosComposerState,
+    window: &CodexWindow, pinned: &ComposerTarget, user_intent: bool) -> Result<(), String> {
+    let admitted = || client_foreground_return_allowed(
+        state.agent.current_electron(), user_intent,
+        current_foreground_pid(), std::process::id(),
+        NSRunningApplication::currentApplication().isActive());
+    let verify_pin = || -> Result<String, String> {
+        let current = current_task_window_for(state.agent)?;
+        if current.app != pinned.app || current.window != pinned.window
+            || window.app != pinned.app || window.window != pinned.window
+            || task_window_is_blocked(&current.window)
+            || state.confirmation_identity.as_ref() != Some(&task_window_identity(&current.window))
+            || state.task_identity.as_ref().is_some_and(|identity| *identity != task_window_identity(&current.window)) {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
+        let (editor, _) = find_composer(state.agent, &current)?;
+        if editor != pinned.composer || !element_is_enabled(&editor)
+            || !composer_is_visible(&editor, &current)
+            || ax_element_attribute(&editor, "AXWindow").as_ref() != Some(&pinned.window) {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
+        let raw = current_electron_raw_value(&editor)?;
+        let actual = normalize_element_composer_value(&editor, &raw);
+        if actual.is_empty() || actual != state.draft.last {
+            return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+        }
+        Ok(raw)
+    };
+    return_to_pinned_once(admitted(), || {
+        let raw = verify_pin()?;
+        // Check again immediately before the one activation, not just at entry.
+        if !admitted() { return Err("DESKTOP_TASK_TARGET_CHANGED".into()); }
+        Ok(raw)
+    }, || {
+        focus_composer(&ComposerTarget { agent: state.agent, app: pinned.app.clone(),
+            window: pinned.window.clone(), composer: pinned.composer.clone(),
+            value: state.draft.last.clone() })
+    }, |raw| {
+        if verify_pin()? != raw { return Err("DESKTOP_TASK_READBACK_CHANGED".into()); }
+        if !agent_is_frontmost(state.agent)
+            || ax_element_attribute(&AXUIElement::system_wide(), "AXFocusedApplication").as_ref() != Some(&pinned.app)
+            || ax_element_attribute(&pinned.app, "AXFocusedWindow").as_ref() != Some(&pinned.window)
+            || ax_element_attribute(&pinned.app, "AXFocusedUIElement").as_ref() != Some(&pinned.composer) {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
+        Ok(())
+    })
+}
+
 fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, String> {
     let Some(pinned) = state.current_visible_target.as_ref() else {
         return find_target(state.agent, &state.session_id, &state.session_title);
@@ -2243,9 +2414,9 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
             state.agent.label()
         ));
     };
-    if state.agent == MacosAgent::WorkBuddy {
+    if state.agent.current_electron() {
         if !agent_is_frontmost(state.agent) {
-            return Err("WorkBuddy 已不在前台，已停止写入，请回到目标对话重新长按".into());
+            return Err(format!("{} 已不在前台，已停止写入，请回到目标对话重新长按", state.agent.label()));
         }
     } else {
         focus_window(&window)?;
@@ -2255,8 +2426,8 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
         if state.task_identity.is_some() {
             return Err("DESKTOP_TASK_TARGET_CHANGED".into());
         }
-        if state.agent == MacosAgent::WorkBuddy {
-            return Err("WorkBuddy 输入框已变化，已停止写入并保留草稿，请在目标对话重新长按".into());
+        if state.agent.current_electron() {
+            return Err("目标客户端输入框已变化，已停止写入并保留草稿，请在目标对话重新长按".into());
         }
         if state.agent == MacosAgent::Codex {
             return Err("Codex 输入框已变化，已停止写入并保留草稿，请点击目标输入框后重新长按".into());
@@ -2291,16 +2462,168 @@ fn focus_composer(target: &ComposerTarget) -> Result<(), String> {
         .map_err(|error| format!("{} macOS 输入框无法获得焦点: {error}", target.agent.label()))
 }
 
+// No hint/whitespace normalization: preserve the complete old draft and type
+// only an exact added suffix. A revision that changes the prefix is not append.
+fn current_electron_append_suffix<'a>(current: &str, next: &'a str) -> Option<&'a str> {
+    next.strip_prefix(current)
+}
+
+fn current_electron_append_guard(actual: &str, expected: &str,
+    selection: Option<(isize, isize)>, utf16_end: usize) -> bool {
+    let Ok(end) = isize::try_from(utf16_end) else { return false; };
+    actual == expected && selection == Some((end, 0))
+}
+
+fn require_current_electron_text_value(raw: Option<String>) -> Result<String, String> {
+    raw.ok_or_else(|| "前台输入框实际内容读取失败，未继续写入且不会自动重试".into())
+}
+
+fn current_electron_raw_value(composer: &AXUIElement) -> Result<String, String> {
+    // An unsupported, failed or wrongly typed AXValue is unknown, not empty.
+    require_current_electron_text_value(composer.value().ok()
+        .and_then(|value| value.downcast::<CFString>()).map(|value| value.to_string()))
+}
+
+fn current_electron_value(composer: &AXUIElement) -> Result<String, String> {
+    let raw = current_electron_raw_value(composer)?;
+    Ok(normalize_element_composer_value(composer, &raw))
+}
+
+fn current_composer_selection(composer: &AXUIElement) -> Option<(isize, isize)> {
+    let value: CFType = composer.attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange"))).ok()?;
+    if value.type_of() != unsafe { AXValueGetTypeID() }
+        || unsafe { AXValueGetType(value.as_CFTypeRef() as AXValueRef) } != kAXValueTypeCFRange {
+        return None;
+    }
+    let mut range = CFRange::init(-1, -1);
+    if !unsafe { AXValueGetValue(value.as_CFTypeRef() as AXValueRef, kAXValueTypeCFRange,
+        &mut range as *mut CFRange as *mut c_void) } { return None; }
+    (range.location >= 0 && range.length >= 0).then_some((range.location, range.length))
+}
+
+fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &str) -> Result<(), String> {
+    let mut pid = 0;
+    if unsafe { AXUIElementGetPid(target.app.as_concrete_TypeRef(), &mut pid) } != kAXErrorSuccess || pid <= 0 {
+        return Err("DeepSeek Harness 输入进程未知，尚未写入".into());
+    }
+    let identity = task_window_identity(&target.window);
+    let assert_target = || -> Result<(), String> {
+        if !agent_is_frontmost(target.agent)
+            || ax_element_attribute(&target.app, "AXFocusedWindow").as_ref() != Some(&target.window)
+            || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer)
+            || task_window_identity(&target.window) != identity {
+            return Err("DESKTOP_TASK_TARGET_CHANGED".into());
+        }
+        Ok(())
+    };
+    assert_target()?;
+    if current_electron_value(&target.composer)? != target.value { return Err("DESKTOP_TASK_READBACK_CHANGED".into()); }
+    let append = current_electron_append_suffix(&target.value, text);
+    let mut append_end = None;
+    if append.is_some() {
+        let raw = current_electron_raw_value(&target.composer)?;
+        if normalize_element_composer_value(&target.composer, &raw) != target.value {
+            return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+        }
+        let end = raw.encode_utf16().count();
+        if !current_electron_append_guard(&target.value, &target.value,
+            current_composer_selection(&target.composer), end) {
+            let end = isize::try_from(end).map_err(|_| "DeepSeek Harness 光标范围无效，未写入".to_owned())?;
+            let range = CFRange::init(end, 0);
+            let ptr = unsafe { AXValueCreate(kAXValueTypeCFRange, &range as *const CFRange as *const c_void) };
+            if ptr.is_null() { return Err("DeepSeek Harness 无法创建末尾光标，未写入".into()); }
+            let value = unsafe { CFType::wrap_under_create_rule(ptr as _) };
+            target.composer.set_attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange")), value)
+                .map_err(|_| "DeepSeek Harness 无法设置末尾光标，未写入".to_owned())?;
+        }
+        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        let mut stable_since = None;
+        loop {
+            assert_target()?;
+            // Preserve even all-newline drafts. No selected-text equality or
+            // character-count heuristic can authorize discarding their bytes.
+            if current_electron_raw_value(&target.composer)? != raw {
+                return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+            }
+            if current_electron_append_guard(&current_electron_value(&target.composer)?, &target.value,
+                current_composer_selection(&target.composer), end) {
+                if stable_since.get_or_insert_with(Instant::now).elapsed() >= KEYBOARD_READBACK_DELAY { break; }
+            } else { stable_since = None; }
+            if Instant::now() >= deadline { return Err("DeepSeek Harness 末尾光标未确认，已保留原文且未写入".into()); }
+            thread::sleep(Duration::from_millis(25));
+        }
+        append_end = Some(end);
+    } else if !target.value.is_empty() {
+        // Existing explicit task replacement remains strict. Voice callers
+        // reject non-append revisions before entering this legacy branch.
+        select_workbuddy_draft(&target.composer).map_err(|_| "DeepSeek Harness 无法确认原文选区，未写入".to_owned())?;
+        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        loop {
+            assert_target()?;
+            let selected = target.composer.attribute(&AXAttribute::new(&CFString::new("AXSelectedText")))
+                .ok().and_then(|value: CFType| value.downcast::<CFString>()).map(|value| value.to_string());
+            if workbuddy_selection_matches(selected.as_deref(), &target.value) { break; }
+            if Instant::now() >= deadline { return Err("DeepSeek Harness 原文选区未确认，未写入".into()); }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+    if text.is_empty() {
+        if !target.value.is_empty() { assert_target()?; post_workbuddy_key(&target.app, 51, CGEventFlags::CGEventFlagNull)?; }
+        return Ok(());
+    }
+    let source = CGEventSource::new(CGEventSourceStateID::Private)
+        .map_err(|_| "DeepSeek Harness 无法创建定向输入事件".to_owned())?;
+    let input = append.unwrap_or(text);
+    let chars = input.chars().collect::<Vec<_>>();
+    let mut expected = if append_end.is_some() { target.value.clone() } else { String::new() };
+    for chars in chars.chunks(8) {
+        assert_target()?;
+        if let Some(end) = append_end {
+            if !current_electron_append_guard(&current_electron_value(&target.composer)?, &expected,
+                current_composer_selection(&target.composer), end) {
+                return Err("DeepSeek Harness 草稿或光标已变化，未继续写入且不会自动重试".into());
+            }
+        }
+        let part: String = chars.iter().collect();
+        for pressed in [true, false] {
+            let event = CGEvent::new_keyboard_event(source.clone(), 0, pressed)
+                .map_err(|_| "DeepSeek Harness 定向输入失败，不会自动重试".to_owned())?;
+            event.set_flags(CGEventFlags::CGEventFlagNull);
+            event.set_string(&part);
+            event.post_to_pid(pid);
+        }
+        expected.push_str(&part);
+        append_end = append_end.map(|end| end + part.encode_utf16().count());
+        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        loop {
+            assert_target()?;
+            let actual = current_electron_value(&target.composer)
+                .map_err(|_| "DeepSeek Harness 草稿写入未确认，未自动重试".to_owned())?;
+            let confirmed = match append_end {
+                Some(end) => current_electron_append_guard(&actual, &expected,
+                    current_composer_selection(&target.composer), end),
+                None => actual == expected,
+            };
+            if confirmed { break; }
+            if Instant::now() >= deadline { return Err("DeepSeek Harness 草稿写入未确认，未自动重试".into()); }
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+    Ok(())
+}
+
 fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), String> {
     let text = text.replace("\r\n", "\n");
     focus_composer(target)?;
     if composer_value(&target.composer) != target.value {
         return Err("输入框内容在获取焦点后发生变化，已保留原文".into());
     }
-    if target.agent == MacosAgent::WorkBuddy {
+    if target.agent == MacosAgent::DeepSeekHarness {
+        replace_current_electron_without_clipboard(target, &text)?;
+    } else if target.agent == MacosAgent::WorkBuddy {
         // Its rich-text editor can expose writable AXValue while bypassing the
         // editor's input events. Use a guarded native paste, never mutate AXValue.
-        let snapshot = PasteboardSnapshot::capture()?;
+        let mut snapshot = PasteboardSnapshot::capture()?;
         let result = (|| {
             let assert_focus = || -> Result<(), String> {
                 if !agent_is_frontmost(target.agent)
@@ -2312,6 +2635,10 @@ fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), Stri
                 Ok(())
             };
             assert_focus()?;
+            // An editor that only shows its gray hint has no draft to preserve:
+            // selecting/verifying the hint would either fail (no selectable
+            // text) or paste over the hint node. Insert at the caret instead.
+            if !target.value.is_empty() {
             let mut used_targeted_select = select_workbuddy_draft(&target.composer).is_err();
             if used_targeted_select {
                 post_workbuddy_key(&target.app, 0, CGEventFlags::CGEventFlagCommand)?;
@@ -2347,17 +2674,29 @@ fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), Stri
                         selection_deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
                         continue;
                     }
-                    return Err("WorkBuddy 未确认选中输入框原文，本次语音未粘贴，请重新长按".into());
+                    // Bounded diagnostics: which text the editor exposed and what
+                    // it reported as selected, so a mismatch can be attributed.
+                    let raw = element_value(&target.composer);
+                    let characters = target.composer
+                        .attribute(&AXAttribute::new(&CFString::new("AXNumberOfCharacters")))
+                        .ok().and_then(|value: CFType| value.downcast::<CFNumber>()).and_then(|value| value.to_i64());
+                    let clip = |text: &str| text.chars().take(40).collect::<String>();
+                    return Err(format!(
+                        "WorkBuddy 未确认选中输入框原文，本次语音未粘贴，请重新长按（原文 {:?}，AX 值 {:?}，字符数 {:?}，选中 {:?}）",
+                        clip(&target.value), clip(&raw), characters, selected.as_deref().map(clip)
+                    ));
                 }
                 thread::sleep(Duration::from_millis(25));
+            }
             }
             assert_focus()?;
             if text.is_empty() {
                 post_workbuddy_key(&target.app, 51, CGEventFlags::CGEventFlagNull)?;
                 thread::sleep(KEYBOARD_READBACK_DELAY);
             } else {
-                set_pasteboard_text(&text)?;
+                snapshot.set_text(&text)?;
                 assert_focus()?;
+                snapshot.verify_written()?;
                 post_workbuddy_key(&target.app, MAC_KEYCODE_V, CGEventFlags::CGEventFlagCommand)?;
                 thread::sleep(KEYBOARD_READBACK_DELAY);
             }
@@ -2528,7 +2867,7 @@ fn insert_codex_voice_once(state: &mut MacosComposerState, transcript: &str) -> 
     let origin = state.draft.caret_after("").ok_or("语音插入位置不可用")?;
     let caret = voice_draft_at_target(&target).ok().and_then(|draft| draft.caret_after(""));
     let edit = voice_edit_without_ack(&state.native_voice_text, transcript, origin, &target.value, caret);
-    let snapshot = PasteboardSnapshot::capture()?;
+    let mut snapshot = PasteboardSnapshot::capture()?;
     let result = (|| {
         if !agent_is_frontmost(MacosAgent::Codex)
             || ax_element_attribute(&target.app, "AXFocusedUIElement").as_ref() != Some(&target.composer) {
@@ -2541,11 +2880,12 @@ fn insert_codex_voice_once(state: &mut MacosComposerState, transcript: &str) -> 
         if !edit.replace.is_empty() {
             select_codex_voice_revision(&target, &edit)?;
         }
-        set_pasteboard_text(&edit.insert)?;
+        snapshot.set_text(&edit.insert)?;
         if !agent_is_frontmost(MacosAgent::Codex)
             || ax_element_attribute(&target.app,"AXFocusedUIElement").as_ref()!=Some(&target.composer) {
             return Err("语音修订期间焦点已变化，未粘贴".into());
         }
+        snapshot.verify_written()?;
         post_codex_paste(&target.app)?;
         state.native_voice_text = transcript.into();
         state.draft.last = state.draft.desired(transcript);
@@ -2558,6 +2898,117 @@ fn insert_codex_voice_once(state: &mut MacosComposerState, transcript: &str) -> 
     result
 }
 
+// Only explicit voice Begin calls this adapter. Observers, task lookup,
+// streaming updates, cancellation and readback must never wake an application.
+fn prepare_existing_workbuddy_for_voice_begin(agent: MacosAgent) -> Result<(), String> {
+    if agent != MacosAgent::WorkBuddy { return Ok(()); }
+    let bundle = agent_bundle_identifiers(MacosAgent::WorkBuddy)[0];
+    let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+        &NSString::from_str(bundle));
+    let rows = applications.iter().map(|application| (
+        application.processIdentifier(),
+        application.bundleIdentifier().is_some_and(|id| id.to_string() == bundle),
+        application.isTerminated(),
+    )).collect::<Vec<_>>();
+    let Some(pid) = workbuddy_voice_wake::unique_existing_pid(&rows)? else {
+        // Preserve the existing first-launch policy; this helper never opens
+        // an app, creates a window/session, or accepts a process-name fallback.
+        return Ok(());
+    };
+    if !unsafe { AXIsProcessTrusted() } {
+        // Keep the existing ensure_accessibility_permission entry in control.
+        // This pre-wake helper neither activates nor prompts before consent.
+        return Ok(());
+    }
+    let application = NSRunningApplication::runningApplicationWithProcessIdentifier(pid)
+        .ok_or_else(|| "WorkBuddy 原进程已退出，未转向其它实例".to_owned())?;
+    let app = AXUIElement::application(pid);
+    let _ = app.set_messaging_timeout(1.5);
+    let still_same = || -> Result<(), String> {
+        if application.processIdentifier() != pid || application.isTerminated()
+            || !application.bundleIdentifier().is_some_and(|id| id.to_string() == bundle) {
+            return Err("WorkBuddy 原进程已变化，未转向其它实例".into());
+        }
+        Ok(())
+    };
+    workbuddy_voice_wake::prepare_existing_once(Some(pid), |_| {
+        still_same()?;
+        if application.isHidden() && !application.unhide() {
+            return Err("WorkBuddy 现有应用无法取消隐藏，未创建新窗口".into());
+        }
+        if !application.isActive() {
+            let requested=application.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+            // An explicit device voice press has no AppKit key event. Activate
+            // the exact existing AX application too, before asking for windows.
+            let ax_requested=app.set_frontmost(CFBoolean::true_value()).is_ok();
+            if !requested && !ax_requested {
+                return Err("WorkBuddy 现有应用激活请求未确认，未自动重试".into());
+            }
+        }
+        let deadline = Instant::now() + AGENT_FRONTMOST_TIMEOUT;
+        loop {
+            still_same()?;
+            if application.isActive() { return Ok(()); }
+            if Instant::now() >= deadline {
+                return Err("WorkBuddy 现有应用尚未确认激活，未重新打开应用".into());
+            }
+            thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+        }
+    }, |_| {
+        still_same()?;
+        // Bypass only the old successful-set cache: a previous background
+        // opt-in did not prove any AX window existed. Do not cache this attempt
+        // until this exact active app exposes a real nonempty window array.
+        let primed = enable_agent_accessibility(&app);
+        // Cold or minimized Electron windows can lag activation. This bounded
+        // wait is local to explicit WorkBuddy Begin, not observer polling.
+        let ready_started=Instant::now();
+        let deadline = ready_started + AGENT_FRONTMOST_TIMEOUT;
+        loop {
+            still_same()?;
+            if !application.isActive() {
+                return Err("WorkBuddy 准备期间前台已变化，未继续唤起".into());
+            }
+            let foreground = ax_element_attribute(&AXUIElement::system_wide(), "AXFocusedApplication");
+            let focused_pid=foreground.as_ref().and_then(|current| {
+                let mut value=0;
+                (unsafe { AXUIElementGetPid(current.as_concrete_TypeRef(),&mut value) }==kAXErrorSuccess)
+                    .then_some(value)
+            });
+            if focused_pid.is_some_and(|value|value>0 && value!=pid) {
+                return Err("WorkBuddy 准备期间目标前台已变化，未继续唤起".into());
+            }
+            let (window_count,window_read_ok)=match app.windows() {
+                Ok(windows)=>(windows.iter().count(),true),Err(_)=>(0,false),
+            };
+            let ready=workbuddy_voice_wake::windows_ready(pid,application.isActive(),focused_pid,window_count);
+            if ready || Instant::now() >= deadline {
+                crate::realtime_chat_log::record("", "workbuddy_wake",serde_json::json!({
+                    "stage":"window_readiness","ok":ready,"elapsedMs":ready_started.elapsed().as_millis(),
+                    "appActive":application.isActive(),"windowCount":window_count.min(32),"windowReadOk":window_read_ok,
+                    "focusedApplication":if focused_pid==Some(pid){"matching"}else if focused_pid.is_none(){"unavailable"}else{"invalid"},
+                }));
+            }
+            if ready {
+                // AppKit's exact pinned active PID is independent foreground
+                // proof when AXFocusedApplication is temporarily absent. Window
+                // restoration, unique editor and draft guards still run below.
+                return Ok(primed);
+            }
+            if Instant::now() >= deadline {
+                return Err("WorkBuddy 激活后窗口仍未就绪，尚未写入；请打开目标窗口后重新长按".into());
+            }
+            thread::sleep(ACCESSIBILITY_TREE_RETRY_DELAY);
+        }
+    }, |pid, primed| {
+        if primed {
+            let mut cache = primed_agent_application_pids().lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            record_agent_accessibility_primed(&mut cache, pid, true);
+        }
+    })
+}
+
 pub(super) fn begin_voice(
     agent: MacosAgent,
     deep_link: &str,
@@ -2565,6 +3016,8 @@ pub(super) fn begin_voice(
     session_title: &str,
     workspace_label: &str,
 ) -> Result<MacosComposerState, String> {
+    if agent == MacosAgent::DeepSeekHarness { return Err("DeepSeek Harness 仅支持当前可见输入框".into()); }
+    prepare_existing_workbuddy_for_voice_begin(agent)?;
     focus_session(agent, deep_link, session_id, session_title, workspace_label)?;
     let session_title = normalize_text(session_title);
     let (target, pin_visible_target) = match find_target(agent, session_id, &session_title) {
@@ -2589,20 +3042,24 @@ pub(super) fn begin_voice(
         draft: voice_draft_at_target(&target)?,
         current_visible_target: pin_visible_target.then_some(target),
         task_identity: None,
+        confirmation_identity: None,
         native_voice_text: String::new(),
     })
 }
 
 pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerState, String> {
+    prepare_existing_workbuddy_for_voice_begin(agent)?;
     let target = find_current_visible_target(agent)?;
     focus_composer(&target)?;
+    let identity = (agent == MacosAgent::DeepSeekHarness).then(|| task_window_identity(&target.window));
     Ok(MacosComposerState {
         agent,
         session_id: String::new(),
         session_title: String::new(),
         draft: voice_draft_at_target(&target)?,
         current_visible_target: Some(target),
-        task_identity: None,
+        task_identity: identity,
+        confirmation_identity: None,
         native_voice_text: String::new(),
     })
 }
@@ -2661,7 +3118,7 @@ pub(super) fn begin_current_task_for(agent: MacosAgent) -> Result<MacosComposerS
     let identity = task_window_identity(&target.window);
     Ok(MacosComposerState { agent, session_id: String::new(),
         session_title: String::new(), draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
-        current_visible_target: Some(target), task_identity: Some(identity), native_voice_text: String::new() })
+        current_visible_target: Some(target), task_identity: Some(identity), confirmation_identity: None, native_voice_text: String::new() })
 }
 
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
@@ -2672,17 +3129,26 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
     let mut last_error = String::new();
     // An uncertain native paste must never be repeated: a delayed first paste
     // could otherwise duplicate the utterance on top of the retry.
-    let attempts = if state.agent == MacosAgent::WorkBuddy { 1 } else { 2 };
+    let attempts = if state.agent.current_electron() { 1 } else { 2 };
     for _ in 0..attempts {
         match find_voice_target(state).and_then(|target| {
+            let identity_before = state.agent.current_electron().then(|| task_window_identity(&target.window));
             if !state.draft.can_update(&target.value, &text) {
                 return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
             }
+            if state.agent == MacosAgent::DeepSeekHarness
+                && current_electron_append_suffix(&target.value, &text).is_none() {
+                return Err("DeepSeek Harness 本次语音不是追加更新，已保留原草稿且未写入".into());
+            }
             if target.value != text { replace_composer_text(&target, &text)?; }
-            Ok(target)
+            let identity_after = state.agent.current_electron().then(|| task_window_identity(&target.window));
+            Ok((target, stable_confirmation_identity(identity_before, identity_after)))
         }) {
-            Ok(_target) => {
+            Ok((_target, confirmation_identity)) => {
                 state.draft.last = text.clone();
+                // Recording proof only: no new input/focus gate. Changed or
+                // missing identity leaves self-client confirm restore disabled.
+                state.confirmation_identity = confirmation_identity;
                 return Ok(text);
             }
             Err(error) => {
@@ -2785,7 +3251,7 @@ fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
     let result = unsafe { AXUIElementPostKeyboardEvent(app.as_concrete_TypeRef(), 13, 36, true) };
     if result != kAXErrorSuccess {
         return Err(format!(
-            "{} macOS Enter 按键按下失败: {}",
+            "COMPOSER_SUBMIT_UNCONFIRMED: {} macOS Enter 按键按下结果未确认: {}",
             agent.label(),
             error_string(result)
         ));
@@ -2795,7 +3261,7 @@ fn press_enter(agent: MacosAgent, app: &AXUIElement) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "{} macOS Enter 按键释放失败: {}",
+            "COMPOSER_SUBMIT_UNCONFIRMED: {} macOS Enter 按键释放结果未确认: {}",
             agent.label(),
             error_string(result)
         ))
@@ -2871,7 +3337,7 @@ fn press_native_submission(target: &ComposerTarget, allow_queue: bool, check_val
         best[0]
             .1
             .press()
-            .map_err(|error| format!("{} macOS 发送按钮执行失败: {error}", target.agent.label()))?;
+            .map_err(|error| format!("COMPOSER_SUBMIT_UNCONFIRMED: {} macOS 发送按钮执行失败: {error}", target.agent.label()))?;
         Ok(Some(mode))
     } else if best.is_empty() {
         Ok(None)
@@ -2946,72 +3412,106 @@ fn cleared_codex_submit_successor(state: &MacosComposerState, identity: &[String
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostSubmitValue { Clear, Unchanged, Changed, Unproven }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PostSubmitError { ScopeChanged, Unavailable }
+fn post_submit_value(raw: Option<&str>, characters: Option<i64>, exact_hint: bool, send_disabled: bool, submitted: &str) -> PostSubmitValue {
+    let Some(raw) = raw else { return PostSubmitValue::Unproven; };
+    if characters.is_some_and(|n|n<0) { return PostSubmitValue::Unproven; }
+    let text=raw.replace("\r\n","\n");
+    let text=text.trim_start_matches('\u{feff}');
+    if text.is_empty() {
+        return if characters.is_some_and(|n|n>0) && !send_disabled { PostSubmitValue::Unproven } else { PostSubmitValue::Clear };
+    }
+    // Chromium can expose structural paragraph/sentinel text for its empty
+    // editor. Require an independent empty-state signal, not just trim().
+    let sentinel_only=text.chars().all(|c|matches!(c,'\n'|'\r'|'\u{feff}'|'\u{200b}'));
+    if sentinel_only {
+        return if characters==Some(0) || send_disabled { PostSubmitValue::Clear } else { PostSubmitValue::Unproven };
+    }
+    if text==submitted { return PostSubmitValue::Unchanged; }
+    // The old draft plus a transient paragraph break is not a receipt, nor a
+    // reason to submit again. Wait for actual stable clear evidence.
+    if text.strip_prefix(submitted).is_some_and(|tail| !tail.is_empty() && tail.chars().all(|c|matches!(c,'\n'|'\r'|'\u{feff}'|'\u{200b}'))) {
+        return PostSubmitValue::Unproven;
+    }
+    if exact_hint {
+        return if characters==Some(0) { PostSubmitValue::Clear } else { PostSubmitValue::Unproven };
+    }
+    PostSubmitValue::Changed
+}
+fn post_submit_scope(same_app_window: bool, same_conversation: bool, original_editor: bool, focused_owned_successor: bool) -> bool {
+    same_app_window && same_conversation && (original_editor || focused_owned_successor)
+}
+fn observe_submit_readback(target:&ComposerTarget, submitted:&str, identity:&[String]) -> Result<(AXUIElement,PostSubmitValue),PostSubmitError> {
+    let windows=agent_windows(target.agent).map_err(|_|PostSubmitError::Unavailable)?;
+    let window=windows.into_iter().find(|window|window.window==target.window && window.app==target.app)
+        .ok_or(PostSubmitError::ScopeChanged)?;
+    let same_window=agent_is_frontmost(target.agent)
+        && ax_element_attribute(&window.app,"AXFocusedWindow").as_ref()==Some(&window.window)
+        && !task_window_is_blocked(&window.window);
+    if !same_window || task_window_identity(&window.window)!=identity { return Err(PostSubmitError::ScopeChanged); }
+    let candidates=composer_candidates(&window).into_iter()
+        .filter(|(element,_)|composer_is_visible(element,&window)).collect::<Vec<_>>();
+    let old_present=candidates.iter().any(|(element,_)|element==&target.composer);
+    let (editor,_)=if old_present {
+        candidates.into_iter().find(|(element,_)|element==&target.composer).ok_or(PostSubmitError::Unavailable)?
+    } else {
+        select_window_composer(target.agent,&window,candidates).map_err(|_|PostSubmitError::Unavailable)?
+    };
+    let focused_owned=ax_element_attribute(&window.app,"AXFocusedUIElement").as_ref()==Some(&editor)
+        && ax_element_attribute(&editor,"AXWindow").as_ref()==Some(&window.window);
+    if !post_submit_scope(same_window,true,old_present,focused_owned) { return Err(PostSubmitError::ScopeChanged); }
+    // Read-only: do not refocus, rebind, cancel, or write to a successor editor.
+    let raw=editor.value().ok().and_then(|v|v.downcast::<CFString>()).map(|v|v.to_string());
+    let characters=editor.attribute(&AXAttribute::new(&CFString::new("AXNumberOfCharacters")))
+        .ok().and_then(|v:CFType|v.downcast::<CFNumber>()).and_then(|v|v.to_i64());
+    let buttons=walk_elements(&window.window,|button|element_role(button)=="AXButton"
+        && send_button_score(button).is_some() && send_button_matches_composer(button,&editor));
+    // Missing AXEnabled is not disabled; ambiguous controls prove nothing.
+    let send_disabled=buttons.len()==1 && buttons[0].enabled().ok().map(bool::from)==Some(false);
+    let exact_hint=raw.as_ref().is_some_and(|raw|composer_value_is_hint(raw,&element_hint_texts(&editor)));
+    Ok((editor,post_submit_value(raw.as_deref(),characters,exact_hint,send_disabled,submitted)))
+}
+
 fn wait_for_submit_readback(
-    state: &mut MacosComposerState,
+    _state: &mut MacosComposerState,
     submitted_text: &str,
     timeout: Duration,
     submit_identity: &[String],
+    original_target: &ComposerTarget,
 ) -> Result<SubmitReadback, String> {
-    let deadline = Instant::now() + timeout;
-    let mut last_error = String::new();
-    let mut clear_successor: Option<(AXUIElement, Instant)> = None;
+    let deadline=Instant::now()+timeout;
+    let mut clear:Option<(AXUIElement,Instant)>=None;
+    let mut changed=false;
+    let mut scope_changed=false;
+    let mut last_unchanged=false;
     loop {
-        match find_voice_target(state) {
-            Ok(target) => {
-                clear_successor = None;
-                let readback = submit_readback(&target.value, submitted_text);
-                if readback != SubmitReadback::DraftUnchanged || Instant::now() >= deadline {
-                    return Ok(readback);
+        match observe_submit_readback(original_target,submitted_text,submit_identity) {
+            Ok((editor,PostSubmitValue::Clear)) if !changed && !scope_changed => {
+                last_unchanged=false;
+                if let Some((prior,since))=&clear {
+                    if prior==&editor && since.elapsed()>=Duration::from_millis(150) { return Ok(SubmitReadback::Confirmed); }
                 }
-            }
-            Err(error) => {
-                if state.agent == MacosAgent::Codex {
-                    // Observation only, after the human's confirmation key.
-                    // Never rebind the write target or submit to its successor.
-                    match cleared_codex_submit_successor(state, submit_identity) {
-                        Ok(successor) => {
-                            if let Some((previous, since)) = &clear_successor {
-                                if previous == &successor && since.elapsed() >= Duration::from_millis(150) {
-                                    return Ok(SubmitReadback::Confirmed);
-                                }
-                            }
-                            if clear_successor.as_ref().is_none_or(|(previous, _)| previous != &successor) {
-                                clear_successor = Some((successor, Instant::now()));
-                            }
-                            last_error = "等待同一新输入框稳定清空".into();
-                        }
-                        Err(reason) => {
-                            clear_successor = None;
-                            last_error = format!("{error}；{reason}");
-                        }
-                    }
-                } else {
-                    // Sending a first message may replace WorkBuddy's composer.
-                    // Observe an empty successor only after submission; never rebind
-                    // the write target or send again to that successor.
-                    if state.agent == MacosAgent::WorkBuddy {
-                        if let Some(pinned) = state.current_visible_target.as_ref() {
-                            let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
-                            if let Ok((_, value)) = find_composer(state.agent, &window) {
-                                if value.is_empty() {
-                                    return Ok(SubmitReadback::Confirmed);
-                                }
-                            }
-                        }
-                    }
-                    last_error = error;
-                }
-            }
+                if clear.as_ref().is_none_or(|(prior,_)|prior!=&editor) { clear=Some((editor,Instant::now())); }
+            },
+            Ok((_,PostSubmitValue::Changed))=>{ changed=true;clear=None;last_unchanged=false; },
+            Ok((_,PostSubmitValue::Unchanged))=>{ clear=None;last_unchanged=true; },
+            Err(PostSubmitError::ScopeChanged)=>{ scope_changed=true;clear=None;last_unchanged=false; },
+            _=>{ clear=None;last_unchanged=false; },
         }
-        if Instant::now() >= deadline {
-            return Err(last_error);
+        if Instant::now()>=deadline {
+            if changed { return Ok(SubmitReadback::ComposerChanged); }
+            if !scope_changed && last_unchanged { return Ok(SubmitReadback::DraftUnchanged); }
+            return Err(if scope_changed { "提交后原窗口或对话已变化；未重发且保留当前草稿" } else { "提交后未观察到稳定的语义空输入框；未重发且保留当前草稿" }.into());
         }
         thread::sleep(Duration::from_millis(40));
     }
 }
 
 fn task_draft_snapshot(state: &MacosComposerState, target: &ComposerTarget) -> Result<serde_json::Value, String> {
-    if !matches!(state.agent, MacosAgent::Codex | MacosAgent::WorkBuddy) || state.task_identity.is_none() {
+    if !matches!(state.agent, MacosAgent::Codex | MacosAgent::WorkBuddy | MacosAgent::DeepSeekHarness) || state.task_identity.is_none() {
         return Err("DESKTOP_TASK_TARGET_CHANGED".into());
     }
     let mut pid = 0;
@@ -3070,13 +3570,14 @@ fn replace_codex_task_text(target: &ComposerTarget, text: &str) -> Result<(), St
         Ok(())
     };
     assert_unchanged()?;
-    let snapshot = PasteboardSnapshot::capture()?;
+    let mut snapshot = PasteboardSnapshot::capture()?;
     let result = (|| {
         post_codex_command(&target.app, 0)?; // macOS A: select all in this editor only.
         thread::sleep(KEYBOARD_READBACK_DELAY);
         assert_unchanged()?;
-        set_pasteboard_text(text)?;
+        snapshot.set_text(text)?;
         assert_unchanged()?;
+        snapshot.verify_written()?;
         post_codex_paste(&target.app)?;
         // Same transport contract as dictation: let the editor consume the
         // clipboard, then submit. AXValue is not a receipt for native input;
@@ -3139,7 +3640,7 @@ pub(super) fn dispatch_task_from_draft(
 
 pub(super) fn dispatch_voice_task(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
     let target = find_voice_target(state)?;
-    if !matches!(state.agent, MacosAgent::Codex|MacosAgent::WorkBuddy) || !state.draft.base.is_empty() || !target.value.is_empty() {
+    if !matches!(state.agent, MacosAgent::Codex|MacosAgent::WorkBuddy|MacosAgent::DeepSeekHarness) || !state.draft.base.is_empty() || !target.value.is_empty() {
         return Err("DESKTOP_TASK_DRAFT_NOT_EMPTY".into());
     }
     update_voice(state, text)?;
@@ -3154,6 +3655,15 @@ pub(super) fn confirm_voice(
 }
 
 fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -> Result<String, String> {
+    // Only explicit Confirm may return from this client's result UI. Shared
+    // lookup, append, cancellation and submit-readback never gain this permit.
+    if state.agent.current_electron() && expected.is_none()
+        && !agent_is_frontmost(state.agent) {
+        let pinned = state.current_visible_target.as_ref()
+            .ok_or_else(|| "DESKTOP_TASK_TARGET_CHANGED".to_owned())?;
+        let window = CodexWindow { app: pinned.app.clone(), window: pinned.window.clone() };
+        restore_exact_pinned_electron_from_current_client(state, &window, pinned, true)?;
+    }
     let target = find_voice_target(state)?;
     if expected.is_some_and(|text| target.value != text) {
         return Err("DESKTOP_TASK_READBACK_CHANGED".into());
@@ -3185,6 +3695,16 @@ fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -
         return Ok(String::new());
     }
     let submit_identity = task_window_identity(&target.window);
+    if state.agent == MacosAgent::DeepSeekHarness {
+        assert_submission_target(&target)?;
+        let mode = press_unique_submission(&target, true)?
+            .ok_or_else(|| "DESKTOP_TASK_SEND_UNAVAILABLE".to_owned())?;
+        if expected.is_some() { return Ok(mode.into()); }
+        return match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT, &submit_identity, &target) {
+            Ok(SubmitReadback::Confirmed) => { state.draft.last.clear(); Ok(String::new()) },
+            _ => Err("COMPOSER_SUBMIT_UNCONFIRMED: DeepSeek Harness 提交结果未知，未自动重发".into()),
+        };
+    }
     if expected.is_some() {
         // Codex tasks share dictation's one-shot submit: native button first,
         // Enter only when no button was attempted. Never retry an uncertain
@@ -3205,10 +3725,17 @@ fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -
         // claim. Do not demand that a rerendered editor keep its pre-send ID.
         return Ok(mode.into());
     } else {
-        press_enter(target.agent, &target.app)?;
+        // Ordinary Claude/WorkBuddy confirmation also owns one submission.
+        // A missing button permits Enter; an attempted or uncertain button does not.
+        submit_once(
+            || press_unique_submission(&target, true),
+            || { assert_submission_target(&target)?; press_enter(target.agent, &target.app) },
+        ).map_err(|reason| if reason.starts_with("COMPOSER_SUBMIT_UNCONFIRMED:") { reason } else {
+            format!("{} macOS 未执行提交：{reason}",state.agent.label())
+        })?;
     }
 
-    match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY, &submit_identity) {
+    let final_readback_reason = match wait_for_submit_readback(state, &text, SUBMIT_FALLBACK_DELAY + SUBMIT_CONFIRM_TIMEOUT, &submit_identity, &target) {
         Ok(SubmitReadback::Confirmed) => {
             state.draft.last.clear();
             return Ok(String::new());
@@ -3216,38 +3743,7 @@ fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -
         Ok(SubmitReadback::ComposerChanged) => {
             state.draft.last.clear();
             return Err(format!(
-                "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
-                state.agent.label()
-            ));
-        }
-        Ok(SubmitReadback::DraftUnchanged) => {
-            // AX keyboard delivery is the most reliable path in current Codex
-            // builds. Only if the exact speech draft is still present after a
-            // bounded delay do we press the unique composer-adjacent button.
-            // The equality guard prevents a late fallback after the composer
-            // has cleared, been replaced, or received new user text.
-            // Explicit task delegation must attempt submission only once.
-            // Retain the legacy fallback solely for ordinary key confirmation.
-            if expected.is_none() {
-                if let Ok(target) = find_voice_target(state) {
-                    if target.value == text {
-                        let _ = press_unique_send_button(&target, true);
-                    }
-                }
-            }
-        }
-        Err(_) => {}
-    }
-
-    let final_readback_reason = match wait_for_submit_readback(state, &text, SUBMIT_CONFIRM_TIMEOUT, &submit_identity) {
-        Ok(SubmitReadback::Confirmed) => {
-            state.draft.last.clear();
-            return Ok(String::new());
-        }
-        Ok(SubmitReadback::ComposerChanged) => {
-            state.draft.last.clear();
-            return Err(format!(
-                "{} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
+                "COMPOSER_SUBMIT_UNCONFIRMED: {} macOS 提交后输入框内容发生变化，无法安全确认发送结果",
                 state.agent.label()
             ));
         }
@@ -3256,7 +3752,7 @@ fn confirm_voice_inner(state: &mut MacosComposerState, expected: Option<&str>) -
     };
 
     Err(format!(
-        "{} macOS 提交结果未确认；请检查目标对话，避免重复发送。原因：{}。诊断：{}",
+        "COMPOSER_SUBMIT_UNCONFIRMED: {} macOS 提交结果未确认；请检查目标对话，避免重复发送。原因：{}。诊断：{}",
         state.agent.label(), final_readback_reason, submit_failure_diagnostic(state, &text)
     ))
 }
@@ -3358,6 +3854,131 @@ pub(super) fn debug_dump_codex_tree() -> Result<Vec<String>, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deepseek_client_focus_return_requires_self_pid_and_explicit_entry() {
+        for agent in [MacosAgent::WorkBuddy, MacosAgent::DeepSeekHarness] {
+            assert!(client_foreground_return_allowed(agent.current_electron(),true,Some(17),17,true));
+        }
+        for agent in [MacosAgent::Codex, MacosAgent::Claude] {
+            assert!(!client_foreground_return_allowed(agent.current_electron(),true,Some(17),17,true));
+        }
+        for (ds,intent,front,own,active) in [
+            (false,true,Some(17),17,true), (true,false,Some(17),17,true),
+            (true,true,None,17,true), (true,true,Some(18),17,true),
+            (true,true,Some(17),17,false), (true,true,Some(0),0,true),
+            (true,true,Some(-1),u32::MAX,true), (true,true,None,u32::MAX,true),
+        ] { assert!(!client_foreground_return_allowed(ds,intent,front,own,active)); }
+    }
+
+    #[test]
+    fn deepseek_focus_return_checks_before_and_after_one_activation() {
+        use std::cell::RefCell;
+        let trace=RefCell::new(Vec::new());
+        return_to_pinned_once(true,
+            || {trace.borrow_mut().push("pin-and-raw-before");Ok("exact snapshot")},
+            || {trace.borrow_mut().push("activate-exact-pin");Ok(())},
+            |proof| {assert_eq!(proof,"exact snapshot");trace.borrow_mut().push("pin-raw-and-focus-after");Ok(())}
+        ).unwrap();
+        assert_eq!(*trace.borrow(),["pin-and-raw-before","activate-exact-pin","pin-raw-and-focus-after"]);
+    }
+
+    #[test]
+    fn deepseek_focus_denial_or_stale_pin_never_activates() {
+        let activate=||->Result<(),String>{panic!("denied/stale pin must not activate")};
+        assert!(return_to_pinned_once(false,||Ok(()),activate,|_|Ok(())).is_err());
+        assert!(return_to_pinned_once(true,||Err::<(),_>("DESKTOP_TASK_READBACK_CHANGED".into()),activate,|_|Ok(())).is_err());
+    }
+
+    #[test]
+    fn deepseek_focus_late_change_stops_after_single_activation_without_replay() {
+        use std::cell::Cell;
+        let attempts=Cell::new(0);
+        let result=return_to_pinned_once(true,||Ok(()),
+            ||{attempts.set(attempts.get()+1);Ok(())},
+            |_|Err("DESKTOP_TASK_TARGET_CHANGED".into()));
+        assert!(result.is_err());assert_eq!(attempts.get(),1);
+        let result=return_to_pinned_once(true,||Ok(()),
+            ||{attempts.set(attempts.get()+1);Err("activation result unknown".into())},
+            |_|panic!("failed activation cannot authorize submit"));
+        assert!(result.is_err());assert_eq!(attempts.get(),2);
+    }
+
+    #[test]
+    fn electron_confirm_identity_requires_ack_before_and_after_same_snapshot() {
+        let a=Some(vec!["window".to_owned(),"conversation-a".to_owned()]);
+        let b=Some(vec!["window".to_owned(),"conversation-b".to_owned()]);
+        assert_eq!(stable_confirmation_identity(a.clone(),a.clone()),a);
+        assert!(stable_confirmation_identity(a.clone(),b).is_none());
+        assert!(stable_confirmation_identity(None,a.clone()).is_none());
+        assert!(stable_confirmation_identity(a,None).is_none());
+        assert!(stable_confirmation_identity(None,None).is_none());
+    }
+
+    #[test]
+    fn deepseek_typed_ax_value_never_turns_unknown_into_an_empty_draft() {
+        assert!(require_current_electron_text_value(None).is_err());
+        for value in ["", "\n", "\n\n", "  ", "原文\n🙂"] {
+            assert_eq!(require_current_electron_text_value(Some(value.into())).unwrap(), value);
+        }
+        // The binding maps both read errors and non-CFString values to None;
+        // neither can authorize the zero-length caret/empty-draft path.
+        let mut writes = 0;
+        if let Ok(value) = require_current_electron_text_value(None) {
+            if current_electron_append_guard(&value, "", Some((0,0)), 0) { writes += 1; }
+        }
+        assert_eq!(writes, 0);
+    }
+
+    #[test]
+    fn deepseek_append_preserves_all_blank_and_existing_draft_bytes() {
+        for base in ["", "\n", "\n\n", "  ", "原文\n  ", "🙂\n"] {
+            let draft = crate::voice_draft::VoiceDraft::new(base.into());
+            let next = draft.desired("新增🙂");
+            let suffix = current_electron_append_suffix(base, &next).unwrap();
+            assert_eq!(format!("{base}{suffix}"), next);
+            assert!(next.starts_with(base));
+            assert!(!suffix.contains("原文"));
+        }
+        assert_eq!(current_electron_append_suffix("\n\n", "\n\n新增"), Some("新增"));
+        assert_eq!(current_electron_append_suffix("旧稿", "新稿"), None);
+        assert_eq!(current_electron_append_suffix("相同", "相同"), Some(""));
+    }
+
+    #[test]
+    fn deepseek_append_requires_exact_collapsed_utf16_caret_and_full_draft() {
+        let raw = "\u{feff}🙂\n\n";
+        let value = "🙂\n\n";
+        let end = raw.encode_utf16().count();
+        assert!(current_electron_append_guard(value, value, Some((end as isize, 0)), end));
+        for range in [None, Some((-1,0)), Some((0,0)), Some((end as isize,1)), Some((end as isize-1,0))] {
+            assert!(!current_electron_append_guard(value, value, range, end));
+        }
+        assert!(!current_electron_append_guard("手动改稿", value, Some((end as isize,0)), end));
+        assert!(!current_electron_append_guard(value, value, Some((end as isize,0)), usize::MAX));
+    }
+
+    #[test]
+    fn deepseek_append_progress_never_authorizes_missing_ack_or_revised_prefix() {
+        let base = "\n\n";
+        let draft = crate::voice_draft::VoiceDraft::new(base.into());
+        let next = draft.desired("一二三🙂四五六七八九");
+        let suffix = current_electron_append_suffix(base, &next).unwrap();
+        let mut actual = base.to_string();
+        let mut end = base.encode_utf16().count();
+        let mut writes = 0;
+        for part in suffix.chars().collect::<Vec<_>>().chunks(8) {
+            assert!(current_electron_append_guard(&actual, &actual, Some((end as isize,0)), end));
+            let prior = actual.clone();
+            let part = part.iter().collect::<String>();
+            writes += 1; actual.push_str(&part); end += part.encode_utf16().count();
+            assert!(!current_electron_append_guard(&prior, &actual, Some((end as isize,0)), end));
+            assert!(current_electron_append_guard(&actual, &actual, Some((end as isize,0)), end));
+        }
+        assert_eq!(actual,next);assert_eq!(writes,2);
+        assert!(current_electron_append_suffix(&actual,&draft.desired("改写前半句")).is_none());
+        assert!(!current_electron_append_guard("用户新稿",&actual,Some((end as isize,0)),end));
+    }
+
     #[test]
     fn native_submit_attempt_never_falls_back_after_button_success_or_error() {
         for mode in ["send", "queue", "steer"] {
@@ -3739,6 +4360,23 @@ mod tests {
         assert!(!is_agent_primary_window_title(MacosAgent::WorkBuddy, "CodeBuddy"));
         assert!(session_deeplink(MacosAgent::WorkBuddy, "id", "claude://code/id").is_err());
         assert_eq!(normalize_composer_value("\u{feff}\n今天帮你做些什么？ @ 引用对话文件，/ 调用技能与指令"), "");
+        // Current WorkBuddy release wording; the hint must never become a draft prefix.
+        assert_eq!(normalize_composer_value("今天帮你做些什么？ @ 添加上下文，/调用技能与指令"), "");
+        assert_eq!(normalize_composer_value("\u{feff}今天帮你做些什么？@ 添加上下文，/调用技能与指令 "), "");
+        assert!(is_workbuddy_hint("今天帮你做些什么？ @ 添加上下文，/调用技能与指令"));
+        // Any gray hint the editor itself exposes (placeholder, label, static-text child) is never a draft.
+        let hints = vec![normalize_text("  Send a message to  WorkBuddy… "), normalize_text("输入内容")];
+        assert!(composer_value_is_hint("Send a message to WorkBuddy…", &hints));
+        assert!(composer_value_is_hint("\u{feff}输入内容", &hints));
+        assert!(!composer_value_is_hint("输入内容 以及我的草稿", &hints));
+        assert!(!composer_value_is_hint("", &hints));
+        assert!(!is_workbuddy_hint("今天帮你做些什么？我想问个问题"));
+        // A draft polluted by an earlier hint paste is real text and must be kept for select/verify.
+        let polluted = "今天帮你做些什么？ @ 添加上下文，/调用技能与指令 哈喽，可以听到吗？";
+        assert!(!is_workbuddy_hint(polluted));
+        assert_eq!(normalize_composer_value(polluted), polluted);
+        assert!(workbuddy_selection_matches(Some(polluted), polluted));
+        assert_eq!(normalize_composer_value("今天帮你做些什么？我想问个问题"), "今天帮你做些什么？我想问个问题");
         assert_eq!(normalize_composer_value("\u{feff}"), "");
         assert_eq!(normalize_composer_value("已有草稿\n下一行"), "已有草稿\n下一行");
     }
@@ -3830,6 +4468,14 @@ mod tests {
             window_bounds: Some((0, 0, 900, 600)),
         };
         assert!(focused_text_target_matches(&captured, &captured));
+        for missing in [
+            FocusedTextTarget { identifier: String::new(), ..captured.clone() },
+            FocusedTextTarget { window_title: String::new(), ..captured.clone() },
+            FocusedTextTarget { element_bounds: None, ..captured.clone() },
+            FocusedTextTarget { window_bounds: None, ..captured.clone() },
+        ] {
+            assert!(!focused_text_target_matches(&captured, &missing));
+        }
         assert!(!focused_text_target_matches(
             &captured,
             &FocusedTextTarget {

@@ -21,7 +21,7 @@ test("local widget dates preserve local time and explicit clearing", () => {
 test("todo mutations use stable identity and revision rather than title matching", () => {
   assert.deepEqual(todoMutation("delete", { id: "abc", revision: 4, title: "重复" }), { operation: "delete", id: "abc", revision: 4 });
   assert.deepEqual(todoMutation("add", null, { title: "买牛奶" }), { operation: "add", title: "买牛奶" });
-  assert.deepEqual([...LOCAL_SOURCES], ["computer.status", "todos.upcoming"]);
+  assert.deepEqual([...LOCAL_SOURCES], ["computer.status", "todos.upcoming", "location.current"]);
 });
 test("both UI and realtime route through the same typed local tools", () => {
   const read = path => readFileSync(new URL(path, import.meta.url), "utf8");

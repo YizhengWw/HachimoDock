@@ -99,12 +99,38 @@ struct ApiCache {
     requests: VecDeque<Instant>,
     values: HashMap<String, (Instant, Value)>,
 }
+const LOCAL_TEXT_BYTES:usize=256*1024;
+struct LocalLyricsCache {
+    path:PathBuf,bytes:u64,modified:Option<std::time::SystemTime>,lines:Arc<Vec<lyrics::Line>>,
+}
+// Read from the opened descriptor with a hard limit, not a pre-open stat size.
+// Unix flags also reject replacement symlinks/FIFOs without waiting on a writer.
+fn read_local_bounded(path:&std::path::Path,limit:usize)->Result<Vec<u8>,String>{
+    let before=std::fs::symlink_metadata(path).map_err(|_|"本地资源不可读")?;
+    if !before.file_type().is_file()||before.len()>limit as u64{return Err("本地资源类型或大小无效".into());}
+    let mut options=std::fs::OpenOptions::new();options.read(true);
+    #[cfg(unix)]{
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW|libc::O_NONBLOCK);
+    }
+    let file=options.open(path).map_err(|_|"本地资源不可读")?;
+    let metadata=file.metadata().map_err(|_|"本地资源不可读")?;
+    if !metadata.is_file()||metadata.len()>limit as u64{return Err("本地资源类型或大小无效".into());}
+    let mut bytes=Vec::with_capacity((metadata.len() as usize).min(limit));
+    file.take(limit as u64+1).read_to_end(&mut bytes).map_err(|_|"本地资源读取失败")?;
+    if bytes.len()>limit{return Err("本地资源超过大小限制".into());}Ok(bytes)
+}
 struct Service {
+    source_id: String,
+    local_only: bool,
+    view_identity: Option<Arc<Mutex<String>>>,
+    job_view_identity: Mutex<String>,
     usb: UsbSerialManager,
     data: Mutex<Snapshot>,
     tracks: Mutex<HashMap<String, Track>>,
     local: Mutex<HashMap<String, PathBuf>>,
     api: Mutex<ApiCache>,
+    local_lyrics:Mutex<Option<LocalLyricsCache>>,
     operations: Mutex<()>,
     transport: Mutex<()>,
     generation: AtomicU64,
@@ -192,9 +218,10 @@ async fn get_stream(raw: &str) -> Result<reqwest::Response, String> {
     Err("音源跳转次数过多".into())
 }
 impl Service {
-    fn request(&self, board: &str, topic: &str, payload: Value) -> Result<Value, String> {
+    fn request(&self, board: &str, topic: &str, mut payload: Value) -> Result<Value, String> {
         let _transport = self.transport.lock().unwrap();
         let started = Instant::now();
+        if self.local_only{payload["source"]=self.source_id.clone().into();payload["hostInstance"]=self.job_view_identity.lock().unwrap().clone().into();}
         let result = self.usb.media_request(board, topic, payload);
         #[cfg(test)]
         if topic == "media/chunk" {
@@ -215,7 +242,7 @@ impl Service {
         }
         result
     }
-    fn begin(&self, board: &str, g: u64, payload: Value) -> Result<Value, String> {
+    fn begin(&self, board: &str, g: u64, mut payload: Value) -> Result<Value, String> {
         let _transport = self.transport.lock().unwrap();
         {
             let mut state = self.data.lock().unwrap();
@@ -225,7 +252,9 @@ impl Service {
             // Register before sending, so a concurrent device Stop can flush
             // exactly this in-flight begin without affecting a newer song.
             state.session_id = payload["sessionId"].as_str().unwrap_or("").into();
+            if self.local_only{payload["hostInstance"]=self.job_view_identity.lock().unwrap().clone().into();}
         }
+        if !self.source_id.is_empty() { payload["source"] = self.source_id.clone().into(); }
         self.usb.media_request(board, "media/begin", payload)
     }
     fn snapshot(&self) -> Snapshot {
@@ -352,15 +381,28 @@ impl Service {
         )
     }
     fn save(&self) -> Result<(), String> {
-        let s = self.snapshot();
+        let snapshot=self.snapshot();let local=self.local.lock().unwrap().clone();self.save_library(&snapshot,&local)
+    }
+    fn check_local_view(&self,expected:Option<&str>)->Result<(),String>{
+        if self.local_only&&expected.is_some_and(|expected|self.view_identity.as_ref().is_none_or(|v|v.lock().map_or(true,|current|*current!=expected))){return Err("媒体视图已变化，操作未执行或未发布".into());}Ok(())
+    }
+    fn save_library(&self,s:&Snapshot,local:&HashMap<String,PathBuf>)->Result<(),String>{
+        self.save_library_checked(s,local,None)
+    }
+    fn save_library_checked(&self,s:&Snapshot,local:&HashMap<String,PathBuf>,expected:Option<&str>)->Result<(),String>{
+        self.save_library_at_boundary(s,local,expected,||{})
+    }
+    fn save_library_at_boundary(&self,s:&Snapshot,local:&HashMap<String,PathBuf>,expected:Option<&str>,before_commit:impl FnOnce())->Result<(),String>{
+        self.check_local_view(expected)?;
+        let permit=if self.local_only{Some(crate::component_runtime_lifecycle::storage_commit_permit()?)}else{None};
         std::fs::create_dir_all(&self.dir).map_err(|_| "无法保存播放列表")?;
-        let mut file =
-            tempfile::NamedTempFile::new_in(&self.dir).map_err(|_| "无法保存播放列表")?;
-        serde_json::to_writer(&mut file,&json!({"schema":1,"queue":s.queue,"volume":s.volume,"mode":s.mode,"local":*self.local.lock().unwrap()})).map_err(|_|"播放列表编码失败")?;
+        let mut file=tempfile::NamedTempFile::new_in(&self.dir).map_err(|_| "无法保存播放列表")?;
+        serde_json::to_writer(&mut file,&json!({"schema":1,"queue":s.queue,"volume":s.volume,"mode":s.mode,"local":local})).map_err(|_|"播放列表编码失败")?;
         file.as_file().sync_all().map_err(|_| "无法写入播放列表")?;
-        file.persist(self.dir.join("music-library.json"))
-            .map_err(|_| "无法保存播放列表")?;
-        Ok(())
+        before_commit();
+        if let Some(permit)=&permit{permit.ensure_current()?;}
+        self.check_local_view(expected)?; // after slow IO, immediately before durable publication
+        file.persist(self.dir.join("music-library.json")).map_err(|_| "无法保存播放列表")?;Ok(())
     }
     fn stop_generation(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
@@ -377,13 +419,19 @@ impl Service {
         std::mem::take(&mut state.session_id)
     }
     fn start(self: &Arc<Self>, track: Track, offset: u64) -> Result<Value, String> {
-        self.start_if_current(track, offset, None)
+        self.start_if_current(track, offset, None, None)
     }
-    fn start_if_current(self: &Arc<Self>, track: Track, offset: u64, expected: Option<u64>) -> Result<Value, String> {
+    fn start_if_current(self: &Arc<Self>, track: Track, offset: u64, expected: Option<u64>, view_hint:Option<&str>) -> Result<Value, String> {
+        let desired_view=if let Some(identity)=&self.view_identity{
+            let current=identity.lock().map_err(|_|"媒体视图不可用")?.clone();
+            if current.is_empty()||view_hint.is_some_and(|expected|expected!=current){return Err("媒体视图已经退出或更换，未开始播放".into());}current
+        }else{String::new()};
+        if self.local_only && track.source != "local" { return Err("此服务仅接受由 PC 明确导入的本地音频".into()); }
         let board = self.usb.status();
         if !board.connected {
             return Err("请连接哈基米设备后播放".into());
         }
+        if self.local_only&&board.capabilities["widgetServiceBridge"]!="p4-service-bridge-v1"{return Err("需要带视图身份的服务桥音频能力".into());}
         if board.capabilities["widgetMedia"] != "p4-media-v1" {
             return Err("请先升级支持随身听的设备固件".into());
         }
@@ -394,12 +442,14 @@ impl Service {
             }
         }
         let voice = crate::realtime_chat::status().active;
+        if self.local_only && voice { return Err("语音正在使用，请结束后再播放".into()); }
         let generation = {
             let mut s = self.data.lock().unwrap();
             if expected.is_some_and(|g| !self.alive(g)) {
                 return Err("播放已取消".into());
             }
             self.stop_generation();
+            *self.job_view_identity.lock().unwrap()=desired_view;
             let generation = self.generation.load(Ordering::SeqCst);
             s.session_id.clear();
             if !s.queue.iter().any(|t| t.key == track.key) {
@@ -466,7 +516,9 @@ impl Service {
         )
     }
     fn alive(&self, g: u64) -> bool {
-        self.generation.load(Ordering::SeqCst) == g
+        self.generation.load(Ordering::SeqCst) == g && self.view_identity.as_ref().is_none_or(|view|{
+            let current=view.lock().unwrap();!current.is_empty()&&*current==*self.job_view_identity.lock().unwrap()
+        })
     }
     fn update_ack(&self, ack: &Value, offset: u64, g: u64) -> Result<(), String> {
         if ack["ok"] == false {
@@ -506,6 +558,10 @@ impl Service {
         Ok(())
     }
     fn prepare_cover(&self, track: &Track) -> Result<(String, Vec<u8>), String> {
+        let bytes = if track.source=="local" {
+            let path=self.local.lock().unwrap().get(&track.key).cloned().ok_or("本地音频不可用")?;
+            [path.with_extension("png"),path.with_extension("jpg")].into_iter().find_map(|p|read_local_bounded(&p,2*1024*1024).ok()).ok_or("封面不可用")?
+        } else {
         if !safe_id(&track.pic_id) || !source(&track.source) {
             return Err("封面不可用".into());
         }
@@ -519,7 +575,7 @@ impl Service {
             true,
         )?;
         let url = result["url"].as_str().ok_or("封面不可用")?;
-        let bytes = rt(async {
+        rt(async {
             let mut response = get_stream(url).await?;
             let mut bytes = vec![];
             while let Some(chunk) = tokio::time::timeout(Duration::from_secs(10), response.chunk())
@@ -533,7 +589,11 @@ impl Service {
                 bytes.extend_from_slice(&chunk);
             }
             Ok(bytes)
-        })?;
+        })?
+        };
+        if track.source=="local"&&!matches!(image::guess_format(&bytes),Ok(image::ImageFormat::Png|image::ImageFormat::Jpeg)){
+            return Err("本地封面仅接受真实PNG/JPEG".into());
+        }
         let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|_| "封面格式无效")?;
@@ -542,7 +602,9 @@ impl Service {
         limits.max_image_height = Some(4096);
         limits.max_alloc = Some(64 * 1024 * 1024);
         reader.limits(limits);
-        let image = reader.decode().map_err(|_| "封面解码失败")?.resize_to_fill(
+        let image = reader.decode().map_err(|_| "封面解码失败")?;
+        if track.source=="local"&&!crate::service_bridge::assets::opaque_image(&image){return Err("本地封面需要不透明背景".into());}
+        let image=image.resize_to_fill(
             192,
             192,
             image::imageops::FilterType::Triangle,
@@ -563,7 +625,22 @@ impl Service {
             rgb565,
         ))
     }
+    fn local_lyrics(&self,track:&Track)->Result<Arc<Vec<lyrics::Line>>,String>{
+        let path=self.local.lock().unwrap().get(&track.key).cloned().ok_or("本地音频不可用")?.with_extension("lrc");
+        let metadata=match std::fs::symlink_metadata(&path){Ok(v)=>v,Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Ok(Arc::new(vec![])),Err(_)=>return Err("本地歌词不可读".into())};
+        if !metadata.file_type().is_file()||metadata.len()>LOCAL_TEXT_BYTES as u64{return Err("本地歌词类型或大小无效".into());}
+        let modified=metadata.modified().ok();
+        {let cached=self.local_lyrics.lock().unwrap();if let Some(cached)=&*cached{
+            if modified.is_some()&&cached.path==path&&cached.bytes==metadata.len()&&cached.modified==modified{return Ok(cached.lines.clone());}
+        }}
+        let bytes=read_local_bounded(&path,LOCAL_TEXT_BYTES)?;
+        let text=String::from_utf8(bytes).map_err(|_|"本地歌词必须是有效UTF-8")?;
+        let lines=Arc::new(lyrics::parse(&text));
+        *self.local_lyrics.lock().unwrap()=Some(LocalLyricsCache{path,bytes:metadata.len(),modified,lines:lines.clone()});
+        Ok(lines)
+    }
     fn prepare_lyrics(&self, track: &Track) -> Result<Vec<lyrics::Line>, String> {
+        if track.source=="local" {return Ok((*self.local_lyrics(track)?).clone());}
         if !safe_id(&track.lyric_id) || !source(&track.source) { return Ok(vec![]); }
         let result = self.api(&[("types", "lyric".into()), ("source", track.source.clone()),
             ("id", track.lyric_id.clone())], true)?;
@@ -617,7 +694,7 @@ impl Service {
         std::thread::spawn(move || {
             let _ = cover_tx.send(art.prepare_cover(&art_track).ok());
         });
-        let has_lyrics = self.usb.status().capabilities["widgetLyrics"] == "p4-lrc-v1";
+        let has_lyrics = !self.local_only && self.usb.status().capabilities["widgetLyrics"] == "p4-lrc-v1";
         let (lyrics_tx, lyrics_rx) = std::sync::mpsc::sync_channel(1);
         if has_lyrics {
             let player = self.clone();let song = track.clone();
@@ -801,7 +878,7 @@ impl Service {
                         return Ok(());
                     }
                     state.cover = preview;
-                    art = Some(pixels);
+                    art = if self.local_only { None } else { Some(pixels) };
                 }
                 if buffered > 650 {
                     let mut sent_metadata = false;
@@ -928,7 +1005,7 @@ impl Service {
             if let Some(next) = next {
                 let _guard = self.operations.lock().unwrap();
                 if self.alive(g) {
-                    let _ = self.start_if_current(next, 0, Some(g));
+                    let _ = self.start_if_current(next, 0, Some(g), None);
                 }
             }
         }
@@ -962,11 +1039,13 @@ impl Service {
 pub fn configure(dir: PathBuf, usb: UsbSerialManager) {
     if !AVAILABLE { return; }
     let s = Arc::new(Service {
+        source_id: String::new(), local_only: false,view_identity:None,job_view_identity:Mutex::new(String::new()),
         usb,
         data: Mutex::new(Snapshot::default()),
         tracks: Mutex::new(HashMap::new()),
         local: Mutex::new(HashMap::new()),
         api: Mutex::new(ApiCache::default()),
+        local_lyrics:Mutex::new(None),
         operations: Mutex::new(()),
         transport: Mutex::new(()),
         generation: AtomicU64::new(0),
@@ -1028,6 +1107,7 @@ pub fn observe_capture(topic: &str, payload: &Value) {
     if !(topic == "audio/begin" || (topic == "audio/status" && payload["active"] == true)) {
         return;
     }
+    crate::service_bridge::native::interrupt_media();
     let Some(s) = SERVICE.get() else { return };
     let mut state = s.data.lock().unwrap();
     if matches!(
@@ -1046,7 +1126,8 @@ pub fn execute(input: Value) -> Result<Value, String> {
     if !AVAILABLE { return Err(UNAVAILABLE.into()); }
     execute_with(service()?, input)
 }
-fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {
+fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {execute_with_view(s,input,None)}
+fn execute_with_view(s: &Arc<Service>, input: Value, view_hint:Option<&str>) -> Result<Value, String> {
     let op = request::validate(&input)?;
     if op == "search" {
         if input["source"].as_str().is_none_or(|source| source == "auto") {
@@ -1074,7 +1155,7 @@ fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {
                 .cloned()
                 .ok_or("歌曲不在本次搜索或曲库中，请重新搜索")?;
             if op == "play" {
-                return s.start(track, 0);
+                return s.start_if_current(track,0,None,view_hint);
             }
             let mut state = s.data.lock().unwrap();
             if !state.queue.iter().any(|t| t.key == key) {
@@ -1090,7 +1171,7 @@ fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {
             let next = s
                 .next_track(if op == "next" { 1 } else { -1 }, false)
                 .ok_or("播放列表为空")?;
-            return s.start(next, 0);
+            return s.start_if_current(next,0,None,view_hint);
         }
         "seek" => {
             let at = input["positionMs"]
@@ -1098,7 +1179,7 @@ fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {
                 .filter(|n| *n <= 3_600_000)
                 .ok_or("进度需为 0–3600000 毫秒")?;
             let track = s.snapshot().current.ok_or("尚未选择歌曲")?;
-            return s.start(track, at);
+            return s.start_if_current(track,at,None,view_hint);
         }
         "resume" | "toggle" | "pause" => {
             let snap = s.snapshot();
@@ -1112,13 +1193,13 @@ fn execute_with(s: &Arc<Service>, input: Value) -> Result<Value, String> {
                     .current
                     .or_else(|| snap.queue.first().cloned())
                     .ok_or("请先添加歌曲")?;
-                return s.start(
+                return s.start_if_current(
                     track,
                     if snap.state == "ended" {
                         0
                     } else {
                         snap.position_ms
-                    },
+                    },None,view_hint,
                 );
             }
             if snap.state == "queued" || snap.state == "loading" {
@@ -1285,14 +1366,10 @@ pub async fn music_player_request(input: Value) -> Result<Value, String> {
         .await
         .map_err(|_| "播放器任务已中断")?
 }
-#[tauri::command]
-pub async fn music_player_import(paths: Vec<String>) -> Result<Value, String> {
-    if !AVAILABLE { return Err(UNAVAILABLE.into()); }
-    tauri::async_runtime::spawn_blocking(move || {
+fn import_into(s: &Arc<Service>, paths: Vec<String>) -> Result<Value,String> {
         if paths.len() > MAX_TRACKS {
             return Err("一次最多添加 20 首".into());
         }
-        let s = service()?;
         let _guard = s.operations.lock().unwrap();
         let mut selected = vec![];
         for path in paths {
@@ -1315,8 +1392,8 @@ pub async fn music_player_import(paths: Vec<String>) -> Result<Value, String> {
         if s.snapshot().queue.len() + selected.len() > MAX_TRACKS {
             return Err("播放列表最多 20 首，请先移除一些歌曲".into());
         }
+        let mut candidate=s.snapshot();let mut local=s.local.lock().unwrap().clone();let mut tracks=s.tracks.lock().unwrap().clone();
         for path in selected {
-            let mut state = s.data.lock().unwrap();
             let id = uuid::Uuid::new_v4().to_string();
             let key = format!("local:{id}");
             let track = Track {
@@ -1335,19 +1412,230 @@ pub async fn music_player_import(paths: Vec<String>) -> Result<Value, String> {
                 lyric_id: String::new(),
                 duration_ms: 0,
             };
-            s.local.lock().unwrap().insert(key.clone(), path);
-            s.tracks.lock().unwrap().insert(key, track.clone());
-            state.queue.push(track);
+            local.insert(key.clone(), path);
+            tracks.insert(key, track.clone());
+            candidate.queue.push(track);
         }
-        s.save()?;
-        snapshot()
-    })
-    .await
-    .map_err(|_| "导入任务已中断")?
+        s.save_library(&candidate,&local)?;
+        s.data.lock().unwrap().queue=candidate.queue;*s.local.lock().unwrap()=local;*s.tracks.lock().unwrap()=tracks;
+        Ok(json!(s.snapshot()))
+}
+#[tauri::command]
+pub async fn music_player_import(paths: Vec<String>) -> Result<Value, String> {
+    if !AVAILABLE { return Err(UNAVAILABLE.into()); }
+    let s=service()?.clone();
+    tauri::async_runtime::spawn_blocking(move || import_into(&s,paths)).await.map_err(|_| "导入任务已中断")?
+}
+
+/// Native adapter for an explicitly declared host service. The legacy global
+/// player remains unavailable; no package can choose a path, provider or URL.
+#[derive(Clone)]
+pub(crate) struct LocalPlayer(Arc<Service>);
+impl LocalPlayer {
+    pub(crate) fn open(id:&str,dir:PathBuf,usb:UsbSerialManager,view_identity:Arc<Mutex<String>>)->Result<Self,String>{
+        if !crate::component_extension::valid_id(id)||id.len()>43{return Err("媒体组件身份无效".into());}
+        let s=Arc::new(Service{source_id:format!("app.{id}"),local_only:true,view_identity:Some(view_identity),job_view_identity:Mutex::new(String::new()),usb,data:Mutex::new(Snapshot::default()),tracks:Mutex::new(HashMap::new()),local:Mutex::new(HashMap::new()),api:Mutex::new(ApiCache::default()),local_lyrics:Mutex::new(None),operations:Mutex::new(()),transport:Mutex::new(()),generation:AtomicU64::new(0),voice_handoff:AtomicBool::new(false),dir});
+        let path=s.dir.join("music-library.json");
+        let exists=match std::fs::symlink_metadata(&path){
+            Ok(metadata)=>{if !metadata.file_type().is_file()||metadata.len()>LOCAL_TEXT_BYTES as u64{return Err("曲库无效，原数据保留".into());}true},
+            Err(error) if error.kind()==std::io::ErrorKind::NotFound=>false,
+            Err(_)=>return Err("曲库不可读，原数据保留".into())
+        };
+        if exists{
+            let v:Value=serde_json::from_slice(&read_local_bounded(&path,LOCAL_TEXT_BYTES)?).map_err(|_|"曲库损坏，原数据保留")?;
+            let queue:Vec<Track>=serde_json::from_value(v["queue"].clone()).map_err(|_|"曲库无效，原数据保留")?;
+            let local:HashMap<String,PathBuf>=serde_json::from_value(v["local"].clone()).map_err(|_|"曲库无效，原数据保留")?;
+            let keys:std::collections::HashSet<_>=queue.iter().map(|t|t.key.clone()).collect();
+            if v["schema"]!=1||queue.len()>MAX_TRACKS||keys.len()!=queue.len()||local.len()!=queue.len()
+                ||queue.iter().any(|t|t.source!="local"||!safe_id(&t.id)||t.key!=format!("local:{}",t.id)||!local.contains_key(&t.key))
+                ||local.values().any(|p|!p.is_absolute()||p.as_os_str().len()>4096){return Err("曲库无效，原数据保留".into());}
+            {let mut state=s.data.lock().unwrap();state.queue=queue.clone();state.volume=v["volume"].as_u64().filter(|n|*n<=100).ok_or("曲库音量无效")? as u8;state.mode=v["mode"].as_str().filter(|m|matches!(*m,"sequence"|"single"|"loop"|"shuffle")).ok_or("曲库模式无效")?.into();}
+            *s.local.lock().unwrap()=local;for t in queue{s.tracks.lock().unwrap().insert(t.key.clone(),t);}
+        }
+        Ok(Self(s))
+    }
+    pub(crate) fn snapshot(&self)->Value {
+        let s=self.0.snapshot();
+        let mut value=json!(s);
+        value["running"]=(s.state=="playing").into();
+        value["durationMs"]=s.current.as_ref().map(|t|t.duration_ms).unwrap_or(0).into();
+        let lines=s.current.as_ref().and_then(|t|self.0.local_lyrics(t).ok()).unwrap_or_else(||Arc::new(vec![]));
+        let at=lines.partition_point(|l|u64::from(l.at_ms)<=s.position_ms).checked_sub(1);
+        value["lyric"]=at.and_then(|at|lines.get(at)).map(|l|crate::widget_data::bounded_text(&l.text,63)).unwrap_or_default().into();
+        value["lyrics"]=json!(lines.as_ref());
+        value
+    }
+    pub(crate) fn view_stamp(&self)->String{self.0.view_identity.as_ref().and_then(|v|v.lock().ok().map(|s|s.clone())).unwrap_or_default()}
+    pub(crate) fn command_observed(&self,method:&str,args:&Value,expected_view:&str)->Result<Value,String>{
+        self.command_observed_at_boundary(method,args,expected_view,||{})
+    }
+    // The no-op production closure is inlined. Host regression can synchronize
+    // exactly after the initial view check, before waiting for operations.
+    fn command_observed_at_boundary(&self,method:&str,args:&Value,expected_view:&str,before_operation:impl FnOnce())->Result<Value,String>{
+        self.command_observed_at_commit_boundary(method,args,expected_view,before_operation,||{})
+    }
+    // Failure injection immediately after successful rename, before the RAM commit.
+    // Both production hooks are no-ops; neither holds a view/reader lock over IO.
+    fn command_observed_at_commit_boundary(&self,method:&str,args:&Value,expected_view:&str,
+        before_operation:impl FnOnce(),after_commit:impl FnOnce())->Result<Value,String>{
+        if self.view_stamp()!=expected_view{return Err("媒体视图已变化，操作未执行".into());}
+        before_operation();
+        if !matches!(method,"play"|"pause"|"resume"|"toggle"|"stop"|"next"|"previous"|"seek"|"seek_percent"|"volume"|"mode"|"remove"){return Err("本地媒体操作未开放".into());}
+        if matches!(method,"mode"|"remove"|"volume"){
+            let _guard=self.0.operations.lock().unwrap();
+            self.0.check_local_view(Some(expected_view))?; // operation wait may outlive its view
+            let mut candidate=self.0.snapshot();let mut local=self.0.local.lock().unwrap().clone();
+            let mut tracks=self.0.tracks.lock().unwrap().clone();
+            match method{
+                "volume"=>candidate.volume=args["volume"].as_u64().filter(|n|*n<=100).ok_or("音量应为 0–100")? as u8,
+                "mode"=>candidate.mode=args["mode"].as_str().filter(|s|matches!(*s,"sequence"|"single"|"loop"|"shuffle")).ok_or("播放模式无效")?.into(),
+                _=>{
+                    let key=args["key"].as_str().ok_or("缺少歌曲 key")?;
+                    if !candidate.queue.iter().any(|t|t.key==key){return Err("歌曲不在列表中".into());}
+                    if candidate.current.as_ref().is_some_and(|t|t.key==key){
+                        if !matches!(candidate.state.as_str(),"idle"|"ended"|"interrupted"|"error"){return Err("请先停止或切换当前歌曲后再移除".into());}
+                        candidate.current=None;candidate.cover.clear();candidate.position_ms=0;candidate.state="idle".into();
+                    }
+                    candidate.queue.retain(|t|t.key!=key);local.remove(key);tracks.remove(key);
+                }
+            }
+            if method=="volume"&&!candidate.session_id.is_empty(){
+                self.0.check_local_view(Some(expected_view))?;
+                let board=self.0.usb.status();
+                if !board.connected{return Err("设备已断开，音量未发送".into());}
+                let ack=self.0.request(&board.board_device_id,"media/control",json!({"operation":"volume","volume":candidate.volume}))?;
+                if ack["ok"]==false{return Err(ack["message"].as_str().unwrap_or("设备拒绝音量操作").into());}
+                self.0.check_local_view(Some(expected_view))?;
+            }
+            self.0.save_library_checked(&candidate,&local,Some(expected_view))?;
+            after_commit();
+            // Rename has committed the library. Complete the data-owner RAM
+            // transaction even if the observing view was revoked meanwhile.
+            // Otherwise a later fresh command could overwrite the committed
+            // file from stale queue/path/track indexes. These short locks span
+            // no IO; operations already serializes all library writers.
+            {
+                let mut state=self.0.data.lock().unwrap();
+                let mut paths=self.0.local.lock().unwrap();
+                let mut registered=self.0.tracks.lock().unwrap();
+                state.queue=candidate.queue;state.mode=candidate.mode;state.volume=candidate.volume;
+                if method=="remove"{state.current=candidate.current;state.cover=candidate.cover;state.position_ms=candidate.position_ms;state.state=candidate.state;}
+                *paths=local;*registered=tracks;
+            }
+            // Internal consistency is not permission to publish to a retired
+            // view. The adapter also checks revocation after this call returns.
+            self.0.check_local_view(Some(expected_view)).map_err(|_|"曲库已提交但视图已退出；请只读刷新状态，不重发操作".to_string())?;
+            return Ok(self.snapshot());
+        }
+        let mut input=args.clone();
+        if method=="seek_percent"{
+            let percent=args["percent"].as_u64().filter(|n|*n<=100).ok_or("进度应为 0–100")?;
+            let duration=self.0.snapshot().current.map(|t|t.duration_ms).filter(|n|*n>0).ok_or("尚未获得真实音频时长")?;
+            input=json!({"positionMs":duration*percent/100,"operation":"seek"});
+        }else{input["operation"]=method.into();}
+        execute_with_view(&self.0,input,Some(expected_view))
+    }
+    /// Called only by the desktop's explicit file-selection route, never by a
+    /// component command, declarative workflow, status poll or device event.
+    pub(crate) fn import(&self,paths:Vec<String>)->Result<Value,String>{import_into(&self.0,paths)}
+    pub(crate) fn interrupt(&self){
+        self.0.stop_generation();if let Ok(mut state)=self.0.data.try_lock(){state.state="interrupted".into();state.message="播放已中断，可手动恢复".into();}
+    }
+    pub(crate) fn stop(&self){let _=execute_with(&self.0,json!({"operation":"stop"}));}
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn local_sidecars_are_descriptor_bounded_and_lyrics_cache_is_not_a_future_line(){
+        let root=tempfile::tempdir().unwrap();let audio=root.path().join("local.wav");std::fs::write(&audio,b"local-only-no-decoder").unwrap();
+        let lrc=audio.with_extension("lrc");std::fs::write(&lrc,b"[00:05.00]first line").unwrap();
+        let player=LocalPlayer::open("local-lyrics-test",root.path().join("private"),UsbSerialManager::new(),Arc::new(Mutex::new(String::new()))).unwrap();
+        player.import(vec![audio.to_string_lossy().into()]).unwrap();
+        let track=player.0.snapshot().queue[0].clone();player.0.data.lock().unwrap().current=Some(track.clone());
+        let first=player.0.local_lyrics(&track).unwrap();let second=player.0.local_lyrics(&track).unwrap();assert!(Arc::ptr_eq(&first,&second));
+        assert_eq!(player.snapshot()["lyric"],"");
+        player.0.data.lock().unwrap().position_ms=5000;assert_eq!(player.snapshot()["lyric"],"first line");
+        std::fs::write(&lrc,vec![b'x';LOCAL_TEXT_BYTES+1]).unwrap();assert!(read_local_bounded(&lrc,LOCAL_TEXT_BYTES).is_err());assert!(player.0.local_lyrics(&track).is_err());
+        std::fs::remove_file(&lrc).unwrap();assert_eq!(player.snapshot()["lyric"],"");
+    }
+    #[test]
+    fn local_prepared_library_is_not_committed_after_view_retirement(){
+        let root=tempfile::tempdir().unwrap();let audio=root.path().join("local.wav");std::fs::write(&audio,b"no-decoder").unwrap();
+        let view=Arc::new(Mutex::new("original-view".into()));
+        let player=LocalPlayer::open("local-view-commit-test",root.path().join("private"),UsbSerialManager::new(),view.clone()).unwrap();
+        player.import(vec![audio.to_string_lossy().into()]).unwrap();let path=player.0.dir.join("music-library.json");let original=std::fs::read(&path).unwrap();
+        let mut candidate=player.0.snapshot();candidate.mode="shuffle".into();
+        let local=player.0.local.lock().unwrap().clone();
+        let result=player.0.save_library_at_boundary(&candidate,&local,Some("original-view"),||{*view.lock().unwrap()="replacement-view".into();});
+        assert!(result.is_err());assert_eq!(std::fs::read(path).unwrap(),original);assert_eq!(player.0.snapshot().mode,"sequence");
+    }
+    #[test]
+    fn local_committed_library_updates_all_indexes_even_when_observing_view_retires(){
+        for method in ["remove","volume","mode"]{
+            let root=tempfile::tempdir().unwrap();let audio=root.path().join("local.wav");
+            std::fs::write(&audio,b"original audio; no decoder").unwrap();
+            let view=Arc::new(Mutex::new("old-view".into()));
+            let player=LocalPlayer::open("local-post-commit-test",root.path().join("private"),UsbSerialManager::new(),view.clone()).unwrap();
+            player.import(vec![audio.to_string_lossy().into()]).unwrap();
+            let key=player.0.snapshot().queue[0].key.clone();
+            let args=match method{"remove"=>json!({"key":key}),"volume"=>json!({"volume":12}),_=>json!({"mode":"shuffle"})};
+            let result=player.command_observed_at_commit_boundary(method,&args,"old-view",||{},||{
+                *view.lock().unwrap()="new-view".into();
+            });
+            assert!(result.unwrap_err().contains("曲库已提交")); // never a success reply for the old view
+            let path=player.0.dir.join("music-library.json");
+            let disk:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(json!(player.0.snapshot().queue),disk["queue"]);
+            assert_eq!(json!(*player.0.local.lock().unwrap()),disk["local"]);
+            let track_keys:std::collections::HashSet<_>=player.0.tracks.lock().unwrap().keys().cloned().collect();
+            let queue_keys:std::collections::HashSet<_>=player.0.snapshot().queue.iter().map(|t|t.key.clone()).collect();
+            assert_eq!(track_keys,queue_keys);
+            assert_eq!(player.snapshot()["volume"],disk["volume"]);assert_eq!(player.snapshot()["mode"],disk["mode"]);
+            // The production registry reuses this instance. A fresh mutation
+            // must preserve the already-committed edit rather than revive it.
+            player.command_observed("volume",&json!({"volume":23}),"new-view").unwrap();
+            let next:Value=serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(next["queue"],disk["queue"]);assert_eq!(next["local"],disk["local"]);assert_eq!(next["mode"],disk["mode"]);
+            assert_eq!(std::fs::read(&audio).unwrap(),b"original audio; no decoder");
+        }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn local_sidecars_refuse_symlinks_and_special_files(){
+        use std::os::unix::fs::symlink;
+        let root=tempfile::tempdir().unwrap();let regular=root.path().join("regular");std::fs::write(&regular,b"content").unwrap();
+        let link=root.path().join("link");symlink(&regular,&link).unwrap();assert!(read_local_bounded(&link,32).is_err());
+        assert!(read_local_bounded(root.path(),32).is_err());
+    }
+    #[test]
+    fn local_metadata_mutations_recheck_view_after_waiting_for_the_actual_operation_mutex(){
+        use std::sync::mpsc;use std::time::Duration;
+        for method in ["volume","mode","remove"]{
+            let root=tempfile::tempdir().unwrap();let audio=root.path().join("local.wav");std::fs::write(&audio,b"local-only-no-decoder").unwrap();
+            let view=Arc::new(Mutex::new("old-view".into()));
+            let player=LocalPlayer::open("local-view-wait-test",root.path().join("private"),UsbSerialManager::new(),view.clone()).unwrap();
+            player.import(vec![audio.to_string_lossy().into()]).unwrap();
+            let path=player.0.dir.join("music-library.json");let bytes=std::fs::read(&path).unwrap();let before=player.0.snapshot();
+            let args=match method{"volume"=>json!({"volume":12}),"mode"=>json!({"mode":"shuffle"}),_=>json!({"key":before.queue[0].key})};
+            let operations=player.0.operations.lock().unwrap();let copy=player.clone();let (tx,rx)=mpsc::channel();
+            let thread=std::thread::spawn(move||copy.command_observed_at_boundary(method,&args,"old-view",||tx.send(()).unwrap()));
+            let reached=rx.recv_timeout(Duration::from_secs(2));*view.lock().unwrap()="new-view".into();drop(operations);
+            let result=thread.join().unwrap();reached.unwrap();assert!(result.is_err());
+            assert_eq!(std::fs::read(&path).unwrap(),bytes);let after=player.0.snapshot();assert_eq!(after.volume,before.volume);assert_eq!(after.mode,before.mode);assert_eq!(after.queue.len(),before.queue.len());
+        }
+    }
+    #[test]
+    fn local_failed_metadata_persist_preserves_live_state_and_original_audio(){
+        let root=tempfile::tempdir().unwrap();let audio=root.path().join("local.wav");std::fs::write(&audio,b"original audio").unwrap();
+        let player=LocalPlayer::open("local-save-failure-test",root.path().join("private"),UsbSerialManager::new(),Arc::new(Mutex::new(String::new()))).unwrap();
+        player.import(vec![audio.to_string_lossy().into()]).unwrap();let before=player.0.snapshot();
+        std::fs::remove_file(player.0.dir.join("music-library.json")).unwrap();std::fs::remove_dir(&player.0.dir).unwrap();std::fs::write(&player.0.dir,b"block directory creation").unwrap();
+        assert!(player.command_observed("volume",&json!({"volume":10}),"").is_err());assert_eq!(player.0.snapshot().volume,before.volume);
+        assert!(player.command_observed("mode",&json!({"mode":"shuffle"}),"").is_err());assert_eq!(player.0.snapshot().mode,before.mode);
+        assert!(player.command_observed("remove",&json!({"key":before.queue[0].key}),"").is_err());assert_eq!(player.0.snapshot().queue.len(),before.queue.len());
+        assert_eq!(std::fs::read(audio).unwrap(),b"original audio");
+    }
     #[test]
     #[ignore = "Explicit online search query required; contacts the user's selected music service"]
     fn manual_online_lyrics() {
@@ -1621,11 +1909,13 @@ mod tests {
     }
     fn test_service(dir: &std::path::Path) -> Arc<Service> {
         Arc::new(Service {
+            source_id: String::new(), local_only: false,view_identity:None,job_view_identity:Mutex::new(String::new()),
             usb: UsbSerialManager::new(),
             data: Mutex::new(Snapshot::default()),
             tracks: Mutex::new(HashMap::new()),
             local: Mutex::new(HashMap::new()),
             api: Mutex::new(ApiCache::default()),
+        local_lyrics:Mutex::new(None),
             operations: Mutex::new(()),
             transport: Mutex::new(()),
             generation: AtomicU64::new(0),

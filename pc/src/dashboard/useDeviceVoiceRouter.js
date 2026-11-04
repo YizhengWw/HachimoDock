@@ -5,11 +5,11 @@
  * [Sync] If this file changes, update `pc/src/dashboard/.folder.md` and `pc/src/.folder.md`.
  */
 
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 
 const MAX_RETIRED_UTTERANCES = 8;
-const TERMINAL_PHASES = new Set(["done", "error", "cancelled"]);
+const TERMINAL_PHASES = new Set(["done", "error", "submit_unknown", "cancelled"]);
 const PHASE_RANK = Object.freeze({
   idle: 0,
   listening: 1,
@@ -23,12 +23,17 @@ const PHASE_RANK = Object.freeze({
   submitted: 6,
   done: 7,
   error: 7,
+  submit_unknown: 7,
   cancelled: 7,
 });
 
 export const DEVICE_VOICE_FLOW_INITIAL_STATE = Object.freeze({
   phase: "idle",
   utteranceId: "",
+  captureId: "",
+  boardDeviceId: "",
+  connectionId: "",
+  bootId: "",
   revision: 0,
   text: "",
   message: "",
@@ -46,11 +51,37 @@ export const DEVICE_VOICE_ROUTER_INITIAL_STATE = Object.freeze({
   flow: DEVICE_VOICE_FLOW_INITIAL_STATE,
   activeUtteranceId: "",
   retiredUtteranceIds: Object.freeze([]),
+  retiredCaptureIds: Object.freeze([]),
   deliveryHandled: false,
 });
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function captureMeta(payload, relay = false) {
+  const captureId = typeof payload.captureId === "number" && Number.isSafeInteger(payload.captureId)
+    ? String(payload.captureId) : normalizeText(payload.captureId);
+  return {
+    captureId,
+    utteranceId: normalizeText(payload.utteranceId || payload.voiceUtteranceId || (relay ? payload.sessionId : "")),
+    boardDeviceId: normalizeText(payload.boardDeviceId),
+    connectionId: normalizeText(payload.connectionId),
+    bootId: normalizeText(payload.bootId),
+  };
+}
+
+function captureForFlow(flow, action) {
+  return Object.fromEntries(["captureId", "boardDeviceId", "connectionId", "bootId"]
+    .map(key => [key, normalizeText(action[key]) || flow[key] || ""]));
+}
+
+// Business outcome, not diagnostic presence, determines presentation severity.
+export function voiceFlowTone(flow) {
+  if (flow?.phase === "submit_unknown") return "warning";
+  if (flow?.phase === "done") return "success";
+  if (flow?.phase === "error") return "error";
+  return "muted";
 }
 
 export function voiceFlowMessage(flow) {
@@ -106,12 +137,43 @@ function startUtterance(state, utteranceId) {
     flow: DEVICE_VOICE_FLOW_INITIAL_STATE,
     activeUtteranceId: utteranceId,
     retiredUtteranceIds,
+    retiredCaptureIds: state.flow.captureId
+      ? [state.flow.captureId, ...(state.retiredCaptureIds || []).filter(id => id !== state.flow.captureId)]
+        .slice(0, MAX_RETIRED_UTTERANCES)
+      : state.retiredCaptureIds || [],
     deliveryHandled: false,
   };
 }
 
 function selectUtteranceState(state, action) {
   const utteranceId = normalizeText(action.utteranceId);
+  const captureId = normalizeText(action.captureId);
+  const phase = normalizeText(action.phase).toLowerCase();
+  if (action.staleCapture || action.terminalAlreadyReported) {
+    return { state, utteranceId, accepted: false };
+  }
+  if (captureId && (state.retiredCaptureIds || []).includes(captureId)) {
+    return { state, utteranceId, accepted: false };
+  }
+  if (captureId && state.flow.captureId && captureId !== state.flow.captureId) {
+    // Only a fresh begin/listening opens a new capture, never a late end/error.
+    if (phase !== "listening" || action.terminalAlreadyReported) return { state, utteranceId, accepted: false };
+    return { state: startUtterance(state, utteranceId), utteranceId, accepted: true };
+  }
+  for (const key of ["boardDeviceId", "connectionId", "bootId"]) {
+    if (state.flow[key] && action[key] && state.flow[key] !== action[key]) {
+      // A reused firmware utterance ID is not evidence of the same capture.
+      if (!captureId || captureId === state.flow.captureId) return { state, utteranceId, accepted: false };
+    }
+  }
+  if (state.flow.captureId && (!utteranceId || (!captureId && state.retiredUtteranceIds.includes(utteranceId)))) {
+    return { state, utteranceId, accepted: false };
+  }
+  if (captureId && captureId === state.flow.captureId && utteranceId && state.activeUtteranceId
+    && utteranceId !== state.activeUtteranceId) return { state, utteranceId, accepted: false };
+  if (captureId && phase === "listening" && utteranceId && utteranceId !== state.activeUtteranceId) {
+    return { state: startUtterance(state, utteranceId), utteranceId, accepted: true };
+  }
   if (!utteranceId || utteranceId === state.activeUtteranceId) {
     return { state, utteranceId: utteranceId || state.activeUtteranceId, accepted: true };
   }
@@ -127,14 +189,23 @@ function selectUtteranceState(state, action) {
 
 export function deviceVoiceRouterReducer(state, action) {
   switch (action.type) {
+    case "capture": {
+      const selected = selectUtteranceState(state, action);
+      if (!selected.accepted || TERMINAL_PHASES.has(selected.state.flow.phase)) return state;
+      return { ...selected.state, activeUtteranceId: selected.utteranceId,
+        flow: { ...selected.state.flow, ...captureForFlow(selected.state.flow, action),
+          utteranceId: selected.utteranceId,
+          phase: selected.state.flow.phase === "idle" ? "listening" : selected.state.flow.phase } };
+    }
     case "transcript": {
       const selected = selectUtteranceState(state, action);
       if (!selected.accepted) return state;
       const baseState = selected.state;
       const flow = baseState.flow;
+      if (TERMINAL_PHASES.has(flow.phase)) return state;
       if ((flow.isFinal || TERMINAL_PHASES.has(flow.phase))
           && phaseRank(action.phase || "listening") < phaseRank(flow.phase)) return state;
-      const revision = Number(action.revision || 0);
+      const revision = Number(action.revision ?? flow.revision ?? 0);
       if (revision < Number(flow.revision || 0)) return state;
       const route = routeForFlow(flow, action);
       return {
@@ -142,18 +213,19 @@ export function deviceVoiceRouterReducer(state, action) {
         activeUtteranceId: selected.utteranceId,
         flow: {
           ...flow,
+          ...captureForFlow(flow, action),
           phase: monotonicPhase(flow.phase, action.phase || "listening"),
           utteranceId: selected.utteranceId,
           revision,
           text: action.text ?? flow.text,
           message: action.message || flow.message || "",
           reply: "",
-          ok: action.ok,
+          ok: action.phase === "submit_unknown" ? false : action.ok,
           agentId: route.agentId,
           sessionId: route.sessionId,
           isFinal: flow.isFinal || action.isFinal === true,
           composerMode: action.composerMode || flow.composerMode || "",
-          composerError: action.composerError || flow.composerError || "",
+          composerError: typeof action.composerError === "string" ? action.composerError : flow.composerError || "",
           updatedAt: Number(action.nowMs || Date.now()),
         },
       };
@@ -162,12 +234,14 @@ export function deviceVoiceRouterReducer(state, action) {
       const selected = selectUtteranceState(state, action);
       if (!selected.accepted) return state;
       const baseState = selected.state;
+      if (TERMINAL_PHASES.has(baseState.flow.phase)) return state;
       const route = routeForFlow(baseState.flow, action);
       return {
         ...baseState,
         activeUtteranceId: selected.utteranceId,
         flow: {
           ...baseState.flow,
+          ...captureForFlow(baseState.flow, action),
           phase: monotonicPhase(baseState.flow.phase, action.phase || "injecting"),
           utteranceId: selected.utteranceId,
           text: action.text || baseState.flow.text || "",
@@ -184,15 +258,18 @@ export function deviceVoiceRouterReducer(state, action) {
       const selected = selectUtteranceState(state, action);
       if (!selected.accepted) return state;
       const baseState = selected.state;
+      if (TERMINAL_PHASES.has(baseState.flow.phase)) return state;
       const terminal = action.pending !== true && action.transient !== true;
       if (terminal && baseState.deliveryHandled) return state;
       const phase = action.pending
         ? "waiting_reply"
         : action.transient
           ? "injecting"
-          : action.ok
-            ? "done"
-            : "error";
+          : action.code === "VISIBLE_COMPOSER_UNCONFIRMED"
+            ? "submit_unknown"
+            : action.ok
+              ? "done"
+              : "error";
       const route = routeForFlow(baseState.flow, action);
       return {
         ...baseState,
@@ -200,19 +277,20 @@ export function deviceVoiceRouterReducer(state, action) {
         deliveryHandled: terminal,
         flow: {
           ...baseState.flow,
+          ...captureForFlow(baseState.flow, action),
           phase: monotonicPhase(baseState.flow.phase, phase),
           utteranceId: selected.utteranceId,
           text: action.text || baseState.flow.text || "",
           message: action.message || (action.ok ? "已发送到当前会话" : "发送失败"),
           reply: terminal ? action.reply || "" : "",
-          ok: terminal ? action.ok === true : null,
+          ok: terminal ? phase !== "submit_unknown" && action.ok === true : null,
           agentId: route.agentId,
           sessionId: route.sessionId,
           composerMode: action.composerMode || baseState.flow.composerMode || "",
           composerError: terminal && action.ok === true
             && ["visible", "focused-input"].includes(action.composerMode)
             ? ""
-            : action.composerError || baseState.flow.composerError || "",
+            : typeof action.composerError === "string" ? action.composerError : baseState.flow.composerError || "",
           updatedAt: Number(action.nowMs || Date.now()),
         },
       };
@@ -223,12 +301,12 @@ export function deviceVoiceRouterReducer(state, action) {
 }
 
 export function transcriptMessage(payload, phase, composerMode) {
-  const visibleAgentLabel = normalizeText(payload?.agentId).toLowerCase() === "workbuddy" ? "WorkBuddy" : normalizeText(payload?.agentId).toLowerCase() === "claude-code"
+  const visibleAgentLabel = normalizeText(payload?.agentId).toLowerCase() === "deepseek-harness" ? "DeepSeek Harness" : normalizeText(payload?.agentId).toLowerCase() === "workbuddy" ? "WorkBuddy" : normalizeText(payload?.agentId).toLowerCase() === "claude-code"
     ? "Claude"
     : "ChatGPT（Codex）";
   if (phase === "listening") {
-    if (visibleAgentLabel === "WorkBuddy") {
-      return "正在聆听；松开后将完整识别结果一次追加到 WorkBuddy 输入框，不自动发送。";
+    if (["WorkBuddy", "DeepSeek Harness"].includes(visibleAgentLabel)) {
+      return `正在聆听；松开后将完整识别结果一次追加到 ${visibleAgentLabel} 输入框，不自动发送。`;
     }
     if (composerMode === "visible") {
       return `正在聆听，识别文字会实时同步到 ${visibleAgentLabel} 输入框。`;
@@ -239,8 +317,8 @@ export function transcriptMessage(payload, phase, composerMode) {
     return "正在聆听并实时识别。";
   }
   if (phase === "partial") {
-    if (visibleAgentLabel === "WorkBuddy") {
-      return "正在实时识别；松开后一次写入 WorkBuddy，写入确认前请保持目标对话在前台。";
+    if (["WorkBuddy", "DeepSeek Harness"].includes(visibleAgentLabel)) {
+      return `正在实时识别；松开后一次写入 ${visibleAgentLabel}，写入确认前请保持目标对话在前台。`;
     }
     if (composerMode === "visible") {
       return `正在实时识别并同步到 ${visibleAgentLabel}；松开后保留为草稿，不自动发送。`;
@@ -275,6 +353,9 @@ export function transcriptMessage(payload, phase, composerMode) {
   if (phase === "cancelled") {
     return normalizeText(payload.error) || "录音目标已变化，本次语音已取消。";
   }
+  if (phase === "submit_unknown") {
+    return "已尝试提交，发送结果未确认；请核对目标对话，避免重复发送。";
+  }
   if (phase === "error") {
     return normalizeText(payload.error) || "设备语音处理失败。";
   }
@@ -282,6 +363,7 @@ export function transcriptMessage(payload, phase, composerMode) {
 }
 
 function audioActivity(payload) {
+  if (payload.failureDomain === "delivery") return null;
   const phase = normalizeText(payload.phase).toLowerCase();
   if (!phase || phase === "status") return null;
   const ok = payload.ok !== false;
@@ -308,11 +390,53 @@ function audioActivity(payload) {
   return message ? { phase, ok, message } : null;
 }
 
+// Independent of React listener reinstallation and transcript delivery order.
+// A valid USB end is only transport completion, not ASR/delivery success: its
+// first later recognition error must still be displayed. After an error or
+// cancellation, no late end/duplicate may replace that cause.
+export function createDeviceAudioActivityGate() {
+  let state = DEVICE_VOICE_ROUTER_INITIAL_STATE;
+  let endedCapture = "";
+  return (payload) => {
+    if (payload.failureDomain === "delivery") return null;
+    const phase = normalizeText(payload.phase).toLowerCase();
+    if (!phase || phase === "status" || phase === "configured") return null;
+    const meta = captureMeta(payload, true);
+    const failed = payload.ok === false || phase === "cancelled";
+    const begin = !failed && ["begin", "listening"].includes(phase);
+    const action = {
+      ...meta,
+      type: begin ? "capture" : "transcript",
+      phase: failed ? (phase === "cancelled" ? "cancelled" : "error")
+        : ["begin", "streaming"].includes(phase) ? "listening"
+          : phase === "end" ? "recognizing" : phase,
+      ok: !failed,
+      staleCapture: payload.staleCapture === true,
+      terminalAlreadyReported: payload.terminalAlreadyReported === true,
+      message: failed ? normalizeText(payload.error) || "音频流处理失败" : "",
+      isFinal: payload.isFinal === true,
+    };
+    const next = deviceVoiceRouterReducer(state, action);
+    if (next === state) return null;
+    state = next;
+    const activity = audioActivity(payload);
+    if (!activity || (!failed && payload.duplicate === true)) return null;
+    const key = state.flow.captureId || state.activeUtteranceId;
+    if (phase === "end" && !failed) {
+      if (endedCapture === key) return null;
+      endedCapture = key;
+    }
+    return { ...activity, ...captureForFlow(state.flow, meta), utteranceId: state.activeUtteranceId };
+  };
+}
+
 export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
   const [routerState, dispatch] = useReducer(
     deviceVoiceRouterReducer,
     DEVICE_VOICE_ROUTER_INITIAL_STATE,
   );
+  const audioActivityGateRef = useRef(null);
+  if (!audioActivityGateRef.current) audioActivityGateRef.current = createDeviceAudioActivityGate();
 
   useEffect(() => {
     let disposed = false;
@@ -332,6 +456,7 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
         const text = normalizeText(payload.state);
         if (!text) return;
         dispatch({
+          ...captureMeta(payload),
           type: "progress",
           phase: "injecting",
           utteranceId: normalizeText(payload.voiceUtteranceId || payload.utteranceId),
@@ -360,11 +485,13 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
           || (!ok ? normalizeText(payload.error) : "")
           || (ok ? defaultSuccessMessage : "发送失败");
         dispatch({
+          ...captureMeta(payload),
           type: "delivery",
           utteranceId: normalizeText(payload.utteranceId || payload.voiceUtteranceId),
           ok,
           transient,
           pending,
+          code: normalizeText(payload.code),
           text: normalizeText(payload.text),
           message: !ok && transient
             ? `桥接连接瞬时抖动，正在确认是否已送达...\n${baseMessage}`
@@ -373,14 +500,25 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
           agentId,
           sessionId,
           composerMode,
-          composerError: normalizeText(payload.composerError)
-            || (!ok ? normalizeText(payload.error) : ""),
+          composerError: typeof payload.composerError === "string"
+            ? normalizeText(payload.composerError)
+            : !ok && typeof payload.error === "string" ? normalizeText(payload.error) : undefined,
         });
       });
 
       unlistenUsbAudio = await listen("usb-audio-stream", (event) => {
         const payload = event?.payload && typeof event.payload === "object" ? event.payload : {};
-        const activity = audioActivity(payload);
+        if (payload.failureDomain === "delivery") return;
+        const meta = captureMeta(payload, true);
+        if (payload.phase === "begin" && payload.ok !== false) {
+          dispatch({ ...meta, type: "capture", phase: "listening", ok: true,
+            staleCapture: payload.staleCapture === true, terminalAlreadyReported: payload.terminalAlreadyReported === true });
+        } else if (payload.ok === false || payload.phase === "cancelled") {
+          dispatch({ ...meta, type: "transcript", phase: payload.phase === "cancelled" ? "cancelled" : "error",
+            ok: false, message: normalizeText(payload.error) || "音频流处理失败",
+            staleCapture: payload.staleCapture === true, terminalAlreadyReported: payload.terminalAlreadyReported === true });
+        }
+        const activity = audioActivityGateRef.current(payload);
         if (activity) onAudioActivity?.(activity);
       });
 
@@ -389,6 +527,7 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
         const phase = normalizeText(payload.phase).toLowerCase() || "listening";
         const composerMode = normalizeText(payload.composerMode).toLowerCase();
         dispatch({
+          ...captureMeta(payload),
           type: "transcript",
           phase,
           utteranceId: normalizeText(payload.utteranceId),
@@ -400,7 +539,10 @@ export function useDeviceVoiceRouter({ onAudioActivity } = {}) {
           sessionId: normalizeText(payload.sessionId),
           isFinal: payload.isFinal === true,
           composerMode,
-          composerError: normalizeText(payload.composerError),
+          composerError: typeof payload.composerError === "string"
+            ? normalizeText(payload.composerError) : undefined,
+          staleCapture: payload.staleCapture === true,
+          terminalAlreadyReported: payload.terminalAlreadyReported === true,
         });
       });
 

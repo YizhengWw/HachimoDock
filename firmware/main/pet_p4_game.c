@@ -170,6 +170,10 @@ static void bounded_reset(
   for(unsigned i=0;i<game->bounded.entity_count;i++){
     game->bounded_entities[i].x_q8=game->bounded_entities[i].x*256;
     game->bounded_entities[i].y_q8=game->bounded_entities[i].y*256;
+    game->bounded_entities[i].body_vx_q8=game->bounded_entities[i].vx*256;
+    game->bounded_entities[i].body_vy_q8=game->bounded_entities[i].vy*256;
+    game->bounded_entities[i].angle_q8=0;
+    game->bounded_entities[i].body_rx=game->bounded_entities[i].body_ry=game->bounded_entities[i].body_rg=0;
   }
   if(game->bounded.track){
     pet_p4_game_entity_t *b=&game->bounded_entities[game->bounded.motion_body];int home=-1;
@@ -352,6 +356,12 @@ static bool bounded_apply_op(
   if (op->entity_index >= 0 && op->entity_index < game->bounded.entity_count) {
     entity = &game->bounded_entities[op->entity_index];
   }
+  if(op->kind==PET_P4_GAME_OP_IMPULSE){
+    if(!game->bounded.bodies||!entity||!entity->body||entity->body_static||!entity->mass)return false;
+    entity->body_vx_q8=bounded_clamp(entity->body_vx_q8+op->dx*256/entity->mass,-16384,16384);
+    entity->body_vy_q8=bounded_clamp(entity->body_vy_q8+op->dy*256/entity->mass,-16384,16384);
+    return true;
+  }
   if (op->kind == PET_P4_GAME_OP_MOVE) {
     return bounded_move_entity(
       game,
@@ -435,6 +445,22 @@ static bool bounded_apply_op(
     entity->tone = op->tone;
     return changed;
   }
+  if (op->kind == PET_P4_GAME_OP_SFX) {
+    if (op->value < 0 || op->value >= 8) return false;
+    game->sfx_pending |= (uint8_t) (1u << op->value);
+    return false; /* audible, not a board change */
+  }
+  if (op->kind == PET_P4_GAME_OP_VAR_SET || op->kind == PET_P4_GAME_OP_VAR_INC) {
+    /* p4-logic-v1: entity_index addresses the mirrored runtime var slot. */
+    if (op->entity_index < 0 || op->entity_index >= game->var_count) return false;
+    int64_t next = op->kind == PET_P4_GAME_OP_VAR_SET
+      ? (int64_t) op->value : (int64_t) game->vars[op->entity_index] + op->value;
+    if (next < -PET_P4_GAME_VAR_LIMIT) next = -PET_P4_GAME_VAR_LIMIT;
+    if (next > PET_P4_GAME_VAR_LIMIT) next = PET_P4_GAME_VAR_LIMIT;
+    bool changed = game->vars[op->entity_index] != (int32_t) next;
+    game->vars[op->entity_index] = (int32_t) next;
+    return changed;
+  }
   if(game->bounded.motion&&op->entity_index==game->bounded.motion_body){
     if(op->kind==PET_P4_GAME_OP_CANCEL){bool changed=game->charging;game->charging=false;game->charge_elapsed_ms=0;return changed;}
     if(op->kind==PET_P4_GAME_OP_CHARGE){
@@ -454,6 +480,31 @@ static bool bounded_apply_op(
     }
   }
   return false;
+}
+
+bool pet_p4_game_compare(int32_t left, unsigned op, int32_t right) {
+  switch (op) {
+    case PET_P4_GAME_CMP_LTE: return left <= right;
+    case PET_P4_GAME_CMP_LT: return left < right;
+    case PET_P4_GAME_CMP_GTE: return left >= right;
+    case PET_P4_GAME_CMP_GT: return left > right;
+    case PET_P4_GAME_CMP_EQ: return left == right;
+    case PET_P4_GAME_CMP_NE: return left != right;
+    default: return false;
+  }
+}
+
+/* p4-logic-v1 rule guard. An unknown var slot never fires, it does not
+ * silently read a stale initial value. */
+static bool bounded_rule_guard(const pet_p4_game_engine_t *game, const pet_p4_game_rule_t *rule) {
+  if (!rule->has_when) return true;
+  if (rule->when_var < 0 || rule->when_var >= game->var_count) return false;
+  int32_t right = rule->when_value;
+  if (rule->when_value_var >= 0) {
+    if (rule->when_value_var >= game->var_count) return false;
+    right = game->vars[rule->when_value_var];
+  }
+  return pet_p4_game_compare(game->vars[rule->when_var], rule->when_op, right);
 }
 
 static bool bounded_rule_matches(
@@ -505,6 +556,7 @@ static bool bounded_execute_rules(
         )) {
       continue;
     }
+    if (!bounded_rule_guard(game, rule)) continue;
     for (int op_index = 0; op_index < rule->op_count; op_index += 1) {
       changed |= bounded_apply_op(
         game,
@@ -537,7 +589,7 @@ static bool bounded_process_trigger(
     events,
     &event_count
   );
-  if (trigger == PET_P4_GAME_TRIGGER_TICK && game->running && !game->game_over && !game->bounded.motion) {
+  if (trigger == PET_P4_GAME_TRIGGER_TICK && game->running && !game->game_over && !game->bounded.motion && !game->bounded.bodies) {
     for (int index = 0; index < game->bounded.entity_count; index += 1) {
       pet_p4_game_entity_t *entity = &game->bounded_entities[index];
       if (!entity->active || (entity->vx == 0 && entity->vy == 0)) continue;
@@ -565,7 +617,7 @@ static bool bounded_process_trigger(
       NULL
     );
   }
-  for (int left = 0; !game->bounded.motion && left < game->bounded.entity_count; left += 1) {
+  for (int left = 0; !game->bounded.motion && !game->bounded.bodies && left < game->bounded.entity_count; left += 1) {
     for (int right = left + 1; right < game->bounded.entity_count; right += 1) {
       if (!bounded_entities_overlap(
             &game->bounded_entities[left],
@@ -592,6 +644,8 @@ static bool bounded_process_trigger(
 /* Bounded continuous body integration, shared by firmware and WASM. Positions
  * are Q8 grid units, velocities grid units/second; no floating point or heap.
  * Only top-side descending crossings can land, never ascent/side overlap. */
+#include "pet_p4_bodies_core.h"
+
 static bool bounded_motion_step(pet_p4_game_engine_t *game,uint64_t now_ms){
   const pet_p4_bounded_game_config_t *c=&game->bounded;
   pet_p4_game_entity_t *body=&game->bounded_entities[c->motion_body];
@@ -687,6 +741,7 @@ static void game_refresh_frame(pet_p4_game_engine_t *game) {
   frame->game_over = game->game_over;
   frame->entity_count = 0;
   frame->motion=game->kind==PET_P4_GAME_BOUNDED&&game->bounded.motion;
+  frame->bodies=game->kind==PET_P4_GAME_BOUNDED&&game->bounded.bodies;
   frame->charge_percent=frame->motion&&game->charging?(uint8_t)(1+99*game->charge_elapsed_ms/game->bounded.charge_ms):0;
   if (game->kind == PET_P4_GAME_BOUNDED) {
     memcpy(
@@ -746,6 +801,25 @@ static void game_refresh_frame(pet_p4_game_engine_t *game) {
     int wing_index = game_cell_index(game, FLAPPY_BIRD_X - 1, bird_y);
     if (wing_index >= 0) frame->cells[wing_index] = 4;
     if (bird_index >= 0) frame->cells[bird_index] = 3;
+  } else if (game->kind == PET_P4_GAME_GOMOKU) {
+    /* Stones come straight from board[]; overlay bits never touch the board. */
+    if (!game->game_over) {
+      int cursor = game_cell_index(game, game->gomoku_cursor_x, game->gomoku_cursor_y);
+      if (cursor >= 0) frame->cells[cursor] |= PET_P4_GAME_GOMOKU_CURSOR;
+    }
+    unsigned last = game->gomoku_ai_pending ? game->gomoku_last_player : game->gomoku_last_ai;
+    if (last == PET_P4_GAME_GOMOKU_NONE) last = game->gomoku_last_player;
+    if (last < PET_P4_GAME_GOMOKU_CELLS) frame->cells[last] |= PET_P4_GAME_GOMOKU_LAST;
+    if (game->gomoku_outcome == 1 || game->gomoku_outcome == 2) {
+      static const int8_t dx[4] = {1, 0, 1, 1};
+      static const int8_t dy[4] = {0, 1, 1, -1};
+      int x = game->gomoku_win_index % PET_P4_GAME_GOMOKU_SIZE;
+      int y = game->gomoku_win_index / PET_P4_GAME_GOMOKU_SIZE;
+      for (int i = 0; i < game->gomoku_win_len; i += 1) {
+        int index = game_cell_index(game, x + i * dx[game->gomoku_win_dir], y + i * dy[game->gomoku_win_dir]);
+        if (index >= 0) frame->cells[index] |= PET_P4_GAME_GOMOKU_WIN;
+      }
+    }
   }
   frame->revision += 1;
 }
@@ -998,11 +1072,217 @@ static bool flappy_step(pet_p4_game_engine_t *game) {
   return true;
 }
 
+/* ---- gomoku: 15x15 board, black (player) vs white (device AI). ---------- */
+
+static const int8_t GOMOKU_DX[4] = {1, 0, 1, 1};
+static const int8_t GOMOKU_DY[4] = {0, 1, 1, -1};
+/* Pattern table over every 5-cell window that contains the candidate cell.
+ * Attack index = own stones in the window including the candidate (1..5);
+ * defend index = opponent stones in a window without own stones (0..4).
+ * Defend[4] blocks an immediate five, attack[5] wins outright; an open four
+ * or open three is counted by two windows, so it outranks the closed shape. */
+static const int32_t GOMOKU_ATTACK[6] = {0, 0, 12, 150, 1500, 100000};
+static const int32_t GOMOKU_DEFEND[5] = {0, 2, 15, 200, 50000};
+
+static void gomoku_sync_score(pet_p4_game_engine_t *game) {
+  /* HUD contract: stone count while playing (odd = white to answer, even =
+   * black to move), outcome*1000+stones once finished so a dashboard can key
+   * result text and reply cues off the same score variable. */
+  game->score = game->game_over
+    ? (int32_t) game->gomoku_outcome * 1000 + game->gomoku_stones
+    : game->gomoku_stones;
+}
+
+static void gomoku_reset(pet_p4_game_engine_t *game, uint64_t now_ms, bool running) {
+  memset(game->board, 0, sizeof(game->board));
+  game->running = running;
+  game->game_over = false;
+  game->last_tick_ms = now_ms;
+  game->gomoku_cursor_x = PET_P4_GAME_GOMOKU_SIZE / 2;
+  game->gomoku_cursor_y = PET_P4_GAME_GOMOKU_SIZE / 2;
+  game->gomoku_rounds = 0;
+  game->gomoku_stones = 0;
+  game->gomoku_last_player = PET_P4_GAME_GOMOKU_NONE;
+  game->gomoku_last_ai = PET_P4_GAME_GOMOKU_NONE;
+  game->gomoku_outcome = 0;
+  game->gomoku_win_index = 0;
+  game->gomoku_win_dir = 0;
+  game->gomoku_win_len = 0;
+  game->gomoku_ai_pending = false;
+  game->gomoku_ai_reads = 0;
+  gomoku_sync_score(game);
+}
+
+static uint8_t gomoku_stone(const pet_p4_game_engine_t *game, int x, int y) {
+  if (x < 0 || y < 0 || x >= PET_P4_GAME_GOMOKU_SIZE || y >= PET_P4_GAME_GOMOKU_SIZE) return 3;
+  return game->board[y * PET_P4_GAME_GOMOKU_SIZE + x];
+}
+
+/* Five or more in a row through (x, y) ends the game for that colour. */
+static bool gomoku_check_win(pet_p4_game_engine_t *game, int x, int y, uint8_t color) {
+  for (int d = 0; d < 4; d += 1) {
+    int forward = 0;
+    int backward = 0;
+    while (gomoku_stone(game, x + (forward + 1) * GOMOKU_DX[d], y + (forward + 1) * GOMOKU_DY[d]) == color) forward += 1;
+    while (gomoku_stone(game, x - (backward + 1) * GOMOKU_DX[d], y - (backward + 1) * GOMOKU_DY[d]) == color) backward += 1;
+    if (forward + backward + 1 >= 5) {
+      int sx = x - backward * GOMOKU_DX[d];
+      int sy = y - backward * GOMOKU_DY[d];
+      game->gomoku_win_index = (uint8_t) (sy * PET_P4_GAME_GOMOKU_SIZE + sx);
+      game->gomoku_win_dir = (uint8_t) d;
+      game->gomoku_win_len = (uint8_t) (forward + backward + 1);
+      game->gomoku_outcome = color;
+      game->running = false;
+      game->game_over = true;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void gomoku_place_stone(pet_p4_game_engine_t *game, int index, uint8_t color) {
+  int x = index % PET_P4_GAME_GOMOKU_SIZE;
+  int y = index / PET_P4_GAME_GOMOKU_SIZE;
+  game->board[index] = color;
+  game->gomoku_stones += 1;
+  if (color == 1) {
+    game->gomoku_rounds += 1;
+    game->gomoku_last_player = (uint8_t) index;
+  } else {
+    game->gomoku_last_ai = (uint8_t) index;
+  }
+  if (!gomoku_check_win(game, x, y, color) && game->gomoku_stones >= PET_P4_GAME_GOMOKU_CELLS) {
+    game->gomoku_outcome = 3; /* board full, nobody connected five */
+    game->running = false;
+    game->game_over = true;
+  }
+  gomoku_sync_score(game);
+}
+
+/* Deterministic bounded reply: score every empty cell for both colours over
+ * the four lines through it, then take the best (ties: nearest the centre,
+ * then lowest index). No recursion, no heap, no randomness. */
+static int gomoku_ai_choose(pet_p4_game_engine_t *game) {
+  int best = -1;
+  int32_t best_score = -1;
+  int best_distance = 0;
+  unsigned reads = 0;
+  const int centre = PET_P4_GAME_GOMOKU_SIZE / 2;
+  for (int index = 0; index < PET_P4_GAME_GOMOKU_CELLS; index += 1) {
+    if (game->board[index] != 0) continue;
+    int x = index % PET_P4_GAME_GOMOKU_SIZE;
+    int y = index / PET_P4_GAME_GOMOKU_SIZE;
+    int32_t total = 0;
+    for (int d = 0; d < 4; d += 1) {
+      uint8_t line[9];
+      for (int k = -4; k <= 4; k += 1) {
+        line[k + 4] = gomoku_stone(game, x + k * GOMOKU_DX[d], y + k * GOMOKU_DY[d]);
+        reads += 1;
+      }
+      for (int w = 0; w < 5; w += 1) {
+        int own = 0;
+        int opp = 0;
+        bool off = false;
+        for (int j = w; j < w + 5; j += 1) {
+          if (line[j] == 2) own += 1;
+          else if (line[j] == 1) opp += 1;
+          else if (line[j] == 3) off = true;
+        }
+        if (off) continue;
+        if (opp == 0) total += GOMOKU_ATTACK[own + 1];
+        if (own == 0) total += GOMOKU_DEFEND[opp];
+      }
+    }
+    int dx = x > centre ? x - centre : centre - x;
+    int dy = y > centre ? y - centre : centre - y;
+    int distance = dx > dy ? dx : dy;
+    if (total > best_score || (total == best_score && distance < best_distance)) {
+      best = index;
+      best_score = total;
+      best_distance = distance;
+    }
+  }
+  game->gomoku_ai_reads = (uint16_t) reads;
+  return best;
+}
+
+static bool gomoku_step(pet_p4_game_engine_t *game) {
+  if (!game->gomoku_ai_pending) return false;
+  game->gomoku_ai_pending = false;
+  int choice = gomoku_ai_choose(game);
+  if (choice < 0) {
+    game->gomoku_outcome = 3;
+    game->running = false;
+    game->game_over = true;
+    gomoku_sync_score(game);
+    return true;
+  }
+  gomoku_place_stone(game, choice, 2);
+  return true;
+}
+
+static bool gomoku_command(pet_p4_game_engine_t *game, pet_p4_game_command_t command, uint64_t now_ms) {
+  if (command == PET_P4_GAME_COMMAND_PLACE || command == PET_P4_GAME_COMMAND_START) {
+    if (!game->running || game->game_over) {
+      gomoku_reset(game, now_ms, true);
+      return true;
+    }
+    if (command == PET_P4_GAME_COMMAND_START || game->gomoku_ai_pending) return false;
+    int index = game->gomoku_cursor_y * PET_P4_GAME_GOMOKU_SIZE + game->gomoku_cursor_x;
+    if (game->board[index] != 0) return false;
+    gomoku_place_stone(game, index, 1);
+    if (!game->game_over) game->gomoku_ai_pending = true;
+    return true;
+  }
+  if (!game->running || game->game_over) return false;
+  if (command == PET_P4_GAME_COMMAND_LEFT || command == PET_P4_GAME_COMMAND_WEST) {
+    if (game->gomoku_cursor_x == 0) return false;
+    game->gomoku_cursor_x -= 1;
+    return true;
+  }
+  if (command == PET_P4_GAME_COMMAND_RIGHT || command == PET_P4_GAME_COMMAND_EAST) {
+    if (game->gomoku_cursor_x + 1 >= PET_P4_GAME_GOMOKU_SIZE) return false;
+    game->gomoku_cursor_x += 1;
+    return true;
+  }
+  if (command == PET_P4_GAME_COMMAND_NORTH) {
+    if (game->gomoku_cursor_y == 0) return false;
+    game->gomoku_cursor_y -= 1;
+    return true;
+  }
+  if (command == PET_P4_GAME_COMMAND_SOUTH) {
+    if (game->gomoku_cursor_y + 1 >= PET_P4_GAME_GOMOKU_SIZE) return false;
+    game->gomoku_cursor_y += 1;
+    return true;
+  }
+  if (command == PET_P4_GAME_COMMAND_UNDO) {
+    /* Take back the last player stone and, once white has answered, its reply.
+     * One level only: no move history is kept. */
+    if (game->gomoku_last_player == PET_P4_GAME_GOMOKU_NONE) return false;
+    game->board[game->gomoku_last_player] = 0;
+    game->gomoku_cursor_x = (uint8_t) (game->gomoku_last_player % PET_P4_GAME_GOMOKU_SIZE);
+    game->gomoku_cursor_y = (uint8_t) (game->gomoku_last_player / PET_P4_GAME_GOMOKU_SIZE);
+    if (game->gomoku_rounds > 0) game->gomoku_rounds -= 1;
+    if (game->gomoku_stones > 0) game->gomoku_stones -= 1;
+    if (!game->gomoku_ai_pending && game->gomoku_last_ai != PET_P4_GAME_GOMOKU_NONE) {
+      game->board[game->gomoku_last_ai] = 0;
+      if (game->gomoku_stones > 0) game->gomoku_stones -= 1;
+    }
+    game->gomoku_last_player = PET_P4_GAME_GOMOKU_NONE;
+    game->gomoku_last_ai = PET_P4_GAME_GOMOKU_NONE;
+    game->gomoku_ai_pending = false;
+    gomoku_sync_score(game);
+    return true;
+  }
+  return false;
+}
+
 const char *pet_p4_game_kind_name(pet_p4_game_kind_t kind) {
   if (kind == PET_P4_GAME_BOUNDED) return "p4-bounded-game-v1";
   if (kind == PET_P4_GAME_BLOCKS) return "blocks";
   if (kind == PET_P4_GAME_SNAKE) return "snake";
   if (kind == PET_P4_GAME_FLAPPY) return "flappy";
+  if (kind == PET_P4_GAME_GOMOKU) return "gomoku";
   return "";
 }
 
@@ -1011,6 +1291,7 @@ pet_p4_game_kind_t pet_p4_game_kind_from_name(const char *name) {
   if (name && strcmp(name, "blocks") == 0) return PET_P4_GAME_BLOCKS;
   if (name && strcmp(name, "snake") == 0) return PET_P4_GAME_SNAKE;
   if (name && strcmp(name, "flappy") == 0) return PET_P4_GAME_FLAPPY;
+  if (name && strcmp(name, "gomoku") == 0) return PET_P4_GAME_GOMOKU;
   return PET_P4_GAME_NONE;
 }
 
@@ -1037,6 +1318,10 @@ bool pet_p4_game_configure(
     game->width = SNAKE_WIDTH;
     game->height = SNAKE_HEIGHT;
     snake_reset(game, 0, false);
+  } else if (kind == PET_P4_GAME_GOMOKU) {
+    game->width = PET_P4_GAME_GOMOKU_SIZE;
+    game->height = PET_P4_GAME_GOMOKU_SIZE;
+    gomoku_reset(game, 0, false);
   } else {
     game->width = FLAPPY_WIDTH;
     game->height = FLAPPY_HEIGHT;
@@ -1061,11 +1346,24 @@ bool pet_p4_game_configure_bounded(
   if (!game || !config
       || config->width < 4 || config->width > PET_P4_GAME_GRID_MAX_WIDTH
       || config->height < 4 || config->height > PET_P4_GAME_GRID_MAX_HEIGHT
-      || config->tick_ms < (config->motion?16U:GAME_TICK_MIN_MS) || config->tick_ms > (config->motion?40U:GAME_TICK_MAX_MS)
+      || config->tick_ms < (config->bodies?20U:config->motion?16U:GAME_TICK_MIN_MS) || config->tick_ms > (config->bodies?200U:config->motion?40U:GAME_TICK_MAX_MS)
       || config->entity_count == 0 || config->entity_count > PET_P4_GAME_MAX_ENTITIES
       || config->rule_count == 0 || config->rule_count > PET_P4_GAME_MAX_RULES) {
     return false;
   }
+  if(config->bodies){
+    unsigned count=0;
+    if(config->motion||config->track||config->solid_tone_mask||config->body_gravity < -64||config->body_gravity>64)return false;
+    for(unsigned i=0;i<config->width*config->height;i++)if(config->base_cells[i])return false;
+    for(unsigned i=0;i<config->entity_count;i++){
+      const pet_p4_game_entity_t *e=&config->entities[i];
+      if(e->body&&e->rolling&&e->shape!=PET_P4_GAME_SHAPE_RECT&&e->shape!=PET_P4_GAME_SHAPE_CIRCLE&&e->shape!=PET_P4_GAME_SHAPE_BALL
+          &&e->shape!=PET_P4_GAME_SHAPE_COIN&&e->shape!=PET_P4_GAME_SHAPE_CAPSULE&&e->shape!=PET_P4_GAME_SHAPE_TRIANGLE&&e->shape!=PET_P4_GAME_SHAPE_DIAMOND)return false;
+      if(e->body){count++;if(!e->mass||e->mass>64||e->restitution>100||!e->collidable||e->bounds!=PET_P4_GAME_BOUNDS_CLAMP||(e->body_static&&(e->vx||e->vy)))return false;}
+      else if(e->vx||e->vy)return false;
+    }
+    if(count<1||count>8)return false;
+  }else for(unsigned i=0;i<config->entity_count;i++)if(config->entities[i].body)return false;
   if(config->motion&&(config->motion_body<0||config->motion_body>=config->entity_count||!config->platform_mask
     ||(config->platform_mask&(1u<<config->motion_body))||(config->platform_mask>>config->entity_count)
     ||config->gravity<4||config->gravity>64||config->lift<2||config->lift>16
@@ -1111,12 +1409,27 @@ bool pet_p4_game_configure_bounded(
         || (rule->trigger == PET_P4_GAME_TRIGGER_ACTION && !rule->action[0])) {
       return false;
     }
+    if(rule->has_when&&(rule->when_var<0||rule->when_var>=PET_P4_GAME_MAX_VARS||rule->when_value_var>=PET_P4_GAME_MAX_VARS||rule->when_op>PET_P4_GAME_CMP_NE))return false;
     if(rule->trigger==PET_P4_GAME_TRIGGER_LANDED&&(!config->motion||rule->entity_index!=config->motion_body
         ||rule->with_index<0||rule->with_index>=config->entity_count||!(config->platform_mask&(1u<<rule->with_index))))return false;
     for(unsigned j=0;j<rule->op_count;j++){
       const pet_p4_game_op_t *o=&rule->ops[j];
+      if(o->kind==PET_P4_GAME_OP_IMPULSE){
+        if(!config->bodies||o->entity_index<0||o->entity_index>=config->entity_count||!config->entities[o->entity_index].body
+           ||o->dx < -64||o->dx>64||o->dy < -64||o->dy>64||(!o->dx&&!o->dy))return false;
+        continue;
+      }
+      if(config->bodies&&(o->kind==PET_P4_GAME_OP_MOVE||o->kind==PET_P4_GAME_OP_PLACE||o->kind==PET_P4_GAME_OP_VELOCITY
+          ||o->kind==PET_P4_GAME_OP_ACCELERATE||o->kind==PET_P4_GAME_OP_BOUNCE||o->kind==PET_P4_GAME_OP_CHARGE
+          ||o->kind==PET_P4_GAME_OP_LAUNCH||o->kind==PET_P4_GAME_OP_CANCEL))return false;
       if(config->track&&(o->kind==PET_P4_GAME_OP_PLACE||o->kind==PET_P4_GAME_OP_SHOW||o->kind==PET_P4_GAME_OP_HIDE
         ||o->kind==PET_P4_GAME_OP_MOVE||o->kind==PET_P4_GAME_OP_VELOCITY||o->kind==PET_P4_GAME_OP_ACCELERATE||o->kind==PET_P4_GAME_OP_BOUNCE))return false;
+      if(o->kind==PET_P4_GAME_OP_SFX){if(o->value<0||o->value>=8)return false;continue;}
+      if(o->kind==PET_P4_GAME_OP_VAR_SET||o->kind==PET_P4_GAME_OP_VAR_INC){
+        /* p4-logic-v1: entity_index is a mirrored var slot, value stays bounded. */
+        if(o->entity_index<0||o->entity_index>=PET_P4_GAME_MAX_VARS||o->value < -10000||o->value>10000)return false;
+        continue;
+      }
       if(o->kind>=PET_P4_GAME_OP_CHARGE&&(!config->motion||o->kind!=PET_P4_GAME_OP_CHARGE||o->entity_index!=config->motion_body))return false;
     }
   }
@@ -1150,7 +1463,9 @@ bool pet_p4_game_command(
   bool changed = false;
   if (!game || game->kind == PET_P4_GAME_NONE
       || game->kind == PET_P4_GAME_BOUNDED) return false;
-  if (game->kind == PET_P4_GAME_FLAPPY && command == PET_P4_GAME_COMMAND_FLAP) {
+  if (game->kind == PET_P4_GAME_GOMOKU) {
+    changed = gomoku_command(game, command, now_ms);
+  } else if (game->kind == PET_P4_GAME_FLAPPY && command == PET_P4_GAME_COMMAND_FLAP) {
     if (!game->running || game->game_over) {
       flappy_reset(game, now_ms, true, true);
     } else {
@@ -1249,10 +1564,10 @@ bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms) {
   uint64_t elapsed = now_ms - game->last_tick_ms;
   uint32_t steps = (uint32_t) (elapsed / game->tick_ms);
   if (steps == 0) return false;
-  if (steps > 8U) {steps = 8U;if(game->bounded.motion)game->last_tick_ms=now_ms-(uint64_t)steps*game->tick_ms;}
+  if (steps > 8U) {steps = 8U;if(game->bounded.motion||game->bounded.bodies)game->last_tick_ms=now_ms-(uint64_t)steps*game->tick_ms;}
   for (uint32_t step = 0; step < steps && game->running; step += 1) {
     if (game->kind == PET_P4_GAME_BOUNDED) {
-      changed |= game->bounded.motion?bounded_motion_step(game,now_ms):bounded_process_trigger(
+      changed |= game->bounded.bodies?bounded_bodies_step(game,now_ms):game->bounded.motion?bounded_motion_step(game,now_ms):bounded_process_trigger(
         game,
         PET_P4_GAME_TRIGGER_TICK,
         NULL,
@@ -1260,6 +1575,7 @@ bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms) {
       );
     } else if (game->kind == PET_P4_GAME_BLOCKS) changed |= blocks_step_down(game);
     else if (game->kind == PET_P4_GAME_SNAKE) changed |= snake_step(game);
+    else if (game->kind == PET_P4_GAME_GOMOKU) changed |= gomoku_step(game);
     else changed |= flappy_step(game);
   }
   game->last_tick_ms += (uint64_t) steps * game->tick_ms;
@@ -1268,7 +1584,7 @@ bool pet_p4_game_process(pet_p4_game_engine_t *game, uint64_t now_ms) {
 }
 
 bool pet_p4_game_pointer(pet_p4_game_engine_t *game,unsigned index,int x,int y,unsigned axes){
-  if(!game||game->kind!=PET_P4_GAME_BOUNDED||game->bounded.motion||!game->running||game->game_over||index>=game->bounded.entity_count||axes<1||axes>3||x < -1024||x>1024||y < -1024||y>1024)return false;
+  if(!game||game->kind!=PET_P4_GAME_BOUNDED||(game->bounded.motion||game->bounded.bodies)||!game->running||game->game_over||index>=game->bounded.entity_count||axes<1||axes>3||x < -1024||x>1024||y < -1024||y>1024)return false;
   pet_p4_game_entity_t *e=&game->bounded_entities[index];
   if(!e->active||e->bounds!=PET_P4_GAME_BOUNDS_CLAMP)return false;
   int nx=x-e->width/2,ny=y-e->height/2;

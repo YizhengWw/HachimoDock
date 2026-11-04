@@ -43,12 +43,13 @@ bool pet_local_parse(const cJSON *j,pet_local_config_t *o){
       if(!q->kind)return false;
     }else{
       const cJSON *items=get(g,"items"),*it;
-      if(!cJSON_IsArray(items)||cJSON_GetArraySize(items)<2||cJSON_GetArraySize(items)>16)return false;
+      if(!cJSON_IsArray(items)||cJSON_GetArraySize(items)<2||cJSON_GetArraySize(items)>PET_LOCAL_ITEMS)return false;
       cJSON_ArrayForEach(it,items){pet_local_item_t *p=&q->items[q->count++];
         if(!keys(it,"|title||note|")||!str(get(it,"title"),p->title,sizeof(p->title))||!str(get(it,"note"),p->note,sizeof(p->note)))return false;
         for(int i=0;i<q->count-1;i++)if(!strcmp(q->items[i].title,p->title))return false;
       }
     }
+    if(!o->countdown&&q->count>24)o->wide_masks=true;
   }
   const cJSON *actions=get(j,"actions"),*a;
   if(!cJSON_IsObject(actions)||cJSON_GetArraySize(actions)<2||cJSON_GetArraySize(actions)>8)return false;
@@ -87,23 +88,46 @@ int64_t pet_local_target(uint8_t kind,int32_t day,int minute,int64_t now){
     if((kind==1?dow>=1&&dow<=5:dow==6)&&(kind==1||t>=now))return t;
   }return -1;
 }
-static int selection(const pet_local_config_t *c,const int32_t v[7]){return wrap(v[0],c->count);}
-static void repair(const pet_local_config_t *c,int32_t v[7]){
+/* Each saved word fits even the existing +/-1e9 integer contract. No shift
+ * reaches the machine word width; no JSON number carries a 64-bit bitmap. */
+static unsigned mask_slot(unsigned group,unsigned word){return word?7+group*2+word-1:1+group*2;}
+static unsigned mask_start(unsigned word){return word?24+(word-1)*20:0;}
+static unsigned mask_width(unsigned word){return word?20:24;}
+static bool deck_excluded(const int32_t v[],unsigned group,unsigned item){
+  unsigned word=item<24?0:item<44?1:2;
+  return ((uint32_t)v[mask_slot(group,word)]&(UINT32_C(1)<<(item-mask_start(word))))!=0;
+}
+static void deck_exclude(int32_t v[],unsigned group,unsigned item){
+  unsigned word=item<24?0:item<44?1:2;
+  v[mask_slot(group,word)]=(int32_t)((uint32_t)v[mask_slot(group,word)]|(UINT32_C(1)<<(item-mask_start(word))));
+}
+static void deck_clear(const pet_local_config_t*c,int32_t v[],unsigned group){
+  for(unsigned word=0;word<(c->wide_masks?3u:1u);word++)v[mask_slot(group,word)]=0;
+}
+static int selection(const pet_local_config_t *c,const int32_t v[]){return wrap(v[0],c->count);}
+static void repair(const pet_local_config_t *c,int32_t v[]){
   v[0]=selection(c,v);
   for(int i=0;i<c->count;i++)if(c->countdown){v[1+i*2]=clamp(v[1+i*2],0,pet_local_day(2099,12,31));v[2+i*2]=clamp(v[2+i*2],0,1439);}
-    else {v[1+i*2]&=(1<<c->groups[i].count)-1;v[2+i*2]=clamp(v[2+i*2],-1,c->groups[i].count-1);}
+    else {
+      for(unsigned word=0;word<(c->wide_masks?3u:1u);word++){
+        unsigned start=mask_start(word),bits=c->groups[i].count>start?c->groups[i].count-start:0;
+        if(bits>mask_width(word))bits=mask_width(word);
+        v[mask_slot((unsigned)i,word)]=(int32_t)((uint32_t)v[mask_slot((unsigned)i,word)]&((UINT32_C(1)<<bits)-1));
+      }
+      v[2+i*2]=clamp(v[2+i*2],-1,c->groups[i].count-1);
+    }
 }
-bool pet_local_action(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[7],const char *action,uint64_t ms,int64_t now,uint32_t random){
+bool pet_local_action(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[],const char *action,uint64_t ms,int64_t now,uint32_t random){
   if(!c->enabled||!pet_local_enabled(c,s,action))return false;int op=0;for(int i=0;i<c->action_count;i++)if(!strcmp(action,c->actions[i]))op=c->operations[i];if(!op)return false;
   repair(c,v);int at=v[0],a=1+2*at,b=a+1;const pet_local_group_t *g=&c->groups[at];
   if(!c->countdown){
     if(s->phase==1&&op!=PET_LOCAL_CLOSE)return false;
     if(op==PET_LOCAL_PREVIOUS||op==PET_LOCAL_NEXT){v[0]=wrap(at+(op==PET_LOCAL_NEXT?1:-1),c->count);s->phase=0;return true;}
     if(op==PET_LOCAL_CLOSE){s->phase=0;s->pending=-1;return true;}
-    if(op==PET_LOCAL_RESET){v[a]=0;s->phase=0;return true;}
-    if(op==PET_LOCAL_EXCLUDE){if(s->phase!=2||v[b]<0)return false;v[a]|=1<<v[b];s->phase=0;}
+    if(op==PET_LOCAL_RESET){deck_clear(c,v,(unsigned)at);s->phase=0;return true;}
+    if(op==PET_LOCAL_EXCLUDE){if(s->phase!=2||v[b]<0)return false;deck_exclude(v,(unsigned)at,(unsigned)v[b]);s->phase=0;}
     if(op==PET_LOCAL_DRAW||op==PET_LOCAL_EXCLUDE){
-      int candidates[16],n=0;for(int i=0;i<g->count;i++)if(!(v[a]&(1<<i)))candidates[n++]=i;
+      int candidates[PET_LOCAL_ITEMS],n=0;for(int i=0;i<g->count;i++)if(!deck_excluded(v,(unsigned)at,(unsigned)i))candidates[n++]=i;
       if(!n){s->phase=4;s->pending=-1;return true;}
       if(n>1)for(int i=0;i<n;i++)if(candidates[i]==v[b]){candidates[i]=candidates[--n];break;}
       /* Multiply-high maps the supplied full-width entropy to a bounded index. */
@@ -133,14 +157,14 @@ bool pet_local_action(const pet_local_config_t *c,pet_local_state_t *s,int32_t v
     s->draft_minute=hour*60+minute;return true;
   }return false;
 }
-bool pet_local_tick(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[7],uint64_t ms,int64_t now){
+bool pet_local_tick(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[],uint64_t ms,int64_t now){
   if(!c->enabled)return false;repair(c,v);
   if(!c->countdown&&s->phase==1&&ms>=s->reveal_at){v[2+2*v[0]]=s->pending;s->phase=2;s->pending=-1;return true;}
   if(c->countdown&&(now!=s->last_second||(s->phase==5&&now>=0))){s->last_second=now;if(s->phase==5&&now>=0)s->phase=0;return true;}
   if(!c->countdown&&(s->last_second==-2||(s->phase==1&&s->last_second!=(int64_t)(ms/50)))){s->last_second=ms/50;return true;}
   return false;
 }
-void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const int32_t v[7],uint64_t ms,int64_t now,pet_local_view_t *o){
+void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const int32_t v[],uint64_t ms,int64_t now,pet_local_view_t *o){
   memset(o,0,sizeof(*o));if(!c->enabled)return;
   int at=selection(c,v),a=1+2*at,b=a+1;const pet_local_group_t *g=&c->groups[at];o->phase=s->phase;
   snprintf(o->eyebrow,sizeof(o->eyebrow),"%s",g->title);snprintf(o->badge,sizeof(o->badge),"%d/%d",at+1,c->count);
@@ -148,7 +172,7 @@ void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const
   if(!c->countdown){
     snprintf(o->primary,sizeof(o->primary),"%s",s->phase==1?"正在揭晓":"抽取一个");
     snprintf(o->secondary,sizeof(o->secondary),"排除重抽");
-    int remaining=0;for(int i=0;i<g->count;i++)if(!(v[a]&(1<<i)))remaining++;
+    int remaining=0;for(int i=0;i<g->count;i++)if(!deck_excluded(v,(unsigned)at,(unsigned)i))remaining++;
     snprintf(o->metric,sizeof(o->metric),"%d",remaining);snprintf(o->label,sizeof(o->label),"可选内容");
     const pet_local_item_t *item=v[b]>=0&&v[b]<g->count?&g->items[v[b]]:NULL;
     const char *headline=s->phase==1?c->busy:s->phase==4?"选项都排除啦":s->phase==2&&item?item->title:c->idle;

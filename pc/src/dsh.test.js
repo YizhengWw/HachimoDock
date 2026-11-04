@@ -1,6 +1,6 @@
 /**
  * [Input] DeepSeek Harness production wiring in Rust discovery/allowlists and the managed bridge sidecar.
- * [Output] Static regression coverage that DSH registers with the agent-session-bus and stays out of visible-composer paths.
+ * [Output] Static wiring checks: DSH status uses the managed bus, while voice uses the current visible composer with no bound-history fallback.
  * [Pos] test node in pc/src
  */
 
@@ -21,7 +21,7 @@ test("managed bridge sidecar registers the DeepSeek Harness adapter", () => {
   assert.equal(busPackage.exports["./adapters/dsh"], "./src/adapters/dsh.js");
 });
 
-test("Rust keeps DeepSeek Harness on the bus-injection path", () => {
+test("Rust routes DeepSeek voice through the current visible composer, not bound history", () => {
   const rust = read("../src-tauri/src/lib.rs");
 
   assert.match(rust, /detect_dsh\(\),/);
@@ -35,12 +35,20 @@ test("Rust keeps DeepSeek Harness on the bus-injection path", () => {
     rust,
     /"deepseek-harness" \| "deepseek" \| "dsh" => "DeepSeek Harness"\.to_string\(\)/,
   );
-  // DSH is injected through agent-session-bus, so it must never join the AX
-  // visible-composer set (which would write into a desktop editor instead).
-  assert.doesNotMatch(
-    rust,
-    /fn agent_uses_visible_composer\(agent_id: &str\) -> bool \{\s*matches!\([^)]*deepseek-harness/,
-  );
+  // These are static native-wiring assertions, not an AX/UIA runtime test.
+  const body = (name) => {
+    const start = rust.indexOf(`fn ${name}(`);
+    assert.notEqual(start, -1, `missing native contract ${name}`);
+    const end = rust.indexOf("\n}", start);
+    assert.notEqual(end, -1, `missing native contract boundary ${name}`);
+    return rust.slice(start, end + 2);
+  };
+  assert.match(body("agent_uses_visible_composer"), /"deepseek-harness"/);
+  assert.match(body("should_use_current_visible_session"), /matches!\(agent_id,[^\n]*"deepseek-harness"/);
+  assert.match(body("device_voice_bound_target_is_addressable"),
+    /!matches!\(target\.agent_id\.as_str\(\), "workbuddy" \| "deepseek-harness"\)/);
+  assert.match(body("agent_streams_voice_draft"),
+    /!matches!\(agent_id, "workbuddy" \| "deepseek-harness"\)/);
 });
 
 test("DSH interrupt action is wired end to end and gated by selected agent", () => {

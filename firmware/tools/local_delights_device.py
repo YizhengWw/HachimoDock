@@ -4,8 +4,8 @@ from pathlib import Path
 import serial
 
 ROOT=Path(__file__).resolve().parents[2]
-OUT=ROOT.parent/'builds/local-delights-20261022/device'
-BOARD='p4-80f1b2d75dfd'
+OUT=None
+BOARD=None
 IDS=('decision-capsule','answer-book','hope-train')
 class Passive(serial.Serial):
     def _update_dtr_state(self):pass
@@ -75,17 +75,15 @@ def ota(b):
         b.transfer('firmware','begin',dict(transferId=tid,size=len(image),sha256=sha,chipRevisionMin=low,chipRevisionMax=high),30);begun=True
         for seq,i in enumerate(range(0,len(image),4092)):
             data=image[i:i+4092];p=dict(transferId=tid,seq=seq,decodedSize=len(data),data=base64.b64encode(data).decode())
-            # Only same-sequence chunks are idempotent. Never repeat commit.
-            for attempt in range(3):
-                try:a=b.transfer('firmware','chunk',p);break
-                except TimeoutError:
-                    if attempt==2:raise
+            # Unknown chunk outcome is not permission to replay or abort.
+            a=b.transfer('firmware','chunk',p)
             assert a['receivedBytes']==i+len(data),a
             if seq%100==0:print('OTA',i+len(data),'/',len(image),flush=True)
         commit_sent=True;a=b.transfer('firmware','commit',{'transferId':tid},30)
         assert a['sha256']==sha and a['version']==version;save('ota-commit.json',a)
     finally:
-        if begun and not commit_sent:b.send('firmware/abort',{'transferId':tid})
+        # Preserve unknown outcomes for explicit read-only reconciliation.
+        pass
     print('Committed; verifying stable boot',flush=True);time.sleep(2)
     end=time.monotonic()+60
     while time.monotonic()<end:
@@ -161,7 +159,11 @@ def test(b,id):
     save(id+'-actions.json',{'states':states,'noReset':True,'physicalInputVerified':False});print('Device action tests passed',id,flush=True)
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--port',required=True);p.add_argument('mode',choices=['probe','ota','sync']);args=p.parse_args();b=Bench(args.port)
+    global BOARD,OUT
+    p=argparse.ArgumentParser();p.add_argument('--port',required=True);p.add_argument('--board-device-id',required=True);p.add_argument('--output-dir',type=Path,required=True);p.add_argument('mode',choices=['probe','ota','sync']);args=p.parse_args()
+    BOARD=args.board_device_id;OUT=args.output_dir.expanduser().resolve()
+    if not BOARD or OUT==ROOT or ROOT in OUT.parents:p.error('explicit board identity and output outside the source repository are required')
+    b=Bench(args.port)
     try:
         if args.mode=='probe':print(json.dumps({'diagnostics':b.diag(),'inventory':b.inventory()},ensure_ascii=False))
         elif args.mode=='ota':ota(b)

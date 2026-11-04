@@ -5,6 +5,7 @@
  * Only exact SessionController admission/cancel and a single approval answerer.
  */
 
+const { createStateContract } = require('./dsh-state-contract')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -188,15 +189,20 @@ function titleOf(bridge, session) {
  * Build the compact session summary served by `GET /sessions` and `/events`.
  * @param {object} bridge - bridge state.
  * @param {object} session - live session.
- * @returns {{id:string,title:string|null,cwd:string|null,lastModified:number,status:'idle'|'running',agentId:string}} summary.
+ * @returns {{id:string,title:string|null,cwd:string|null,lastModified:number,status:'idle'|'running'|'unknown',agentId:string}} summary.
  */
 function summarizeSession(bridge, session) {
   let agent
   try {
     agent = bridge.ctx.agents?.get?.(session.id)
+    if (agent?.session !== undefined && agent.session !== session) agent = undefined
   } catch {
     agent = undefined
   }
+  const snapshot = bridge.stateContract.snapshot(session, bridge.server.epoch)
+  // Current registry activity is safe even when attachment missed turn/start.
+  // It cannot identify an outstanding question or prove task completion.
+  const status = agent?.status === 'running' ? 'running' : agent?.status === 'idle' ? 'idle' : 'unknown'
   const lastModified = bridge.lastModified.get(session.id)
   const createdAt = Number.isSafeInteger(session.header?.createdAt) ? session.header.createdAt : 0
   return {
@@ -204,22 +210,18 @@ function summarizeSession(bridge, session) {
     title: titleOf(bridge, session),
     cwd: typeof session.header?.cwd === 'string' ? session.header.cwd : null,
     lastModified: Number.isFinite(lastModified) ? lastModified : createdAt,
-    status: agent?.status === 'running' ? 'running' : 'idle',
-    state: bridge.sessionStates.get(String(session.id))?.state
-      || (agent?.status === 'running' ? 'working' : 'idle'),
+    status,
+    active: status === 'running' ? true : status === 'idle' ? false : null,
+    activitySource: status === 'unknown' ? null : 'live-agent-status',
+    stateDetailUnknown: snapshot.state === 'unknown',
+    state: snapshot.state,
+    waitKind: snapshot.waitKind,
+    epoch: snapshot.epoch,
+    sourceSeq: snapshot.sourceSeq,
+    stateContract: 'live-session-seq-turn-call-v1',
     displayContent: bridge.sessionText.get(String(session.id)) || '',
-    transitionRevision: bridge.sessionStates.get(String(session.id))?.revision || 0,
+    transitionRevision: snapshot.revision,
     agentId: AGENT_ID,
-  }
-}
-
-function rememberSessionState(bridge, sessionId, state) {
-  const previous = bridge.sessionStates.get(sessionId) || { state: 'idle', revision: 0 }
-  if (previous.state === state) return
-  bridge.sessionStates.set(sessionId, { state, revision: previous.revision + 1 })
-  if (bridge.sessionStates.size > CACHE_LIMIT) {
-    const oldest = bridge.sessionStates.keys().next()
-    if (!oldest.done) bridge.sessionStates.delete(oldest.value)
   }
 }
 
@@ -276,115 +278,78 @@ function rememberSessionText(bridge, sessionId, text) {
   }
 }
 
-/**
- * Translate the DSH turn-end reason into a device lifecycle state.
- * A stopped/cancelled turn must not look like a completed task: only an
- * explicit `completed` ending is terminal `done`.
- * @param {object} data - turn/end event data.
- * @returns {'done'|'error'|'idle'} device state.
- */
-function turnEndState(data) {
-  const kind = typeof data?.reason?.kind === 'string' ? data.reason.kind : ''
-  if (kind === 'error') return 'error'
-  if (kind === 'completed') return 'done'
-  if (kind === 'aborted' || kind === 'interrupted' || kind === 'blocked'
-      || kind === 'max-tokens' || kind === 'forked') return 'stopped'
-  /* Older hosts omit the reason; preserve the historical completed behavior. */
-  return 'done'
-}
-
 function forwardSessionEvent(bridge, session, event) {
   if (!session || typeof session.id !== 'string' || !event || typeof event.type !== 'string') return
+  // Reject a detached/replaced Session, even if an older object reuses its id.
+  if (getLiveSession(bridge.ctx, session.id) !== session) return
+  const normalized = bridge.stateContract.observe(session, event, bridge.server.epoch)
+  if (!normalized.accepted) {
+    if (normalized.changed) publishSessionSummary(bridge, session)
+    return
+  }
   const sessionId = session.id
   const time = Number.isSafeInteger(event.time) ? event.time : bridge.server.now()
-  bridge.lastModified.set(sessionId, time)
-  if (bridge.lastModified.size > CACHE_LIMIT) {
-    const oldest = bridge.lastModified.keys().next()
-    if (!oldest.done) bridge.lastModified.delete(oldest.value)
-  }
+  remember(bridge.lastModified, sessionId, time)
   const data = event.data !== null && typeof event.data === 'object' ? event.data : {}
+  const state = {
+    state: normalized.state,
+    waitKind: normalized.waitKind,
+    epoch: normalized.epoch,
+    sourceSeq: normalized.sourceSeq,
+    transitionRevision: normalized.revision,
+    stateContract: 'live-session-seq-turn-call-v1',
+  }
   switch (event.type) {
     case 'session/title': {
       const title = boundString(data.title, 160) ?? ''
       remember(bridge.titleMap, sessionId, title)
-      bridge.server.publish('session-title', { sessionId, title })
-      return
+      bridge.server.publish('session-title', { sessionId, title, ...state })
+      break
     }
     case 'turn/start':
-      rememberSessionState(bridge, sessionId, 'working')
+    case 'turn/end':
       bridge.server.publish('turn', {
-        sessionId,
-        phase: 'start',
+        sessionId, ...state,
+        phase: event.type === 'turn/start' ? 'start' : 'end',
         turn: Number.isSafeInteger(data.turn) ? data.turn : undefined,
+        reason: boundString(data.reason?.kind, 64) ?? undefined,
       })
-      return
+      break
     case 'assistant/message': {
       const text = assistantMessageText(data.message)
-      if (text) {
-        rememberSessionText(bridge, sessionId, text)
-        publishSessionSummary(bridge, session)
-      }
+      if (text) rememberSessionText(bridge, sessionId, text)
+      publishSessionSummary(bridge, session)
       return
     }
-    case 'turn/end':
-      rememberSessionState(bridge, sessionId, turnEndState(data))
-      bridge.server.publish('turn', {
-        sessionId,
-        phase: 'end',
-        turn: Number.isSafeInteger(data.turn) ? data.turn : undefined,
-        reason: typeof data.reason?.kind === 'string' ? data.reason.kind : undefined,
-      })
-      return
-    case 'tool/call': {
-      const callId = typeof data.callId === 'string' ? data.callId : ''
-      const name = boundString(data.name, 120) ?? 'tool'
-      remember(bridge.toolNames, `${sessionId}:${callId}`, name)
-      // Tool-running is an active device state, not just a transient event.
-      rememberSessionState(bridge, sessionId, 'tool_running')
-      bridge.server.publish('tool', { sessionId, phase: 'start', name, callId: callId || undefined, ok: true })
-      return
-    }
+    case 'tool/call':
     case 'tool/result': {
-      const callId =
-        typeof data.message?.callId === 'string'
-          ? data.message.callId
-          : typeof data.callId === 'string'
-            ? data.callId
-            : ''
-      const key = `${sessionId}:${callId}`
-      const name = bridge.toolNames.get(key) ?? 'tool'
-      bridge.toolNames.delete(key)
-      rememberSessionState(bridge, sessionId, 'working')
+      const call = normalized.call
+      if (!call) break
       bridge.server.publish('tool', {
-        sessionId,
-        phase: 'end',
-        name,
-        callId: callId || undefined,
-        ok: data.message?.isError !== true,
+        sessionId, ...state,
+        phase: event.type === 'tool/call' ? 'start' : 'end',
+        name: call.name,
+        callId: call.callId,
+        ok: event.type === 'tool/call' || (data.message?.isError !== true && !data.error),
       })
-      return
+      break
     }
-    case 'approval/asked': {
-      const approvalId = typeof data.id === 'string' ? data.id : ''
+    case 'approval/asked':
       bridge.server.publish('approval-asked', {
-        sessionId,
-        approvalId,
+        sessionId, ...state, approvalId: boundString(data.id, 256) ?? '',
         tool: boundString(data.toolName, 120) ?? 'unknown',
       })
-      return
-    }
-    case 'approval/decided': {
-      const approvalId = typeof data.id === 'string' ? data.id : ''
+      break
+    case 'approval/decided':
       bridge.server.publish('approval-resolved', {
-        sessionId,
-        approvalId,
+        sessionId, ...state, approvalId: boundString(data.id, 256) ?? '',
         outcome: typeof data.outcome === 'string' ? data.outcome : 'unavailable',
       })
-      return
-    }
+      break
     default:
-      return
+      if (!normalized.changed) return
   }
+  publishSessionSummary(bridge, session)
 }
 
 /**
@@ -523,9 +488,8 @@ function createBridge(ctx, config = {}) {
     logger,
     titleMap: new Map(),
     lastModified: new Map(),
-    sessionStates: new Map(),
+    stateContract: createStateContract({ limit: CACHE_LIMIT }),
     sessionText: new Map(),
-    toolNames: new Map(),
     server: null,
   }
   bridge.server = new BridgeServer({
@@ -570,6 +534,9 @@ function createBridge(ctx, config = {}) {
   ctx.on('session/disposed', (session) => {
     try {
       if (session && typeof session.id === 'string') {
+        const current = getLiveSession(bridge.ctx, session.id)
+        if (current && current !== session) return
+        bridge.stateContract.forget(session)
         bridge.server.retireSession(session.id)
         bridge.server.publish('session', { session: { id: session.id, removed: true } })
       }

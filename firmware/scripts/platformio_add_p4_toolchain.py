@@ -3,6 +3,8 @@
 Import("env")
 
 import os
+import re
+import atexit
 
 project_dir = env.subst("$PROJECT_DIR")
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
@@ -16,7 +18,7 @@ env["ENV"]["PET_P4_UART_BAUD_OVERRIDE"] = env.GetProjectOption(
 
 
 def normalize_component_lock(source, target, env):
-    """Undo ESP-IDF's machine-specific lock rewrite after a successful build."""
+    """Restore only this project's local component source paths, not versions."""
     lock_name = "dependencies.v3.lock" if env.GetProjectOption("custom_p4_chip_family", "v1") == "v3" else "dependencies.lock"
     lock_path = os.path.join(project_dir, lock_name)
     if not os.path.isfile(lock_path):
@@ -24,20 +26,29 @@ def normalize_component_lock(source, target, env):
     with open(lock_path, "r", encoding="utf-8") as lock_file:
         current = lock_file.read()
     portable_root = "$PET_P4_PROJECT_DIR"
-    candidates = {
-        project_dir,
-        project_dir.replace("\\", "/"),
-        project_dir.replace("/", "\\"),
-    }
-    normalized = current
-    for candidate in candidates:
-        normalized = normalized.replace(candidate, portable_root)
+    prefix=project_dir.replace("\\","/").rstrip("/")+"/components/"
+    def portable_path(match):
+        value=match.group(2).strip()
+        if len(value)>1 and value[0]==value[-1] and value[0] in ("'",'"'):
+            value=value[1:-1]
+        value=value.replace("\\","/")
+        if not value.startswith(prefix):return match.group(0)
+        component=value[len(prefix):]
+        if not component or component in (".","..") or "/" in component or not os.path.isdir(os.path.join(project_dir,"components",component)):
+            raise RuntimeError("Unexpected project-local component dependency path")
+        return match.group(1)+portable_root+"/components/"+component
+    normalized=re.sub(r"(?m)^([ \t]+path:[ \t]+)([^\r\n]+)$",portable_path,current)
     if normalized != current:
         with open(lock_path, "w", encoding="utf-8", newline="\n") as lock_file:
             lock_file.write(normalized)
 
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", normalize_component_lock)
+# ESP-IDF also rewrites the lock when an incremental build decides the binary
+# is already up to date; its .bin post-action is then skipped. Restore generated
+# local paths at graceful SCons exit as well. Idempotent, and versions/hashes stay
+# unchanged. Interrupted/abrupt exits still require the normal source hash gate.
+atexit.register(normalize_component_lock,None,None,env)
 
 toolchain_dir = env.PioPlatform().get_package_dir("toolchain-riscv32-esp")
 if toolchain_dir:

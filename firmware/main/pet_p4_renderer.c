@@ -3,7 +3,7 @@
  *         semantic shapes, and persisted RGB565-alpha sprite frames.
  * [Output] Logical RGB565 P4 frames with aspect-fit asset scaling and an
  *          optional direct-to-panel H.264 path for full-size idle playback,
- *          plus a main-page indicator and a paginated component card catalog with native icons,
+ *          plus a paginated component card catalog with native icons,
  *          global-binding-neutral navigation hints, modern clean cards/HUDs, and
  *          Session-independent recording feedback on the idle main page,
  *          a lightweight transfer screen that never reads changing assets,
@@ -14,10 +14,22 @@
  */
 
 #include "pet_p4_renderer.h"
+#include "pet_p4_compact_underlay.h"
+#include "pet_p4_fs_activity.h"
 #include "pet_p4_frame_gate.h"
+#include "pet_p4_logical_retention.h"
+#include "pet_p4_render_trace.h"
+#include "pet_p4_ppa_trace.h"
+#include "pet_p4_task_policy.h"
+#include "pet_p4_prefetch_lifetime.h"
+#include "pet_p4_h264_packed.h"
+#ifndef PET_P4_H264_PREFETCH
+#define PET_P4_H264_PREFETCH 0
+#endif
 #include "pet_p4_bubble_pixels.h"
 
 #include <limits.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,8 +42,13 @@
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_heap_caps.h"
+/* Routine renderer success/trace logs are DEBUG only. Both production targets
+ * compile at INFO (maximum INFO), so frames and frame-tail metrics never wait
+ * for serialized protocol TX merely to announce normal rendering. Keep WARN/
+ * ERROR, numeric fault/lifetime metrics and all frame/gap clocks unchanged. */
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -40,7 +57,14 @@
 #include "miniz.h"
 
 #include "pet_p4_lcd.h"
+#include "pet_p4_rgb565_span.h"
+#include "pet_p4_rgb565_blend.h"
+#include "pet_p4_rgb565_rotate.h"
+#include "pet_p4_h264_pack_word.h"
 #include "pet_p4_miniapp.h"
+#if PET_SERVICE_BRIDGE_ENABLED
+#include "pet_p4_app_host.h"
+#endif
 #include "pet_p4_center_layout.h"
 #include "../assets/component-center/catalog.h"
 #include "pet_p4_image.h"
@@ -50,12 +74,49 @@
 #include "pet_p4_audio.h"
 #include "pet_p4_instrument_core.h"
 #include "pet_p4_behavior.h"
+#include "pet_p4_raw_assets.h"
+#include "pet_p4_resources_device.h"
 
 #define PET_P4_ASSET_WIDTH 640
 static bool g_last_native_valid;
 static uint32_t g_lcd_submitted, g_lcd_skipped;
 static portMUX_TYPE g_metrics_lock = portMUX_INITIALIZER_UNLOCKED;
 static pet_p4_render_metrics_t g_metrics;
+#if PET_P4_APP_CLEAR_OPAQUE_CENTER
+/* Renderer-serialized numeric counters, copied into the lifetime metrics. */
+static uint32_t g_clear_center_frames,g_clear_full_frames;
+#endif
+#if PET_P4_APP_COLD_FAST
+static uint32_t g_cold_fast_image_nodes,g_cold_fast_panel_nodes,g_cold_fast_clear_skips;
+#endif
+#if PET_P4_APP_PPA_COPY
+static uint32_t g_ppa_copies,g_ppa_copy_fallbacks,g_ppa_copy_mismatches;static bool g_ppa_copy_disabled;
+#if PET_P4_H264_WORKER_PACK
+/* Render-thread owned; written only at take from job-local worker values. */
+static uint32_t g_worker_packs,g_worker_pack_fallbacks,g_worker_pack_max_us,g_worker_pack_last_us;
+#endif
+#endif
+#if PET_P4_GAP_PEAK_CONTEXT
+/* Written by the main task between frames, consumed by its own next frame. */
+static pet_render_gap_context_t g_loop_context;
+void pet_p4_renderer_note_loop(uint32_t wait_us,uint32_t held_us,uint32_t miniapp_us){
+  if(wait_us>g_loop_context.wait_max_us)g_loop_context.wait_max_us=wait_us;
+  if(held_us>g_loop_context.held_max_us)g_loop_context.held_max_us=held_us;
+  if(miniapp_us>g_loop_context.miniapp_max_us)g_loop_context.miniapp_max_us=miniapp_us;
+  pet_p4_render_trace_add(&g_loop_context.held_total_us,held_us);
+  pet_render_counter_increment(&g_loop_context.iterations);
+}
+#if PET_P4_GAP_PEAK_HOLDER
+/* Called before note_loop raises wait_max_us, so a wait equal to or above the
+ * current maximum re-attributes the context; a shorter one leaves it. */
+void pet_p4_renderer_note_wait_holder(uint32_t wait_us,const char *holder,uint32_t topic_hash){
+  if(wait_us<g_loop_context.wait_max_us)return;
+  g_loop_context.wait_topic_hash=topic_hash;
+  strncpy(g_loop_context.wait_holder,holder?holder:"",sizeof(g_loop_context.wait_holder)-1);
+  g_loop_context.wait_holder[sizeof(g_loop_context.wait_holder)-1]=0;
+}
+#endif
+#endif
 pet_p4_render_metrics_t pet_p4_renderer_metrics(void) {
   portENTER_CRITICAL(&g_metrics_lock);
   pet_p4_render_metrics_t result = g_metrics;
@@ -75,10 +136,21 @@ pet_p4_render_metrics_t pet_p4_renderer_metrics(void) {
 #define PET_P4_PPA_BUFFER_ALIGNMENT 64U
 #define PET_P4_ASSET_CACHE_SLOTS 2U
 #define PET_P4_ASSET_CACHE_MAX_FILE_BYTES (2U * 1024U * 1024U)
+#define PET_P4_ASSET_PREPARE_CHUNK_BYTES 16384U
+#ifndef PET_P4_ASSET_PREPARE_STACK_BYTES
+#define PET_P4_ASSET_PREPARE_STACK_BYTES 4096U
+#endif
+#define PET_P4_ASSET_PREPARE_PRIORITY 1U
 #define PET_P4_H264_MAX_DECODE_FRAMES_PER_RENDER 1U
-#define PET_P4_H264_PRIMARY_TASK_PRIORITY 16U
+#define PET_P4_H264_PRIMARY_TASK_PRIORITY PET_P4_H264_TASK_PRIORITY
 #define PET_P4_H264_PACK_TASK_STACK_BYTES 3072U
-#define PET_P4_H264_PACK_TASK_PRIORITY 16U
+#define PET_P4_H264_PACK_TASK_PRIORITY PET_P4_H264_TASK_PRIORITY
+#if defined(CONFIG_ESP_H264_DUAL_TASK)
+_Static_assert(CONFIG_ESP_H264_DUAL_TASK_PRIORITY == PET_P4_H264_SECONDARY_TASK_PRIORITY,
+  "H264 secondary worker priority must match the reviewed policy");
+_Static_assert(CONFIG_ESP_H264_DUAL_TASK_CORE == 1,
+  "Secondary decode scheduling requires the dedicated second core");
+#endif
 #define P4_BOOT_DIAGNOSTIC_MS 3000ULL
 #define PET_P4_UI_WIDTH 640
 #define PET_P4_UI_HEIGHT 480
@@ -112,7 +184,7 @@ pet_p4_render_metrics_t pet_p4_renderer_metrics(void) {
 static const char *TAG = "pet-p4-renderer";
 
 extern const lv_font_t pet_p4_font_cn_16;
-extern const lv_font_t pet_p4_font_cn_32;
+#include "pet_p4_font_native32.h"
 
 static uint16_t *g_framebuffer;
 static uint16_t *g_native_framebuffer;
@@ -123,6 +195,51 @@ static uint16_t *g_jpeg_output;
 static uint8_t *g_tjpgd_workbuf;
 static jpeg_decoder_handle_t g_jpeg_decoder;
 static ppa_client_handle_t g_ppa_srm_client;
+/* Diagnostic state outlives every ISR callback. user_data is an opaque numeric
+ * cookie, never a pointer to a caller's stack or an image buffer. */
+static DRAM_ATTR pet_ppa_trace_state_t g_ppa_trace;
+static DRAM_ATTR portMUX_TYPE g_ppa_trace_mux=portMUX_INITIALIZER_UNLOCKED;
+#include "pet_p4_ppa_queue_probe.inc"
+static void ppa_trace_frame_begin(void) {
+  portENTER_CRITICAL(&g_ppa_trace_mux);
+  pet_ppa_trace_frame_begin(&g_ppa_trace);
+  portEXIT_CRITICAL(&g_ppa_trace_mux);
+}
+static void ppa_trace_frame_snapshot(pet_ppa_trace_frame_t *out) {
+  portENTER_CRITICAL(&g_ppa_trace_mux);
+  pet_ppa_trace_snapshot(&g_ppa_trace,out);
+  portEXIT_CRITICAL(&g_ppa_trace_mux);
+}
+static bool IRAM_ATTR ppa_trace_done(ppa_client_handle_t client,ppa_event_data_t *event,void *user_data) {
+  (void)client;(void)event;
+  uint32_t cookie=(uint32_t)(uintptr_t)user_data;
+  uint64_t now_us=(uint64_t)esp_timer_get_time();
+  portENTER_CRITICAL_ISR(&g_ppa_trace_mux);
+  pet_ppa_trace_callback(&g_ppa_trace,cookie,now_us);
+  portEXIT_CRITICAL_ISR(&g_ppa_trace_mux);
+  return false; /* No extra task notification, yield, log, or ownership change. */
+}
+static esp_err_t ppa_trace_srm(pet_ppa_trace_op_t kind,ppa_srm_oper_config_t *config) {
+  uint64_t started_us=(uint64_t)esp_timer_get_time();
+  portENTER_CRITICAL(&g_ppa_trace_mux);
+  uint32_t cookie=pet_ppa_trace_begin(&g_ppa_trace,kind,started_us);
+  portEXIT_CRITICAL(&g_ppa_trace_mux);
+  config->user_data=(void *)(uintptr_t)cookie;
+#if PET_P4_PPA_QUEUE_PROBE
+  ppa_queue_scope_begin(g_ppa_srm_client,cookie);
+#endif
+  /* The caller's mode, buffers and all image parameters are unchanged. Never
+   * hold the diagnostic lock while the original blocking transaction runs. */
+  esp_err_t result=ppa_do_scale_rotate_mirror(g_ppa_srm_client,config);
+#if PET_P4_PPA_QUEUE_PROBE
+  ppa_queue_scope_end(cookie);
+#endif
+  uint64_t returned_us=(uint64_t)esp_timer_get_time();
+  portENTER_CRITICAL(&g_ppa_trace_mux);
+  pet_ppa_trace_return(&g_ppa_trace,cookie,result==ESP_OK,returned_us);
+  portEXIT_CRITICAL(&g_ppa_trace_mux);
+  return result;
+}
 static size_t g_jpeg_input_capacity;
 static size_t g_jpeg_output_capacity;
 static bool g_jpeg_input_dma_compatible;
@@ -146,7 +263,7 @@ static pet_p4_behavior_t g_behavior;
 static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_miniapp_sprites;
 // Only the main render task uses these snapshots. Keep large views off its
 // bounded stack; package/legacy media rendering shares one snapshot per frame.
-static EXT_RAM_BSS_ATTR pet_p4_miniapp_view_t g_miniapp_view_snapshot;
+static EXT_RAM_BSS_ATTR pet_p4_miniapp_render_snapshot_t g_miniapp_render_snapshot;
 static EXT_RAM_BSS_ATTR pet_p4_media_view_t g_media_view_snapshot;
 static bool g_logged_asset;
 static bool g_logged_missing_asset;
@@ -155,11 +272,23 @@ static bool g_framebuffer_initialized;
 static unsigned long long g_asset_decode_blocked_until_ms;
 static char g_last_render_page[PET_P4_PAGE_MAX];
 static uint32_t g_last_decode_us;
+static pet_p4_render_trace_t g_render_trace;
+static uint32_t g_render_trace_frame;
 static unsigned int g_asset_cache_revision;
+static uint64_t g_asset_renderer_storage_epoch;
 static uint16_t *g_session_overlay_cache;
 static uint64_t g_session_overlay_signature;
 static bool g_session_overlay_cache_valid;
 static bool g_last_realtime_conversation;
+/* Reset when leaving/clearing main. A pending first appearance must not paint
+ * its status bubble over retained component-center pixels. */
+static bool g_main_appearance_ready;
+/* Only the compact panel ROI is retained, never another full frame. */
+static EXT_RAM_BSS_ATTR pet_compact_underlay_t g_main_compact_underlay;
+static bool g_main_compact_frame_clean;
+_Static_assert(PET_P4_UI_WIDTH == PET_COMPACT_FRAME_WIDTH, "compact underlay stride");
+_Static_assert(PET_P4_UI_HEIGHT == PET_COMPACT_ROI_Y + PET_COMPACT_ROI_HEIGHT + 16,
+  "compact underlay geometry");
 static bool g_last_approval_visible;
 static bool g_session_overlay_cache_allocation_failed;
 static uint8_t g_session_overlay_row_run_count[PET_P4_UI_HEIGHT];
@@ -181,8 +310,6 @@ static TaskHandle_t g_h264_pack_task;
 static SemaphoreHandle_t g_h264_pack_done;
 static bool g_h264_pack_task_init_attempted;
 static char g_h264_fs_path[80];
-static char g_h264_validated_fs_path[80];
-static bool g_h264_single_slice_valid;
 
 typedef struct {
   const uint8_t *plane_y;
@@ -203,9 +330,92 @@ typedef struct {
   size_t size;
   unsigned long long last_used_ms;
   char fs_path[80];
+  bool loading, finished, failed, h264, single_slice_valid, raw_source;
+#if PET_P4_H264_PREFETCH
+  uint8_t decoder_readers; /* exact immutable-source pins; mux protected */
+#endif
+  int source_slot;
+  uint32_t raw_offset;
+  uint64_t storage_epoch;
+  pet_resource_owner_t owner;
+  pet_resource_lease_t buffer_lease, prepare_lease;
 } pet_p4_asset_cache_entry_t;
 
 static pet_p4_asset_cache_entry_t g_asset_cache[PET_P4_ASSET_CACHE_SLOTS];
+static portMUX_TYPE g_asset_prepare_mux=portMUX_INITIALIZER_UNLOCKED;
+static TaskHandle_t g_asset_prepare_task;
+static int g_asset_prepare_slot=-1;
+static bool g_asset_cache_pending;
+static uint64_t g_asset_prepare_cancel_epoch;
+static bool g_asset_prepare_suspended;
+static uint64_t g_asset_prepare_storage_epoch;
+#if PET_P4_H264_PREFETCH
+typedef struct {
+  pet_prefetch_ticket_t ticket;
+  pet_resource_owner_t owner;
+  pet_resource_lease_t lease;
+  pet_p4_asset_cache_entry_t *source;
+  uint64_t cancel_epoch;
+  char path[80];
+  int width,height,frame;
+  bool restart,success;
+  uint32_t output_size,decode_us,wall_us;
+  uint64_t enqueued_us;
+  uint8_t *output;
+#if PET_P4_H264_WORKER_PACK
+  /* Back buffer assigned by the render thread at offer; packed by the worker
+   * in WORKING only; adopted by the render thread at take. Job-local results. */
+  uint8_t *packed;size_t packed_capacity;
+  int packed_stride,packed_storage_h;bool packed_ok;uint32_t pack_us;
+#endif
+} pet_h264_prefetch_job_t;
+static pet_prefetch_lifetime_t g_h264_prefetch_lifetime;
+static pet_h264_prefetch_job_t g_h264_prefetch_job;
+/* Packed-current is renderer-owned, never decoder output or worker metadata. */
+static pet_h264_packed_view_t g_h264_packed_current;
+static int g_h264_presented_frame=-1;
+static bool g_h264_reset_requested;
+static bool g_h264_program_window;
+static bool h264_prefetch_worker(void);
+#if PET_P4_KEYFRAME_BG
+static bool keyframe_worker(void);
+/* Caller holds g_asset_prepare_mux; no nested lock or wait. */
+static bool keyframe_working_locked(void);
+#endif
+static void h264_prefetch_cancel_locked(void);
+static bool h264_prefetch_reset(void);
+_Static_assert(sizeof(StackType_t)==1,"ESP-IDF P4 task stack/HWM units are bytes");
+#endif
+
+bool pet_p4_renderer_program_window_begin(void){
+#if PET_P4_H264_PREFETCH
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool idle=!g_h264_program_window&&g_h264_prefetch_lifetime.phase!=PET_PREFETCH_WORKING
+    &&g_h264_prefetch_lifetime.phase!=PET_PREFETCH_CONSUMING;
+#if PET_P4_KEYFRAME_BG
+  idle=idle&&!keyframe_working_locked();
+#endif
+  if(idle)g_h264_program_window=true;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  return idle;
+#else
+  return true;
+#endif
+}
+void pet_p4_renderer_program_window_end(void){
+#if PET_P4_H264_PREFETCH
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool held=g_h264_program_window;g_h264_program_window=false;
+  TaskHandle_t worker=g_asset_prepare_task;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  if(held&&worker)xTaskNotifyGive(worker);
+#endif
+}
+
+static bool h264_stream_has_single_slice_access_units(
+  const uint8_t *stream, size_t stream_size,
+  const pet_p4_asset_cache_entry_t *job
+);
 
 typedef struct {
   uint32_t samples;
@@ -221,10 +431,35 @@ typedef struct {
   uint64_t total_us;
   uint32_t over_budget;
   uint32_t total_samples_us[PET_P4_RENDER_PERF_WINDOW];
+  pet_p4_render_peak_t peak;
+#if PET_P4_RENDER_LCD_SPLIT_PROBE && !PET_P4_RETAIN_PEAK_PHASES
+  /* A retained boot peak already owns the split. Do not duplicate a second
+   * window-peak record in that private mode; the dedicated LCD probe keeps
+   * its original window logging unchanged. */
+  uint32_t peak_compare_us;
+  bool peak_compare_valid;
+  pet_lcd_observation_t peak_lcd;
+#endif
 } pet_p4_render_perf_t;
 
 static pet_p4_render_perf_t g_render_perf;
+#if PET_P4_LOGICAL_COMPARE
+static bool g_app_logical_same;
+_Static_assert(PET_P4_NATIVE_OUTPUT_BUFFER_COUNT>=2,"Logical reuse needs distinct native buffers");
+#endif
+#if PET_P4_APP_RETAIN_LOGICAL
+static pet_logical_retention_t g_app_final_retention;
+static pet_logical_common_plan_t g_app_common_plan;
+static bool g_app_may_retain,g_app_final_reused,g_app_final_eligible;
+#endif
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+static uint32_t g_last_compare_us;
+static bool g_last_compare_valid;
+static pet_lcd_observation_t g_last_lcd_observation;
+#endif
 static int64_t g_last_slow_render_log_us;
+static int64_t g_last_frame_gap_log_us;
+static int64_t g_previous_render_ended_us;
 static uint32_t g_last_h264_pack_us;
 static uint32_t g_last_h264_convert_us;
 
@@ -246,8 +481,8 @@ static void note_asset_decode_success(void) {
 }
 
 static uint32_t elapsed_us_clamped(int64_t started_us, int64_t ended_us) {
-  int64_t elapsed = ended_us - started_us;
-  if (elapsed <= 0) return 0;
+  if (started_us < 0 || ended_us <= started_us) return 0;
+  uint64_t elapsed = (uint64_t)ended_us - (uint64_t)started_us;
   return elapsed > UINT32_MAX ? UINT32_MAX : (uint32_t) elapsed;
 }
 
@@ -256,6 +491,38 @@ static uint32_t perf_average_tenths_ms(uint64_t total_us, uint32_t samples) {
   return (uint32_t) (total_us / ((uint64_t) samples * 100ULL));
 }
 
+#if PET_P4_APP_NODE_TRACE
+_Static_assert(PET_SURFACE_NODES==PET_APP_TRACE_NODES,"node trace must cover every surface node");
+typedef struct {uint32_t *out;int64_t started;} app_node_scope_t;
+static app_node_scope_t app_node_scope_begin(uint32_t *out){
+  return (app_node_scope_t){out,esp_timer_get_time()};
+}
+static void app_node_scope_end(app_node_scope_t *scope){
+  if(!pet_app_draw_trace_add(scope->out,scope->started,esp_timer_get_time())
+      &&g_render_trace.app_nodes.invalid_clock<UINT32_MAX)g_render_trace.app_nodes.invalid_clock++;
+}
+static void app_node_trace_log(const pet_p4_render_trace_t *trace){
+  if(!trace->app_draw_started_us)return;
+#if PET_P4_QUOTA_V3
+  char line[1536]; /* 64 full-width slots plus the 64-bit mask header */
+#else
+  char line[1152]; /* 48 full-width slots plus the 64-bit mask header */
+#endif
+  if(pet_app_draw_trace_format(&trace->app_nodes,trace->frame,line,sizeof(line)))ESP_LOGD(TAG,"%s",line);
+  else ESP_LOGW(TAG,"P4 app nodes truncated frame=%u",(unsigned)trace->frame);
+#if PET_P4_APP_RETAIN_LOGICAL
+  if(trace->logical_retained)ESP_LOGD(TAG,"P4 final logical retained frame=%u",(unsigned)trace->frame);
+#endif
+}
+#define APP_NODE_SCOPE(name,field) app_node_scope_t name __attribute__((cleanup(app_node_scope_end)))=app_node_scope_begin(&g_render_trace.app_nodes.field)
+#define APP_NODE_MARK(index) (g_render_trace.app_nodes.nodes_mask|=UINT64_C(1)<<(index))
+#define APP_NODE_HIT() (g_render_trace.app_nodes.cache_hit=1)
+#else
+#define APP_NODE_SCOPE(name,field)
+#define APP_NODE_MARK(index) ((void)0)
+#define APP_NODE_HIT() ((void)0)
+#define app_node_trace_log(trace) ((void)0)
+#endif
 static void record_render_performance(
   int64_t started_us,
   int64_t ended_us,
@@ -270,14 +537,113 @@ static void record_render_performance(
   g_metrics.last_decode_us = g_last_decode_us;
   g_metrics.submitted_frames = g_lcd_submitted;
   g_metrics.unchanged_frames = g_lcd_skipped;
+#if PET_P4_RETAIN_PEAK_PHASES
+  if(total_us>g_metrics.lifetime.max_us){
+    g_metrics.lifetime.asset_us=asset_us;g_metrics.lifetime.decode_us=g_last_decode_us;
+    g_metrics.lifetime.pack_us=g_last_h264_pack_us;g_metrics.lifetime.convert_us=g_last_h264_convert_us;
+#if PET_P4_LOGICAL_COMPARE
+    g_metrics.lifetime.logical_compare_us=g_render_trace.logical_compare_us;
+#if PET_P4_APP_RETAIN_LOGICAL
+    g_metrics.lifetime.logical_retained=g_render_trace.logical_retained;
+#endif
+#endif
+    g_metrics.lifetime.overlay_us=overlay_us;g_metrics.lifetime.rotate_us=rotate_us;g_metrics.lifetime.lcd_us=lcd_us;
+    g_metrics.lifetime.content_us=g_render_trace.content_us;g_metrics.lifetime.common_us=g_render_trace.common_overlay_us;
+    g_metrics.lifetime.bubble_select_us=g_render_trace.bubble_select_us;
+    g_metrics.lifetime.pinned_blit_us=g_render_trace.pinned_blit_us;
+    g_metrics.lifetime.bubble_draw_us=g_render_trace.bubble_draw_us;
+    g_metrics.lifetime.session_cache_fill_us=g_render_trace.session_cache_fill_us;
+    g_metrics.lifetime.session_cache_draw_us=g_render_trace.session_cache_draw_us;
+    g_metrics.lifetime.session_cache_scan_us=g_render_trace.session_cache_scan_us;
+    g_metrics.lifetime.session_cache_copy_us=g_render_trace.session_cache_copy_us;
+    g_metrics.lifetime.voice_us=g_render_trace.voice_us;
+    g_metrics.lifetime.resolve_us=g_render_trace.resolve_us;g_metrics.lifetime.cache_us=g_render_trace.cache_us;
+    g_metrics.lifetime.scale_us=g_render_trace.scale_us;
+#if PET_P4_APP_PHASE_TRACE
+    g_metrics.lifetime.app_snapshot_us=g_render_trace.app_snapshot_us;
+    g_metrics.lifetime.app_snapshot_wait_us=g_render_trace.app_snapshot_wait_us;
+    g_metrics.lifetime.app_draw_us=g_render_trace.app_draw_us;
+#endif
+#if PET_P4_APP_NODE_TRACE
+    g_metrics.lifetime.app_nodes=g_render_trace.app_nodes;
+#endif
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+    g_metrics.lifetime.compare_us=g_last_compare_us;g_metrics.lifetime.compare_valid=g_last_compare_valid;
+    g_metrics.lifetime.lcd_submit_us=g_last_lcd_observation.submit_us;g_metrics.lifetime.lcd_wait_us=g_last_lcd_observation.wait_us;
+    g_metrics.lifetime.lcd_valid=g_last_lcd_observation.valid;g_metrics.lifetime.lcd_submitted=g_last_lcd_observation.submitted;
+    g_metrics.lifetime.lcd_waited=g_last_lcd_observation.refresh_waited;
+#endif
+  }
+#endif
+#if PET_P4_FRAME_IO_OVERLAP
+  {
+    /* A widget operation lane (install/delete/activate or save flush) was
+     * active, started or completed inside this frame's wall window. This is a
+     * numeric correlation for diagnosis only, not CPU time or a cause. */
+    bool overlapped=false;
+    for(unsigned i=0;i<2;i++){
+      const pet_p4_render_operation_observation_t *before=&g_render_trace.operation_before[i],*after=&g_render_trace.operation_after[i];
+      if(((before->phase|after->phase)>>16)&1U)overlapped=true;
+      if(after->seq!=before->seq||g_render_trace.completed_after[i]!=g_render_trace.completed_before[i])overlapped=true;
+    }
+    uint32_t nodes_us=pet_app_draw_trace_nodes_total(&g_render_trace.app_nodes);
+    pet_render_overlap_record(&g_metrics.lifetime,overlapped,g_render_trace.page==PET_RENDER_PAGE_APP,total_us,g_render_trace.frame,
+      g_render_trace.app_draw_us,rotate_us,lcd_us,g_render_trace.app_nodes.clear_us,nodes_us,overlay_us,
+      total_us>g_metrics.lifetime.max_us);
+  }
+#endif
+#if PET_P4_APP_CLEAR_OPAQUE_CENTER
+  g_metrics.lifetime.clear_center_frames=g_clear_center_frames;
+  g_metrics.lifetime.clear_full_frames=g_clear_full_frames;
+#endif
+#if PET_P4_APP_COLD_FAST
+  g_metrics.lifetime.cold_fast_image_nodes=g_cold_fast_image_nodes;
+  g_metrics.lifetime.cold_fast_panel_nodes=g_cold_fast_panel_nodes;
+  g_metrics.lifetime.cold_fast_clear_skips=g_cold_fast_clear_skips;
+#endif
+#if PET_P4_APP_PPA_COPY
+  g_metrics.lifetime.ppa_copies=g_ppa_copies;g_metrics.lifetime.ppa_copy_fallbacks=g_ppa_copy_fallbacks;g_metrics.lifetime.ppa_copy_mismatches=g_ppa_copy_mismatches;
+#endif
+#if PET_P4_H264_WORKER_PACK
+  g_metrics.lifetime.worker_packs=g_worker_packs;g_metrics.lifetime.worker_pack_fallbacks=g_worker_pack_fallbacks;
+  g_metrics.lifetime.worker_pack_max_us=g_worker_pack_max_us;g_metrics.lifetime.worker_pack_last_us=g_worker_pack_last_us;
+#endif
+#if PET_P4_GAP_PEAK_CONTEXT
+  {
+    pet_render_gap_context_t context=g_loop_context;
+    context.frame=g_render_trace.frame;
+#if PET_P4_GAP_PEAK_HOLDER
+    context.at_us=(uint64_t)ended_us;
+#endif
+    context.lane0_phase=g_render_trace.operation_before[0].phase;context.lane1_phase=g_render_trace.operation_before[1].phase;
+    pet_render_gap_context_record(&g_metrics.lifetime,g_render_trace.gap_us,&context);
+    memset(&g_loop_context,0,sizeof(g_loop_context));
+  }
+#endif
+  pet_render_lifetime_record(&g_metrics.lifetime,total_us,g_render_trace.gap_us,
+    g_render_trace.frame,g_render_trace.page,started_us,ended_us,
+    PET_P4_RENDER_FRAME_BUDGET_US,100000U);
   portEXIT_CRITICAL(&g_metrics_lock);
+  /* Execution time alone hides time spent waiting between frames, including
+   * protocol/state-lock work. Report the gap separately; it is not CPU time
+   * and is not attributed to the operation observed at the next frame start. */
+  if (g_render_trace.gap_us > 100000U
+      && (!g_last_frame_gap_log_us || ended_us-g_last_frame_gap_log_us >= 2000000LL)) {
+    ESP_LOGD(TAG, "P4 frame gap frame=%u gap_us=%u",
+      (unsigned)g_render_trace.frame, (unsigned)g_render_trace.gap_us);
+    ESP_LOGD(TAG, PET_RENDER_CONTEXT_FORMAT, PET_RENDER_CONTEXT_VALUES(g_render_trace));
+#if PET_P4_APP_NODE_TRACE
+    app_node_trace_log(&g_render_trace);
+#endif
+    g_last_frame_gap_log_us=ended_us;
+  }
   if (total_us > 100000U
       && (!g_last_slow_render_log_us
           || ended_us - g_last_slow_render_log_us >= 2000000LL)) {
     ESP_LOGW(
       TAG,
       "P4 slow render total=%u.%ums asset=%u.%u decode=%u.%u pack=%u.%u convert=%u.%u "
-      "overlay=%u.%u rotate=%u.%u lcd=%u.%u",
+      "overlay=%u.%u rotate=%u.%u lcd=%u.%u" PET_RENDER_TRACE_FORMAT,
       total_us / 1000U,
       (total_us % 1000U) / 100U,
       asset_us / 1000U,
@@ -293,19 +659,42 @@ static void record_render_performance(
       rotate_us / 1000U,
       (rotate_us % 1000U) / 100U,
       lcd_us / 1000U,
-      (lcd_us % 1000U) / 100U
+      (lcd_us % 1000U) / 100U,
+      PET_RENDER_TRACE_VALUES(g_render_trace)
     );
+    if (g_render_trace.start_us) {
+      ESP_LOGD(TAG, PET_RENDER_CONTEXT_FORMAT, PET_RENDER_CONTEXT_VALUES(g_render_trace));
+#if PET_P4_APP_NODE_TRACE
+      app_node_trace_log(&g_render_trace);
+#endif
+      ESP_LOGD(TAG, PET_RENDER_PPA_FORMAT, PET_RENDER_PPA_VALUES(g_render_trace));
+    }
     g_last_slow_render_log_us = ended_us;
   }
   if (total_us > PET_P4_RENDER_PERF_GAP_RESET_US) {
+    portENTER_CRITICAL(&g_metrics_lock);
+    pet_render_counter_increment(&g_metrics.lifetime.window_resets);
+    portEXIT_CRITICAL(&g_metrics_lock);
     memset(&g_render_perf, 0, sizeof(g_render_perf));
     return;
   }
   if (g_render_perf.samples > 0
       && started_us - g_render_perf.last_ended_us > PET_P4_RENDER_PERF_GAP_RESET_US) {
+    portENTER_CRITICAL(&g_metrics_lock);
+    pet_render_counter_increment(&g_metrics.lifetime.window_resets);
+    portEXIT_CRITICAL(&g_metrics_lock);
     memset(&g_render_perf, 0, sizeof(g_render_perf));
   }
   if (g_render_perf.samples == 0) g_render_perf.started_us = started_us;
+#if PET_P4_RENDER_LCD_SPLIT_PROBE && !PET_P4_RETAIN_PEAK_PHASES
+  if(!g_render_perf.peak.valid||total_us>g_render_perf.peak.total_us){
+    g_render_perf.peak_compare_us=g_last_compare_us;g_render_perf.peak_compare_valid=g_last_compare_valid;g_render_perf.peak_lcd=g_last_lcd_observation;
+  }
+#endif
+  pet_p4_render_peak_record(
+    &g_render_perf.peak, &g_render_trace, total_us, asset_us, g_last_decode_us,
+    g_last_h264_pack_us, g_last_h264_convert_us, overlay_us, rotate_us, lcd_us
+  );
   uint32_t index = g_render_perf.samples;
   if (index >= PET_P4_RENDER_PERF_WINDOW) index = PET_P4_RENDER_PERF_WINDOW - 1;
   g_render_perf.total_samples_us[index] = total_us;
@@ -352,8 +741,10 @@ static void record_render_performance(
   g_metrics.p95_us = sorted[94];
   g_metrics.max_us = sorted[PET_P4_RENDER_PERF_WINDOW - 1];
   g_metrics.window_samples = PET_P4_RENDER_PERF_WINDOW;
+  pet_render_counter_increment(&g_metrics.lifetime.completed_windows);
+  g_metrics.lifetime.window_end_frame=g_render_trace.frame;
   portEXIT_CRITICAL(&g_metrics_lock);
-  ESP_LOGI(
+  ESP_LOGD(
     TAG,
     "P4 render perf fps=%u.%u total=%u.%ums p95=%u.%ums max=%u.%ums "
     "asset=%u.%u decode=%u.%u pack=%u.%u convert=%u.%u overlay=%u.%u rotate=%u.%u lcd=%u.%u over66=%u/%u",
@@ -382,37 +773,284 @@ static void record_render_performance(
     g_render_perf.over_budget,
     PET_P4_RENDER_PERF_WINDOW
   );
+  /* Same frame as max, not a mixture of independently averaged/maxed stages. */
+  const pet_p4_render_peak_t *peak = &g_render_perf.peak;
+  ESP_LOGD(
+    TAG,
+    "P4 render peak total_us=%u asset_us=%u decode_us=%u pack_us=%u convert_us=%u "
+    "overlay_us=%u rotate_us=%u lcd_us=%u" PET_RENDER_TRACE_FORMAT,
+    (unsigned int) peak->total_us, (unsigned int) peak->asset_us,
+    (unsigned int) peak->decode_us, (unsigned int) peak->pack_us,
+    (unsigned int) peak->convert_us, (unsigned int) peak->overlay_us,
+    (unsigned int) peak->rotate_us, (unsigned int) peak->lcd_us,
+    PET_RENDER_TRACE_VALUES(peak->trace)
+  );
+  if (peak->trace.start_us) {
+    ESP_LOGD(TAG, PET_RENDER_CONTEXT_FORMAT, PET_RENDER_CONTEXT_VALUES(peak->trace));
+#if PET_P4_APP_NODE_TRACE
+    app_node_trace_log(&peak->trace);
+#endif
+    ESP_LOGD(TAG, PET_RENDER_PPA_FORMAT, PET_RENDER_PPA_VALUES(peak->trace));
+  }
+#if PET_P4_RENDER_LCD_SPLIT_PROBE && !PET_P4_RETAIN_PEAK_PHASES
+  ESP_LOGD(TAG,"P4 lcd split frame=%u compare_us=%u compare_valid=%u submit_us=%u wait_us=%u valid=%u submitted=%u waited=%u",
+    (unsigned)peak->trace.frame,(unsigned)g_render_perf.peak_compare_us,(unsigned)g_render_perf.peak_compare_valid,(unsigned)g_render_perf.peak_lcd.submit_us,
+    (unsigned)g_render_perf.peak_lcd.wait_us,(unsigned)g_render_perf.peak_lcd.valid,
+    (unsigned)g_render_perf.peak_lcd.submitted,(unsigned)g_render_perf.peak_lcd.refresh_waited);
+#endif
   memset(&g_render_perf, 0, sizeof(g_render_perf));
 }
 
+static bool asset_prepare_audio_busy(void) {
+  return pet_p4_audio_active() || pet_p4_audio_playback_active()
+    || pet_p4_audio_conversation_active() || pet_p4_audio_music_active();
+}
+
+static bool asset_prepare_current(const pet_p4_asset_cache_entry_t *job) {
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool suspended = g_asset_prepare_suspended;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  bool audio_blocked=asset_prepare_audio_busy();
+#if PET_P4_CONVERSATION_VIDEO
+  if(job->prepare_lease.kind==PET_RESOURCE_CACHED_VIDEO)
+    audio_blocked=audio_blocked&&(!pet_p4_audio_conversation_video_ready()||pet_p4_audio_music_active());
+#endif
+  if (suspended || audio_blocked) {
+    pet_resources_device_revoke(job->owner);
+    return false;
+  }
+  return pet_resources_device_current(job->prepare_lease)
+    && pet_resources_device_current(job->buffer_lease);
+}
+
+/* Only the renderer mutates metadata/reclaims entries. The worker has exclusive
+ * ownership of its private buffer until finished is published under this mux.
+ * No allocation, I/O, broker call, or wait is made while holding the mux. */
+static bool asset_cache_entry_finished(const pet_p4_asset_cache_entry_t *entry) {
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool finished = entry->finished;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  return finished;
+}
+
+static void asset_cache_release(pet_p4_asset_cache_entry_t *entry) {
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  pet_p4_asset_cache_entry_t previous = *entry;
+  bool in_flight = previous.loading && !previous.finished;
+#if PET_P4_H264_PREFETCH
+  in_flight = in_flight || previous.decoder_readers;
+#endif
+  if (!in_flight) memset(entry, 0, sizeof(*entry));
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  pet_resources_device_revoke(previous.owner);
+  if (in_flight) return;
+  if (previous.bytes) heap_caps_free(previous.bytes);
+  (void) pet_resources_device_finish(previous.buffer_lease);
+  (void) pet_resources_device_finish(previous.prepare_lease);
+}
+
+/* May be called by a protocol worker before mutating storage, without taking
+ * the render mutex. No cache memory/decoder changes and no waiting for I/O. */
+void pet_p4_renderer_cancel_asset_preparation(void) {
+  pet_resource_owner_t owners[PET_P4_ASSET_CACHE_SLOTS] = {0};
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  g_asset_prepare_cancel_epoch++;
+#if PET_P4_H264_PREFETCH
+  h264_prefetch_cancel_locked();
+  pet_resource_owner_t codec_owner=g_h264_prefetch_job.owner;
+#endif
+  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++)
+    if (g_asset_cache[i].loading) owners[i] = g_asset_cache[i].owner;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+#if PET_P4_H264_PREFETCH
+  pet_resources_device_revoke(codec_owner);
+#endif
+  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++)
+    pet_resources_device_revoke(owners[i]);
+}
+
+void pet_p4_renderer_set_asset_preparation_suspended(bool suspended) {
+  pet_resource_owner_t owners[PET_P4_ASSET_CACHE_SLOTS] = {0};
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  if (suspended && !g_asset_prepare_suspended) g_asset_prepare_storage_epoch++;
+  g_asset_prepare_suspended = suspended;
+  if (suspended) {
+    g_asset_prepare_cancel_epoch++;
+#if PET_P4_H264_PREFETCH
+    h264_prefetch_cancel_locked();
+#endif
+    for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++)
+      if (g_asset_cache[i].loading) owners[i] = g_asset_cache[i].owner;
+  }
+#if PET_P4_H264_PREFETCH
+  pet_resource_owner_t codec_owner=suspended?g_h264_prefetch_job.owner:(pet_resource_owner_t){0};
+#endif
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+#if PET_P4_H264_PREFETCH
+  pet_resources_device_revoke(codec_owner);
+#endif
+  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++)
+    pet_resources_device_revoke(owners[i]);
+}
+
+/* Renderer-owned physical reclamation is separate from cancelling the shared
+ * decoder. A clip may own that decoder while a previous ordinary read finishes. */
+static void release_inactive_asset_prepares(void) {
+  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++) {
+    pet_p4_asset_cache_entry_t *entry = &g_asset_cache[i];
+    if (entry->loading) asset_cache_release(entry);
+  }
+}
+static void cancel_pending_asset_prepares(void) {
+  pet_p4_renderer_cancel_asset_preparation();
+  release_inactive_asset_prepares();
+}
+
 static void clear_asset_stream_cache(void) {
-  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i += 1) {
-    if (g_asset_cache[i].bytes) {
-      heap_caps_free(g_asset_cache[i].bytes);
+  for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i++) {
+    asset_cache_release(&g_asset_cache[i]);
+  }
+}
+
+/* A single priority-1 task owns all filesystem work. The captured raw slot/base
+ * and SPIFFS path never consult mutable active-slot metadata from this task. */
+static void prepare_asset_entry(pet_p4_asset_cache_entry_t *entry) {
+  pet_p4_asset_cache_entry_t job = *entry;
+  uint8_t *bytes = NULL;
+  FILE *file = NULL;
+  pet_fs_activity_t file_activity __attribute__((cleanup(pet_fs_activity_end)))={0};
+  bool ok = asset_prepare_current(&job), valid = !job.h264;
+  int64_t started_us = esp_timer_get_time();
+  if (ok) {
+    bytes = heap_caps_malloc(job.size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ok = bytes != NULL;
+  }
+  if (ok && !job.raw_source) {
+    file_activity=pet_fs_activity_begin();
+    file = fopen(job.fs_path, "rb");
+    ok = file != NULL;
+  }
+  for (size_t offset = 0; ok && offset < job.size;) {
+    if (!asset_prepare_current(&job)) { ok = false; break; }
+    size_t length = job.size - offset;
+    if (length > PET_P4_ASSET_PREPARE_CHUNK_BYTES) length = PET_P4_ASSET_PREPARE_CHUNK_BYTES;
+    ok = job.raw_source
+      ? pet_p4_raw_assets_read_range(job.source_slot, job.raw_offset, job.size, offset, bytes + offset, length)
+      : fread(bytes + offset, 1, length, file) == length;
+    offset += length;
+    vTaskDelay(1);
+  }
+  if (file) fclose(file);
+  pet_fs_activity_end(&file_activity);
+  uint32_t read_us = elapsed_us_clamped(started_us, esp_timer_get_time());
+  int64_t validate_started_us = esp_timer_get_time();
+  ok = ok && asset_prepare_current(&job);
+  bool read_ok = ok;
+  if (ok && job.h264) valid = h264_stream_has_single_slice_access_units(bytes, job.size, &job);
+  bool current = asset_prepare_current(&job);
+  ok = ok && valid && current;
+  uint32_t validate_us = elapsed_us_clamped(validate_started_us, esp_timer_get_time());
+  /* Finish only after all physical I/O/validation has returned. The buffer lease
+   * stays occupied until the renderer observes publication and frees it. */
+  (void) pet_resources_device_finish(job.prepare_lease);
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  entry->bytes = bytes;
+  entry->single_slice_valid = valid;
+  entry->failed = !ok;
+  entry->finished = true;
+  g_asset_prepare_slot = -1;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  /* Job-local values only: after publication the renderer may reuse entry. */
+  ESP_LOGD(TAG, "P4 asset prepare bytes=%u read_us=%u validate_us=%u raw=%u readOK=%u valid=%u ok=%u current=%u",
+    (unsigned) job.size, (unsigned) read_us, (unsigned) validate_us,
+    job.raw_source ? 1U : 0U, read_ok ? 1U : 0U, valid ? 1U : 0U,
+    ok ? 1U : 0U, current ? 1U : 0U);
+}
+
+static void asset_prepare_task(void *unused) {
+  (void) unused;
+  for (;;) {
+    (void) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    for (;;) {
+      portENTER_CRITICAL(&g_asset_prepare_mux);
+      int slot = g_asset_prepare_slot;
+      portEXIT_CRITICAL(&g_asset_prepare_mux);
+      if (slot >= 0 && slot < (int) PET_P4_ASSET_CACHE_SLOTS) {
+        prepare_asset_entry(&g_asset_cache[slot]);
+        continue;
+      }
+#if PET_P4_H264_PREFETCH
+      if (h264_prefetch_worker()) continue;
+#endif
+#if PET_P4_KEYFRAME_BG
+      if (keyframe_worker()) continue;
+#endif
+      break;
     }
-    memset(&g_asset_cache[i], 0, sizeof(g_asset_cache[i]));
   }
 }
 
 static pet_p4_asset_cache_entry_t *load_asset_stream_cache(
   const char *logical_path,
   const char *fs_path,
-  size_t expected_size
+  size_t expected_size,
+  bool h264,
+  int source_slot,
+  uint64_t request_epoch,
+  uint64_t storage_epoch
 ) {
   unsigned long long now_ms = renderer_monotonic_ms();
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  uint64_t cancel_epoch = g_asset_prepare_cancel_epoch;
+  bool suspended = g_asset_prepare_suspended;
+  bool stale = request_epoch != cancel_epoch || storage_epoch != g_asset_prepare_storage_epoch;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  g_asset_cache_pending = false;
+  g_render_trace.cache_hit = PET_RENDER_CACHE_MISS;
+  if (stale) { g_asset_cache_pending = true; return NULL; }
+  if (!fs_path || !fs_path[0] || expected_size == 0
+      || expected_size > PET_P4_ASSET_CACHE_MAX_FILE_BYTES) return NULL;
+  bool failed_match = false;
+  pet_p4_asset_cache_entry_t *hit = NULL;
   for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i += 1) {
-    if (g_asset_cache[i].bytes
-        && g_asset_cache[i].size == expected_size
-        && strcmp(g_asset_cache[i].fs_path, fs_path) == 0) {
-      g_asset_cache[i].last_used_ms = now_ms;
-      return &g_asset_cache[i];
+    pet_p4_asset_cache_entry_t *entry = &g_asset_cache[i];
+    if (entry->owner.generation && (entry->storage_epoch != storage_epoch || entry->source_slot != source_slot)) {
+      asset_cache_release(entry);
+    }
+    bool match = entry->size == expected_size && entry->h264 == h264
+      && strcmp(entry->fs_path, fs_path) == 0;
+    if (entry->loading && !asset_cache_entry_finished(entry)) {
+      if (!match || asset_prepare_audio_busy()) pet_resources_device_revoke(entry->owner);
+      g_asset_cache_pending = true;
+      continue;
+    }
+    portENTER_CRITICAL(&g_asset_prepare_mux);
+    entry->loading = false; /* acquire publication above */
+    portEXIT_CRITICAL(&g_asset_prepare_mux);
+    bool current = entry->owner.generation && pet_resources_device_current(entry->buffer_lease);
+    if (entry->failed || (entry->owner.generation && !current)) {
+      failed_match = failed_match || (match && entry->failed && current);
+      asset_cache_release(entry);
+      continue;
+    }
+    if (match && entry->bytes && current) {
+      entry->last_used_ms = now_ms;
+      hit = entry;
     }
   }
-  if (!fs_path || !fs_path[0] || expected_size == 0
-      || expected_size > PET_P4_ASSET_CACHE_MAX_FILE_BYTES) {
-    return NULL;
+  if (hit) {
+    g_render_trace.cache_hit = PET_RENDER_CACHE_HIT;
+    g_asset_cache_pending = false;
+    return hit;
   }
-
+  if (failed_match) { g_asset_cache_pending = false; return NULL; }
+  if (g_asset_cache_pending) return NULL;
+  /* Busy/protected resources are deferred work, never decoder failures. */
+  g_asset_cache_pending = true;
+  if (suspended || asset_prepare_audio_busy()) return NULL;
+  if (!g_asset_prepare_task && xTaskCreate(asset_prepare_task, "p4-asset-prep",
+        PET_P4_ASSET_PREPARE_STACK_BYTES, NULL, PET_P4_ASSET_PREPARE_PRIORITY,
+        &g_asset_prepare_task) != pdPASS) return NULL;
   unsigned int selected = 0;
   for (unsigned int i = 0; i < PET_P4_ASSET_CACHE_SLOTS; i += 1) {
     if (!g_asset_cache[i].bytes) {
@@ -424,49 +1062,72 @@ static pet_p4_asset_cache_entry_t *load_asset_stream_cache(
     }
   }
   pet_p4_asset_cache_entry_t *entry = &g_asset_cache[selected];
-  if (entry->bytes) heap_caps_free(entry->bytes);
-  memset(entry, 0, sizeof(*entry));
-  entry->bytes = (uint8_t *) heap_caps_malloc(
-    expected_size,
-    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-  );
-  if (!entry->bytes) return NULL;
-
-  int64_t load_started_us = esp_timer_get_time();
-  size_t read = pet_p4_asset_read_all(logical_path, entry->bytes, expected_size)
-    ? expected_size
-    : 0;
-  if (read != expected_size) {
-    ESP_LOGW(
-      TAG,
-      "P4 asset cache load failed path=%s want=%u got=%u",
-      fs_path,
-      (unsigned int) expected_size,
-      (unsigned int) read
-    );
-    heap_caps_free(entry->bytes);
-    memset(entry, 0, sizeof(*entry));
+  asset_cache_release(entry);
+#if PET_P4_H264_PREFETCH
+  /* Revocation can leave a physically pinned source occupied. Never reuse it. */
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool still_pinned=entry->decoder_readers!=0;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  if(still_pinned)return NULL;
+#endif
+  uint32_t mask = PET_RESOURCE_MASK(PET_RESOURCE_ASSET_BUFFER) | PET_RESOURCE_MASK(PET_RESOURCE_ASSET_PREPARE);
+  if (pet_resources_device_owner_open(mask, &entry->owner) != PET_RESOURCE_OK) return NULL;
+  if (pet_resources_device_acquire(entry->owner, PET_RESOURCE_ASSET_BUFFER, expected_size,
+        &entry->buffer_lease) != PET_RESOURCE_OK
+      || pet_resources_device_acquire(entry->owner, PET_RESOURCE_ASSET_PREPARE, 1,
+        &entry->prepare_lease) != PET_RESOURCE_OK) {
+    asset_cache_release(entry);
     return NULL;
   }
-
   entry->size = expected_size;
+  entry->h264 = h264;
   entry->last_used_ms = now_ms;
   snprintf(entry->fs_path, sizeof(entry->fs_path), "%s", fs_path);
-  uint32_t load_ms = elapsed_us_clamped(load_started_us, esp_timer_get_time()) / 1000U;
-  ESP_LOGI(
-    TAG,
-    "P4 asset cache loaded slot=%u bytes=%u load=%ums path=%s",
-    selected,
-    (unsigned int) expected_size,
-    load_ms,
-    fs_path
-  );
-  return entry;
+  entry->source_slot = source_slot;
+  entry->storage_epoch = storage_epoch;
+  entry->raw_source = pet_p4_raw_assets_supports_path(logical_path)
+    && pet_p4_raw_assets_locate(entry->source_slot, logical_path, expected_size, &entry->raw_offset);
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool cancelled = g_asset_prepare_suspended || cancel_epoch != g_asset_prepare_cancel_epoch;
+  if (!cancelled) {
+    entry->loading = true;
+    g_asset_prepare_slot = (int) selected;
+  }
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  if (cancelled) { asset_cache_release(entry); return NULL; }
+  xTaskNotifyGive(g_asset_prepare_task);
+  return NULL;
 }
 
+#if PET_P4_KEYFRAME_BG
+static void keyframe_engine_lock(void);
+static void keyframe_engine_unlock(void);
+#endif
+static bool decode_jpeg_frame_hardware_into(
+  const uint8_t *input,
+  size_t input_size,
+  uint16_t *output,
+  size_t output_capacity,
+  int *out_width,
+  int *out_height,
+  int *out_stride,
+  esp_err_t *out_error
+);
 static bool decode_jpeg_frame_hardware(
   const uint8_t *input,
   size_t input_size,
+  int *out_width,
+  int *out_height,
+  int *out_stride,
+  esp_err_t *out_error
+) {
+  return decode_jpeg_frame_hardware_into(input,input_size,g_jpeg_output,g_jpeg_output_capacity,out_width,out_height,out_stride,out_error);
+}
+static bool decode_jpeg_frame_hardware_into(
+  const uint8_t *input,
+  size_t input_size,
+  uint16_t *output,
+  size_t output_capacity,
   int *out_width,
   int *out_height,
   int *out_stride,
@@ -482,8 +1143,8 @@ static bool decode_jpeg_frame_hardware(
   esp_err_t err;
 
   if (out_error) *out_error = ESP_ERR_INVALID_STATE;
-  if (!g_jpeg_decoder || !input || input_size == 0 || !g_jpeg_output) return false;
-  if (input_size > UINT32_MAX || g_jpeg_output_capacity > UINT32_MAX) {
+  if (!g_jpeg_decoder || !input || input_size == 0 || !output) return false;
+  if (input_size > UINT32_MAX || output_capacity > UINT32_MAX) {
     if (out_error) *out_error = ESP_ERR_INVALID_SIZE;
     return false;
   }
@@ -499,15 +1160,21 @@ static bool decode_jpeg_frame_hardware(
     return false;
   }
 
+#if PET_P4_KEYFRAME_BG
+  keyframe_engine_lock(); /* one hardware engine shared with the keyframe worker */
+#endif
   err = jpeg_decoder_process(
     g_jpeg_decoder,
     &decode_cfg,
     input,
     (uint32_t) input_size,
-    (uint8_t *) g_jpeg_output,
-    (uint32_t) g_jpeg_output_capacity,
+    (uint8_t *) output,
+    (uint32_t) output_capacity,
     &decoded_size
   );
+#if PET_P4_KEYFRAME_BG
+  keyframe_engine_unlock();
+#endif
   if (err != ESP_OK) {
     if (out_error) *out_error = err;
     return false;
@@ -599,21 +1266,25 @@ static int tjpgd_output_func(JDEC *jd, void *bitmap, JRECT *rect) {
   return 1;
 }
 
+static bool decode_jpeg_frame_tjpgd_into(const uint8_t *input, size_t input_size, uint16_t *output, size_t output_pixels, uint8_t *workbuf, int *out_width, int *out_height, JRESULT *out_error);
 static bool decode_jpeg_frame_tjpgd(const uint8_t *input, size_t input_size, int *out_width, int *out_height, JRESULT *out_error) {
+  return decode_jpeg_frame_tjpgd_into(input,input_size,g_jpeg_output,g_jpeg_output_capacity / sizeof(uint16_t),g_tjpgd_workbuf,out_width,out_height,out_error);
+}
+static bool decode_jpeg_frame_tjpgd_into(const uint8_t *input, size_t input_size, uint16_t *output, size_t output_pixels, uint8_t *workbuf, int *out_width, int *out_height, JRESULT *out_error) {
   JDEC decoder;
   pet_p4_tjpgd_session_t session = {
     .input = input,
     .input_size = input_size,
-    .output = g_jpeg_output,
-    .output_pixels = g_jpeg_output_capacity / sizeof(uint16_t),
+    .output = output,
+    .output_pixels = output_pixels,
   };
   if (out_error) *out_error = JDR_OK;
-  if (!input || input_size == 0 || !g_tjpgd_workbuf || !g_jpeg_output) {
+  if (!input || input_size == 0 || !workbuf || !output) {
     if (out_error) *out_error = JDR_PAR;
     return false;
   }
 
-  JRESULT rc = jd_prepare(&decoder, tjpgd_input_func, g_tjpgd_workbuf, PET_P4_TJPGD_WORK_BUFFER_BYTES, &session);
+  JRESULT rc = jd_prepare(&decoder, tjpgd_input_func, workbuf, PET_P4_TJPGD_WORK_BUFFER_BYTES, &session);
   if (rc != JDR_OK) {
     if (out_error) *out_error = rc;
     return false;
@@ -646,8 +1317,29 @@ static uint16_t blend_rgb565(uint16_t dst, uint8_t r, uint8_t g, uint8_t b, uint
   return rgb565(nr, ng, nb);
 }
 
+static struct {bool active;int x,y,right,bottom;} g_app_clip;
+#if PET_P4_RASTER_EXACT
+/* All raster calls share the existing single native renderer serialization.
+ * No stack-sized row, allocation, DMA buffer or asynchronous scratch owner. */
+static DRAM_ATTR pet_rgb565_blend_t g_blend_lookup;
+#if PET_P4_GLYPH_AXIS_INTERNAL
+/* The SAME512-byte axis scratch, not another allocation or texture. */
+static DRAM_ATTR pet_raster_axis_t g_glyph_axis[PET_RASTER_AXIS_TILE];
+#else
+static EXT_RAM_BSS_ATTR pet_raster_axis_t g_glyph_axis[PET_RASTER_AXIS_TILE];
+#endif
+#endif
+#if PET_P4_GLYPH_ROWS
+/* Only two source rows, not a scaled glyph/frame or retained bitmap pointer.
+ * Same serialized native renderer owner as the existing axis scratch. */
+static DRAM_ATTR float g_glyph_rows[2][66];
+static DRAM_ATTR int32_t g_glyph_sample_y;
+static EXT_RAM_BSS_ATTR char g_app_label_rows[8][192];
+#endif
+static bool app_clip_contains(int x,int y){return !g_app_clip.active||(x>=g_app_clip.x&&y>=g_app_clip.y&&x<g_app_clip.right&&y<g_app_clip.bottom);}
 static void put_px(int x, int y, uint16_t color) {
   if (x < 0 || y < 0 || x >= PET_P4_UI_WIDTH || y >= PET_P4_UI_HEIGHT) return;
+  if(!app_clip_contains(x,y))return;
   if (!g_framebuffer) return;
   g_framebuffer[y * PET_P4_UI_WIDTH + x] = color;
 }
@@ -657,8 +1349,15 @@ static void fill_rect(int x, int y, int w, int h, uint16_t color) {
   int y0 = y < 0 ? 0 : y;
   int x1 = x + w > PET_P4_UI_WIDTH ? PET_P4_UI_WIDTH : x + w;
   int y1 = y + h > PET_P4_UI_HEIGHT ? PET_P4_UI_HEIGHT : y + h;
+  if(g_app_clip.active){if(x0<g_app_clip.x)x0=g_app_clip.x;if(y0<g_app_clip.y)y0=g_app_clip.y;if(x1>g_app_clip.right)x1=g_app_clip.right;if(y1>g_app_clip.bottom)y1=g_app_clip.bottom;}
   if (x0 >= x1 || y0 >= y1) return;
   if (!g_framebuffer) return;
+#if PET_P4_RENDER_SPAN_FILL
+  if(x1-x0>=32&&y1-y0>=4){
+    pet_rgb565_fill_rows(g_framebuffer+(size_t)y0*PET_P4_UI_WIDTH+x0,PET_P4_UI_WIDTH,(size_t)(x1-x0),(size_t)(y1-y0),color);
+    return;
+  }
+#endif
   for (int yy = y0; yy < y1; yy += 1) {
     uint16_t *row = g_framebuffer + yy * PET_P4_UI_WIDTH;
     for (int xx = x0; xx < x1; xx += 1) row[xx] = color;
@@ -834,14 +1533,25 @@ static int glyph_width(uint32_t codepoint, uint32_t next_codepoint) {
   return glyph.adv_w > 0 ? glyph.adv_w : glyph.box_w;
 }
 
-/* Keep 16 px advances for layout; use native 32 px ink when available. */
-static bool scaled_glyph_dsc(uint32_t codepoint, uint32_t next_codepoint,
-                             lv_font_glyph_dsc_t *glyph, int *scale) {
-  if (*scale == 2 && lv_font_get_glyph_dsc(&pet_p4_font_cn_32, glyph, codepoint, next_codepoint)) {
-    *scale = 1;
-    return true;
+/* Native32 changes ink only. Layout continues to use glyph_width/font16. */
+static inline bool scaled_glyph_dsc(uint32_t cp,uint32_t next,lv_font_glyph_dsc_t *glyph,int *scale){
+#if PET_FONT_NATIVE_32
+  if(*scale==2&&pet_p4_font_native32_has_glyph(cp)
+      &&lv_font_get_glyph_dsc(&pet_p4_font_cn_32,glyph,cp,next)){
+    *scale=1;return true;
   }
-  return lv_font_get_glyph_dsc(&pet_p4_font_cn_16, glyph, codepoint, next_codepoint);
+#else
+  (void)scale;
+#endif
+  return lv_font_get_glyph_dsc(&pet_p4_font_cn_16,glyph,cp,next);
+}
+static inline int scaled_glyph_baseline(const lv_font_glyph_dsc_t *glyph,int scale){
+#if PET_FONT_NATIVE_32
+  return (glyph->resolved_font->line_height-glyph->resolved_font->base_line)*scale;
+#else
+  (void)glyph;
+  return (pet_p4_font_cn_16.line_height-pet_p4_font_cn_16.base_line)*scale;
+#endif
 }
 
 static bool glyph_visual_bounds(
@@ -881,10 +1591,11 @@ static bool glyph_visual_bounds(
       }
     }
   }
-  int baseline = (glyph.resolved_font->line_height - glyph.resolved_font->base_line) * scale;
+  /* Capture resolved-font and geometry before a release callback may invalidate it. */
+  int baseline = scaled_glyph_baseline(&glyph, scale);
+  int glyph_top = baseline - glyph.box_h * scale - glyph.ofs_y * scale;
   lv_font_glyph_release_draw_data(&glyph);
   if (last_ink_row < first_ink_row) return false;
-  int glyph_top = baseline - glyph.box_h * scale - glyph.ofs_y * scale;
   *top = glyph_top + first_ink_row * scale;
   *bottom = glyph_top + (last_ink_row + 1) * scale - 1;
   return true;
@@ -958,7 +1669,7 @@ static void draw_lvgl_glyph(uint32_t codepoint, uint32_t next_codepoint, int x, 
     lv_font_glyph_release_draw_data(&glyph);
     return;
   }
-  int baseline = y + (glyph.resolved_font->line_height - glyph.resolved_font->base_line) * scale;
+  int baseline = y + scaled_glyph_baseline(&glyph, scale);
   int gx0 = x + glyph.ofs_x * scale;
   int gy0 = baseline - glyph.box_h * scale - glyph.ofs_y * scale;
   uint8_t r = (uint8_t) (((color >> 11) & 0x1F) * 255 / 31);
@@ -1300,8 +2011,15 @@ static void fill_round_rect(int x, int y, int w, int h, int radius, uint16_t col
 
 static void blend_px(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t alpha) {
   if (x < 0 || y < 0 || x >= PET_P4_UI_WIDTH || y >= PET_P4_UI_HEIGHT) return;
+  if(!app_clip_contains(x,y))return;
   if (!g_framebuffer) return;
   uint16_t *px = &g_framebuffer[y * PET_P4_UI_WIDTH + x];
+#if PET_P4_ALPHA_FAST
+  /* Both endpoint identities are exhaustive RGB565 tests. Do not execute
+   * six channel divisions for an opaque glyph's interior. */
+  if(!alpha)return;
+  if(alpha==255){*px=rgb565(r,g,b);return;}
+#endif
   *px = blend_rgb565(*px, r, g, b, alpha);
 }
 
@@ -1310,6 +2028,16 @@ static void blend_rect(int x, int y, int w, int h, uint8_t r, uint8_t g, uint8_t
   int y0 = y < 0 ? 0 : y;
   int x1 = x + w > PET_P4_UI_WIDTH ? PET_P4_UI_WIDTH : x + w;
   int y1 = y + h > PET_P4_UI_HEIGHT ? PET_P4_UI_HEIGHT : y + h;
+#if PET_P4_RASTER_EXACT
+  if(g_app_clip.active){if(x0<g_app_clip.x)x0=g_app_clip.x;if(y0<g_app_clip.y)y0=g_app_clip.y;if(x1>g_app_clip.right)x1=g_app_clip.right;if(y1>g_app_clip.bottom)y1=g_app_clip.bottom;}
+  if(!g_framebuffer)return;
+  if(x1>x0&&y1>y0&&(x1-x0)*(y1-y0)>=1024){
+    pet_rgb565_blend_prepare(&g_blend_lookup,r,g,b,alpha);
+    pet_rgb565_blend_rows(g_framebuffer+(size_t)y0*PET_P4_UI_WIDTH+x0,
+      PET_P4_UI_WIDTH,(size_t)(x1-x0),(size_t)(y1-y0),&g_blend_lookup);
+    return;
+  }
+#endif
   if (x0 >= x1 || y0 >= y1) return;
   for (int yy = y0; yy < y1; yy += 1) {
     for (int xx = x0; xx < x1; xx += 1) blend_px(xx, yy, r, g, b, alpha);
@@ -1335,6 +2063,27 @@ static void blend_round_rect(int x, int y, int w, int h, int radius, uint8_t r, 
   if (radius > w / 2) radius = w / 2;
   if (radius > h / 2) radius = h / 2;
   if (!radius) { blend_rect(x, y, w, h, r, g, b, alpha); return; }
+#if PET_P4_RASTER_EXACT
+  /* Three DISJOINT straight regions; keep the original AA corner formula.
+   * Alpha is non-idempotent, so no pixel may be painted by two regions. */
+  blend_rect(x+radius,y,w-2*radius,h,r,g,b,alpha);
+  blend_rect(x,y+radius,radius,h-2*radius,r,g,b,alpha);
+  blend_rect(x+w-radius,y+radius,radius,h-2*radius,r,g,b,alpha);
+  for(int corner=0;corner<4;corner++){
+    int cx=corner&1?x+w-radius:x,cy=corner&2?y+h-radius:y;
+    int left=cx<0?0:cx,top=cy<0?0:cy;
+    int right=cx+radius>PET_P4_UI_WIDTH?PET_P4_UI_WIDTH:cx+radius;
+    int bottom=cy+radius>PET_P4_UI_HEIGHT?PET_P4_UI_HEIGHT:cy+radius;
+    for(int yy=top;yy<bottom;yy++){
+      float dy=fmaxf(0,fabsf(yy+.5f-(y+h*.5f))-(h*.5f-radius));
+      for(int xx=left;xx<right;xx++){
+        float dx=fmaxf(0,fabsf(xx+.5f-(x+w*.5f))-(w*.5f-radius));
+        float coverage=dx>0&&dy>0?fminf(1,fmaxf(0,radius+.5f-sqrtf(dx*dx+dy*dy))):1;
+        uint8_t a=(uint8_t)(alpha*coverage);if(a)blend_px(xx,yy,r,g,b,a);
+      }
+    }
+  }
+#else
   // Alpha compositing is not idempotent: overlapping rectangles/full circles
   // produce dark seams. Cover each destination pixel exactly once. Straight
   // edges need no square root; only the four bounded corner regions do.
@@ -1350,6 +2099,7 @@ static void blend_round_rect(int x, int y, int w, int h, int radius, uint8_t r, 
       if (a) blend_px(xx, yy, r, g, b, a);
     }
   }
+#endif
 }
 
 static void draw_home_white_panel(int x, int y, int w, int h, int radius, uint16_t outline) {
@@ -1383,6 +2133,26 @@ static void draw_session_card_panel(
   fill_round_rect(x + 4, y + 4, w - 8, h - 8, radius - 4, selected_surface);
 }
 
+/* Renderer-only timing; includes underlying mutex waits and all timer overhead.
+ * Child select/blit/voice stages are subsets of the inclusive draw stages. */
+static void renderer_bubble_select(const char *owner, unsigned style, const char *title,
+    const char *body, uint64_t now, pet_bubble_text_view_t *out) {
+  int64_t started = esp_timer_get_time();
+  pet_bubble_pixels_select(owner, style, title, body, now, out);
+  pet_p4_render_trace_add(&g_render_trace.bubble_select_us,
+    elapsed_us_clamped(started, esp_timer_get_time()));
+}
+static bool renderer_bubble_draw_pinned(const pet_bubble_text_view_t *view,
+    unsigned style, unsigned page, uint16_t *framebuffer, int x, int y,
+    int clip_width, uint16_t color) {
+  int64_t started = esp_timer_get_time();
+  bool drawn = pet_bubble_pixels_draw_pinned(view, style, page, framebuffer,
+    x, y, clip_width, color);
+  pet_p4_render_trace_add(&g_render_trace.pinned_blit_us,
+    elapsed_us_clamped(started, esp_timer_get_time()));
+  return drawn;
+}
+
 static void draw_card_body_lines(
   const char *body,
   int x,
@@ -1391,7 +2161,7 @@ static void draw_card_body_lines(
   uint16_t color,
   const pet_bubble_text_view_t *host_pixels
 ) {
-  if (host_pixels && host_pixels->pixels && pet_bubble_pixels_draw_pinned(host_pixels, PET_BUBBLE_BODY_CLIPPED, 0, g_framebuffer,
+  if (host_pixels && host_pixels->pixels && renderer_bubble_draw_pinned(host_pixels, PET_BUBBLE_BODY_CLIPPED, 0, g_framebuffer,
       x, first_line_y, max_px, color)) return;
   const char *second_line = draw_text_line_medium_vcenter(
     body,
@@ -1577,10 +2347,10 @@ static bool scale_asset_frame_ppa(int src_w, int src_h, int src_stride) {
     .byte_swap = false,
     .mode = PPA_TRANS_MODE_BLOCKING,
   };
-  esp_err_t err = ppa_do_scale_rotate_mirror(g_ppa_srm_client, &scaling);
+  esp_err_t err = ppa_trace_srm(PET_PPA_TRACE_SCALE, &scaling);
   if (err == ESP_OK) {
     if (!g_logged_ppa_scaling) {
-      ESP_LOGI(
+      ESP_LOGD(
         TAG,
         "P4 asset scale=PPA source=%dx%d stride=%d output=%dx%d offset=%d,%d factor=%.3f",
         src_w,
@@ -1633,6 +2403,7 @@ static void scale_asset_frame_to_display(int src_w, int src_h, int src_stride) {
   }
   memset(g_framebuffer, 0, PET_P4_UI_WIDTH * PET_P4_UI_HEIGHT * sizeof(uint16_t));
   if (!scale_asset_frame_ppa(src_w, src_h, src_stride)) {
+    g_render_trace.fallback |= PET_RENDER_FALLBACK_JPEG_SCALE_CPU;
     scale_asset_frame_cpu(src_w, src_h, src_stride);
   }
 }
@@ -1654,24 +2425,51 @@ static void reset_h264_decoder(void) {
   g_h264_fs_path[0] = '\0';
 }
 
+/* Only render-path callers use this wrapper: out-of-frame playback resets must
+ * not contaminate the next frame's diagnostics. No reset policy is changed. */
+static void reset_h264_decoder_traced(pet_p4_render_trace_t *trace){
+  int64_t started_us=esp_timer_get_time();reset_h264_decoder();
+  pet_p4_render_trace_add(&trace->reset_us,elapsed_us_clamped(started_us,esp_timer_get_time()));
+}
+static void reset_h264_decoder_measured(void) {
+#if PET_P4_H264_PREFETCH
+  int64_t started_us = esp_timer_get_time();
+  (void)h264_prefetch_reset();
+  pet_p4_render_trace_add(&g_render_trace.reset_us,
+    elapsed_us_clamped(started_us, esp_timer_get_time()));
+#else
+  reset_h264_decoder_traced(&g_render_trace);
+#endif
+}
+
 void pet_p4_renderer_reset_playback(void) {
+  cancel_pending_asset_prepares();
   g_last_native_valid = false;
   pet_p4_behavior_init(&g_behavior);
+#if PET_P4_H264_PREFETCH
+  (void)h264_prefetch_reset();
+#else
   reset_h264_decoder();
+#endif
   g_decoder_fs_path[0] = '\0';
-  g_h264_validated_fs_path[0] = '\0';
-  g_h264_single_slice_valid = false;
 }
 
 static bool h264_stream_has_single_slice_access_units(
   const uint8_t *stream,
-  size_t stream_size
+  size_t stream_size,
+  const pet_p4_asset_cache_entry_t *job
 ) {
   size_t cursor = 0;
+  size_t next_check = PET_P4_ASSET_PREPARE_CHUNK_BYTES;
   unsigned int access_units = 0;
   unsigned int slices_in_access_unit = 0;
   if (!stream || stream_size < 5) return false;
   while (cursor + 3 < stream_size) {
+    if (cursor >= next_check) {
+      vTaskDelay(1);
+      if (!asset_prepare_current(job)) return false;
+      next_check = cursor + PET_P4_ASSET_PREPARE_CHUNK_BYTES;
+    }
     size_t prefix_size = 0;
     if (cursor + 4 <= stream_size
         && stream[cursor] == 0 && stream[cursor + 1] == 0
@@ -1702,19 +2500,23 @@ static bool h264_stream_has_single_slice_access_units(
   return access_units > 0 && slices_in_access_unit == 1U;
 }
 
-static bool start_h264_decoder(const char *fs_path, const uint8_t *stream, size_t stream_size) {
+static bool start_h264_decoder_role(const char *fs_path,const uint8_t *stream,size_t stream_size,
+  pet_p4_render_trace_t *trace,const pet_p4_asset_cache_entry_t *job) {
   esp_h264_dec_cfg_sw_t config = {
     .pic_type = ESP_H264_RAW_FMT_I420,
   };
-  reset_h264_decoder();
+  reset_h264_decoder_traced(trace);
   if (!stream || stream_size == 0 || stream_size > PET_P4_ASSET_CACHE_MAX_FILE_BYTES) {
     return false;
   }
+  int64_t copy_started_us = esp_timer_get_time();
   if (g_h264_work_capacity < stream_size) {
     uint8_t *resized = heap_caps_realloc(
       g_h264_work_stream, stream_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
     );
     if (!resized) {
+      pet_p4_render_trace_add(&trace->copy_us,
+        elapsed_us_clamped(copy_started_us, esp_timer_get_time()));
       ESP_LOGW(TAG, "P4 H264 working buffer allocation failed bytes=%u", (unsigned int) stream_size);
       return false;
     }
@@ -1723,18 +2525,32 @@ static bool start_h264_decoder(const char *fs_path, const uint8_t *stream, size_
   }
   // Refresh once per playback/seek, not on every frame. Reuse the allocation
   // across loops and families, but never reuse the decoder-mutated contents.
-  memcpy(g_h264_work_stream, stream, stream_size);
+  if(job){
+    for(size_t offset=0;offset<stream_size;){
+      if(!asset_prepare_current(job))return false;
+      size_t length=stream_size-offset;
+      if(length>PET_P4_ASSET_PREPARE_CHUNK_BYTES)length=PET_P4_ASSET_PREPARE_CHUNK_BYTES;
+      memcpy(g_h264_work_stream+offset,stream+offset,length);offset+=length;
+    }
+  }else memcpy(g_h264_work_stream, stream, stream_size);
   g_h264_work_size = stream_size;
+  pet_p4_render_trace_add(&trace->copy_us,
+    elapsed_us_clamped(copy_started_us, esp_timer_get_time()));
+  int64_t init_started_us = esp_timer_get_time();
   esp_h264_err_t err = esp_h264_dec_sw_new(&config, &g_h264_decoder);
   if (err != ESP_H264_ERR_OK || !g_h264_decoder) {
+    pet_p4_render_trace_add(&trace->init_us,
+      elapsed_us_clamped(init_started_us, esp_timer_get_time()));
     ESP_LOGW(TAG, "P4 H264 decoder create failed error=%d", (int) err);
-    reset_h264_decoder();
+    reset_h264_decoder_traced(trace);
     return false;
   }
   err = esp_h264_dec_open(g_h264_decoder);
+  pet_p4_render_trace_add(&trace->init_us,
+    elapsed_us_clamped(init_started_us, esp_timer_get_time()));
   if (err != ESP_H264_ERR_OK) {
     ESP_LOGW(TAG, "P4 H264 decoder open failed error=%d", (int) err);
-    reset_h264_decoder();
+    reset_h264_decoder_traced(trace);
     return false;
   }
   g_h264_decoder_open = true;
@@ -1742,9 +2558,12 @@ static bool start_h264_decoder(const char *fs_path, const uint8_t *stream, size_
   return true;
 }
 
-static bool decode_next_h264_frame(
+static bool decode_next_h264_frame_role(
   int width,
-  int height
+  int height,
+  bool render_caller,
+  uint32_t *decode_us,
+  const pet_p4_asset_cache_entry_t *job
 ) {
   unsigned int steps = 0;
   size_t expected_output = (size_t) width * (size_t) height * 3U / 2U;
@@ -1753,6 +2572,7 @@ static bool decode_next_h264_frame(
     return false;
   }
   while (g_h264_stream_offset < g_h264_work_size && steps++ < 64U) {
+    if(job&&!asset_prepare_current(job))return false;
     size_t remaining = g_h264_work_size - g_h264_stream_offset;
     esp_h264_dec_in_frame_t input = {
       .raw_data = {
@@ -1761,15 +2581,15 @@ static bool decode_next_h264_frame(
       },
     };
     esp_h264_dec_out_frame_t output = {0};
-    UBaseType_t original_priority = uxTaskPriorityGet(NULL);
-    if (original_priority < PET_P4_H264_PRIMARY_TASK_PRIORITY) {
+    bool boosted = render_caller && pet_p4_render_can_boost(uxTaskPriorityGet(NULL), ESP_TASK_MAIN_PRIO);
+    if (boosted) {
       vTaskPrioritySet(NULL, PET_P4_H264_PRIMARY_TASK_PRIORITY);
     }
     int64_t decode_started_us = esp_timer_get_time();
     esp_h264_err_t err = esp_h264_dec_process(g_h264_decoder, &input, &output);
-    g_last_decode_us += elapsed_us_clamped(decode_started_us, esp_timer_get_time());
-    if (original_priority < PET_P4_H264_PRIMARY_TASK_PRIORITY) {
-      vTaskPrioritySet(NULL, original_priority);
+    pet_p4_render_trace_add(decode_us,elapsed_us_clamped(decode_started_us,esp_timer_get_time()));
+    if (boosted) {
+      vTaskPrioritySet(NULL, ESP_TASK_MAIN_PRIO);
     }
     if (err != ESP_H264_ERR_OK || input.consume == 0
         || input.consume > input.raw_data.len) {
@@ -1801,6 +2621,15 @@ static bool decode_next_h264_frame(
   }
   return false;
 }
+
+#if !PET_P4_H264_PREFETCH
+static bool start_h264_decoder(const char *fs_path,const uint8_t *stream,size_t stream_size){
+  return start_h264_decoder_role(fs_path,stream,stream_size,&g_render_trace,NULL);
+}
+static bool decode_next_h264_frame(int width,int height){
+  return decode_next_h264_frame_role(width,height,true,&g_last_decode_us,NULL);
+}
+#endif
 
 static bool resolve_h264_i420_layout(
   int visible_w,
@@ -1842,6 +2671,14 @@ static void pack_h264_i420_rows(const pet_p4_h264_pack_job_t *job) {
     uint8_t *target = job->packed + (size_t) y * job->packed_stride;
     int x = 0;
     for (; x + 7 < src_w; x += 8) {
+#if PET_P4_H264_PACK_WORD_IO
+      /* Pointer alignment is checked BEFORE any compiler assumption. Keep
+       * the original byte-safe block for unaligned planes/rows and tails. */
+      if (pet_h264_pack8_word_io(target, source_y + x, source_chroma + x / 2)) {
+        target += 12;
+        continue;
+      }
+#endif
       uint32_t y_lo;
       uint32_t y_hi;
       uint32_t chroma;
@@ -1928,15 +2765,15 @@ static bool pack_h264_i420_for_ppa(
     g_h264_pack_job.row_begin = split_row;
     primary_job.row_end = split_row;
     while (xSemaphoreTake(g_h264_pack_done, 0) == pdTRUE) {}
-    UBaseType_t original_priority = uxTaskPriorityGet(NULL);
-    if (original_priority < PET_P4_H264_PACK_TASK_PRIORITY) {
+    bool boosted = pet_p4_render_can_boost(uxTaskPriorityGet(NULL), ESP_TASK_MAIN_PRIO);
+    if (boosted) {
       vTaskPrioritySet(NULL, PET_P4_H264_PACK_TASK_PRIORITY);
     }
     xTaskNotifyGive(g_h264_pack_task);
     pack_h264_i420_rows(&primary_job);
     xSemaphoreTake(g_h264_pack_done, portMAX_DELAY);
-    if (original_priority < PET_P4_H264_PACK_TASK_PRIORITY) {
-      vTaskPrioritySet(NULL, original_priority);
+    if (boosted) {
+      vTaskPrioritySet(NULL, ESP_TASK_MAIN_PRIO);
     }
   } else {
     pack_h264_i420_rows(&primary_job);
@@ -2028,11 +2865,11 @@ static bool scale_h264_frame_ppa(
     .mode = PPA_TRANS_MODE_BLOCKING,
   };
   int64_t convert_started_us = esp_timer_get_time();
-  esp_err_t err = ppa_do_scale_rotate_mirror(g_ppa_srm_client, &scaling);
+  esp_err_t err = ppa_trace_srm(PET_PPA_TRACE_CONVERT, &scaling);
   g_last_h264_convert_us += elapsed_us_clamped(convert_started_us, esp_timer_get_time());
   if (err == ESP_OK) {
     if (!g_logged_h264_ppa) {
-      ESP_LOGI(
+      ESP_LOGD(
         TAG,
         "P4 H264 convert=PPA source=%dx%d output=%dx%d offset=%d,%d factor=%.3f",
         src_w,
@@ -2103,6 +2940,9 @@ static void scale_h264_frame_cpu(
   }
 }
 
+#include "pet_p4_h264_prefetch.inc"
+
+#if !PET_P4_H264_PREFETCH
 static bool render_h264_asset_frame(
   const pet_p4_asset_selection_t *asset,
   const char *fs_path,
@@ -2117,41 +2957,41 @@ static bool render_h264_asset_frame(
       || asset->width <= 0 || asset->height <= 0) {
     return false;
   }
-  if (strcmp(g_h264_validated_fs_path, fs_path) != 0) {
-    g_h264_single_slice_valid =
-      h264_stream_has_single_slice_access_units(stream->bytes, stream->size);
-    snprintf(g_h264_validated_fs_path, sizeof(g_h264_validated_fs_path), "%s", fs_path);
-    if (!g_h264_single_slice_valid) {
-      ESP_LOGW(
-        TAG,
-        "P4 H264 rejected unsafe stream: expected one slice per access unit path=%s",
-        fs_path
-      );
-    }
-  }
-  if (!g_h264_single_slice_valid) return false;
+  /* Immutable cache entries are validated once by the low-priority preparer.
+   * validate_us remains render-thread wall time (zero), never worker CPU time. */
+  if (!stream->single_slice_valid) return false;
   target_frame = (int) (
     (cycle_elapsed_ms * (unsigned long long) asset->frames)
     / (unsigned long long) asset->duration_ms
   );
   if (target_frame >= asset->frames) target_frame = asset->frames - 1;
+  g_render_trace.restart_reason |= pet_p4_render_restart_reason(
+    g_h264_decoder != NULL, strcmp(g_h264_fs_path, fs_path) == 0,
+    target_frame < g_h264_decoded_frame
+  );
   if (!g_h264_decoder || strcmp(g_h264_fs_path, fs_path) != 0
       || target_frame < g_h264_decoded_frame) {
     if (!start_h264_decoder(fs_path, stream->bytes, stream->size)) return false;
   }
   unsigned int decoded_in_pass = 0;
+  int64_t decode_outer_started_us = esp_timer_get_time();
   while (g_h264_decoded_frame < target_frame
          && decoded_in_pass < PET_P4_H264_MAX_DECODE_FRAMES_PER_RENDER) {
     if (!decode_next_h264_frame(asset->width, asset->height)) {
+      pet_p4_render_trace_add(&g_render_trace.decode_outer_us,
+        elapsed_us_clamped(decode_outer_started_us, esp_timer_get_time()));
       return false;
     }
     decoded_in_pass += 1U;
     if ((decoded_in_pass % 8U) == 0U) vTaskDelay(1);
   }
+  pet_p4_render_trace_add(&g_render_trace.decode_outer_us,
+    elapsed_us_clamped(decode_outer_started_us, esp_timer_get_time()));
   if (!g_h264_output
       || g_h264_output_size < (uint32_t) (asset->width * asset->height * 3 / 2)) {
     return false;
   }
+  int64_t scale_started_us = esp_timer_get_time();
   if (!resolve_h264_i420_layout(
         asset->width,
         asset->height,
@@ -2159,6 +2999,8 @@ static bool render_h264_asset_frame(
         &i420_stride,
         &i420_storage_h
       )) {
+    pet_p4_render_trace_add(&g_render_trace.scale_us,
+      elapsed_us_clamped(scale_started_us, esp_timer_get_time()));
     ESP_LOGW(
       TAG,
       "P4 H264 output layout invalid visible=%dx%d bytes=%u",
@@ -2190,6 +3032,7 @@ static bool render_h264_asset_frame(
     }
   }
   if (!converted) {
+    g_render_trace.fallback |= PET_RENDER_FALLBACK_H264_CPU;
     scale_h264_frame_cpu(
       g_h264_output,
       asset->width,
@@ -2198,8 +3041,10 @@ static bool render_h264_asset_frame(
       i420_storage_h
     );
   }
+  pet_p4_render_trace_add(&g_render_trace.scale_us,
+    elapsed_us_clamped(scale_started_us, esp_timer_get_time()));
   if (!g_logged_h264_decoder) {
-    ESP_LOGI(
+    ESP_LOGD(
       TAG,
       "P4 H264 decoder=%s output=I420 visible=%dx%d storage=%dx%d bytes=%u",
       PET_P4_H264_DECODER_MODE,
@@ -2213,11 +3058,55 @@ static bool render_h264_asset_frame(
   }
   return true;
 }
+#endif
 
+#if PET_P4_CONVERSATION_VIDEO
+/* Render-mutex owned metadata, never a retained cache pointer. If a listening
+ * or speaking clip is not cached, continue the last valid animation rather
+ * than doing filesystem reads during conversation. Replacement/storage edits
+ * invalidate it; a revoked or physically unfinished buffer is never reused. */
+static struct {
+  pet_p4_asset_selection_t asset;
+  char fs_path[80];
+  uint64_t storage_epoch,cancel_epoch;
+  unsigned int revision;
+  int source_slot;
+  bool valid;
+} g_conversation_animation;
+static pet_p4_asset_cache_entry_t *conversation_animation_cached(unsigned int revision,
+    int source_slot,uint64_t request_epoch,uint64_t storage_epoch){
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  bool current=!g_asset_prepare_suspended&&request_epoch==g_asset_prepare_cancel_epoch
+    &&storage_epoch==g_asset_prepare_storage_epoch;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  if(!current)return NULL;
+  if(!g_conversation_animation.valid||g_conversation_animation.revision!=revision
+      ||g_conversation_animation.source_slot!=source_slot
+      ||g_conversation_animation.cancel_epoch!=request_epoch
+      ||g_conversation_animation.storage_epoch!=storage_epoch)return NULL;
+  for(unsigned i=0;i<PET_P4_ASSET_CACHE_SLOTS;i++){
+    pet_p4_asset_cache_entry_t *entry=&g_asset_cache[i];
+    if(entry->bytes&&entry->h264&&!entry->failed&&asset_cache_entry_finished(entry)
+        &&entry->storage_epoch==storage_epoch&&entry->source_slot==source_slot
+        &&entry->size==g_conversation_animation.asset.stream_bytes
+        &&!strcmp(entry->fs_path,g_conversation_animation.fs_path)
+        &&pet_resources_device_current(entry->buffer_lease))return entry;
+  }
+  return NULL;
+}
+#endif
 static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pet_p4_view_model_t *view, unsigned long long now_ms) {
   char fs_path[80];
   pet_p4_asset_selection_t asset;
+  portENTER_CRITICAL(&g_asset_prepare_mux);
+  uint64_t request_epoch = g_asset_prepare_cancel_epoch;
+  uint64_t storage_epoch = g_asset_prepare_storage_epoch;
+  portEXIT_CRITICAL(&g_asset_prepare_mux);
+  int source_slot = pet_p4_asset_active_slot();
+  int64_t resolve_started_us = esp_timer_get_time();
   if (!select_asset(state, now_ms, &asset)) {
+    pet_p4_render_trace_add(&g_render_trace.resolve_us,
+      elapsed_us_clamped(resolve_started_us, esp_timer_get_time()));
     if (!g_logged_asset_failure) {
       ESP_LOGW(TAG, "P4 asset select failed manifest_len=%u family_count=%u status=%d",
                state && state->asset_manifest_json[0] ? (unsigned int) strlen(state->asset_manifest_json) : 0,
@@ -2227,20 +3116,38 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
     }
     return false;
   }
-  if (!pet_p4_asset_fs_path(asset.path, fs_path, sizeof(fs_path))) {
+  if (!pet_p4_asset_fs_path_for_slot(source_slot, asset.path, false, fs_path, sizeof(fs_path))) {
+    pet_p4_render_trace_add(&g_render_trace.resolve_us,
+      elapsed_us_clamped(resolve_started_us, esp_timer_get_time()));
     if (!g_logged_asset_failure) {
       ESP_LOGW(TAG, "P4 asset path rejected: %s", asset.path);
       g_logged_asset_failure = true;
     }
     return false;
   }
-  if (state && g_asset_cache_revision != state->asset_revision) {
-    reset_h264_decoder();
+  pet_p4_render_trace_add(&g_render_trace.resolve_us,
+    elapsed_us_clamped(resolve_started_us, esp_timer_get_time()));
+  g_render_trace.stream_size = asset.stream_bytes;
+  if (asset.codec == PET_P4_ASSET_CODEC_H264) {
+#ifdef CONFIG_ESP_H264_DUAL_TASK
+    g_render_trace.backend = PET_RENDER_BACKEND_H264_DUAL;
+#else
+    g_render_trace.backend = PET_RENDER_BACKEND_H264_SINGLE;
+#endif
+  } else {
+    g_render_trace.backend = PET_RENDER_BACKEND_JPEG_HARDWARE;
+  }
+  if ((state && g_asset_cache_revision != state->asset_revision)
+      || g_asset_renderer_storage_epoch != storage_epoch) {
+    g_render_trace.restart_reason |= PET_RENDER_RESTART_REVISION;
+    reset_h264_decoder_measured();
+    int64_t cache_started_us = esp_timer_get_time();
     clear_asset_stream_cache();
-    g_asset_cache_revision = state->asset_revision;
+    pet_p4_render_trace_add(&g_render_trace.cache_us,
+      elapsed_us_clamped(cache_started_us, esp_timer_get_time()));
+    if (state) g_asset_cache_revision = state->asset_revision;
+    g_asset_renderer_storage_epoch = storage_epoch;
     g_decoder_fs_path[0] = '\0';
-    g_h264_validated_fs_path[0] = '\0';
-    g_h264_single_slice_valid = false;
   }
   if (strcmp(g_decoder_fs_path, fs_path) != 0) {
     snprintf(g_decoder_fs_path, sizeof(g_decoder_fs_path), "%s", fs_path);
@@ -2252,8 +3159,24 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
 
   size_t stream_size = asset.stream_bytes;
   if (stream_size == 0 || stream_size > PET_P4_ASSET_CACHE_MAX_FILE_BYTES) return false;
-  pet_p4_asset_cache_entry_t *stream = load_asset_stream_cache(asset.path, fs_path, stream_size);
+  int64_t cache_started_us = esp_timer_get_time();
+  pet_p4_asset_cache_entry_t *stream = load_asset_stream_cache(asset.path, fs_path, stream_size,
+    asset.codec == PET_P4_ASSET_CODEC_H264, source_slot, request_epoch, storage_epoch);
+  pet_p4_render_trace_add(&g_render_trace.cache_us,
+    elapsed_us_clamped(cache_started_us, esp_timer_get_time()));
+#if PET_P4_CONVERSATION_VIDEO
+  if(!stream&&state&&pet_p4_audio_conversation_video_ready()){
+    stream=conversation_animation_cached(state->asset_revision,source_slot,request_epoch,storage_epoch);
+    if(stream){
+      asset=g_conversation_animation.asset;
+      snprintf(fs_path,sizeof(fs_path),"%s",g_conversation_animation.fs_path);
+      g_asset_cache_pending=false;g_render_trace.cache_hit=PET_RENDER_CACHE_HIT;
+      g_render_trace.stream_size=asset.stream_bytes;
+    }
+  }
+#endif
   if (!stream) {
+    if (g_asset_cache_pending) return false;
     if (!g_logged_asset_failure) {
       ESP_LOGW(
         TAG,
@@ -2280,8 +3203,13 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
   unsigned long long cycle_elapsed_ms = playback_elapsed_ms % playback_duration_ms;
   g_last_decode_us = 0;
   if (asset.codec == PET_P4_ASSET_CODEC_H264) {
+#if PET_P4_H264_PREFETCH
+    bool rendered=render_h264_asset_frame_async(&asset,fs_path,stream,playback_duration_ms);
+#else
     bool rendered = render_h264_asset_frame(&asset, fs_path, stream, cycle_elapsed_ms);
+#endif
     if (!rendered) {
+      if(g_asset_cache_pending)return false; /* native work is not an asset error */
       if (!g_logged_asset_failure) {
         ESP_LOGW(
           TAG,
@@ -2297,14 +3225,32 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
       return false;
     }
     if (!g_logged_asset || strcmp(g_rendered_family, asset.family) != 0) {
-      ESP_LOGI(TAG, "rendering P4 family=%s asset=%s", asset.family, asset.path);
+      ESP_LOGD(TAG, "rendering P4 family=%s asset=%s", asset.family, asset.path);
       snprintf(g_rendered_family, sizeof(g_rendered_family), "%s", asset.family);
       g_logged_asset = true;
     }
     note_asset_decode_success();
+#if PET_P4_CONVERSATION_VIDEO
+    if(state){
+      g_conversation_animation.asset=asset;
+      snprintf(g_conversation_animation.fs_path,sizeof(g_conversation_animation.fs_path),"%s",fs_path);
+      g_conversation_animation.revision=state->asset_revision;
+      g_conversation_animation.source_slot=source_slot;
+      g_conversation_animation.storage_epoch=storage_epoch;
+      g_conversation_animation.cancel_epoch=request_epoch;
+      g_conversation_animation.valid=true;
+    }
+#endif
     return true;
   }
-  if (g_h264_decoder) reset_h264_decoder();
+#if PET_P4_H264_PREFETCH
+  if(!h264_prefetch_reset()){g_asset_cache_pending=true;return false;}
+#else
+  if (g_h264_decoder) {
+    g_render_trace.restart_reason |= PET_RENDER_RESTART_CODEC;
+    reset_h264_decoder_measured();
+  }
+#endif
   int frame_index = (int) (
     (cycle_elapsed_ms * (unsigned long long) asset.frames) / playback_duration_ms
   );
@@ -2316,7 +3262,10 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
       || offset > stream->size || frame_size > stream->size - offset) {
     return false;
   }
+  int64_t copy_started_us = esp_timer_get_time();
   memcpy(g_jpeg_input, stream->bytes + offset, frame_size);
+  pet_p4_render_trace_add(&g_render_trace.copy_us,
+    elapsed_us_clamped(copy_started_us, esp_timer_get_time()));
 
   int decoded_width = 0;
   int decoded_height = 0;
@@ -2334,6 +3283,8 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
   );
   bool decoded = decoded_with_hardware;
   if (!decoded) {
+    g_render_trace.backend = PET_RENDER_BACKEND_JPEG_TJPGD;
+    g_render_trace.fallback |= PET_RENDER_FALLBACK_JPEG_TJPGD;
     decoded = decode_jpeg_frame_tjpgd(
       g_jpeg_input,
       frame_size,
@@ -2352,6 +3303,7 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
     }
   }
   g_last_decode_us = elapsed_us_clamped(decode_started_us, esp_timer_get_time());
+  g_render_trace.decode_outer_us = g_last_decode_us;
   if (!decoded) {
     if (!g_logged_asset_failure) {
       ESP_LOGW(
@@ -2370,7 +3322,7 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
     return false;
   }
   if (decoded_with_hardware && !g_logged_hardware_decoder) {
-    ESP_LOGI(
+    ESP_LOGD(
       TAG,
       "P4 JPEG decoder=hardware output=RGB565 size=%dx%d",
       decoded_width,
@@ -2384,9 +3336,12 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
   if (src_w <= 0 || src_h <= 0) return false;
   if (src_w > PET_P4_ASSET_WIDTH) src_w = PET_P4_ASSET_WIDTH;
   if (src_h > PET_P4_ASSET_HEIGHT) src_h = PET_P4_ASSET_HEIGHT;
+  int64_t scale_started_us = esp_timer_get_time();
   scale_asset_frame_to_display(src_w, src_h, decoded_stride);
+  pet_p4_render_trace_add(&g_render_trace.scale_us,
+    elapsed_us_clamped(scale_started_us, esp_timer_get_time()));
   if (!g_logged_asset || strcmp(g_rendered_family, asset.family) != 0) {
-    ESP_LOGI(TAG, "rendering P4 family=%s asset=%s", asset.family, asset.path);
+    ESP_LOGD(TAG, "rendering P4 family=%s asset=%s", asset.family, asset.path);
     snprintf(g_rendered_family, sizeof(g_rendered_family), "%s", asset.family);
     g_logged_asset = true;
   }
@@ -2394,9 +3349,20 @@ static bool render_asset_pet_frame(const pet_p4_runtime_state_t *state, const pe
   return true;
 }
 
+/* Called after the appearance attempt and before any main-page overlays. */
+static void main_compact_underlay_prepare(bool drew_asset, bool compact_requested) {
+  g_main_compact_frame_clean = drew_asset;
+  if (drew_asset) pet_compact_underlay_forget(&g_main_compact_underlay);
+  else pet_compact_underlay_restore(&g_main_compact_underlay, g_framebuffer);
+  /* Once another overlay owns this frame, no later pending compact may capture
+   * its pixels. Wait for the next clean appearance instead. */
+  if (!compact_requested) pet_compact_underlay_forget(&g_main_compact_underlay);
+}
+
 static void draw_bubble(const pet_p4_runtime_state_t *state,
     const pet_p4_view_model_t *view, unsigned long long now_ms) {
   if (view && !view->show_bubble) return;
+  int64_t content_started = esp_timer_get_time();
   bool compact = view ? view->compact_bubble : true;
   pet_bubble_text_view_t text = {0};
   char owner[160];
@@ -2404,7 +3370,7 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     state ? (view && view->realtime_conversation ? state->conversation_id : state->current_session_id) : "");
   const char *requested_title = view && view->title ? view->title : "";
   const char *requested_body = view && view->body ? view->body : "";
-  pet_bubble_pixels_select(owner, compact ? PET_BUBBLE_COMPACT
+  renderer_bubble_select(owner, compact ? PET_BUBBLE_COMPACT
       : view && view->realtime_conversation ? PET_BUBBLE_BODY : PET_BUBBLE_BODY_CLIPPED,
     compact ? "" : requested_title, compact && !requested_body[0] ? requested_title : requested_body,
     now_ms, &text);
@@ -2433,12 +3399,12 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     uint64_t caption_since = text.since_ms > view->caption_since_ms ? text.since_ms : view->caption_since_ms;
     unsigned host_page = host_pages ? (unsigned)(((now_ms >= caption_since ? now_ms-caption_since : 0)/2800ULL)%host_pages) : 0;
     if (realtime && host_pages) pet_bubble_pixels_pin_page(&text,host_page);
-    if (!(text.pixels && pet_bubble_pixels_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
+    if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
         x + 30, y + 10, w - 82, ink)))
       draw_text_line_vcenter(title, x + 30, y + 10, 38, w - 82, ink, 2, true);
     if (body[0]) {
       if (realtime) {
-        bool host_drawn = host_pages && text.pixels && pet_bubble_pixels_draw_pinned(&text,
+        bool host_drawn = host_pages && text.pixels && renderer_bubble_draw_pinned(&text,
           PET_BUBBLE_BODY, host_page, g_framebuffer, x + 30, y + 50, w - 60, muted);
         if (!host_drawn) {
           // Roll through pairs of wrapped lines without allocating or cutting UTF-8.
@@ -2471,6 +3437,8 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     if (realtime) draw_text_line_vcenter(view->conversation_history ? "回看" : "对话", x + w - 78, y + 14, 30, 64, selection, 1, true);
     else draw_status_marker(status, now_ms, x + w - 26, y + 26);
     pet_bubble_pixels_release(&text);
+    pet_p4_render_trace_add(&g_render_trace.bubble_draw_us,
+      elapsed_us_clamped(content_started, esp_timer_get_time()));
     return;
   }
 
@@ -2487,9 +3455,16 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
   if (w < 160) w = 160;
   if (w > 420) w = 420;
   if (w & 1) w += 1;
+  if (!pet_compact_underlay_begin(&g_main_compact_underlay, g_framebuffer,
+      (unsigned)(w + 2), g_main_compact_frame_clean)) {
+    pet_bubble_pixels_release(&text);
+    pet_p4_render_trace_add(&g_render_trace.bubble_draw_us,
+      elapsed_us_clamped(content_started, esp_timer_get_time()));
+    return;
+  }
   draw_home_white_panel(x, y, w, h, 16, outline);
   fill_round_rect(x + 10, y + 14, 4, h - 28, 2, accent);
-  if (!(text.pixels && pet_bubble_pixels_draw_pinned(&text, PET_BUBBLE_COMPACT, 0, g_framebuffer,
+  if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_COMPACT, 0, g_framebuffer,
       text_x, y + (h - 38) / 2 + PET_P4_COMPACT_TEXT_OPTICAL_Y, w - 72, ink))) draw_text_line(
     body,
     text_x,
@@ -2506,52 +3481,25 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     y + 28
   );
   pet_bubble_pixels_release(&text);
+    pet_p4_render_trace_add(&g_render_trace.bubble_draw_us,
+      elapsed_us_clamped(content_started, esp_timer_get_time()));
 }
 
-static void draw_touch_feedback(
-  const pet_p4_runtime_state_t *state,
-  unsigned long long now_ms
-) {
-  if (!pet_p4_state_touch_feedback_active(state, now_ms)) return;
-  int x = state->local_touch_x;
-  int y = state->local_touch_y;
+static void draw_touch_feedback_pixels(int x,int y) {
   uint16_t white = rgb565(255, 255, 255);
   uint16_t teal = rgb565(0, 170, 162);
   fill_ellipse(x, y, 13, 13, white);
   fill_ellipse(x, y, 9, 9, teal);
   fill_ellipse(x, y, 3, 3, white);
 }
-
-static void draw_page_indicator(const char *page) {
-  int count = 2;
-  int current = strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0;
-  int x = PET_P4_PAGE_INDICATOR_X;
-  int y = PET_P4_PAGE_INDICATOR_Y;
-  uint16_t background = rgb565(11, 14, 13);
-  uint16_t active = rgb565(255, 163, 31);
-  uint16_t inactive = rgb565(111, 119, 112);
-  blend_round_rect(
-    x,
-    y,
-    PET_P4_PAGE_INDICATOR_WIDTH,
-    PET_P4_PAGE_INDICATOR_HEIGHT,
-    10,
-    5,
-    7,
-    6,
-    220
-  );
-  for (int i = 0; i < count; i += 1) {
-    int radius = i == current ? 4 : 2;
-    fill_ellipse(
-      x + 18 + i * 16,
-      y + PET_P4_PAGE_INDICATOR_HEIGHT / 2,
-      radius,
-      radius,
-      i == current ? active : inactive
-    );
-  }
+static void draw_touch_feedback(
+  const pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+) {
+  if (!pet_p4_state_touch_feedback_active(state, now_ms)) return;
+  draw_touch_feedback_pixels(state->local_touch_x,state->local_touch_y);
 }
+
 
 static void draw_text_right(
   const char *text,
@@ -2711,7 +3659,7 @@ static bool center_draw_thumbnail(const char *id,int x,int y) {
   }
   return false;
 }
-static void render_component_center_page(void) {
+static void render_component_center_page(bool loading) {
   const uint16_t background = rgb565(224, 196, 162);
   const uint16_t panel = rgb565(255, 247, 232);
   const uint16_t outline = rgb565(231, 207, 174);
@@ -2730,7 +3678,7 @@ static void render_component_center_page(void) {
   if(center_background)memcpy(g_framebuffer,center_background,640*480*2);
   else fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, background);
   draw_text_line("组件中心", 26, 14, 300, ink, 2, true);
-  draw_text_line("轻点打开 · 左右滑动翻页",26,54,440,muted,1,true);
+  draw_text_line(loading ? "正在准备组件，可返回取消" : "轻点打开 · 左右滑动翻页",26,54,440,muted,1,true);
   char count_text[24];
   snprintf(count_text, sizeof(count_text), "已安装 %u 个", (unsigned int) count);
   fill_round_rect(474,22,142,30,15,panel);
@@ -2789,28 +3737,7 @@ static void render_component_center_page(void) {
   draw_text_center("摇杆选择    确认键打开    全局键返回", 320, 444, 580, muted, 1);
 }
 
-static void draw_connection_banner(
-  const pet_p4_runtime_state_t *state,
-  unsigned long long now_ms
-) {
-  if (!state) return;
-  bool connected = pet_p4_state_host_connected(state, now_ms);
-  const char *label = NULL;
-  uint16_t dot = rgb565(0, 170, 162);
-  if (connected && state->asset_family_count > 0) return;
-  if (connected) {
-    label = "正在同步宠物形象";
-  } else if (state->desktop_device_id[0]) {
-    label = "客户端未连接";
-    dot = rgb565(224, 79, 72);
-  } else if (state->native_usb_mounted || state->host_last_seen_ms > 0) {
-    label = "正在连接 Pet Manager";
-    dot = rgb565(242, 168, 45);
-  } else {
-    label = "连接 Pet Manager 以开始";
-    dot = rgb565(242, 168, 45);
-  }
-
+static void draw_connection_banner_pixels(const char *label,uint16_t dot) {
   uint16_t background = rgb565(11, 14, 13);
   uint16_t text = rgb565(250, 241, 204);
   int banner_h = 32;
@@ -2833,6 +3760,32 @@ static void draw_connection_banner(
     true
   );
 }
+static void draw_connection_banner(
+  const pet_p4_runtime_state_t *state,
+  unsigned long long now_ms
+) {
+  if (!state) return;
+  bool connected = pet_p4_state_host_connected(state, now_ms);
+  const char *label = NULL;
+  uint16_t dot = rgb565(0, 170, 162);
+  if (connected && state->asset_family_count > 0) return;
+  if (connected) label = "正在同步宠物形象";
+  else if (state->desktop_device_id[0]) {label = "客户端未连接";dot = rgb565(224, 79, 72);}
+  else if (state->native_usb_mounted || state->host_last_seen_ms > 0) {label = "正在连接 Pet Manager";dot = rgb565(242, 168, 45);}
+  else {label = "连接 Pet Manager 以开始";dot = rgb565(242, 168, 45);}
+  draw_connection_banner_pixels(label,dot);
+}
+#if PET_P4_APP_RETAIN_LOGICAL
+static void draw_common_connection(uint8_t banner){
+  switch(banner){
+    case 1:draw_connection_banner_pixels("正在同步宠物形象",rgb565(0,170,162));break;
+    case 2:draw_connection_banner_pixels("客户端未连接",rgb565(224,79,72));break;
+    case 3:draw_connection_banner_pixels("正在连接 Pet Manager",rgb565(242,168,45));break;
+    case 4:draw_connection_banner_pixels("连接 Pet Manager 以开始",rgb565(242,168,45));break;
+    default:break;
+  }
+}
+#endif
 
 static void draw_text_right(
   const char *text,
@@ -2914,6 +3867,7 @@ static void draw_voice_waveform(int x, int y, int width, uint16_t color) {
 }
 
 static void draw_voice_input_row(int x, int y) {
+  int64_t content_started = esp_timer_get_time();
   uint16_t ink = rgb565(28, 31, 31);
   uint16_t muted = rgb565(92, 98, 96);
   draw_voice_waveform(x + 30, y, 230, rgb565(255, 163, 31));
@@ -2923,6 +3877,8 @@ static void draw_voice_input_row(int x, int y) {
   draw_line(x + 279, y + 25, x + 297, y + 25, ink);
   draw_line(x + 297, y + 25, x + 297, y + 18, ink);
   draw_text_line_vcenter("LISTENING", x + 324, y + 11, 30, 180, muted, 1, true);
+  pet_p4_render_trace_add(&g_render_trace.voice_us,
+    elapsed_us_clamped(content_started, esp_timer_get_time()));
 }
 
 static void draw_standalone_voice_overlay(void) {
@@ -2939,21 +3895,13 @@ static void session_text(const pet_p4_session_queue_item_t *item, uint64_t now_m
     pet_bubble_text_view_t *out) {
   char owner[160];
   snprintf(owner, sizeof(owner), "session:%s", item->id);
-  pet_bubble_pixels_select(owner, PET_BUBBLE_BODY_CLIPPED, item->title,
+  renderer_bubble_select(owner, PET_BUBBLE_BODY_CLIPPED, item->title,
     item->content[0] ? item->content : item->state, now_ms, out);
 }
 
-static void draw_session_queue_uncached(
-  const pet_p4_runtime_state_t *state,
-  unsigned long long now_ms,
-  bool draw_working_markers
-) {
-  if (!state || state->session_queue_count == 0) return;
-
-  uint16_t ink = rgb565(28, 31, 31);
-  uint16_t muted = rgb565(55, 61, 59);
-  uint16_t card_outline = rgb565(216, 221, 218);
-  uint16_t selection = rgb565(25, 151, 99);
+/* Keep cache identity and both draw passes on the same visible card window. */
+static void session_overlay_visible_window(const pet_p4_runtime_state_t *state,
+    unsigned int *out_selected, unsigned int *out_start, unsigned int *out_visible) {
   unsigned int selected = state->current_session_index > 0
     ? state->current_session_index - 1
     : 0;
@@ -2964,6 +3912,26 @@ static void draw_session_queue_uncached(
     if (selected >= state->session_queue_count - 1) start = state->session_queue_count - visible;
     else if (selected > 0) start = selected - 1;
   }
+  *out_selected = selected;
+  *out_start = start;
+  *out_visible = visible;
+}
+
+static void draw_session_queue_uncached(
+  const pet_p4_runtime_state_t *state,
+  unsigned long long now_ms,
+  bool draw_working_markers
+) {
+  if (!state || state->session_queue_count == 0) return;
+  int64_t content_started = esp_timer_get_time();
+
+
+  uint16_t ink = rgb565(28, 31, 31);
+  uint16_t muted = rgb565(55, 61, 59);
+  uint16_t card_outline = rgb565(216, 221, 218);
+  uint16_t selection = rgb565(25, 151, 99);
+  unsigned int selected, start, visible;
+  session_overlay_visible_window(state, &selected, &start, &visible);
   int block_height = (int) visible * PET_P4_SESSION_CARD_HEIGHT
     + ((int) visible - 1) * PET_P4_SESSION_CARD_GAP;
   int first_y = PET_P4_SESSION_CARD_BOTTOM - block_height;
@@ -2992,7 +3960,7 @@ static void draw_session_queue_uncached(
     if (draw_working_markers || marker_status != PET_P4_VIEW_STATUS_WORKING) {
       draw_status_marker(marker_status, now_ms, x + w - 26, y + 26);
     }
-    if (!(text.pixels && pet_bubble_pixels_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
+    if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
         x + 30, y + 10, w - 82, ink)))
       draw_text_line_vcenter(text.title, x + 30, y + 10, 38, w - 82, ink, 2, true);
 
@@ -3003,6 +3971,8 @@ static void draw_session_queue_uncached(
     }
     pet_bubble_pixels_release(&text);
   }
+  pet_p4_render_trace_add(&g_render_trace.session_cache_draw_us,
+    elapsed_us_clamped(content_started, esp_timer_get_time()));
 }
 
 static uint64_t session_cache_hash_bytes(uint64_t hash, const void *bytes, size_t size) {
@@ -3026,7 +3996,10 @@ static uint64_t session_overlay_signature(const pet_p4_runtime_state_t *state) {
   hash = session_cache_hash_bytes(hash, &state->session_queue_count, sizeof(state->session_queue_count));
   hash = session_cache_hash_bytes(hash, &state->current_session_index, sizeof(state->current_session_index));
   hash = session_cache_hash_bytes(hash, &state->session_voice_active, sizeof(state->session_voice_active));
-  for (unsigned int i = 0; i < state->session_queue_count && i < PET_P4_SESSION_QUEUE_MAX; i += 1) {
+  unsigned int selected, start, visible;
+  session_overlay_visible_window(state, &selected, &start, &visible);
+  (void)selected; /* current_session_index above retains its complete dependency. */
+  for (unsigned int i = start; i < start + visible && i < PET_P4_SESSION_QUEUE_MAX; i += 1) {
     const pet_p4_session_queue_item_t *item = &state->session_queue[i];
     hash = session_cache_hash_text(hash, item->id);
     hash = session_cache_hash_text(hash, item->title);
@@ -3037,6 +4010,7 @@ static uint64_t session_overlay_signature(const pet_p4_runtime_state_t *state) {
 }
 
 static void scan_session_overlay_cache_runs(void) {
+  int64_t content_started = esp_timer_get_time();
   memset(g_session_overlay_row_run_count, 0, sizeof(g_session_overlay_row_run_count));
   for (int y = 0; y < PET_P4_UI_HEIGHT; y += 1) {
     const uint16_t *row = g_session_overlay_cache + y * PET_P4_UI_WIDTH;
@@ -3057,6 +4031,8 @@ static void scan_session_overlay_cache_runs(void) {
       g_session_overlay_row_run_count[y] = run + 1;
     }
   }
+  pet_p4_render_trace_add(&g_render_trace.session_cache_scan_us,
+    elapsed_us_clamped(content_started, esp_timer_get_time()));
 }
 
 static bool rebuild_session_overlay_cache(
@@ -3078,16 +4054,19 @@ static bool rebuild_session_overlay_cache(
 
   uint16_t *output = g_framebuffer;
   g_framebuffer = g_session_overlay_cache;
+  int64_t fill_started = esp_timer_get_time();
   for (size_t i = 0; i < (size_t) PET_P4_UI_WIDTH * PET_P4_UI_HEIGHT; i += 1) {
     g_session_overlay_cache[i] = PET_P4_SESSION_CACHE_SENTINEL;
   }
+  pet_p4_render_trace_add(&g_render_trace.session_cache_fill_us,
+    elapsed_us_clamped(fill_started, esp_timer_get_time()));
   draw_session_queue_uncached(state, now_ms, false);
   g_framebuffer = output;
   scan_session_overlay_cache_runs();
   g_session_overlay_signature = signature;
   g_session_overlay_cache_valid = true;
   memset(&g_render_perf, 0, sizeof(g_render_perf));
-  ESP_LOGI(
+  ESP_LOGD(
     TAG,
     "P4 session overlay cache rebuilt sessions=%u selected=%u",
     state->session_queue_count,
@@ -3097,6 +4076,7 @@ static bool rebuild_session_overlay_cache(
 }
 
 static void copy_session_overlay_cache(void) {
+  int64_t content_started = esp_timer_get_time();
   for (int y = 0; y < PET_P4_UI_HEIGHT; y += 1) {
     const uint16_t *source = g_session_overlay_cache + y * PET_P4_UI_WIDTH;
     uint16_t *target = g_framebuffer + y * PET_P4_UI_WIDTH;
@@ -3106,22 +4086,16 @@ static void copy_session_overlay_cache(void) {
       memcpy(target + start, source + start, (size_t) (end - start) * sizeof(uint16_t));
     }
   }
+  pet_p4_render_trace_add(&g_render_trace.session_cache_copy_us,
+    elapsed_us_clamped(content_started, esp_timer_get_time()));
 }
 
 static void draw_session_queue_working_markers(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
 ) {
-  unsigned int selected = state->current_session_index > 0
-    ? state->current_session_index - 1
-    : 0;
-  if (selected >= state->session_queue_count) selected = 0;
-  unsigned int visible = state->session_queue_count < 3 ? state->session_queue_count : 3;
-  unsigned int start = 0;
-  if (state->session_queue_count > visible) {
-    if (selected >= state->session_queue_count - 1) start = state->session_queue_count - visible;
-    else if (selected > 0) start = selected - 1;
-  }
+  unsigned int selected, start, visible;
+  session_overlay_visible_window(state, &selected, &start, &visible);
   int block_height = (int) visible * PET_P4_SESSION_CARD_HEIGHT
     + ((int) visible - 1) * PET_P4_SESSION_CARD_GAP;
   int first_y = PET_P4_SESSION_CARD_BOTTOM - block_height;
@@ -3683,6 +4657,11 @@ static void draw_miniapp_game_grid(
     for (int x = 0; x < game->width; x += 1) {
       int index = y * game->width + x;
       uint8_t tone = game->cells[index];
+      if (game->kind == PET_P4_GAME_GOMOKU) {
+        /* packed gomoku cell: black -> ink, white -> light, bare cursor -> secondary */
+        uint8_t stone = tone & PET_P4_GAME_GOMOKU_STONE_MASK;
+        tone = stone == 1 ? 3 : stone == 2 ? 4 : (tone & PET_P4_GAME_GOMOKU_CURSOR) ? 2 : 0;
+      }
       uint16_t color = empty;
       if (tone == 1) color = primary;
       else if (tone == 2) color = secondary;
@@ -4133,18 +5112,157 @@ static void draw_media_queue(int x,int y,uint16_t color) {
 
 static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;
 #include "pet_p4_app_icons.h"
-static EXT_RAM_BSS_ATTR uint8_t g_surface_indices[98304];
+static EXT_RAM_BSS_ATTR uint8_t g_surface_indices[PET_SURFACE_IMAGE_PIXELS];
 // Runtime-only cache: flash still stores the same compact P4I1 images. A static
 // full-screen background must not be resampled/alpha-blended 307200 times/frame.
-static EXT_RAM_BSS_ATTR uint16_t g_surface_background[640*480];
-static uint16_t g_surface_colors[4][256];
-static uint8_t g_surface_alpha[4][256];
+#if PET_P4_APP_PPA_COPY
+#define PET_SURFACE_BACKGROUND_ALIGN __attribute__((aligned(64)))  /* PPA source/destination cache-line alignment */
+#else
+#define PET_SURFACE_BACKGROUND_ALIGN
+#endif
+static EXT_RAM_BSS_ATTR PET_SURFACE_BACKGROUND_ALIGN uint16_t g_surface_background[640*480];
+static uint16_t g_surface_colors[PET_SURFACE_IMAGES][256];
+static uint8_t g_surface_alpha[PET_SURFACE_IMAGES][256];
+#if PET_P4_APP_COLD_FAST
+static bool g_surface_opaque[PET_SURFACE_IMAGES];
+#endif
 static bool g_surface_background_valid;
 static uint8_t g_surface_background_page;
-static uint32_t g_surface_revision, g_surface_offsets[4];
+static uint32_t g_surface_revision, g_surface_offsets[PET_P4_MINIAPP_SPRITE_MAX];
 static uint64_t g_surface_play_ms,g_surface_last_ms;
 static bool g_surface_was_playing;
+#include "pet_p4_capability_draw.inc"
+#if PET_P4_APP_COLD_FAST
+/* Pure span helpers; the host exactness test compiles them against the loops they replace. */
+static inline void cold_fast_blend_span(uint16_t *px,int count,uint8_t r,uint8_t g,uint8_t b,uint8_t alpha){
+  for(int i=0;i<count;i++)px[i]=blend_rgb565(px[i],r,g,b,alpha);
+}
+/* blend_rgb565 is channel-separable, so one 5/6/5-bit table per channel, built
+ * by calling blend_rgb565 itself, reproduces it exactly for a constant colour+alpha. */
+typedef struct {uint16_t r[32],g[64],b[32];} cold_fast_blend_lut_t;
+static inline void cold_fast_blend_lut(cold_fast_blend_lut_t *lut,uint8_t r,uint8_t g,uint8_t b,uint8_t alpha){
+  for(unsigned v=0;v<64;v++){
+    uint16_t out=blend_rgb565((uint16_t)(((v&31)<<11)|(v<<5)|(v&31)),r,g,b,alpha);
+    if(v<32){lut->r[v]=(uint16_t)(out&0xF800);lut->b[v]=(uint16_t)(out&0x001F);}
+    lut->g[v]=(uint16_t)(out&0x07E0);
+  }
+}
+static inline void cold_fast_blend_span_lut(uint16_t *px,int count,const cold_fast_blend_lut_t *lut){
+  for(int i=0;i<count;i++){uint16_t v=px[i];px[i]=(uint16_t)(lut->r[v>>11]|lut->g[(v>>5)&63]|lut->b[v&31]);}
+}
+static inline void cold_fast_image_span(uint16_t *out,const uint8_t *row,const uint16_t *colors,const uint8_t *alpha,const uint8_t *palette,int count){
+  for(int i=0;i<count;i++){
+    unsigned index=row[i],a=alpha[index];
+    if(!a)continue;
+    if(a==255){out[i]=colors[index];continue;}
+    const uint8_t *p=palette+4*index;uint16_t bg=out[i];
+    unsigned r=((bg>>11)&31)*255/31,g=((bg>>5)&63)*255/63,b=(bg&31)*255/31;
+    out[i]=rgb565((p[0]*a+r*(255-a))/255,(p[1]*a+g*(255-a))/255,(p[2]*a+b*(255-a))/255);
+  }
+}
+static inline bool cold_fast_palette_opaque(const uint8_t *palette){
+  for(int color=0;color<256;color++)if(palette[4*color+3]!=255)return false;
+  return true;
+}
+/* Opacity over the indices the frame actually uses (unused palette entries do not matter). */
+static inline bool cold_fast_indices_opaque(const uint8_t *indices,size_t count,const uint8_t *alpha){
+  for(size_t i=0;i<count;i++)if(alpha[indices[i]]!=255)return false;
+  return true;
+}
+/* Only the cover==1 interior of a valid, unstroked rounded panel. Corners
+ * continue through the original SDF below. Alpha interpolation keeps its signed
+ * integer truncation; horizontal tiles compute it once per column, not per pixel.
+ * Scratch is bounded (64 alpha bytes or the existing 256-byte channel LUT). */
+static void cold_fast_panel_interior(const pet_surface_node_t *n,int x0,int y0,int x1,int y1,
+    uint8_t r,uint8_t g,uint8_t b){
+  if(x0>=x1||y0>=y1)return;
+  if(n->vertical||n->opacity==n->opacity_end){
+    cold_fast_blend_lut_t lut;
+    int last=-1;
+    for(int y=y0;y<y1;y++){
+      int a=n->opacity+(n->opacity_end-n->opacity)*(n->vertical?y:0)/(n->vertical&&n->h>1?n->h-1:1);
+      if(!a)continue;
+      uint16_t *row=g_framebuffer+(n->y+y)*640+n->x+x0;
+      if(a==255){for(int x=x0;x<x1;x++)row[x-x0]=n->color;continue;}
+      if(a!=last){cold_fast_blend_lut(&lut,r,g,b,(uint8_t)a);last=a;}
+      cold_fast_blend_span_lut(row,x1-x0,&lut);
+    }
+    return;
+  }
+  for(int tile=x0;tile<x1;tile+=64){
+    int count=x1-tile;if(count>64)count=64;
+    uint8_t alpha[64];
+    for(int x=0;x<count;x++)alpha[x]=(uint8_t)(n->opacity+(n->opacity_end-n->opacity)*(tile+x)/(n->w>1?n->w-1:1));
+    for(int y=y0;y<y1;y++){
+      uint16_t *row=g_framebuffer+(n->y+y)*640+n->x+tile;
+      for(int x=0;x<count;x++){
+        unsigned a=alpha[x];
+        if(a==255)row[x]=n->color;
+        else if(a)row[x]=blend_rgb565(row[x],r,g,b,(uint8_t)a);
+      }
+    }
+  }
+}
+/* Set when the clear was skipped under a full-screen first JPEG node; the JPEG
+ * branch clears it on success or paints the background itself on failure. */
+static bool g_cold_fast_jpeg_pending;
+/* Tentative forward declaration of the renderer's own static (defined below next to the label code). */
+static const pet_surface_t *g_app_text_surface;
+#endif
+/* Track C fragment: big-image tiles and clip playback (flag-gated, shares these statics). */
+#include "pet_p4_renderer_ext.inc"
+
+/* Render-thread handoff: a hidden/absent clip is polled on EVERY frame until
+ * its worker and decoder really release the source. Never retag an old view
+ * with a store-generation lookup performed after the model lock was dropped. */
+static bool renderer_component_media_frame(const pet_p4_miniapp_render_snapshot_t *snapshot){
+#if PET_P4_BIG_IMAGE || PET_P4_CLIP
+  renderer_ext_media_snapshot(snapshot?snapshot->media_generation:0);
+#endif
+#if PET_P4_CLIP
+  bool clip_visible=false;
+  if(snapshot&&snapshot->view.active&&snapshot->view.app_surface&&snapshot->surface_active){
+    for(unsigned i=0;i<snapshot->surface.count;i++){
+      const pet_surface_node_t *n=&snapshot->surface.nodes[i];
+      if(n->type!=PET_SURFACE_NODE_CLIP||n->hidden||!pet_surface_node_on_page(n,snapshot->view.surface_page))continue;
+      pet_surface_node_t projected;
+      const pet_surface_viewport_t *viewport=pet_surface_node_viewport(&snapshot->surface,n);
+      if(pet_surface_project(viewport,n,viewport?viewport->offset:0,&projected)){
+        clip_visible=true;break;
+      }
+    }
+  }
+  /* Generation retirement cannot depend on draw: a clip may have scrolled out
+   * of its viewport, so no node renderer would see its stale source token. */
+  if(!clip_visible||(g_clip_lease.token&&g_clip_lease.generation!=snapshot->media_generation))
+    return renderer_ext_clip_retire();
+#else
+  (void)snapshot;
+#endif
+  return true;
+}
+#if PET_SERVICE_BRIDGE_ENABLED
+static bool draw_service_image(const pet_surface_node_t*n,const char*id,uint64_t now){
+  if(!n->image_bind[0])return false;pet_bridge_image_lease_t lease;
+  if(!pet_app_host_image_borrow(id,n->image_bind,now,&lease))return false;
+  for(int dy=0;dy<n->h;dy++){
+    int y=n->y+dy;if(y<0||y>=480)continue;unsigned sy=(unsigned)((uint32_t)dy*lease.height/n->h);
+    for(int dx=0;dx<n->w;dx++){int x=n->x+dx;if(x<0||x>=640||!app_clip_contains(x,y))continue;unsigned sx=(unsigned)((uint32_t)dx*lease.width/n->w);g_framebuffer[y*640+x]=lease.pixels[sy*lease.width+sx];}
+  }pet_app_host_image_release(&lease);
+#if PET_P4_APP_COLD_FAST
+  /* A pending clear belongs to this first full-screen JPEG fallback node.
+   * A successful service image has already overwritten the same whole frame. */
+  g_cold_fast_jpeg_pending=false;
+#endif
+  return true;
+}
+#endif
 static void draw_surface_image(const pet_surface_node_t *n) {
+#if PET_P4_BIG_IMAGE
+  /* A parsed big-image node has no ordinary image slot. Prefer a real
+   * palette/JPEG image even if a synthetic node was zero-initialized. */
+  if(n->image<0&&n->big>=0){renderer_ext_draw_big(n);return;}
+#endif
   if(n->image<0||n->image>=g_surface_images.count)return;
   const pet_p4_miniapp_sprite_t *im=&g_surface_images.items[n->image];
   if(im->fps!=0)return;
@@ -4152,12 +5270,28 @@ static void draw_surface_image(const pet_surface_node_t *n) {
   if(im->data_length>=16&&packed[2]=='J'){
     // The parser only permits this as the first full-screen static node. Decode
     // once into the existing background cache, never on each animation frame.
-    if(!pet_image_jpeg(packed,im->data_length)||!g_jpeg_input||im->data_length-12>g_jpeg_input_capacity)return;
-    memcpy(g_jpeg_input,packed+12,im->data_length-12);
-    int w=0,h=0,stride=0;esp_err_t err;JRESULT fallback;
-    bool ok=decode_jpeg_frame_hardware(g_jpeg_input,im->data_length-12,&w,&h,&stride,&err);
-    if(!ok){ok=decode_jpeg_frame_tjpgd(g_jpeg_input,im->data_length-12,&w,&h,&fallback);stride=w;}
-    if(ok&&w==640&&h==480)for(int y=0;y<480;y++)memcpy(g_framebuffer+y*640,g_jpeg_output+y*stride,1280);
+    int w=0,h=0,stride=0;bool ok=false;
+#if PET_P4_KEYFRAME_BG
+    /* Keyframe set: the worker-decoded current frame is copied; frame 0 before the
+     * worker ran (or a cache holding another frame) decodes exactly as before. */
+    if(g_app_text_surface&&g_app_text_surface->keyframes>1){
+      if(keyframe_blit(g_app_text_surface,&im)){ok=true;w=640;h=480;}
+      else packed=g_surface_images.pixels+im->data_offset;
+    }
+    if(!ok)
+#endif
+    if(pet_image_jpeg(packed,im->data_length)&&g_jpeg_input&&im->data_length-12<=g_jpeg_input_capacity){
+      memcpy(g_jpeg_input,packed+12,im->data_length-12);
+      esp_err_t err;JRESULT fallback;
+      ok=decode_jpeg_frame_hardware(g_jpeg_input,im->data_length-12,&w,&h,&stride,&err);
+      if(!ok){ok=decode_jpeg_frame_tjpgd(g_jpeg_input,im->data_length-12,&w,&h,&fallback);stride=w;}
+    }
+    if(ok&&w==640&&h==480&&stride)for(int y=0;y<480;y++)memcpy(g_framebuffer+y*640,g_jpeg_output+y*stride,1280);
+#if PET_P4_APP_COLD_FAST
+    /* The clear was skipped for this node: a successful full-screen decode wrote every
+     * pixel; any other outcome paints the background exactly where the clear would have. */
+    if(g_cold_fast_jpeg_pending){g_cold_fast_jpeg_pending=false;if(!(ok&&w==640&&h==480)&&g_app_text_surface)fill_rect(0,0,640,480,g_app_text_surface->background);}
+#endif
     return;
   }
   const uint8_t *palette=g_surface_images.pixels+im->data_offset+12;
@@ -4175,9 +5309,24 @@ static void draw_surface_image(const pet_surface_node_t *n) {
   int32_t row_x=(int32_t)lroundf((co*(.5f/n->w-.5f)+si*(.5f/n->h-.5f)+.5f)*iw*unit);
   int32_t row_y=(int32_t)lroundf((-si*(.5f/n->w-.5f)+co*(.5f/n->h-.5f)+.5f)*ih*unit);
   const uint16_t *colors=g_surface_colors[n->image];const uint8_t *alpha=g_surface_alpha[n->image];
+#if PET_P4_APP_COLD_FAST
+  if(!n->rotate_ms&&!n->tile_cols&&n->w==iw&&n->h==ih&&g_framebuffer){
+    /* Identity sampling: xx==yy==65536, xy==yx==0, row_x==row_y==32768, so the
+     * loop below reads indices[dy*stride+dx]; same three per-pixel cases. */
+    int dx0=n->x<0?-n->x:0,dx1=n->w;if(n->x+dx1>640)dx1=640-n->x;
+    if(g_app_clip.active){if(n->x+dx0<g_app_clip.x)dx0=g_app_clip.x-n->x;if(n->x+dx1>g_app_clip.right)dx1=g_app_clip.right-n->x;}
+    for(int dy=0;dy<n->h;dy++){
+      int py=n->y+dy;if(py<0||py>=480||(g_app_clip.active&&(py<g_app_clip.y||py>=g_app_clip.bottom)))continue;
+      if(dx1>dx0)cold_fast_image_span(g_framebuffer+py*640+n->x+dx0,indices+dy*stride+dx0,colors,alpha,palette,dx1-dx0);
+    }
+    pet_render_counter_increment(&g_cold_fast_image_nodes);return;
+  }
+#endif
   for(int dy=0;dy<n->h;dy++,row_x+=xy,row_y+=yy){
+    int py=n->y+dy;if(py<0||py>=480||(g_app_clip.active&&(py<g_app_clip.y||py>=g_app_clip.bottom)))continue;
     int32_t sx=row_x,sy=row_y;uint16_t *out=g_framebuffer+(n->y+dy)*640+n->x;
     for(int dx=0;dx<n->w;dx++,sx+=xx,sy+=yx){
+      if(n->x+dx<0||n->x+dx>=640||!app_clip_contains(n->x+dx,py))continue;
       if(sx<0||sy<0||sx>=(iw<<16)||sy>=(ih<<16))continue;
       unsigned index=indices[((sy>>16)+oy)*stride+(sx>>16)+ox],a=alpha[index];
       if(!a)continue;
@@ -4189,7 +5338,7 @@ static void draw_surface_image(const pet_surface_node_t *n) {
   }
 }
 static void load_surface_images(unsigned long long now_ms) {
-  if(pet_p4_miniapp_get_surface_images(&g_surface_images,&g_surface_revision)){
+  if(g_miniapp_render_snapshot.images_changed){
     g_surface_background_valid=false;
     size_t used=0;
     for(int i=0;i<g_surface_images.count;i++){
@@ -4204,6 +5353,9 @@ static void load_surface_images(unsigned long long now_ms) {
         const uint8_t *p=palette+4*color;
         g_surface_colors[i][color]=rgb565(p[0],p[1],p[2]);g_surface_alpha[i][color]=p[3];
       }
+#if PET_P4_APP_COLD_FAST
+      g_surface_opaque[i]=cold_fast_palette_opaque(palette)||cold_fast_indices_opaque(g_surface_indices+g_surface_offsets[i],pixels,g_surface_alpha[i]);
+#endif
       used+=pixels;
     }
     g_surface_play_ms=0;g_surface_last_ms=now_ms;g_surface_was_playing=false;
@@ -4214,15 +5366,74 @@ static void draw_app_panel(const pet_surface_node_t *n) {
   if(!n->radius&&!n->stroke_width&&n->opacity==255&&n->opacity_end==255){fill_rect(n->x,n->y,n->w,n->h,n->color);return;}
   const uint8_t r=((n->color>>11)&31)*255/31,g=((n->color>>5)&63)*255/63,b=(n->color&31)*255/31;
   const int radius=n->radius;
-  for(int y=0;y<n->h;y++)for(int x=0;x<n->w;x++){
-    float qx=fabsf(x+.5f-n->w*.5f)-(n->w*.5f-radius),qy=fabsf(y+.5f-n->h*.5f)-(n->h*.5f-radius);
-    float dx=fmaxf(qx,0),dy=fmaxf(qy,0),d=sqrtf(dx*dx+dy*dy)+fminf(fmaxf(qx,qy),0)-radius;
-    float cover=fminf(1,fmaxf(0,.5f-d));if(cover<=0)continue;
+  int x0=n->x<0?-n->x:0,y0=n->y<0?-n->y:0,x1=n->w,y1=n->h;
+  if(n->x+x1>640)x1=640-n->x;if(n->y+y1>480)y1=480-n->y;
+  if(g_app_clip.active){if(n->x+x0<g_app_clip.x)x0=g_app_clip.x-n->x;if(n->y+y0<g_app_clip.y)y0=g_app_clip.y-n->y;if(n->x+x1>g_app_clip.right)x1=g_app_clip.right-n->x;if(n->y+y1>g_app_clip.bottom)y1=g_app_clip.bottom-n->y;}
+#if PET_P4_APP_COLD_FAST
+  if(!radius&&!n->stroke_width&&n->opacity==n->opacity_end&&n->opacity&&n->opacity!=255&&g_framebuffer&&x1>x0&&y1>y0){
+    /* Radius 0: the SDF cover is 1 on every pixel of the clipped rectangle, so the
+     * loop below is blend_px(x,y,r,g,b,opacity) everywhere; same blend_rgb565. */
+    cold_fast_blend_lut_t lut;cold_fast_blend_lut(&lut,r,g,b,n->opacity);
+    for(int y=y0;y<y1;y++)cold_fast_blend_span_lut(g_framebuffer+(n->y+y)*640+n->x+x0,x1-x0,&lut);
+    pet_render_counter_increment(&g_cold_fast_panel_nodes);return;
+  }
+#endif
+  const bool solid=n->opacity==255&&n->opacity_end==255&&!n->stroke_width
+    &&radius>0&&radius<=n->w/2&&radius<=n->h/2;
+  bool span_interior=false;
+#if PET_P4_APP_COLD_FAST
+  span_interior=!solid&&!n->stroke_width&&radius<=n->w/2&&radius<=n->h/2
+    &&g_framebuffer&&x1>x0&&y1>y0;
+  if(span_interior){
+    /* Three disjoint rectangles are strictly outside the radius-square corners.
+     * Their original SDF coverage is exactly 1, including radius zero. */
+    cold_fast_panel_interior(n,x0,y0>radius?y0:radius,x1,y1<n->h-radius?y1:n->h-radius,r,g,b);
+    cold_fast_panel_interior(n,x0>radius?x0:radius,y0,x1<n->w-radius?x1:n->w-radius,y1<radius?y1:radius,r,g,b);
+    cold_fast_panel_interior(n,x0>radius?x0:radius,y0>n->h-radius?y0:n->h-radius,x1<n->w-radius?x1:n->w-radius,y1,r,g,b);
+    pet_render_counter_increment(&g_cold_fast_panel_nodes);
+  }
+#endif
+  if(solid){
+    // Outside the four radius-square corners the original SDF has cover==1.
+    // Fill disjoint opaque spans; corners retain the exact antialiasing below.
+    fill_rect(n->x,n->y+radius,n->w,n->h-2*radius,n->color);
+    fill_rect(n->x+radius,n->y,n->w-2*radius,radius,n->color);
+    fill_rect(n->x+radius,n->y+n->h-radius,n->w-2*radius,radius,n->color);
+  }
+#if PET_P4_APP_PANEL_MIRROR
+  if(solid&&x0==0&&y0==0&&x1==n->w&&y1==n->h){
+    /* Integer/half-integer geometry is exactly representable here. The four
+     * unclipped SDF corners have identical coverage, not approximated circles.
+     * Gradients, strokes, clipping and malformed geometry retain the old path. */
+    for(int y=0;y<radius;y++){
+      float qy=fabsf(y+.5f-n->h*.5f)-(n->h*.5f-radius);
+      for(int x=0;x<radius;x++){
+        float qx=fabsf(x+.5f-n->w*.5f)-(n->w*.5f-radius);
+        float d=(qx>0&&qy>0?sqrtf(qx*qx+qy*qy):(qx>qy?qx:qy))-radius;
+        float cover=.5f-d;if(cover<=0)continue;if(cover>1)cover=1;
+        int xx=n->x+x,rx=n->x+n->w-1-x,yy=n->y+y,by=n->y+n->h-1-y;
+        if(cover==1){put_px(xx,yy,n->color);put_px(rx,yy,n->color);put_px(xx,by,n->color);put_px(rx,by,n->color);}
+        else{int alpha=(int)(255*cover);blend_px(xx,yy,r,g,b,alpha);blend_px(rx,yy,r,g,b,alpha);blend_px(xx,by,r,g,b,alpha);blend_px(rx,by,r,g,b,alpha);}
+      }
+    }
+    return;
+  }
+#endif
+  for(int y=y0;y<y1;y++){
+    if((solid||span_interior)&&y>=radius&&y<n->h-radius)continue;
+    float qy=fabsf(y+.5f-n->h*.5f)-(n->h*.5f-radius);
+    for(int x=x0;x<x1;x++){
+    if((solid||span_interior)&&x>=radius&&x<n->w-radius){x=n->w-radius-1;continue;}
+    float qx=fabsf(x+.5f-n->w*.5f)-(n->w*.5f-radius);
+    // The rounded-box SDF needs sqrt only in the four corner squares.
+    float d=(qx>0&&qy>0?sqrtf(qx*qx+qy*qy):(qx>qy?qx:qy))-radius;
+    float cover=.5f-d;if(cover<=0)continue;if(cover>1)cover=1;
     int pos=n->vertical?y:x,len=n->vertical?n->h:n->w;
     int a=n->opacity+(n->opacity_end-n->opacity)*pos/(len>1?len-1:1);
-    if(a)blend_px(n->x+x,n->y+y,r,g,b,(int)(a*cover));
+    if(a==255&&cover==1)put_px(n->x+x,n->y+y,n->color);
+    else if(a)blend_px(n->x+x,n->y+y,r,g,b,(int)(a*cover));
     if(n->stroke_width){float edge=fminf(1,fmaxf(0,d+n->stroke_width+.5f))*cover;uint16_t c=n->stroke;if(edge>0)blend_px(n->x+x,n->y+y,((c>>11)&31)*255/31,((c>>5)&63)*255/63,(c&31)*255/31,(int)(edge*255));}
-  }
+  }}
 }
 static void draw_app_icon(int icon,int x,int y,int size,uint16_t color){
   if(icon<0||icon>=PET_APP_ICON_COUNT)return;
@@ -4276,19 +5487,117 @@ static float app_font_sample(const pet_surface_font_t *f,int index,int x,int y){
 static float app_glyph_sample(const uint8_t *bitmap,const lv_font_glyph_dsc_t *g,int x,int y){
   return x<0||y<0||x>=g->box_w||y>=g->box_h?0:glyph_alpha_at(bitmap,g,x,y);
 }
+#if PET_P4_GLYPH_ROWS
+static void app_prepare_glyph_rows(const pet_surface_font_t *font,int index,
+    const uint8_t *bitmap,const lv_font_glyph_dsc_t *glyph,int width,int iy){
+  if(g_glyph_sample_y==iy)return;
+  g_glyph_rows[0][0]=g_glyph_rows[1][0]=0;
+  g_glyph_rows[0][width+1]=g_glyph_rows[1][width+1]=0;
+  for(int x=0;x<width;x++){
+    g_glyph_rows[0][x+1]=font?app_font_sample(font,index,x,iy):app_glyph_sample(bitmap,glyph,x,iy);
+    g_glyph_rows[1][x+1]=font?app_font_sample(font,index,x,iy+1):app_glyph_sample(bitmap,glyph,x,iy+1);
+  }
+  g_glyph_sample_y=iy;
+}
+static inline float app_glyph_row_alpha(int ix,float fx,float fy){
+  return (g_glyph_rows[0][ix+1]*(1-fx)+g_glyph_rows[0][ix+2]*fx)*(1-fy)
+    +(g_glyph_rows[1][ix+1]*(1-fx)+g_glyph_rows[1][ix+2]*fx)*fy;
+}
+#endif
+#if PET_P4_GLYPH_PIXEL_FAST
+/* Private exact store path: framebuffer, node and viewport clipping are
+ * intersected once per glyph, then every visible pixel takes the SAME uint8_t
+ * alpha conversion, opaque rgb565 word and blend_rgb565 word that blend_px
+ * produces under PET_P4_ALPHA_FAST. The float coverage expressions and the
+ * two-row source refills are untouched. No new scratch, buffer or cache. */
+typedef struct {int x0,x1,y0,y1;} glyph_pixel_bounds_t;
+static inline bool glyph_pixel_bounds(const pet_surface_node_t *clip,int left,int right,int top,int bottom,glyph_pixel_bounds_t *out){
+  int x0=left,x1=right,y0=top,y1=bottom;
+  if(x0<clip->x)x0=clip->x;if(x1>clip->x+clip->w)x1=clip->x+clip->w;
+  if(y0<clip->y)y0=clip->y;if(y1>clip->y+clip->h)y1=clip->y+clip->h;
+  if(x0<0)x0=0;if(y0<0)y0=0;if(x1>PET_P4_UI_WIDTH)x1=PET_P4_UI_WIDTH;if(y1>PET_P4_UI_HEIGHT)y1=PET_P4_UI_HEIGHT;
+  if(g_app_clip.active){if(x0<g_app_clip.x)x0=g_app_clip.x;if(y0<g_app_clip.y)y0=g_app_clip.y;if(x1>g_app_clip.right)x1=g_app_clip.right;if(y1>g_app_clip.bottom)y1=g_app_clip.bottom;}
+  *out=(glyph_pixel_bounds_t){x0,x1,y0,y1};
+  return g_framebuffer&&x0<x1&&y0<y1;
+}
+static inline void glyph_pixel_store(uint16_t *px,uint8_t r,uint8_t g,uint8_t b,uint16_t opaque,float a){
+  uint8_t alpha=(uint8_t)(int)a;
+  if(!alpha)return;
+  if(alpha==255){*px=opaque;return;}
+  *px=blend_rgb565(*px,r,g,b,alpha);
+}
+#endif
 static void draw_app_glyph(uint32_t cp,uint32_t next,float x,float y,int px,uint16_t color,const pet_surface_node_t *clip){
   if(cp==0xFE0F||cp==0x200D)return;
   int index;const pet_surface_font_t *font=app_font_glyph(cp,&index);
   if(font){
     float scale=px/(float)(font->cell_h?font->cell_h:32);
     int cw=font->cell_w?font->cell_w:32;
+#if PET_P4_GLYPH_PIXEL_FAST
+    const uint8_t cr=((color>>11)&31)*255/31,cg=((color>>5)&63)*255/63,cb=(color&31)*255/31;
+    const uint16_t opaque=rgb565(cr,cg,cb);
+    int left=(int)floorf(x),right=(int)ceilf(x+cw*scale);
+    glyph_pixel_bounds_t bounds;
+    if(!glyph_pixel_bounds(clip,left,right,(int)floorf(y),(int)ceilf(y+px),&bounds))return;
+    for(int tile=left;tile<right;tile+=PET_RASTER_AXIS_TILE){
+      unsigned count=(unsigned)(right-tile);if(count>PET_RASTER_AXIS_TILE)count=PET_RASTER_AXIS_TILE;
+      int c0=bounds.x0-tile,c1=bounds.x1-tile;if(c0<0)c0=0;if(c1>(int)count)c1=(int)count;
+      if(c0>=c1)continue;
+      g_glyph_sample_y=INT32_MIN;
+      pet_raster_axis_prepare(g_glyph_axis,tile,count,x,scale);
+      for(int yy=bounds.y0;yy<bounds.y1;yy++){
+        float sy=(yy+.5f-y)/scale-.5f;int iy=(int)floorf(sy);float fy=sy-iy;
+        if(cw<=64)app_prepare_glyph_rows(font,index,NULL,NULL,cw,iy);
+        uint16_t *row=g_framebuffer+(size_t)yy*PET_P4_UI_WIDTH+tile;
+        for(int col=c0;col<c1;col++){
+          int ix=g_glyph_axis[col].index;float fx=g_glyph_axis[col].fraction;
+          float a;
+          if(cw<=64){if(ix< -1||ix>=cw)continue;a=app_glyph_row_alpha(ix,fx,fy);}else
+          a=(app_font_sample(font,index,ix,iy)*(1-fx)+app_font_sample(font,index,ix+1,iy)*fx)*(1-fy)+(app_font_sample(font,index,ix,iy+1)*(1-fx)+app_font_sample(font,index,ix+1,iy+1)*fx)*fy;
+          if(clip->weight)a=fminf(255,a*1.15f);
+          if(a>0)glyph_pixel_store(row+col,cr,cg,cb,opaque,a);
+        }
+      }
+    }
+    return;
+#elif PET_P4_RASTER_EXACT
+    int left=(int)floorf(x),right=(int)ceilf(x+cw*scale);
+    for(int tile=left;tile<right;tile+=PET_RASTER_AXIS_TILE){
+#if PET_P4_GLYPH_ROWS
+      g_glyph_sample_y=INT32_MIN;
+#endif
+      unsigned count=(unsigned)(right-tile);if(count>PET_RASTER_AXIS_TILE)count=PET_RASTER_AXIS_TILE;
+      pet_raster_axis_prepare(g_glyph_axis,tile,count,x,scale);
+      for(int yy=(int)floorf(y);yy<(int)ceilf(y+px);yy++){
+        if(yy<clip->y||yy>=clip->y+clip->h)continue;
+        float sy=(yy+.5f-y)/scale-.5f;int iy=(int)floorf(sy);float fy=sy-iy;
+#if PET_P4_GLYPH_ROWS
+        if(cw<=64)app_prepare_glyph_rows(font,index,NULL,NULL,cw,iy);
+#endif
+        for(unsigned col=0;col<count;col++){
+          int xx=tile+(int)col;if(xx<clip->x||xx>=clip->x+clip->w)continue;
+          int ix=g_glyph_axis[col].index;float fx=g_glyph_axis[col].fraction;
+          float a;
+#if PET_P4_GLYPH_ROWS
+          if(cw<=64){if(ix< -1||ix>=cw)continue;a=app_glyph_row_alpha(ix,fx,fy);}else
+#endif
+          a=(app_font_sample(font,index,ix,iy)*(1-fx)+app_font_sample(font,index,ix+1,iy)*fx)*(1-fy)+(app_font_sample(font,index,ix,iy+1)*(1-fx)+app_font_sample(font,index,ix+1,iy+1)*fx)*fy;
+          if(clip->weight)a=fminf(255,a*1.15f);
+          if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
+        }
+      }
+    }
+    return;
+#else
     for(int yy=(int)floorf(y);yy<(int)ceilf(y+px);yy++)for(int xx=(int)floorf(x);xx<(int)ceilf(x+cw*scale);xx++){
       if(xx<clip->x||yy<clip->y||xx>=clip->x+clip->w||yy>=clip->y+clip->h)continue;
       float sx=(xx+.5f-x)/scale-.5f,sy=(yy+.5f-y)/scale-.5f;int ix=(int)floorf(sx),iy=(int)floorf(sy);float fx=sx-ix,fy=sy-iy;
       float a=(app_font_sample(font,index,ix,iy)*(1-fx)+app_font_sample(font,index,ix+1,iy)*fx)*(1-fy)+(app_font_sample(font,index,ix,iy+1)*(1-fx)+app_font_sample(font,index,ix+1,iy+1)*fx)*fy;
       if(clip->weight)a=fminf(255,a*1.15f);
       if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
-    }return;
+    }
+    return;
+#endif
   }
   if(pet_app_symbol_advance(cp)){
     float scale=px/16.0f;int width=cp==0x2103?8:pet_app_symbol_advance(cp);
@@ -4306,6 +5615,59 @@ static void draw_app_glyph(uint32_t cp,uint32_t next,float x,float y,int px,uint
   if(!bitmap){lv_font_glyph_release_draw_data(&g);return;}
   float scale=px/16.0f,gx=x+g.ofs_x*scale,gy=y+(pet_p4_font_cn_16.line_height-pet_p4_font_cn_16.base_line-g.box_h-g.ofs_y)*scale;
   int left=(int)floorf(gx)-1,top=(int)floorf(gy)-1,right=(int)ceilf(gx+g.box_w*scale)+1,bottom=(int)ceilf(gy+g.box_h*scale)+1;
+#if PET_P4_GLYPH_PIXEL_FAST
+  const uint8_t cr=((color>>11)&31)*255/31,cg=((color>>5)&63)*255/63,cb=(color&31)*255/31;
+  const uint16_t opaque=rgb565(cr,cg,cb);
+  glyph_pixel_bounds_t bounds;
+  if(glyph_pixel_bounds(clip,left,right,top,bottom,&bounds)){
+    for(int tile=left;tile<right;tile+=PET_RASTER_AXIS_TILE){
+      unsigned count=(unsigned)(right-tile);if(count>PET_RASTER_AXIS_TILE)count=PET_RASTER_AXIS_TILE;
+      int c0=bounds.x0-tile,c1=bounds.x1-tile;if(c0<0)c0=0;if(c1>(int)count)c1=(int)count;
+      if(c0>=c1)continue;
+      g_glyph_sample_y=INT32_MIN;
+      pet_raster_axis_prepare(g_glyph_axis,tile,count,gx,scale);
+      for(int yy=bounds.y0;yy<bounds.y1;yy++){
+        float sy=(yy+.5f-gy)/scale-.5f;int iy=(int)floorf(sy);float fy=sy-iy;
+        if(g.box_w<=64)app_prepare_glyph_rows(NULL,0,bitmap,&g,g.box_w,iy);
+        uint16_t *row=g_framebuffer+(size_t)yy*PET_P4_UI_WIDTH+tile;
+        for(int col=c0;col<c1;col++){
+          int ix=g_glyph_axis[col].index;float fx=g_glyph_axis[col].fraction;
+          float a;
+          if(g.box_w<=64){if(ix< -1||ix>=g.box_w)continue;a=app_glyph_row_alpha(ix,fx,fy);}else
+          a=(app_glyph_sample(bitmap,&g,ix,iy)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy)*fx)*(1-fy)+(app_glyph_sample(bitmap,&g,ix,iy+1)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy+1)*fx)*fy;
+          if(clip->weight)a=fminf(255,a*1.18f);
+          if(a>0)glyph_pixel_store(row+col,cr,cg,cb,opaque,a);
+        }
+      }
+    }
+  }
+#elif PET_P4_RASTER_EXACT
+  for(int tile=left;tile<right;tile+=PET_RASTER_AXIS_TILE){
+#if PET_P4_GLYPH_ROWS
+    g_glyph_sample_y=INT32_MIN;
+#endif
+    unsigned count=(unsigned)(right-tile);if(count>PET_RASTER_AXIS_TILE)count=PET_RASTER_AXIS_TILE;
+    pet_raster_axis_prepare(g_glyph_axis,tile,count,gx,scale);
+    for(int yy=top;yy<bottom;yy++){
+      if(yy<clip->y||yy>=clip->y+clip->h)continue;
+      float sy=(yy+.5f-gy)/scale-.5f;int iy=(int)floorf(sy);float fy=sy-iy;
+#if PET_P4_GLYPH_ROWS
+      if(g.box_w<=64)app_prepare_glyph_rows(NULL,0,bitmap,&g,g.box_w,iy);
+#endif
+      for(unsigned col=0;col<count;col++){
+        int xx=tile+(int)col;if(xx<clip->x||xx>=clip->x+clip->w)continue;
+        int ix=g_glyph_axis[col].index;float fx=g_glyph_axis[col].fraction;
+        float a;
+#if PET_P4_GLYPH_ROWS
+        if(g.box_w<=64){if(ix< -1||ix>=g.box_w)continue;a=app_glyph_row_alpha(ix,fx,fy);}else
+#endif
+        a=(app_glyph_sample(bitmap,&g,ix,iy)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy)*fx)*(1-fy)+(app_glyph_sample(bitmap,&g,ix,iy+1)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy+1)*fx)*fy;
+        if(clip->weight)a=fminf(255,a*1.18f);
+        if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
+      }
+    }
+  }
+#else
   for(int yy=top;yy<bottom;yy++)for(int xx=left;xx<right;xx++){
     if(xx<clip->x||yy<clip->y||xx>=clip->x+clip->w||yy>=clip->y+clip->h)continue;
     float sx=(xx+.5f-gx)/scale-.5f,sy=(yy+.5f-gy)/scale-.5f;
@@ -4313,10 +5675,17 @@ static void draw_app_glyph(uint32_t cp,uint32_t next,float x,float y,int px,uint
     float a=(app_glyph_sample(bitmap,&g,ix,iy)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy)*fx)*(1-fy)+(app_glyph_sample(bitmap,&g,ix,iy+1)*(1-fx)+app_glyph_sample(bitmap,&g,ix+1,iy+1)*fx)*fy;
     if(clip->weight)a=fminf(255,a*1.18f);
     if(a>0)blend_px(xx,yy,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,(int)a);
-  }lv_font_glyph_release_draw_data(&g);
+  }
+#endif
+  lv_font_glyph_release_draw_data(&g);
 }
 static void draw_app_label(const pet_surface_node_t *n,const char *text,uint16_t color){
-  char rows[8][192]={{0}};int count=0,px=n->font_size,lh=n->line_height;
+#if PET_P4_GLYPH_ROWS
+  char (*rows)[192]=g_app_label_rows;memset(rows,0,sizeof(g_app_label_rows));
+#else
+  char rows[8][192]={{0}};
+#endif
+  int count=0,px=n->font_size,lh=n->line_height;
   int icon_space=n->type==8&&n->icon>=0?n->icon_size+((text&&*text)?n->gap:0):0;
   int width=n->w-2*n->padding-icon_space;if(width<1)return;
   int max=n->type==8?1:n->h/lh;if(max<1)max=1;if(max>8)max=8;
@@ -4379,6 +5748,22 @@ static void draw_app_game(const pet_surface_t *s,const pet_p4_game_frame_t *g){
         fill_rect(px+2,py,cell/5,cell,rgb565(148,185,150));
         if(tone==2){fill_round_rect(px,py,cell,cell,cell/6,rgb565(69,115,100));fill_rect(px+3,py+3,cell-6,3,rgb565(164,197,161));}
       }
+    }else if(g->kind==PET_P4_GAME_GOMOKU){
+      /* Board lines live in the package background; only stones, cursor,
+       * last-move dot and the winning line are drawn here. */
+      int stone=tone&PET_P4_GAME_GOMOKU_STONE_MASK,r=cell/2-2;if(r<3)r=3;
+      if(tone&PET_P4_GAME_GOMOKU_WIN)fill_round_rect(px+1,py+1,cell-2,cell-2,cell/3,rgb565(236,186,66));
+      if(stone){
+        fill_ellipse(cx+1,cy+1,r,r,rgb565(70,48,24));
+        fill_ellipse(cx,cy,r,r,stone==1?rgb565(28,28,34):rgb565(246,242,230));
+        fill_ellipse(cx-r/3,cy-r/3,r/4+1,r/4+1,stone==1?rgb565(96,96,108):rgb565(255,255,255));
+        if(tone&PET_P4_GAME_GOMOKU_LAST)fill_ellipse(cx,cy,r/4+1,r/4+1,rgb565(224,72,56));
+      }
+      if(tone&PET_P4_GAME_GOMOKU_CURSOR){
+        uint16_t edge=rgb565(230,96,48);
+        fill_rect(px,py,cell,2,edge);fill_rect(px,py+cell-2,cell,2,edge);
+        fill_rect(px,py,2,cell,edge);fill_rect(px+cell-2,py,2,cell,edge);
+      }
     }else{
       const uint16_t colors[]={0,rgb565(131,122,211),rgb565(98,184,204),rgb565(224,157,117),rgb565(173,206,144)};
       fill_round_rect(px+1,py+1,cell-2,cell-2,cell/5,colors[tone<=4?tone:1]);
@@ -4406,12 +5791,59 @@ static void draw_scene_capsule(int x,int y,int w,int h,uint16_t color,const pet_
     }
   }
 }
+/* B bodies-only rotation; existing image/node paths and caches are unchanged. */
+#if PET_P4_BODIES
+#include "pet_p4_bodies_raster.h"
+static void draw_app_body(const pet_p4_game_entity_t *e,const pet_surface_scene_sprite_t *sprite,
+  int x,int y,int cell,const pet_surface_scene_view_t *v,const miniapp_pixel_palette_t *palette,unsigned long long now){
+  int w=e->width*cell,h=e->height*cell,cx=x+w/2,cy=y+h/2,reach=(w+h+1)/2;
+  int left=cx-reach,right=cx+reach,top=cy-reach,bottom=cy+reach;
+  if(left<v->x)left=v->x;if(top<v->y)top=v->y;if(right>v->x+v->w)right=v->x+v->w;if(bottom>v->y+v->h)bottom=v->y+v->h;
+  const pet_p4_miniapp_sprite_t *im=NULL;int iw=0,frame=0;
+  if(sprite){
+    if(sprite->image<0||sprite->image>=g_surface_images.count||!sprite->columns)return;
+    im=&g_surface_images.items[sprite->image];if(im->fps||im->frame_width%sprite->columns)return;
+    iw=im->frame_width/sprite->columns;frame=(now*sprite->fps/1000)%sprite->columns;
+  }
+  for(int py=top;py<bottom;py++)for(int px=left;px<right;px++){
+    int sx,sy;if(!body_source_pixel(px,py,cx,cy,w,h,e->angle_q8/256,&sx,&sy))continue;
+    uint16_t color=miniapp_game_tone_color(e->tone,palette);unsigned alpha=255;
+    if(im){
+      unsigned at=g_surface_offsets[sprite->image]+(unsigned)(sy*im->frame_height/h)*im->frame_width+frame*iw+(unsigned)(sx*iw/w);
+      unsigned index=g_surface_indices[at];color=g_surface_colors[sprite->image][index];alpha=g_surface_alpha[sprite->image][index];
+    }else{
+      if(sx<2||sy<2||sx>=w-2||sy>=h-2)continue;
+      int dx=2*sx-w,dy=2*sy-h;
+      if(e->shape==PET_P4_GAME_SHAPE_CIRCLE||e->shape==PET_P4_GAME_SHAPE_BALL||e->shape==PET_P4_GAME_SHAPE_COIN){
+        if((int64_t)dx*dx*h*h+(int64_t)dy*dy*w*w>(int64_t)w*w*h*h)continue;
+      }else if(e->shape==PET_P4_GAME_SHAPE_TRIANGLE){if((int64_t)(dx<0?-dx:dx)*h>(int64_t)w*sy)continue;}
+      else if(e->shape==PET_P4_GAME_SHAPE_DIAMOND){if((int64_t)(dx<0?-dx:dx)*h+(int64_t)(dy<0?-dy:dy)*w>(int64_t)w*h)continue;}
+      else if(e->shape==PET_P4_GAME_SHAPE_CAPSULE){
+        int radius=w<h?w/2:h/2,qx=sx<radius?radius-sx:sx>=w-radius?sx-(w-radius-1):0,qy=sy<radius?radius-sy:sy>=h-radius?sy-(h-radius-1):0;
+        if(qx*qx+qy*qy>radius*radius)continue;
+      }
+    }
+    if(alpha==255)put_px(px,py,color);
+    else if(alpha)blend_px(px,py,((color>>11)&31)*255/31,((color>>5)&63)*255/63,(color&31)*255/31,alpha);
+  }
+}
+#endif
 static void draw_app_scene(const pet_surface_t *s,const pet_p4_game_frame_t *g,unsigned long long now){
   const pet_surface_scene_view_t *v=&s->scene_view;
   if(!v->enabled||g->kind!=PET_P4_GAME_BOUNDED||!g->width||!g->height)return;
   int cell=v->w/g->width;if(v->h/g->height<cell)cell=v->h/g->height;
   if(cell<1)return;
   int ox=v->x+(v->w-cell*g->width)/2,oy=v->y+(v->h-cell*g->height)/2;
+  /* Preserve the caller's clip and intersect it with the scene. A sprite
+   * crossing one edge must keep its visible pixels, rather than disappear. */
+  const bool previous_clip_active=g_app_clip.active;
+  const int previous_clip[4]={g_app_clip.x,g_app_clip.y,g_app_clip.right,g_app_clip.bottom};
+  if(!g_app_clip.active){g_app_clip.x=v->x;g_app_clip.y=v->y;g_app_clip.right=v->x+v->w;g_app_clip.bottom=v->y+v->h;}
+  else{
+    if(g_app_clip.x<v->x)g_app_clip.x=v->x;if(g_app_clip.y<v->y)g_app_clip.y=v->y;
+    if(g_app_clip.right>v->x+v->w)g_app_clip.right=v->x+v->w;if(g_app_clip.bottom>v->y+v->h)g_app_clip.bottom=v->y+v->h;
+  }
+  g_app_clip.active=true;
   miniapp_pixel_palette_t palette={.background=s->background,.surface=s->background,.ink=v->colors[0],.primary=v->colors[1],.secondary=v->colors[2],.light=v->colors[3],.shadow=v->colors[4]};
   // Grid cells include entity occupancy, so only the entity renderer owns moving
   // shapes here. The scene's collision geometry remains unchanged.
@@ -4419,16 +5851,25 @@ static void draw_app_scene(const pet_surface_t *s,const pet_p4_game_frame_t *g,u
     const pet_p4_game_entity_t *e=&g->entities[i];if(!e->active)continue;
     const pet_surface_scene_sprite_t *sprite=NULL;
     for(int j=0;j<v->count;j++)if(!strcmp(v->sprites[j].entity,e->id))sprite=&v->sprites[j];
-    int px=ox+(g->motion?e->x_q8*cell/256:e->x*cell),py=oy+(g->motion?e->y_q8*cell/256:e->y*cell);
+    int px=ox+((g->motion||g->bodies)?e->x_q8*cell/256:e->x*cell),py=oy+((g->motion||g->bodies)?e->y_q8*cell/256:e->y*cell);
+#if PET_P4_BODIES
+    if(g->bodies&&e->body&&e->rolling){draw_app_body(e,sprite,px,py,cell,v,&palette,now);continue;}
+#endif
     if(g->motion&&!sprite&&e->shape==PET_P4_GAME_SHAPE_CAPSULE){
       draw_scene_capsule(px,py,e->width*cell,e->height*cell,miniapp_game_tone_color(e->tone,&palette),v);continue;
     }
-    if(g->motion&&(px<v->x||py<v->y||px+e->width*cell>v->x+v->w||py+e->height*cell>v->y+v->h))continue;
+    if(px>=v->x+v->w||py>=v->y+v->h||px+e->width*cell<=v->x||py+e->height*cell<=v->y)continue;
     if(sprite){
       pet_surface_node_t n={.x=px,.y=py,.w=e->width*cell,.h=e->height*cell,.image=sprite->image,.tile_cols=sprite->columns,.tile_rows=1,.tile_index=(now*sprite->fps/1000)%sprite->columns};
+#if PET_P4_BIG_IMAGE
+      /* This synthetic palette sprite bypasses the parser's -1 sentinel. */
+      n.big=-1;
+#endif
       draw_surface_image(&n);
     }else {pet_p4_game_entity_t placed=*e;placed.x=placed.y=0;draw_miniapp_game_entity(&placed,NULL,px,py,cell,true,&palette);}
   }
+  g_app_clip.active=previous_clip_active;g_app_clip.x=previous_clip[0];g_app_clip.y=previous_clip[1];
+  g_app_clip.right=previous_clip[2];g_app_clip.bottom=previous_clip[3];
 }
 static void draw_app_data(const pet_surface_t *s,const pet_p4_miniapp_view_t *app){
   const pet_surface_data_view_t *v=&s->data_view;if(!v->enabled)return;
@@ -4460,35 +5901,332 @@ static void draw_app_data(const pet_surface_t *s,const pet_p4_miniapp_view_t *ap
   const char *status=!d->received?"连接 Pet Manager 后显示":d->stale?"数据已过期，请检查连接":d->message;
   app_data_label(status,v->x,v->y+v->h-24,v->w,24,13,muted);
 }
+typedef struct {int image;const pet_side_art_t*art;} side_draw_context_t;
+static void draw_side_cell(void*opaque,int x,int y,int w,int h,unsigned frame,bool flip){
+  const side_draw_context_t*c=opaque;const pet_side_art_t*a=c->art;
+  if(c->image<0||c->image>=g_surface_images.count||frame>=a->columns*a->rows||w<=0||h<=0||w>96||h>96)return;
+  const pet_p4_miniapp_sprite_t*im=&g_surface_images.items[c->image];
+  if(im->frame_width!=a->columns*16||im->frame_height!=a->rows*16)return;
+  const uint8_t*indices=g_surface_indices+g_surface_offsets[c->image];
+  const uint8_t*palette=g_surface_images.pixels+im->data_offset+12;
+  int ox=(frame%a->columns)*16,oy=(frame/a->columns)*16;
+  int left=x>a->x?x:a->x,top=y>a->y?y:a->y,right=x+w<a->x+a->w?x+w:a->x+a->w,bottom=y+h<a->y+a->h?y+h:a->y+a->h;
+  uint8_t sample_x[96];for(int px=left;px<right;px++){int sx=(px-x)*16/w;sample_x[px-left]=(uint8_t)(flip?15-sx:sx);}
+  for(int py=top;py<bottom;py++){
+    int sy=oy+(py-y)*16/h;uint16_t*out=g_framebuffer+py*640;
+    for(int px=left;px<right;px++){
+      int sx=sample_x[px-left];
+      unsigned index=indices[sy*im->frame_width+ox+sx],alpha=g_surface_alpha[c->image][index];if(!alpha)continue;
+      if(alpha==255){out[px]=g_surface_colors[c->image][index];continue;}
+      const uint8_t*p=palette+4*index;uint16_t bg=out[px];
+      unsigned r=((bg>>11)&31)*255/31,g=((bg>>5)&63)*255/63,b=(bg&31)*255/31;
+      out[px]=rgb565((p[0]*alpha+r*(255-alpha))/255,(p[1]*alpha+g*(255-alpha))/255,(p[2]*alpha+b*(255-alpha))/255);
+    }
+  }
+}
+static void draw_app_side(void){
+  if(!g_miniapp_render_snapshot.side_active)return;
+  const pet_side_scene_t *scene=&g_miniapp_render_snapshot.scene;
+  const pet_side_art_t *art=&g_miniapp_render_snapshot.art;
+  int image=-1;for(int i=0;i<g_surface_images.count;i++)if(!strcmp(g_surface_images.items[i].id,art->image))image=i;
+  if(image<0)return;
+  fill_rect(art->x,art->y,art->w,art->h,art->sky);
+  side_draw_context_t context={.image=image,.art=art};pet_side_draw(scene,art,draw_side_cell,&context);
+}
+#include "pet_p4_app_cache.h"
+#if PET_CANVAS_ENABLED
+static void canvas_rect(void *context,int x,int y,int w,int h,uint16_t color){
+  (void)context;fill_rect(x,y,w,h,color);
+}
+static void draw_app_canvas(const pet_surface_t *surface,unsigned page){
+  if(surface->canvas.count&&surface->canvas_bindings_ready&&(surface->canvas.page==4||surface->canvas.page==page))pet_canvas_draw(&surface->canvas,canvas_rect,NULL);
+}
+#else
+#define draw_app_canvas(surface,page) ((void)(surface),(void)(page))
+#endif
+static EXT_RAM_BSS_ATTR pet_app_frame_key_t g_app_frame_key;
+#if PET_P4_APP_DIRTY_CACHE
+#include "pet_p4_app_dirty.h"
+/* Prefix bytes belong to an exact captured image/resource revision even when
+ * both packs contain zero images. A visually unchanged empty image pack alone
+ * must not authorize another dynamic application's old static prefix. */
+static uint32_t g_app_background_revision;
+#if PET_P4_APP_CACHE_PROGRESSIVE
+#include "pet_p4_app_cache_progressive.h"
+static pet_app_cache_progressive_t g_app_cache_progressive;
+#endif
+static void app_dirty_clip(const pet_app_dirty_rect_t *r){
+  if(!g_app_clip.active){g_app_clip.active=true;g_app_clip.x=r->x;g_app_clip.y=r->y;g_app_clip.right=r->right;g_app_clip.bottom=r->bottom;}
+  else{
+    if(g_app_clip.x<r->x)g_app_clip.x=r->x;if(g_app_clip.y<r->y)g_app_clip.y=r->y;
+    if(g_app_clip.right>r->right)g_app_clip.right=r->right;if(g_app_clip.bottom>r->bottom)g_app_clip.bottom=r->bottom;
+  }
+}
+#if PET_P4_APP_COLD_FAST
+/* True when the first node drawn on this page is a static, unrotated, untiled,
+ * full-screen palette image whose palette is entirely opaque: it overwrites every
+ * framebuffer pixel, so the clear it would cover is pure waste. */
+static bool cold_fast_opaque_first_image(const pet_surface_t *s,uint8_t page){
+  for(unsigned i=0;i<s->count;i++){
+    const pet_surface_node_t *n=&s->nodes[i];
+    if(n->hidden||!pet_surface_node_on_page(n,page))continue;
+    if(n->type!=6||n->in_view||n->floating||n->x||n->y||n->w!=640||n->h!=480||n->rotate_ms||n->tile_cols)return false;
+    if(n->image<0||n->image>=g_surface_images.count)return false;
+    const pet_p4_miniapp_sprite_t *im=&g_surface_images.items[n->image];
+    if(im->fps!=0)return false;
+    if(pet_image_jpeg(g_surface_images.pixels+im->data_offset,im->data_length)){g_cold_fast_jpeg_pending=true;return true;}
+    return g_surface_opaque[n->image];
+  }
+  return false;
+}
+#endif
+static void app_clear_uncovered(const pet_surface_t *surface,uint8_t page,bool cache_frame){
+  pet_app_dirty_rect_t r;
+#if PET_P4_APP_CLEAR_OPAQUE_CENTER
+  const bool center=cache_frame&&pet_app_clear_center_supported(surface);
+#else
+  const bool center=cache_frame&&pet_app_dirty_supported(surface);
+#endif
+  const bool skipped=center&&pet_app_opaque_center(surface,page,&r);
+#if PET_P4_APP_CLEAR_OPAQUE_CENTER
+  pet_render_counter_increment(skipped?&g_clear_center_frames:&g_clear_full_frames);
+#endif
+  if(skipped){
+    fill_rect(0,0,640,r.y,surface->background);
+    fill_rect(0,r.bottom,640,480-r.bottom,surface->background);
+    fill_rect(0,r.y,r.x,r.bottom-r.y,surface->background);
+    fill_rect(r.right,r.y,640-r.right,r.bottom-r.y,surface->background);
+  }else fill_rect(0,0,640,480,surface->background);
+}
+#endif
+#if PET_P4_KEYFRAME_BG
+static void keyframe_invalidate_frame_cache(void){
+  g_surface_background_valid=false;g_app_frame_key.valid=false;
+#if PET_P4_APP_CACHE_PROGRESSIVE
+  /* The logical surface key does not encode which JPEG keyframe is shown.
+   * Old populated rows/retained pixels cannot be continued under a new frame. */
+  pet_app_cache_progressive_cancel(&g_app_cache_progressive);
+#endif
+}
+#endif
+#if PET_P4_APP_PPA_COPY
+/* 1:1 PPA SRM copy of one 640x480 RGB565 frame: identical bytes, DMA instead of
+ * the CPU. Rows 0/159/320/479 of the first 8 copies are compared with the source;
+ * any mismatch or PPA error disables the path for this boot (CPU copy). */
+static void app_frame_copy_ppa(void *to,const void *from,size_t bytes){
+  uint16_t *dst=(uint16_t*)to;const uint16_t *src=(const uint16_t*)from;
+  if(bytes==640*480*sizeof(uint16_t)&&!g_ppa_copy_disabled&&g_ppa_srm_client&&g_framebuffer_ppa_compatible&&(((uintptr_t)dst|(uintptr_t)src)&63u)==0){
+    ppa_srm_oper_config_t copy={
+      .in={.buffer=src,.pic_w=640,.pic_h=480,.block_w=640,.block_h=480,.block_offset_x=0,.block_offset_y=0,.srm_cm=PPA_SRM_COLOR_MODE_RGB565},
+      .out={.buffer=dst,.buffer_size=640*480*sizeof(uint16_t),.pic_w=640,.pic_h=480,.block_offset_x=0,.block_offset_y=0,.srm_cm=PPA_SRM_COLOR_MODE_RGB565},
+      .rotation_angle=PPA_SRM_ROTATION_ANGLE_0,.scale_x=1.0f,.scale_y=1.0f,.rgb_swap=false,.byte_swap=false,.mode=PPA_TRANS_MODE_BLOCKING};
+    if(ppa_trace_srm(PET_PPA_TRACE_SCALE,&copy)==ESP_OK){
+      pet_render_counter_increment(&g_ppa_copies);
+      if(g_ppa_copies<=8){
+        static const int rows[4]={0,159,320,479};
+        for(int i=0;i<4;i++)if(memcmp(dst+rows[i]*640,src+rows[i]*640,640*sizeof(uint16_t))){
+          pet_render_counter_increment(&g_ppa_copy_mismatches);g_ppa_copy_disabled=true;pet_app_frame_copy(dst,src,bytes);return;
+        }
+      }
+      return;
+    }
+    pet_render_counter_increment(&g_ppa_copy_fallbacks);g_ppa_copy_disabled=true;
+  }
+  pet_app_frame_copy(dst,src,bytes);
+}
+/* From here on (the APP page renderer below) every clean-frame copy routes through the PPA helper. */
+#define pet_app_frame_copy(to,from,bytes) app_frame_copy_ppa((to),(from),(bytes))
+#endif
+#if PET_P4_CELLS_V1
+/* p4-cells-v1 node: one whole-pixel tile per cell. With an atlas the frame index is the
+ * cell value (0 draws nothing); without one, 1 = disc in color, 2 = disc in foreground,
+ * >=3 = square in stroke. The cursor is a 2 px outline around (cursor_col, cursor_row).
+ * Bounded by 256 cells; no heap, same primitives as the other app nodes. */
+static void draw_app_cells(const pet_surface_node_t *n,const pet_cells_t *grid){
+  if(!grid||!grid->enabled||!grid->cols||!grid->rows)return;
+  int tw=n->w/grid->cols,th=n->h/grid->rows;if(tw<1||th<1)return;
+  int inset=tw<8||th<8?1:2;
+  for(unsigned y=0;y<grid->rows;y++)for(unsigned x=0;x<grid->cols;x++){
+    int v=grid->values[y*grid->cols+x];if(!v)continue;
+    int px=n->x+(int)x*tw,py=n->y+(int)y*th;
+    if(n->image>=0){
+      if(v>=n->tile_cols)continue;
+      pet_surface_node_t tile=*n;tile.x=px;tile.y=py;tile.w=tw;tile.h=th;tile.tile_cols=n->tile_cols;tile.tile_rows=1;tile.tile_row=0;tile.tile_index=(uint8_t)v;tile.floating=false;tile.rotate_ms=0;
+      draw_surface_image(&tile);
+    }else{
+      int w=tw-2*inset,h=th-2*inset;if(w<1||h<1)continue;
+      if(v==1)fill_round_rect(px+inset,py+inset,w,h,(w<h?w:h)/2,n->color);
+      else if(v==2)fill_round_rect(px+inset,py+inset,w,h,(w<h?w:h)/2,n->foreground);
+      else fill_rect(px+inset,py+inset,w,h,n->stroke);
+    }
+  }
+  if(n->cursor_col>=0&&n->cursor_row>=0&&n->cursor_col<grid->cols&&n->cursor_row<grid->rows){
+    int px=n->x+n->cursor_col*tw,py=n->y+n->cursor_row*th;
+    fill_rect(px,py,tw,2,n->cursor_color);fill_rect(px,py+th-2,tw,2,n->cursor_color);
+    fill_rect(px,py,2,th,n->cursor_color);fill_rect(px+tw-2,py,2,th,n->cursor_color);
+  }
+}
+#endif
 static bool render_package_app(unsigned long long now_ms,const pet_p4_miniapp_view_t *app) {
-  static EXT_RAM_BSS_ATTR pet_surface_t surface;
-  if(!pet_p4_miniapp_app_surface(&surface))return false;
-  load_surface_images(now_ms);
-  g_app_text_surface=&surface;
+  if(!g_miniapp_render_snapshot.surface_active)return false;
+#if PET_P4_APP_CACHE_POPULATION_BUDGET && !PET_P4_APP_CACHE_PROGRESSIVE
+  int64_t cache_population_started=esp_timer_get_time();
+#endif
+  const pet_surface_t *surface=&g_miniapp_render_snapshot.surface;
+  {APP_NODE_SCOPE(images_scope,images_us);load_surface_images(now_ms);}
+  g_app_text_surface=surface;
+#if PET_P4_KEYFRAME_BG
+  keyframe_advance(surface,now_ms);
+#endif
   const char *values[]={app->title,app->eyebrow,app->headline,app->metric_label,app->metric_value,app->metric_unit,app->badge,app->note,app->footer};
+  /* Only the resolved package layer is cached. These runtime layers can change
+   * without changing surface nodes/dashboard values, so they must stay live. */
+  bool cache_frame,cache_match;
+  /* Media progress lives outside the resolved surface/dashboard key: a big
+   * image can still be filling tiles, and a clip can present another frame.
+   * Until that progress is part of an exact ready key, neither whole/final
+   * frames nor a static prefix may suppress their per-frame renderer work. */
+  bool dynamic_media=false;
+  {APP_NODE_SCOPE(key_scope,key_us);
+#if PET_P4_BIG_IMAGE || PET_P4_CLIP
+  for(unsigned i=0;i<surface->count;i++){
+    const pet_surface_node_t *n=&surface->nodes[i];
+#if PET_P4_BIG_IMAGE
+    if(n->type==6&&n->big>=0){dynamic_media=true;break;}
+#endif
+#if PET_P4_CLIP
+    if(n->type==PET_SURFACE_NODE_CLIP){dynamic_media=true;break;}
+#endif
+  }
+#endif
+  cache_frame=!dynamic_media&&pet_app_frame_eligible_at(surface,app->surface_page)&&!app->slicing&&!app->media&&!app->instrument
+    &&app->game.kind==PET_P4_GAME_NONE&&!app->data.enabled&&!app->data_source[0]
+    &&!g_miniapp_render_snapshot.side_active;
+#if PET_P4_APP_CACHE_PROGRESSIVE
+  if(!cache_frame&&g_app_cache_progressive.active){
+    pet_app_cache_progressive_cancel(&g_app_cache_progressive);
+    g_surface_background_valid=false;
+  }
+#endif
+  cache_match=cache_frame&&g_surface_background_valid&&pet_app_frame_matches(&g_app_frame_key,surface,values,app->surface_page,app->progress_percent);
+#if PET_P4_LOGICAL_COMPARE
+  /* Hint ONLY. The final complete logical/native pixel comparison remains
+   * mandatory, including all live overlays. A staged key is never a texture. */
+  g_app_logical_same=cache_frame&&((g_surface_background_valid&&g_app_frame_key.valid)
+      ||(g_app_cache_progressive.active&&g_app_cache_progressive.revision==g_surface_revision))
+    &&pet_app_frame_content_matches(&g_app_frame_key,surface,values,app->surface_page,app->progress_percent);
+#endif
+  }
+#if PET_P4_APP_RETAIN_LOGICAL
+  if(g_app_may_retain&&g_app_logical_same&&!g_miniapp_render_snapshot.confirmation_active){
+    /* This is the PREVIOUS complete final logical frame, not the partially
+     * populated clean texture. Exact base key AND immutable common plan match.
+     * Never copy a banner/modal/touch marker into the clean texture. */
+    g_app_final_reused=true;g_render_trace.logical_retained=true;
+    if(g_app_cache_progressive.active&&pet_logical_common_empty(g_app_common_plan)){
+      APP_NODE_SCOPE(remember_scope,remember_us);
+      pet_app_cache_progressive_copy(&g_app_cache_progressive,&g_app_frame_key,g_surface_background,g_framebuffer);
+      g_surface_background_valid=g_app_frame_key.valid;
+    }
+#if PET_P4_APP_NODE_TRACE
+    g_render_trace.app_nodes.cache_deferred=g_app_cache_progressive.active;
+#endif
+    goto app_overlays;
+  }
+#endif
+  if(cache_match){
+    APP_NODE_HIT();
+    {APP_NODE_SCOPE(copy_scope,cache_copy_us);pet_app_frame_copy(g_framebuffer,g_surface_background,sizeof(g_surface_background));}goto app_overlays;
+  }
+#if PET_P4_APP_DIRTY_CACHE
+  pet_app_dirty_rect_t dirty={0};
+  bool partial=cache_frame&&g_surface_background_valid
+    &&pet_app_dirty_plan(&g_app_frame_key,surface,values,app->surface_page,app->progress_percent,&dirty);
+  if(!partial&&g_app_frame_key.valid){g_surface_background_valid=false;g_app_frame_key.valid=false;}
+#else
+  if(g_app_frame_key.valid){g_surface_background_valid=false;g_app_frame_key.valid=false;}
+#endif
   // Cache the static prefix, including tiled artwork and its translucent shade.
   // Theme overlays are cached per page too; do not blend a full-screen wash on
   // every frame. Actionable/dynamic nodes always remain live.
   int prefix=0;
-  while(prefix<surface.count){const pet_surface_node_t *n=&surface.nodes[prefix];if(n->floating||n->action[0]||n->tile_cols||n->show_var[0]||n->state_mask||n->host_mask||(n->type!=6&&n->type!=0))break;prefix++;}
+  /* Draw order is independent of whether media may be cached. Keeping the
+   * real static prefix places scene/canvas layers above its background. */
+  while(prefix<surface->count){const pet_surface_node_t *n=&surface->nodes[prefix];if(
+#if PET_P4_BIG_IMAGE
+    (n->type==6&&n->big>=0)||
+#endif
+#if PET_SERVICE_BRIDGE_ENABLED
+    n->image_bind[0]||
+#endif
+    n->in_view||n->floating||n->action[0]||n->tile_cols||n->show_var[0]||n->state_mask||n->host_mask||(n->type!=6&&n->type!=0))break;prefix++;}
   int first=0;
-  if(prefix&&g_surface_background_valid&&g_surface_background_page==app->surface_page){memcpy(g_framebuffer,g_surface_background,sizeof(g_surface_background));first=prefix;}
-  else fill_rect(0,0,640,480,surface.background);
-  for(int i=first;i<surface.count;i++){
-    if(i==prefix&&prefix&&first==0){memcpy(g_surface_background,g_framebuffer,sizeof(g_surface_background));g_surface_background_valid=true;g_surface_background_page=app->surface_page;}
-    if(i==prefix){draw_app_game(&surface,&app->game);draw_app_scene(&surface,&app->game,now_ms);draw_app_data(&surface,app);}
-    const pet_surface_node_t *n=&surface.nodes[i];
-    if(n->hidden||(n->page!=4&&n->page!=app->surface_page))continue;
+#if PET_P4_APP_DIRTY_CACHE
+  if(partial){
+    {APP_NODE_SCOPE(copy_scope,cache_copy_us);pet_app_frame_copy(g_framebuffer,g_surface_background,sizeof(g_surface_background));}
+    APP_NODE_SCOPE(clear_scope,clear_us);g_app_clip.active=false;app_dirty_clip(&dirty);
+    fill_rect(dirty.x,dirty.y,dirty.right-dirty.x,dirty.bottom-dirty.y,surface->background);
+  }else if(!dynamic_media&&!cache_frame&&prefix&&g_surface_background_valid&&g_surface_background_page==app->surface_page
+      &&g_app_background_revision==g_surface_revision){APP_NODE_SCOPE(prefix_scope,prefix_us);pet_app_frame_copy(g_framebuffer,g_surface_background,sizeof(g_surface_background));first=prefix;}
+  else {APP_NODE_SCOPE(clear_scope,clear_us);g_app_clip.active=false;
+#if PET_P4_APP_COLD_FAST
+    g_cold_fast_jpeg_pending=false;
+    if(cold_fast_opaque_first_image(surface,app->surface_page))pet_render_counter_increment(&g_cold_fast_clear_skips);else
+#endif
+    app_clear_uncovered(surface,app->surface_page,cache_frame);}
+#else
+  if(!dynamic_media&&prefix&&g_surface_background_valid&&g_surface_background_page==app->surface_page){APP_NODE_SCOPE(prefix_scope,prefix_us);pet_app_frame_copy(g_framebuffer,g_surface_background,sizeof(g_surface_background));first=prefix;}
+  else {APP_NODE_SCOPE(clear_scope,clear_us);fill_rect(0,0,640,480,surface->background);}
+#endif
+  for(int i=first;i<surface->count;i++){
+    g_app_clip.active=false;
+    if(!dynamic_media&&i==prefix&&prefix&&first==0
+#if PET_P4_APP_DIRTY_CACHE
+        &&!cache_frame
+#endif
+      ){APP_NODE_SCOPE(prefix_scope,prefix_us);pet_app_frame_copy(g_surface_background,g_framebuffer,sizeof(g_surface_background));g_surface_background_valid=true;g_surface_background_page=app->surface_page;
+#if PET_P4_APP_DIRTY_CACHE
+        g_app_background_revision=g_surface_revision;
+#endif
+      }
+    if(i==prefix){draw_app_game(surface,&app->game);draw_app_scene(surface,&app->game,now_ms);draw_app_data(surface,app);draw_app_side();draw_app_canvas(surface,app->surface_page);}
+    pet_surface_node_t projected;
+    const pet_surface_viewport_t *viewport=pet_surface_node_viewport(surface,&surface->nodes[i]);
+    if(!pet_surface_project(viewport,&surface->nodes[i],viewport?viewport->offset:0,&projected))continue;
+    const pet_surface_node_t *n=&projected;
+    if(n->hidden||!pet_surface_node_on_page(n,app->surface_page))continue;
+    if(viewport){g_app_clip.active=true;g_app_clip.x=viewport->x;g_app_clip.y=viewport->y;g_app_clip.right=viewport->x+viewport->w;g_app_clip.bottom=viewport->y+viewport->h;}
+#if PET_P4_APP_COLD_FAST
+    if(g_cold_fast_jpeg_pending&&n->type!=6){g_cold_fast_jpeg_pending=false;g_app_clip.active=false;fill_rect(0,0,640,480,surface->background);if(viewport){g_app_clip.active=true;}}
+#endif
+#if PET_P4_APP_DIRTY_CACHE
+    if(partial){
+      if(pet_app_dirty_empty(&dirty)||n->x>=dirty.right||n->y>=dirty.bottom||n->x+n->w<=dirty.x||n->y+n->h<=dirty.y)continue;
+      app_dirty_clip(&dirty);
+      if(g_app_clip.x>=g_app_clip.right||g_app_clip.y>=g_app_clip.bottom)continue;
+    }
+#endif
+    APP_NODE_MARK(i);APP_NODE_SCOPE(node_scope,nodes_us[i]);
     if(n->type==6){
         pet_surface_node_t image=*n;
         if(n->floating)image.y=n->y+(int)lroundf(sinf((now_ms%6000)*6.2831853f/6000)*3);
+#if PET_SERVICE_BRIDGE_ENABLED
+        if(!draw_service_image(&image,app->widget_id,now_ms))
+#endif
         draw_surface_image(&image);
-    }else if(n->type==0)draw_app_panel(n);
+    }
+#if PET_P4_CLIP
+    else if(n->type==PET_SURFACE_NODE_CLIP)renderer_ext_draw_clip(n,now_ms);
+#endif
+    else if(n->type==0)draw_app_panel(n);
     else if(n->type==7)draw_app_icon(n->icon,n->x,n->y,n->w<n->h?n->w:n->h,n->color);
+#if PET_P4_CELLS_V1
+    else if(n->type==PET_SURFACE_NODE_CELLS)draw_app_cells(n,&g_miniapp_render_snapshot.cells);
+#endif
     else if(n->type==1||n->type==8){
       char progress[16];snprintf(progress,sizeof(progress),"%d%%",app->progress_percent<0?0:app->progress_percent);
       const char *text=n->bind<9?values[n->bind]:n->bind==9?progress:n->text;
-      if(surface.graphics){
+      if(surface->graphics){
         if(n->type==8)draw_app_panel(n);
         draw_app_label(n,text,n->type==8?n->foreground:n->color);
         if(n->disabled)blend_round_rect(n->x,n->y,n->w,n->h,n->radius,128,128,128,110);
@@ -4502,11 +6240,57 @@ static bool render_package_app(unsigned long long now_ms,const pet_p4_miniapp_vi
         const char *next=draw_text_line(text,n->x,y,n->w,n->color,n->scale,last);
         if(last||!next||next==text)break;text=next;y+=32*n->scale;
       }
-    }else if(n->type==2){int value=app->progress_percent;if(value<0)value=0;if(value>100)value=100;fill_rect(n->x,n->y,n->w*value/100,n->h,n->color);}
+    }else if(n->type==2){int value=n->var_bind[0]?n->bound_value:app->progress_percent;if(value<0)value=0;if(value>100)value=100;fill_rect(n->x,n->y,n->w*value/100,n->h,n->color);}
   }
-  if(prefix==surface.count){draw_app_game(&surface,&app->game);draw_app_scene(&surface,&app->game,now_ms);draw_app_data(&surface,app);}
-  char prompt[121];
-  if(pet_p4_miniapp_confirmation(prompt,now_ms)){
+  g_app_clip.active=false;
+  if(prefix==surface->count){draw_app_game(surface,&app->game);draw_app_scene(surface,&app->game,now_ms);draw_app_data(surface,app);draw_app_side();draw_app_canvas(surface,app->surface_page);}
+  bool populate_cache=cache_frame;
+#if PET_P4_APP_CACHE_POPULATION_BUDGET && !PET_P4_APP_CACHE_PROGRESSIVE
+  populate_cache=populate_cache&&pet_app_cache_population_admitted(cache_population_started,esp_timer_get_time());
+#endif
+#if PET_P4_APP_NODE_TRACE
+  g_render_trace.app_nodes.cache_deferred=cache_frame&&!populate_cache;
+#endif
+  if(populate_cache){
+    APP_NODE_SCOPE(remember_scope,remember_us);
+#if PET_P4_APP_CACHE_PROGRESSIVE
+    if(partial&&dirty.bottom-dirty.y<=PET_APP_CACHE_ROW_QUANTUM){
+      pet_app_dirty_copy(g_surface_background,g_framebuffer,&dirty);
+      pet_app_frame_remember(&g_app_frame_key,surface,values,app->surface_page,app->progress_percent);
+      pet_app_cache_progressive_cancel(&g_app_cache_progressive);
+    }else{
+      pet_app_cache_progressive_prepare(&g_app_cache_progressive,&g_app_frame_key,surface,values,
+        app->surface_page,app->progress_percent,g_surface_revision,partial);
+      g_surface_background_valid=false;
+      pet_app_cache_progressive_copy(&g_app_cache_progressive,&g_app_frame_key,g_surface_background,g_framebuffer);
+    }
+    g_surface_background_valid=g_app_frame_key.valid;
+    g_surface_background_page=app->surface_page;g_app_background_revision=g_surface_revision;
+#if PET_P4_APP_NODE_TRACE
+    g_render_trace.app_nodes.cache_deferred=g_app_cache_progressive.active;
+#endif
+#else
+#if PET_P4_APP_DIRTY_CACHE
+    if(partial)pet_app_dirty_copy(g_surface_background,g_framebuffer,&dirty);
+    else
+#endif
+    pet_app_frame_copy(g_surface_background,g_framebuffer,sizeof(g_surface_background));g_surface_background_valid=true;g_surface_background_page=app->surface_page;
+#if PET_P4_APP_DIRTY_CACHE
+    g_app_background_revision=g_surface_revision;
+#endif
+    pet_app_frame_remember(&g_app_frame_key,surface,values,app->surface_page,app->progress_percent);
+#endif
+  }
+app_overlays:;
+#if PET_P4_PARTICLES
+  /* Decorative dots live above the cached package layer and never enter it. */
+  draw_app_particles(surface,app->widget_id,g_surface_revision,app->surface_page,now_ms);
+#endif
+#if PET_P4_APP_RETAIN_LOGICAL
+  g_app_final_eligible=cache_frame&&!g_miniapp_render_snapshot.confirmation_active&&!PET_PARTICLES_ACTIVE(surface);
+#endif
+  const char *prompt=g_miniapp_render_snapshot.confirmation_prompt;
+  if(g_miniapp_render_snapshot.confirmation_active){
     blend_rect(0,0,640,480,0,0,0,115);
     fill_round_rect(108,156,424,202,24,rgb565(255,250,242));
     pet_surface_node_t label={.x=136,.y=180,.w=368,.h=76,.font_size=20,.line_height=28,.align=1,.icon=-1};
@@ -4520,20 +6304,28 @@ static bool render_package_app(unsigned long long now_ms,const pet_p4_miniapp_vi
   return true;
 }
 static bool render_package_media(unsigned long long now_ms, pet_p4_media_view_t *m) {
-  static EXT_RAM_BSS_ATTR pet_surface_t surface;char source[48];
-  if(!pet_p4_miniapp_media_config(source,&surface))return false;
-  if(strcmp(source,m->source))memset(m,0,sizeof(*m));
+#if PET_P4_APP_DIRTY_CACHE
+  /* This path may reuse the same buffer as a media prefix. Never leave an
+   * exact full-app key authorizing that different owner/content. */
+  g_app_frame_key.valid=false;
+#if PET_P4_APP_CACHE_PROGRESSIVE
+  if(g_app_cache_progressive.active){pet_app_cache_progressive_cancel(&g_app_cache_progressive);g_surface_background_valid=false;}
+#endif
+#endif
+  if(!g_miniapp_render_snapshot.surface_active)return false;
+  const pet_surface_t *surface=&g_miniapp_render_snapshot.surface;
+  if(strcmp(g_miniapp_render_snapshot.media_source,m->source))memset(m,0,sizeof(*m));
   load_surface_images(now_ms);
   bool playing=!strcmp(m->status,"playing");
   if(playing&&g_surface_was_playing&&now_ms>=g_surface_last_ms&&now_ms-g_surface_last_ms<250)g_surface_play_ms+=now_ms-g_surface_last_ms;
   g_surface_last_ms=now_ms;g_surface_was_playing=playing;
-  const pet_surface_node_t *first=&surface.nodes[0];
-  bool cached_background=surface.count&&first->type==6&&!first->rotate_ms&&first->page==2
+  const pet_surface_node_t *first=&surface->nodes[0];
+  bool cached_background=surface->count&&first->type==6&&!first->rotate_ms&&first->page==2
     &&first->x==0&&first->y==0&&first->w==640&&first->h==480&&g_surface_background_valid;
-  if(!cached_background)fill_rect(0,0,640,480,surface.background);
+  if(!cached_background)fill_rect(0,0,640,480,surface->background);
   int index=0;for(int i=0;i<m->count;i++)if(!strcmp(m->queue[i],m->title))index=i;
-  for(int i=0;i<surface.count;i++) {
-    const pet_surface_node_t *n=&surface.nodes[i];
+  for(int i=0;i<surface->count;i++) {
+    const pet_surface_node_t *n=&surface->nodes[i];
     if(n->page!=2&&n->page!=m->page)continue;
     int x=n->x,y=n->y,w=n->w,h=n->h;uint16_t c=n->color;
     if(n->type==6){
@@ -4557,7 +6349,13 @@ static bool render_package_media(unsigned long long now_ms, pet_p4_media_view_t 
         case 6:snprintf(number,sizeof(number),"%02u",m->count);text=number;break;
         case 7:snprintf(number,sizeof(number),"%u",m->level);text=number;break;
       }
-      draw_text_line(text,x,y,w,c,n->scale,true);
+      if(n->action[0]){
+        // Media action labels share their hit box's center. Font visual bounds,
+        // rather than a browser/native font-size offset, choose the baseline.
+        int label_width=utf8_text_width(text,-1,n->scale);if(label_width>w)label_width=w;
+        int inset=(w-label_width)/2;
+        draw_text_line_vcenter(text,x+inset,y,h,w-inset,c,n->scale,true);
+      }else draw_text_line(text,x,y,w,c,n->scale,true);
     }else if(n->type==2){int value=n->bind==4?m->volume:m->level;if(value>100)value=100;fill_rect(x,y,w*value/100,h,c);}
     else if(n->type==3){
       for(int j=0;j<=40;j++){int height=j%5?h/3:h/2;fill_rect(x+j*(w-2)/40,y+h-height,1,height,c);}
@@ -4567,13 +6365,22 @@ static bool render_package_media(unsigned long long now_ms, pet_p4_media_view_t 
       for(int row=0;row<rows&&first+row<m->count;row++){
         int at=first+row,ry=y+row*48;
         if(at==m->selected)fill_round_rect_outline(x,ry+2,w,44,10,c,c);
-        draw_text_line(m->queue[at],x+16,ry+8,w-32,at==m->selected?surface.background:c,1,true);
+        draw_text_line(m->queue[at],x+16,ry+8,w-32,at==m->selected?surface->background:c,1,true);
       }
     }else if(n->type==5){
       int size=w<h?w:h;if(size<12)continue;int r=size/2;
-      fill_ellipse(x+r,y+r,r,r,c);
-      if(!strcmp(m->status,"playing")||!strcmp(m->status,"buffering"))fill_rect(x+size/3,y+size/3,size/3,size/3,surface.background);
-      else for(int j=0;j<size/3;j++)fill_rect(x+size/3+j,y+size/4+j/2,1,size/2-j,surface.background);
+      int cx=x+w/2,cy=y+h/2,left=cx-r,top=cy-r;
+      fill_ellipse(cx,cy,r,r,c);
+      if(!strcmp(m->status,"playing")||!strcmp(m->status,"buffering"))fill_rect(left+size/3,top+size/3,size/3,size/3,surface->background);
+      else{
+        int base_x=left+size/3,tip_x=left+size*2/3,span=tip_x-base_x;
+        int upper=cy-(top+size/4),lower=top+size*3/4-cy;
+        // Include the final column: a real one-pixel tip, not a clipped trapezoid.
+        for(int j=0;j<=span;j++){
+          int up=upper*(span-j)/span,down=lower*(span-j)/span;
+          fill_rect(base_x+j,cy-up,1,up+down+1,surface->background);
+        }
+      }
     }
   }
   return true;
@@ -4876,8 +6683,14 @@ static void render_miniapp_page(
   const pet_p4_runtime_state_t *state,
   unsigned long long now_ms
 ) {
-  bool available = pet_p4_miniapp_get_view(&g_miniapp_view_snapshot);
-  const pet_p4_miniapp_view_t *app = available ? &g_miniapp_view_snapshot : NULL;
+  bool available = pet_p4_miniapp_render_snapshot(&g_miniapp_render_snapshot,&g_surface_images,&g_surface_revision);
+  if(!renderer_component_media_frame(available?&g_miniapp_render_snapshot:NULL))return;
+#if PET_P4_APP_PHASE_TRACE
+  g_render_trace.app_snapshot_us=available?g_miniapp_render_snapshot.capture_total_us:0;
+  g_render_trace.app_snapshot_wait_us=available?g_miniapp_render_snapshot.capture_wait_us:0;
+  g_render_trace.app_draw_started_us=(uint64_t)esp_timer_get_time();
+#endif
+  const pet_p4_miniapp_view_t *app = available ? &g_miniapp_render_snapshot.view : NULL;
   if(!app||!app->active||!app->instrument)instrument_release();
   if(app && app->active && app->slicing) {render_fruit_page();return;}
   if(app && app->active && app->instrument) {render_instrument_page(now_ms,app->title);return;}
@@ -5070,6 +6883,13 @@ static void draw_boot_diagnostic(unsigned long long now_ms) {
 
 static esp_err_t rotate_landscape_to_panel(void) {
   if (!g_framebuffer || !g_native_framebuffer) return ESP_ERR_INVALID_STATE;
+#if PET_P4_RENDER_ROTATE_TILE
+  /* Same destination and original RGB565 element mapping. The original LCD
+   * submit/cache-sync/refresh fence still owns publication and buffer reuse. */
+  if(BSP_LCD_H_RES==PET_P4_UI_HEIGHT&&BSP_LCD_V_RES==PET_P4_UI_WIDTH&&
+     pet_rgb565_rotate_panel(g_native_framebuffer,(size_t)BSP_LCD_H_RES*BSP_LCD_V_RES,
+       g_framebuffer,PET_P4_UI_WIDTH,PET_P4_UI_HEIGHT))return ESP_OK;
+#endif
   /* Every producer and the ST7701S panel use the same RGB565 element order. */
   if (g_ppa_srm_client
       && g_framebuffer_ppa_compatible
@@ -5101,10 +6921,10 @@ static esp_err_t rotate_landscape_to_panel(void) {
       .byte_swap = false,
       .mode = PPA_TRANS_MODE_BLOCKING,
     };
-    esp_err_t err = ppa_do_scale_rotate_mirror(g_ppa_srm_client, &rotation);
+    esp_err_t err = ppa_trace_srm(PET_PPA_TRACE_ROTATE, &rotation);
     if (err == ESP_OK) {
       if (!g_logged_ppa_rotation) {
-        ESP_LOGI(TAG, "P4 rotation=PPA angle=270 output=RGB565 panel-order=RGB size=%dx%d",
+        ESP_LOGD(TAG, "P4 rotation=PPA angle=270 output=RGB565 panel-order=RGB size=%dx%d",
           BSP_LCD_H_RES, BSP_LCD_V_RES);
         g_logged_ppa_rotation = true;
       }
@@ -5126,6 +6946,36 @@ static esp_err_t rotate_landscape_to_panel(void) {
   return ESP_OK;
 }
 
+static void renderer_init_native_buffers(void) {
+  if (!g_native_framebuffers[0] && !g_native_framebuffers[1])
+    g_native_framebuffer_ppa_compatible = true;
+  for (unsigned int index = 0; index < PET_P4_NATIVE_OUTPUT_BUFFER_COUNT; index += 1) {
+    /* Keep successful allocations when the other slot failed. A retry fills
+     * only missing slots, avoiding both a leaked buffer and a permanent hole. */
+    if (g_native_framebuffers[index]) continue;
+    g_native_framebuffers[index] = (uint16_t *) heap_caps_aligned_calloc(
+      PET_P4_PPA_BUFFER_ALIGNMENT,
+      BSP_LCD_H_RES * BSP_LCD_V_RES,
+      sizeof(uint16_t),
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA
+    );
+    if (!g_native_framebuffers[index]) {
+      g_native_framebuffer_ppa_compatible = false;
+      g_native_framebuffers[index] = (uint16_t *) heap_caps_malloc(
+        BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+      );
+    }
+    if (!g_native_framebuffers[index]) {
+      g_native_framebuffers[index] = (uint16_t *) heap_caps_malloc(
+        BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t),
+        MALLOC_CAP_8BIT
+      );
+    }
+  }
+  if (!g_native_framebuffer) g_native_framebuffer = g_native_framebuffers[0];
+}
+
 esp_err_t pet_p4_renderer_init(void) {
   if (!g_framebuffer) {
     g_framebuffer = (uint16_t *) heap_caps_aligned_calloc(
@@ -5143,31 +6993,7 @@ esp_err_t pet_p4_renderer_init(void) {
     }
     if (!g_framebuffer) g_framebuffer = (uint16_t *) heap_caps_malloc(PET_P4_UI_WIDTH * PET_P4_UI_HEIGHT * sizeof(uint16_t), MALLOC_CAP_8BIT);
   }
-  if (!g_native_framebuffers[0]) {
-    g_native_framebuffer_ppa_compatible = true;
-    for (unsigned int index = 0; index < PET_P4_NATIVE_OUTPUT_BUFFER_COUNT; index += 1) {
-      g_native_framebuffers[index] = (uint16_t *) heap_caps_aligned_calloc(
-        PET_P4_PPA_BUFFER_ALIGNMENT,
-        BSP_LCD_H_RES * BSP_LCD_V_RES,
-        sizeof(uint16_t),
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA
-      );
-      if (!g_native_framebuffers[index]) {
-        g_native_framebuffer_ppa_compatible = false;
-        g_native_framebuffers[index] = (uint16_t *) heap_caps_malloc(
-          BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t),
-          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-        );
-      }
-      if (!g_native_framebuffers[index]) {
-        g_native_framebuffers[index] = (uint16_t *) heap_caps_malloc(
-          BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t),
-          MALLOC_CAP_8BIT
-        );
-      }
-    }
-    g_native_framebuffer = g_native_framebuffers[0];
-  }
+  renderer_init_native_buffers();
   if (!g_jpeg_input) {
     jpeg_decode_memory_alloc_cfg_t input_mem_cfg = {
       .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER,
@@ -5205,6 +7031,9 @@ esp_err_t pet_p4_renderer_init(void) {
     g_tjpgd_workbuf = (uint8_t *) heap_caps_malloc(PET_P4_TJPGD_WORK_BUFFER_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!g_tjpgd_workbuf) g_tjpgd_workbuf = (uint8_t *) heap_caps_malloc(PET_P4_TJPGD_WORK_BUFFER_BYTES, MALLOC_CAP_8BIT);
   }
+#if PET_P4_KEYFRAME_BG
+  keyframe_init();
+#endif
   if (!g_h264_pack_task_init_attempted) {
     g_h264_pack_task_init_attempted = true;
     g_h264_pack_done = xSemaphoreCreateBinary();
@@ -5246,6 +7075,13 @@ esp_err_t pet_p4_renderer_init(void) {
           "P4 PPA rotation init failed (%s); using CPU fallback",
           esp_err_to_name(ppa_err)
         );
+      } else {
+        const ppa_event_callbacks_t callbacks={.on_trans_done=ppa_trace_done};
+        bool available=ppa_client_register_event_callbacks(g_ppa_srm_client,&callbacks)==ESP_OK;
+        /* Optional registration failure only disables diagnostic splits. */
+        portENTER_CRITICAL(&g_ppa_trace_mux);
+        pet_ppa_trace_set_available(&g_ppa_trace,available);
+        portEXIT_CRITICAL(&g_ppa_trace_mux);
       }
     } else {
       ESP_LOGW(TAG, "P4 PPA output buffer unavailable; using CPU rotation");
@@ -5272,6 +7108,17 @@ esp_err_t pet_p4_renderer_init(void) {
     }
   }
   return ESP_OK;
+}
+
+/* The APP clip owns the SAME decoder/worker as main-page appearances. Once
+ * pinned, its draw/hidden/generation paths own retirement. Cancelling the shared
+ * job at every APP frame would discard every ready clip frame before take. */
+static void renderer_cancel_inactive_prepares(const char *page){
+  if(!strcmp(page,"main"))return;
+#if PET_P4_CLIP
+  if(!strcmp(page,"app")&&g_clip_lease.token){release_inactive_asset_prepares();return;}
+#endif
+  cancel_pending_asset_prepares();
 }
 
 static void draw_approval_button(
@@ -5371,8 +7218,19 @@ esp_err_t pet_p4_renderer_render(
   const pet_p4_view_model_t *view,
   unsigned long long now_ms
 ) {
-  ESP_RETURN_ON_ERROR(pet_p4_renderer_init(), TAG, "allocate render buffers");
+  /* Entry reset also covers initialization failures; no lifetime/window reset. */
+  pet_p4_render_trace_begin(&g_render_trace, g_render_trace_frame, view && view->page ? view->page : "main");
+  const esp_err_t renderer_init_result=pet_p4_renderer_init();
+  if(renderer_init_result!=ESP_OK)(void)renderer_component_media_frame(NULL);
+  ESP_RETURN_ON_ERROR(renderer_init_result, TAG, "allocate render buffers");
+#if PET_P4_H264_WORKER_PACK
+  h264_frame_offer_begin();
+#endif
   const uint16_t *previous_native = g_native_framebuffer;
+#if PET_P4_LOGICAL_COMPARE
+  const unsigned previous_native_index=g_native_framebuffer_index;
+  g_app_logical_same=false;
+#endif
   const bool previous_valid = g_last_native_valid;
   g_last_native_valid = false; /* rotation/draw failures must force a refresh */
   g_native_framebuffer_index =
@@ -5384,76 +7242,185 @@ esp_err_t pet_p4_renderer_render(
   g_last_decode_us = 0;
   g_last_h264_pack_us = 0;
   g_last_h264_convert_us = 0;
+  const char *page = view && view->page ? view->page : "main";
+  if(strcmp(page,"main")) {
+    g_main_appearance_ready=false;
+    pet_compact_underlay_forget(&g_main_compact_underlay);
+  }
+  pet_p4_render_trace_begin(&g_render_trace, ++g_render_trace_frame, page);
+#if PET_P4_APP_RETAIN_LOGICAL
+  /* Keep all new planning work INSIDE the unchanged whole-frame clock. */
+  g_app_common_plan=pet_logical_common_plan(state!=NULL,
+    pet_p4_state_touch_feedback_active(state,now_ms),state?state->local_touch_x:0,state?state->local_touch_y:0,
+    state&&pet_p4_state_host_connected(state,now_ms),state&&state->asset_family_count>0,
+    state&&state->desktop_device_id[0],state&&state->native_usb_mounted,state&&state->host_last_seen_ms>0,
+    now_ms<=P4_BOOT_DIAGNOSTIC_MS);
+  g_app_may_retain=pet_logical_retention_begin(&g_app_final_retention,g_app_common_plan,previous_valid,
+    !strcmp(g_last_render_page,"app"),!strcmp(page,"app"));
+  g_app_final_reused=g_app_final_eligible=false;
+#endif
+  ppa_trace_frame_begin();
+  g_render_trace.start_us = (uint64_t)render_started_us;
+  if (g_previous_render_ended_us > 0) {
+    g_render_trace.previous_end_us=(uint64_t)g_previous_render_ended_us;
+    g_render_trace.gap_us=elapsed_us_clamped(g_previous_render_ended_us,render_started_us);
+  }
+  pet_widget_trace_snapshot_t operation_snapshot;
+  pet_widget_trace_snapshot(&operation_snapshot);
+  pet_p4_render_trace_observe(&g_render_trace, &operation_snapshot, false);
+  renderer_cancel_inactive_prepares(page);
+  g_asset_cache_pending = false;
   if (!g_framebuffer_initialized) {
+#if PET_P4_APP_RETAIN_LOGICAL
+    g_app_may_retain=false;
+#endif
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_framebuffer_initialized = true;
   }
-  const char *page = view && view->page ? view->page : "main";
   if(strcmp(page,"components"))center_art_release();
   if(strcmp(page,"app"))instrument_release();
   bool realtime_mode = view && view->realtime_conversation;
+  bool component_media_idle=true;
+  if(strcmp(page,"app"))component_media_idle=renderer_component_media_frame(NULL);
   if (realtime_mode != g_last_realtime_conversation) {
+#if PET_P4_APP_RETAIN_LOGICAL
+    g_app_may_retain=false;
+#endif
     // Even a missing/failed appearance must not leave old Agent cards beneath the chat.
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
+    g_main_appearance_ready = false;
+    pet_compact_underlay_forget(&g_main_compact_underlay);
     g_last_realtime_conversation = realtime_mode;
   }
   const bool approval_visible = state && pet_p4_state_approval_pending(state, now_ms);
-  if (approval_visible != g_last_approval_visible) {
+  const bool approval_changed = approval_visible != g_last_approval_visible;
+#if PET_P4_APP_RETAIN_LOGICAL
+  /* A final retained APP frame includes common overlays. Never reuse or publish
+   * that final frame across an approval modal/countdown; keep the clean texture. */
+  if (approval_visible || approval_changed) g_app_may_retain = false;
+#endif
+  if (approval_changed) {
     // The modal dims arbitrary pixels; repaint the page beneath from black so
     // entering/leaving it cannot leave a ghost card on pages (for example a
     // missing appearance frame) that only repaint their own controls.
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
+    g_main_appearance_ready = false;
+    pet_compact_underlay_forget(&g_main_compact_underlay);
     g_last_approval_visible = approval_visible;
   }
   if (strcmp(page, "components") == 0) {
-    render_component_center_page();
+    render_component_center_page(view && view->component_loading);
   } else if (strcmp(page, "touch_test") == 0 && state) {
     render_touch_test_page(state);
   } else if (strcmp(page, "app") == 0) {
     render_miniapp_page(state, now_ms);
   } else {
-    if (g_last_render_page[0] && strcmp(g_last_render_page, "main") != 0) {
-      fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
-    }
     bool realtime = view && view->realtime_conversation;
     bool show_session_queue = !realtime && state && state->session_queue_count > 0;
     int64_t asset_started_us = esp_timer_get_time();
-    bool drew_asset = render_asset_pet_frame(state, view, now_ms);
+    bool drew_asset = component_media_idle&&render_asset_pet_frame(state, view, now_ms);
+    if(drew_asset)g_main_appearance_ready=true;
+    if(!component_media_idle)g_asset_cache_pending=true;
+    /* A queued prepare is not a missing/bad asset. Keep the last logical pixels
+     * while continuing all live overlays and the normal unchanged-frame gate. */
+    if (!drew_asset && !g_asset_cache_pending && g_last_render_page[0]
+        && strcmp(g_last_render_page, "main") != 0)
+      fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     overlay_started_us = esp_timer_get_time();
     asset_us = elapsed_us_clamped(asset_started_us, overlay_started_us);
-    if (!drew_asset) {
+    if (!drew_asset && !g_asset_cache_pending) {
       if (!g_logged_missing_asset) {
-        ESP_LOGI(TAG, "no usable P4 appearance frames yet; keeping bubble/status visible");
+        ESP_LOGD(TAG, "no usable P4 appearance frames yet; keeping bubble/status visible");
         g_logged_missing_asset = true;
       }
     }
-    if (view && view->show_voice_overlay) draw_standalone_voice_overlay();
-    else if (!show_session_queue) draw_bubble(state, view, now_ms);
-    if (!realtime) draw_session_queue(state, now_ms);
-    else g_session_overlay_cache_valid = false;
+    bool compact_requested = !show_session_queue
+      && (!view || (view->show_bubble && view->compact_bubble && !view->show_voice_overlay));
+    main_compact_underlay_prepare(drew_asset, compact_requested);
+    /* Appearance and its overlays enter the same logical/LCD frame. While the
+     * first decode is queued, retain the previous page without an early bubble. */
+    if(g_main_appearance_ready){
+      if (view && view->show_voice_overlay) draw_standalone_voice_overlay();
+      else if (!show_session_queue) draw_bubble(state, view, now_ms);
+      if (!realtime) draw_session_queue(state, now_ms);
+      else g_session_overlay_cache_valid = false;
+    }else g_session_overlay_cache_valid=false;
   }
+  const int64_t common_overlay_started_us = esp_timer_get_time();
+#if PET_P4_APP_PHASE_TRACE
+  if(g_render_trace.app_draw_started_us)g_render_trace.app_draw_us=elapsed_us_clamped((int64_t)g_render_trace.app_draw_started_us,common_overlay_started_us);
+#endif
+  g_render_trace.content_us = elapsed_us_clamped(overlay_started_us, common_overlay_started_us);
   const bool media_page = strcmp(page, "app") == 0 && pet_p4_miniapp_media_active();
   const bool instrument_page = strcmp(page, "app") == 0
     && pet_p4_miniapp_instrument_config(NULL, NULL);
   const bool dedicated_page = media_page || instrument_page || (strcmp(page,"app")==0 && pet_p4_miniapp_slicing_active()) || strcmp(page, "components") == 0
     || strcmp(page, "touch_test") == 0;
+#if PET_P4_APP_RETAIN_LOGICAL
+  if(!g_app_final_reused){
+    if(!dedicated_page&&g_app_common_plan.touch)draw_touch_feedback_pixels(g_app_common_plan.touch_x,g_app_common_plan.touch_y);
+  }
+#else
   if (!dedicated_page) draw_touch_feedback(state, now_ms);
-  if (strcmp(page, "main") == 0) draw_page_indicator(page);
+#endif
   // Native media owns its status and error UI. Generic Agent/connection banners
   // must not cover playback status or break the immersive lyrics-only page.
+#if PET_P4_APP_RETAIN_LOGICAL
+  if(!dedicated_page&&!g_app_final_reused)draw_common_connection(g_app_common_plan.banner);
+#else
   if (!dedicated_page) draw_connection_banner(state, now_ms);
+#endif
   snprintf(g_last_render_page, sizeof(g_last_render_page), "%s", page);
+#if PET_P4_APP_RETAIN_LOGICAL
+  if(!dedicated_page&&!g_app_final_reused&&g_app_common_plan.boot)draw_boot_diagnostic(now_ms);
+#else
   if (!dedicated_page) draw_boot_diagnostic(now_ms);
+#endif
   draw_approval_overlay(state, now_ms);
   int64_t rotate_started_us = esp_timer_get_time();
+  g_render_trace.common_overlay_us = elapsed_us_clamped(common_overlay_started_us, rotate_started_us);
   uint32_t overlay_us = elapsed_us_clamped(overlay_started_us, rotate_started_us);
-  ESP_RETURN_ON_ERROR(rotate_landscape_to_panel(), TAG, "rotate logical framebuffer");
+#if PET_P4_LOGICAL_COMPARE
+  int64_t compare_started_us=rotate_started_us;
+  bool logical_unchanged=false;
+  if(g_app_logical_same&&previous_valid&&BSP_LCD_H_RES==PET_P4_UI_HEIGHT&&BSP_LCD_V_RES==PET_P4_UI_WIDTH){
+    logical_unchanged=pet_p4_logical_frame_unchanged(g_framebuffer,previous_native,PET_P4_UI_WIDTH,PET_P4_UI_HEIGHT);
+    g_render_trace.logical_compare_us=elapsed_us_clamped(compare_started_us,esp_timer_get_time());
+  }
+  rotate_started_us=esp_timer_get_time();
+  if(logical_unchanged){
+    /* Keep the proven LCD reference's pointer AND index. The unused next
+     * buffer has not been written and must never become the next reference. */
+    g_native_framebuffer_index=previous_native_index;
+    g_native_framebuffer=g_native_framebuffers[previous_native_index];
+  }else
+#endif
+  {
+    esp_err_t rotate_err=rotate_landscape_to_panel();
+    if(rotate_err!=ESP_OK){
+#if PET_P4_H264_WORKER_PACK
+      h264_frame_offer_end(false);
+#endif
+      return rotate_err;
+    }
+  }
   int64_t lcd_started_us = esp_timer_get_time();
   uint32_t rotate_us = elapsed_us_clamped(rotate_started_us, lcd_started_us);
-  bool unchanged = pet_p4_frame_unchanged(g_native_framebuffer, previous_native,
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  g_last_compare_us=0;memset(&g_last_lcd_observation,0,sizeof(g_last_lcd_observation));
+#endif
+  bool unchanged =
+#if PET_P4_LOGICAL_COMPARE
+    logical_unchanged||
+#endif
+    pet_p4_frame_unchanged(g_native_framebuffer, previous_native,
     (size_t) BSP_LCD_H_RES * BSP_LCD_V_RES * sizeof(uint16_t), previous_valid);
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  g_last_compare_valid=true;g_last_compare_us=pet_lcd_elapsed(lcd_started_us,esp_timer_get_time(),&g_last_compare_valid);
+  esp_err_t lcd_err=unchanged?ESP_OK:pet_p4_lcd_draw_rgb565_observed(0,0,BSP_LCD_H_RES,BSP_LCD_V_RES,g_native_framebuffer,&g_last_lcd_observation);
+#else
   esp_err_t lcd_err = unchanged ? ESP_OK : pet_p4_lcd_draw_rgb565(
     0,
     0,
@@ -5461,10 +7428,20 @@ esp_err_t pet_p4_renderer_render(
     BSP_LCD_V_RES,
     g_native_framebuffer
   );
+#endif
   g_last_native_valid = lcd_err == ESP_OK;
+#if PET_P4_APP_RETAIN_LOGICAL
+  pet_logical_retention_finish(&g_app_final_retention,g_app_common_plan,
+    lcd_err==ESP_OK&&g_app_final_eligible&&!approval_visible&&!strcmp(page,"app"));
+#endif
   if (unchanged) g_lcd_skipped++;
   else if (lcd_err == ESP_OK) g_lcd_submitted++;
   int64_t render_ended_us = esp_timer_get_time();
+  g_render_trace.end_us = (uint64_t)render_ended_us;
+  g_previous_render_ended_us=render_ended_us;
+  ppa_trace_frame_snapshot(&g_render_trace.ppa);
+  pet_widget_trace_snapshot(&operation_snapshot);
+  pet_p4_render_trace_observe(&g_render_trace, &operation_snapshot, true);
   record_render_performance(
     render_started_us,
     render_ended_us,
@@ -5473,6 +7450,11 @@ esp_err_t pet_p4_renderer_render(
     rotate_us,
     elapsed_us_clamped(lcd_started_us, render_ended_us)
   );
+#if PET_P4_H264_WORKER_PACK
+  /* A new QUEUED decode may start only after the full frame was submitted and
+   * recorded. Its scheduling cost remains in the unmodified next-frame gap. */
+  h264_frame_offer_end(lcd_err==ESP_OK);
+#endif
   return lcd_err;
 }
 
@@ -5480,6 +7462,12 @@ esp_err_t pet_p4_renderer_render_transfer_status(
   bool firmware_update,
   unsigned long long now_ms
 ) {
+  /* Entry reset also covers initialization failures; no lifetime/window reset. */
+  pet_p4_render_trace_begin(&g_render_trace, g_render_trace_frame, "transfer");
+  /* Transfer-only drawing intentionally replaces the normal renderer cadence. */
+  g_previous_render_ended_us=0;
+  (void)renderer_component_media_frame(NULL); /* poll old clip cleanup on transfer frames too */
+  cancel_pending_asset_prepares();
   ESP_RETURN_ON_ERROR(pet_p4_renderer_init(), TAG, "allocate transfer render buffers");
   g_last_native_valid = false; /* transfer renders bypass normal frame gating */
   g_native_framebuffer_index =

@@ -11,8 +11,10 @@ def test_identical_default_cues_are_embedded_only_once():
     assert (clips / "error.wav").read_bytes() == (clips / "waiting_user.wav").read_bytes()
     cmake = (ROOT / "main/CMakeLists.txt").read_text()
     assert "PET_ERROR_CUE_SHA STREQUAL PET_WAIT_CUE_SHA" in cmake
-    assert "foreach(cue done error)" in cmake
-    assert "foreach(cue permission_request permission_approved permission_denied permission_expired session_terminated)" in cmake
+    assert "foreach(cue done error)" not in cmake
+    assert '"pet_p4_cue_packed.c"' in cmake
+    assert 'compress_system_cues.py" "--check"' in cmake
+    assert "foreach(cue permission_request" not in cmake
     assert "../pc/public/terrier-clips/waiting_user.wav" not in (ROOT / "platformio.ini").read_text()
     source = (ROOT / "main/pet_p4_system_cues.c").read_text()
     assert "_binary_waiting_user_wav" not in source
@@ -25,23 +27,11 @@ def test_shared_cues_parse_and_preserve_unknown_custom_audio():
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* Link-only placeholders: host test exercises the parser on real resource bytes. */
-const unsigned char d0[1] __asm__("_binary_done_wav_start") = {0};
-const unsigned char d1[1] __asm__("_binary_done_wav_end") = {0};
-const unsigned char e0[1] __asm__("_binary_error_wav_start") = {0};
-const unsigned char e1[1] __asm__("_binary_error_wav_end") = {0};
-const unsigned char w0[1] __asm__("_binary_waiting_user_wav_start") = {0};
-const unsigned char w1[1] __asm__("_binary_waiting_user_wav_end") = {0};
-const unsigned char pr0[1] __asm__("_binary_permission_request_wav_start") = {0};
-const unsigned char pr1[1] __asm__("_binary_permission_request_wav_end") = {0};
-const unsigned char pa0[1] __asm__("_binary_permission_approved_wav_start") = {0};
-const unsigned char pa1[1] __asm__("_binary_permission_approved_wav_end") = {0};
-const unsigned char pd0[1] __asm__("_binary_permission_denied_wav_start") = {0};
-const unsigned char pd1[1] __asm__("_binary_permission_denied_wav_end") = {0};
-const unsigned char pe0[1] __asm__("_binary_permission_expired_wav_start") = {0};
-const unsigned char pe1[1] __asm__("_binary_permission_expired_wav_end") = {0};
-const unsigned char st0[1] __asm__("_binary_session_terminated_wav_start") = {0};
-const unsigned char st1[1] __asm__("_binary_session_terminated_wav_end") = {0};
+/* Host test exercises the original WAV parser on canonical resource bytes. */
+/* This test isolates the existing WAV parser; the packed decoder and complete
+ * seven-family lookup are exercised with real zlib by p4_cue_packed_test. */
+bool pet_p4_cue_packed_init(void) {return false;}
+bool pet_p4_cue_packed_pcm(unsigned index,const uint8_t **pcm,size_t *size) {(void)index;(void)pcm;(void)size;return false;}
 int main(int argc, char **argv) {
   assert(argc==9);
   for (int i=1;i<argc;i++) {

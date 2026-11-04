@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "representation": "c-string-no-nul-v1",
+  "cases": [
+    {"name":"plain multilingual text","value":{"label":"专注 · café 🐾"},"allowed":true},
+    {"name":"ordinary JSON controls remain text","value":{"label":"line one\nline two\t\b\f\r"},"allowed":true},
+    {"name":"literal escape spelling is not NUL","value":{"label":"A\\u0000B"},"allowed":true},
+    {"name":"encoded NUL value cannot be represented","value":{"label":"A\u0000B"},"allowed":false},
+    {"name":"NUL object key cannot alias a shorter key","value":{"topic\u0000ignored":"test"},"allowed":false},
+    {"name":"deep NUL is not skipped","value":{"items":[1,true,null,{"detail":"\u0000"}]},"allowed":false},
+    {"name":"unrelated scalars preserve their meaning","value":{"items":[0,-1,1.25,true,false,null,""]},"allowed":true},
+    {"name":"literal escape after a real slash","value":{"items":["\\","\\\\u0000","末尾"]},"allowed":true}
+  ],
+  "rawCases": [
+    {"json":"{\"topic\":\"test\\u0000ignored\",\"payload\":{}}","allowed":false},
+    {"json":"{\"topic\":\"test\",\"payload\":{\"label\":\"A\\u0000B\"}}","allowed":false},
+    {"json":"{\"topic\":\"test\",\"payload\":{\"label\":\"A\\\\u0000B\"}}","allowed":true},
+    {"json":"{\"topic\":\"test\",\"payload\":{\"label\":\"line\\nnext\"}}","allowed":true}
+  ]
+}

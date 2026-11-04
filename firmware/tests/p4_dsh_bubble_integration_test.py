@@ -30,6 +30,7 @@ def test_approval_uses_local_text_without_host_bubble_pin(tmp_path):
     signature = function(source, "draw_card_body_lines").split("{")[0]
     prelude = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include "pet_p4_protocol.h"
@@ -79,6 +80,7 @@ def test_stopped_cue_only_after_admission_and_once_per_revision(tmp_path):
              "json_bounded_u64", "json_session_id_array_contains"]
     prelude = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -127,9 +129,11 @@ def test_approval_cancel_releases_parsed_message_even_on_stale_id(tmp_path):
     begin = source.index('  } else if (strcmp(topic, "approval/cancel") == 0)')
     end = source.index('  } else if (strncmp(topic, "state/", 6) == 0)', begin)
     branch = source[begin:end]
-    cleanup = source[source.rindex("  cJSON_Delete(root);"):]
+    handler = function(source, "pet_p4_handle_line_with_reply")
+    cleanup = handler[handler.rindex("  cJSON_Delete(root);"):]
     prelude = r'''
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
@@ -161,3 +165,55 @@ static bool dispatch(pet_p4_runtime_state_t *state,const char *line) {
                 + function(source, "pet_p4_state_clear_approval").replace("static ", "", 1)
                 + dispatch + branch + "\n  }\n" + cleanup + main,
                 ROOT / "tests/vendor/cjson/cJSON.c")
+
+
+def test_approval_invalidates_actual_private_final_frame_retention(tmp_path):
+    source = (ROOT / "main/pet_p4_renderer.c").read_text()
+    begin = source.index("  const bool approval_visible =")
+    end = source.index('  if (strcmp(page, "components") == 0)', begin)
+    gate = source[begin:end]
+    begin = source.index("  pet_logical_retention_finish(", end)
+    finish = source[begin:source.index(");", begin) + 2]
+    harness = r'''
+#include <assert.h>
+#include <string.h>
+#include <stdint.h>
+#include "pet_p4_logical_retention.h"
+#include "pet_p4_compact_underlay.h"
+#define PET_P4_APP_RETAIN_LOGICAL 1
+#define PET_P4_UI_WIDTH 640
+#define PET_P4_UI_HEIGHT 480
+#define ESP_OK 0
+typedef struct {bool active;} state_t;
+static bool pet_p4_state_approval_pending(const state_t *s,unsigned long long now) {(void)now;return s->active;}
+static unsigned clears;
+static uint16_t rgb565(int r,int g,int b) {return (uint16_t)(r+g+b);}
+static void fill_rect(int x,int y,int w,int h,uint16_t c) {(void)x;(void)y;(void)w;(void)h;(void)c;clears++;}
+static bool g_last_approval_visible,g_app_may_retain,g_main_appearance_ready=true;
+static bool g_session_overlay_cache_valid=true,g_app_final_eligible=true;
+static pet_logical_retention_t g_app_final_retention;
+static pet_compact_underlay_t g_main_compact_underlay={.valid=true,.painted=true};
+static pet_logical_common_plan_t g_app_common_plan;
+static void frame(bool active,bool expected_reuse,bool expected_publish) {
+  state_t actual={active};const state_t *state=&actual;
+  const unsigned long long now_ms=1000;
+  const char *page="app";int lcd_err=ESP_OK;
+  g_app_may_retain=pet_logical_retention_begin(&g_app_final_retention,g_app_common_plan,true,true,true);
+'''
+    main = r'''
+  assert(g_app_may_retain==expected_reuse);
+''' + finish + r'''
+  assert(g_app_final_retention.valid==expected_publish);
+}
+int main(void) {
+  frame(false,false,true);frame(false,true,true);
+  frame(true,false,false);assert(clears==1 && !g_main_appearance_ready && !g_session_overlay_cache_valid);
+  assert(!g_main_compact_underlay.valid && !g_main_compact_underlay.painted);
+  frame(true,false,false);assert(clears==1);
+  g_main_compact_underlay.valid=true;g_main_compact_underlay.painted=true;
+  frame(false,false,true);assert(clears==2);
+  assert(!g_main_compact_underlay.valid && !g_main_compact_underlay.painted);
+  frame(false,true,true);
+}
+'''
+    compile_run(tmp_path, harness + gate + main)

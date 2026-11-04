@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_media_snapshots_are_renderer_owned_not_nested_stack_copies():
     source = (ROOT / 'firmware/main/pet_p4_renderer.c').read_text()
-    assert 'static EXT_RAM_BSS_ATTR pet_p4_miniapp_view_t g_miniapp_view_snapshot;' in source
+    assert 'static EXT_RAM_BSS_ATTR pet_p4_miniapp_render_snapshot_t g_miniapp_render_snapshot;' in source
     assert 'static EXT_RAM_BSS_ATTR pet_p4_media_view_t g_media_view_snapshot;' in source
     render = source.split('static bool render_package_media', 1)[1].split('/* Lossless instrument layers:', 1)[0]
     assert 'pet_p4_media_view_t m;' not in render
@@ -18,14 +18,15 @@ def test_media_snapshots_are_renderer_owned_not_nested_stack_copies():
     build = (ROOT / 'firmware/main/CMakeLists.txt').read_text()
     assert '-fstack-usage' in build
     image = (ROOT / 'firmware/scripts/platformio_chip_images.py').read_text()
-    assert 'sum(frames.get(name, 0) for name in chain) > 4096' in image
+    assert 'stack.check_build(output.parent, elf)' in image
+    assert 'renderer_stack_budget.py' in image
     assert 'g_surface_background_valid' in source
     assert 'if(a==255){out[dx]=colors[index];continue;}' in source
     assert 'int32_t sx=row_x,sy=row_y' in source
     assert 'pet_p4_miniapp_media_surface_animated()' in (ROOT/'firmware/main/pet_p4_main.c').read_text()
 
 
-def test_actual_media_renderer_empty_full_queue_images_rotation_and_bad_resource(tmp_path):
+def test_actual_radio_renderer_empty_full_queue_images_rotation_and_bad_resource(tmp_path):
     source = (ROOT / 'firmware/main/pet_p4_renderer.c').read_text()
     renderer = 'static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;' + source.split(
         'static EXT_RAM_BSS_ATTR pet_p4_miniapp_sprite_pack_t g_surface_images;', 1
@@ -33,6 +34,7 @@ def test_actual_media_renderer_empty_full_queue_images_rotation_and_bad_resource
     # Application typography has its own harness; this exercises the actual
     # shared image cache and media renderer without compiling unrelated LVGL code.
     renderer=renderer.split('static void draw_app_panel',1)[0]+'static bool render_package_media'+renderer.split('static bool render_package_media',1)[1]
+    renderer=renderer.replace('static bool render_package_media(', 'static bool render_captured_media(')
     (tmp_path / 'esp_err.h').write_text('typedef int esp_err_t;\n#define ESP_OK 0\n')
     harness = r'''
 #include <assert.h>
@@ -46,6 +48,7 @@ def test_actual_media_renderer_empty_full_queue_images_rotation_and_bad_resource
 #define EXT_RAM_BSS_ATTR
 static uint16_t g_framebuffer[640*480];
 static pet_surface_t fixture;
+static pet_p4_miniapp_render_snapshot_t g_miniapp_render_snapshot;
 static pet_p4_miniapp_sprite_pack_t packed;
 static unsigned revision=1;
 static unsigned full_background_clears;
@@ -55,12 +58,6 @@ static unsigned g_jpeg_input_capacity;
 static uint16_t *g_jpeg_output;
 static bool decode_jpeg_frame_hardware(const void*p,size_t n,int*w,int*h,int*s,esp_err_t*e){assert(!"unexpected JPEG in palette rotation test");return false;}
 static bool decode_jpeg_frame_tjpgd(const void*p,size_t n,int*w,int*h,JRESULT*e){assert(!"unexpected JPEG in palette rotation test");return false;}
-bool pet_p4_miniapp_media_config(char source[48],pet_surface_t *surface){
-  strcpy(source,"pc.media-sample");*surface=fixture;return true;
-}
-bool pet_p4_miniapp_get_surface_images(pet_p4_miniapp_sprite_pack_t *out,uint32_t *seen){
-  if(*seen==revision)return false;*seen=revision;*out=packed;return true;
-}
 static uint16_t rgb565(unsigned r,unsigned g,unsigned b){return ((r>>3)<<11)|((g>>2)<<5)|(b>>3);}
 static void fill_rect(int x,int y,int w,int h,uint16_t c){
   assert(x>=0&&y>=0&&w>=0&&h>=0&&x+w<=640&&y+h<=480);
@@ -73,6 +70,15 @@ static void fill_round_rect_outline(int x,int y,int w,int h,int r,uint16_t c,uin
 static void fill_ellipse(int x,int y,int rx,int ry,uint16_t c){fill_rect(x-rx,y-ry,rx*2,ry*2,c);}
 static void draw_text_line(const char*t,int x,int y,int w,uint16_t c,int s,bool e){
   (void)t;(void)c;(void)e;assert(x>=0&&x+w<=640&&y>=0&&y+32*s<=480);
+}
+/* Typography is a synthetic boundary here; the production font visual-bounds
+ * centering has separate typography coverage. Keep real media/control dispatch. */
+static int utf8_text_width(const char*t,int limit,int scale){
+  int count=0;(void)limit;for(const unsigned char*p=(const unsigned char*)t;*p;p++)if((*p&0xc0)!=0x80)count++;
+  return count*24*scale;
+}
+static void draw_text_line_vcenter(const char*t,int x,int y,int h,int w,uint16_t c,int scale,bool e){
+  assert(h>=32*scale);draw_text_line(t,x,y+(h-32*scale)/2,w,c,scale,e);
 }
 static void load_fixture(const char *path){
   FILE *f=fopen(path,"rb");assert(f);char buf[8192];size_t n=fread(buf,1,sizeof(buf)-1,f);buf[n]=0;fclose(f);
@@ -114,7 +120,7 @@ int main(int argc,char **argv){
   for(int layout=1;layout<argc;layout++){
     load_fixture(argv[layout]);
     for(int count=0;count<=20;count++)for(int page=0;page<=1;page++){
-      memset(&m,0,sizeof(m));strcpy(m.source,"pc.media-sample");m.count=count;m.page=page;m.volume=50;
+      memset(&m,0,sizeof(m));strcpy(m.source,"pc.city-radio");m.count=count;m.page=page;m.volume=50;
       for(int i=0;i<count;i++)snprintf(m.queue[i],sizeof(m.queue[i]),"Radio %d",i);
       for(int select=0;select<(count?count:1);select++){
         m.selected=select;assert(render_package_media(1000,&m));
@@ -161,22 +167,65 @@ int main(int argc,char **argv){
   // A truncated/corrupt image safely disappears, while the rest of the UI renders.
   packed.items[0].data_length=12;revision++;render_package_media(1310,&m);assert(g_surface_images.count==0);
   assert(g_framebuffer[0]==fixture.background);
+  /* Actual renderer transport branch, including rectangular node centering.
+   * The synthetic circle paints its full square, so each tested triangle pixel
+   * must be cut by the real foreground-column loop, not a shape stub. */
+  const int boxes[][2]={{64,64},{96,64},{64,96},{12,12},{63,47}};
+  for(unsigned i=0;i<sizeof(boxes)/sizeof(*boxes);i++){
+    memset(&fixture,0,sizeof(fixture));fixture.background=0x1234;fixture.count=1;
+    pet_surface_node_t*n=&fixture.nodes[0];n->type=5;n->x=100;n->y=100;n->w=boxes[i][0];n->h=boxes[i][1];n->color=0x5678;n->page=0;
+    g_surface_background_valid=false;m.page=0;strcpy(m.status,"idle");
+    assert(render_package_media(1400,&m));
+    int size=n->w<n->h?n->w:n->h,r=size/2,cx=n->x+n->w/2,cy=n->y+n->h/2;
+    int left=cx-r,top=cy-r,base=left+size/3,tip=left+size*2/3;
+    assert(g_framebuffer[cy*640+tip]==fixture.background);
+    assert(g_framebuffer[(cy-1)*640+tip]==n->color&&g_framebuffer[(cy+1)*640+tip]==n->color);
+    assert(g_framebuffer[(top+size/4)*640+base]==fixture.background);
+    assert(g_framebuffer[(top+size*3/4)*640+base]==fixture.background);
+    for(int yy=0;yy<480;yy++)for(int xx=0;xx<640;xx++)
+      if(xx<n->x||xx>=n->x+n->w||yy<n->y||yy>=n->y+n->h)assert(g_framebuffer[yy*640+xx]==fixture.background);
+  }
   return 0;
 }
 '''
     code = tmp_path / 'renderer.c'
-    code.write_text(harness + renderer + main)
+    clipping='static struct {bool active;int x,y,right,bottom;} g_app_clip;' + source.split('static struct {bool active;int x,y,right,bottom;} g_app_clip;',1)[1].split('static void put_px',1)[0]
+    # Include the production clip guard, then exercise the same image path at
+    # negative projected Y and both viewport edges under ASan/UBSan.
+    checks=r'''
+  g_app_clip.active=true;g_app_clip.x=16;g_app_clip.y=64;g_app_clip.right=624;g_app_clip.bottom=416;
+  for(int yy=-479;yy<=479;yy+=37){
+    pet_surface_node_t node={.type=6,.image=0,.x=16,.y=yy,.w=200,.h=240};
+    for(int p=0;p<640*480;p++)g_framebuffer[p]=0x1357;
+    draw_surface_image(&node);
+    for(int y=0;y<480;y++)for(int x=0;x<640;x++)
+      if(x<16||x>=624||y<64||y>=416)assert(g_framebuffer[y*640+x]==0x1357);
+  }
+  g_app_clip.active=false;
+'''
+    main=main.replace('  // A truncated/corrupt image',checks+'  // A truncated/corrupt image')
+    captured_fixture=r'''
+/* Test input is a completed capture; product drawing cannot call live getters. */
+static bool render_package_media(unsigned long long now,pet_p4_media_view_t *m){
+  g_miniapp_render_snapshot.surface_active=true;g_miniapp_render_snapshot.surface=fixture;
+  strcpy(g_miniapp_render_snapshot.media_source,"pc.city-radio");
+  g_miniapp_render_snapshot.images_changed=g_surface_revision!=revision;
+  if(g_miniapp_render_snapshot.images_changed){g_surface_revision=revision;g_surface_images=packed;}
+  return render_captured_media(now,m);
+}
+'''
+    code.write_text(harness + clipping + renderer + captured_fixture + main)
     cjson = ROOT / 'firmware/tests/vendor/cjson'
     binary = tmp_path / 'renderer'
     subprocess.run(['cc', '-std=c11', '-fsanitize=address,undefined', '-g', '-I', str(tmp_path),
                     '-I', str(ROOT/'firmware/main'), '-I', str(cjson), str(code),
                     str(ROOT/'firmware/main/pet_p4_surface.c'), str(cjson/'cJSON.c'), '-lm', '-o', str(binary)], check=True)
-    new = json.loads((ROOT/'pc/tests/fixtures/media-sample/runtime/widget.json').read_text())['surface']
+    new = json.loads((ROOT/'pc/builtin-clawpkgs/city-radio/runtime/widget.json').read_text())['surface']
     old = {'background':65535,'elements':[
         {'type':'text','x':24,'y':24,'w':500,'h':64,'color':1,'scale':2,'bind':'title'},
         {'type':'list','x':24,'y':100,'w':590,'h':288,'color':1,'page':1},
         {'type':'transport','x':280,'y':400,'w':60,'h':60,'color':1,'page':0}]}
     paths = []
-    for name, layout in [('legacy',old),('images',new)]:
+    for name, layout in [('legacy',old),('vinyl',new)]:
         file = tmp_path / f'{name}.json';file.write_text(json.dumps(layout));paths.append(str(file))
     subprocess.run([str(binary), *paths], check=True)

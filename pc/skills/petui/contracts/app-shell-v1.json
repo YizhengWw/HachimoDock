@@ -1,0 +1,450 @@
+{
+ "engine": "p4-app-shell-v1",
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "quota": "p4-quota-v3",
+  "navigation": "p4-app-navigation-v1",
+  "vars": {
+   "tab": {
+    "type": "int",
+    "init": 0
+   },
+   "hits": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "pages": [
+   {
+    "id": "home"
+   },
+   {
+    "id": "list"
+   },
+   {
+    "id": "detail"
+   },
+   {
+    "id": "settings"
+   },
+   {
+    "id": "about"
+   },
+   {
+    "id": "help"
+   }
+  ],
+  "initial_page": "home",
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "transitions": [
+   {
+    "from": "*",
+    "on": "tab.next"
+   },
+   {
+    "from": "*",
+    "on": "tab.prev"
+   },
+   {
+    "from": "*",
+    "on": "open",
+    "from_page": "list",
+    "page": {
+     "push": "detail"
+    }
+   },
+   {
+    "from": "*",
+    "on": "back",
+    "page": {
+     "back": true
+    }
+   },
+   {
+    "from": "*",
+    "on": "hit",
+    "inc": {
+     "hits": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "about",
+    "page": {
+     "push": "about"
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "Shell",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "shell": "p4-app-shell-v1",
+   "background": 0,
+   "tabs": {
+    "items": [
+     {
+      "label": "首页",
+      "icon": "home",
+      "page": 0
+     },
+     {
+      "label": "列表",
+      "icon": "list",
+      "page": 1
+     },
+     {
+      "label": "设置",
+      "icon": "desk",
+      "page": 3
+     }
+    ],
+    "var": "tab",
+    "x": 0,
+    "y": 420,
+    "w": 640,
+    "h": 60,
+    "colors": [
+     8452,
+     65535,
+     44405,
+     0
+    ]
+   },
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "text": "Home",
+     "page": 0
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 80,
+     "w": 200,
+     "h": 48,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Open",
+     "action": "open",
+     "page": 1
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "text": "Detail",
+     "page": 2
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 80,
+     "w": 200,
+     "h": 48,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Back",
+     "action": "back",
+     "page": 2
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 200,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "hits"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 260,
+     "w": 200,
+     "h": 48,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Hit",
+     "action": "hit"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "text": "Settings",
+     "page": 3
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "text": "About",
+     "page": 4
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "actions": [
+    "tab.next"
+   ],
+   "tab": 1,
+   "page": "list",
+   "history": [],
+   "hits": 0
+  },
+  {
+   "actions": [
+    "tab.prev"
+   ],
+   "tab": 2,
+   "page": "settings",
+   "history": [],
+   "hits": 0
+  },
+  {
+   "actions": [
+    "tab.next",
+    "tab.next",
+    "tab.next"
+   ],
+   "tab": 0,
+   "page": "home",
+   "history": [],
+   "hits": 0
+  },
+  {
+   "actions": [
+    "tab.next",
+    "open",
+    "hit"
+   ],
+   "tab": 1,
+   "page": "detail",
+   "history": [
+    "list"
+   ],
+   "hits": 1
+  },
+  {
+   "actions": [
+    "tab.next",
+    "open",
+    "tab.next"
+   ],
+   "tab": 2,
+   "page": "settings",
+   "history": [],
+   "hits": 0
+  },
+  {
+   "actions": [
+    "tab.next",
+    "open",
+    "back",
+    "tab.prev"
+   ],
+   "tab": 0,
+   "page": "home",
+   "history": [],
+   "hits": 0
+  },
+  {
+   "actions": [
+    "about",
+    "tab.prev",
+    "back"
+   ],
+   "tab": 2,
+   "page": "settings",
+   "history": [],
+   "hits": 0
+  }
+ ],
+ "invalid": [
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items"
+   ],
+   "value": [
+    {
+     "label": "A",
+     "page": 0
+    }
+   ]
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items",
+    2,
+    "page"
+   ],
+   "value": 12
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items",
+    2,
+    "page"
+   ],
+   "value": 0
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items",
+    2,
+    "page"
+   ],
+   "value": 6
+  },
+  {
+   "path": [
+    "transitions",
+    1
+   ],
+   "value": {
+    "from": "*",
+    "on": "tab.other"
+   }
+  },
+  {
+   "path": [
+    "quota"
+   ],
+   "value": "p4-quota-v2"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "page"
+   ],
+   "value": 12
+  },
+  {
+   "path": [
+    "vars",
+    "tab",
+    "type"
+   ],
+   "value": "string"
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "w"
+   ],
+   "value": 100
+  },
+  {
+   "path": [
+    "surface",
+    "shell"
+   ],
+   "value": "p4-app-shell-v2"
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "h"
+   ],
+   "value": 120
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    5,
+    "y"
+   ],
+   "value": 430
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "colors"
+   ],
+   "value": [
+    0,
+    1,
+    2
+   ]
+  },
+  {
+   "path": [
+    "transitions",
+    0
+   ],
+   "value": {
+    "from": "*",
+    "on": "tab.next",
+    "inc": {
+     "hits": 1
+    }
+   }
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items",
+    0,
+    "icon"
+   ],
+   "value": "rocket"
+  },
+  {
+   "path": [
+    "surface",
+    "tabs",
+    "items",
+    0,
+    "label"
+   ],
+   "value": ""
+  }
+ ]
+}

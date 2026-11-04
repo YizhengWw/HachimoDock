@@ -110,6 +110,7 @@ def run(
             "blocks": "blocks.start",
             "snake": "snake.start",
             "flappy": "flappy.flap",
+            "gomoku": "gomoku.place",
         }
         resolved_start = start_action or start_actions.get(game_type)
         if not resolved_start:
@@ -121,6 +122,9 @@ def run(
         if game_type and not started.get("gameRunning"):
             raise AssertionError(f"game scene did not start: {started}")
 
+        # gomoku only advances on a tick after a stone is placed; place once before waiting.
+        if game_type == "gomoku":
+            dispatch(port, "gomoku.place")
         resolved_tick_wait = tick_wait if tick_wait is not None else (1.1 if game_type == "blocks" else 0.55)
         time.sleep(resolved_tick_wait)
         moved = query_widget(port)
@@ -131,6 +135,7 @@ def run(
             "blocks": "blocks.drop",
             "snake": "snake.turn_left",
             "flappy": "flappy.flap",
+            "gomoku": "gomoku.right",
         }
         resolved_control = control_action or control_actions.get(game_type)
         if not resolved_control:

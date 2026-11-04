@@ -54,6 +54,17 @@ def test_v3_build_is_separate_without_changing_transport_or_ui():
         assert "version: " + version in (ROOT / name).read_text()
 
 
+def test_private_link_reference_never_overrides_normal_ui_or_windows():
+    import configparser
+    config=configparser.ConfigParser(interpolation=None)
+    config.read(ROOT/'platformio.ini')
+    assert config['env:esp32_p4_uart_2m_reference']['custom_p4_uart_baud']=='2000000'
+    assert config['env:esp32_p4_uart_2m_reference']['extends']=='env:esp32_p4_canvas_candidate'
+    assert config['env:esp32_p4_evboard']['custom_p4_uart_baud']=='4000000'
+    for name in ('esp32_p4_canvas_candidate','esp32_p4_evboard_windows','esp32_p4_evboard_v3'):
+        assert 'custom_p4_uart_baud' not in config['env:'+name]
+
+
 def test_factory_rejects_unbounded_and_mixed_images():
     for lo, hi in [(1,199), (300,399)]:
         assert factory_revision_range(factory(lo,hi)) == (lo,hi)

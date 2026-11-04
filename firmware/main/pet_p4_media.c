@@ -3,6 +3,10 @@
 #include "pet_p4_media_codec.h"
 #include "pet_p4_audio.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_service_bridge.h"
+#if PET_SERVICE_BRIDGE_ENABLED
+#include "pet_p4_app_host.h"
+#endif
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_random.h"
@@ -113,6 +117,13 @@ bool pet_p4_media_handle(const char *topic,const cJSON *p,pet_p4_send_line_fn se
   xSemaphoreTake(lock,portMAX_DELAY);send_line=send;send_ctx=ctx;
   bool ok=true;const char *message="";const char *id=str(p,"sessionId");
   uint32_t n=0;bool exact=id[0]&&!strcmp(id,session);
+#if PET_SERVICE_BRIDGE_ENABLED
+  const char*host_instance=str(p,"hostInstance"),*scoped_source=str(p,"source");
+  bool scoped=host_instance[0];
+  bool blocked=scoped&&(strncmp(scoped_source,"app.",4)||!pet_app_host_instance_matches(scoped_source+4,host_instance)
+    ||(strcmp(topic,"media/begin")&&strcmp(topic,"media/library")&&strcmp(view.source,scoped_source)));
+  if(blocked){ok=false;message="media view instance expired";}else
+#endif
   if(!strcmp(topic,"media/begin")) {
     uint32_t rate,duration,offset,volume;
     if(!id[0]||strlen(id)>=sizeof(session)||strncmp(id,"music-",6)||strcmp(str(p,"format"),"ima-block-v1")

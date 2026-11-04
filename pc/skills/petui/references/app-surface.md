@@ -1,5 +1,26 @@
 # PetUI 声明式应用界面
 
+候选通用绘图见 [canvas.md](canvas.md)。它有独立能力协商和编译开关，正常目标
+默认关闭；不得把预览/离线通过当成已开放任意 Canvas、原生代码或实机性能保证。
+
+原生独立列表生命周期桥仍是开发底座，不是已开放的设备本地集合程序。
+另有 UI 候选专用的 PC 驱动 `surface.collection_view`，严格契约见
+[host-collection.md](host-collection.md)。它使用现有 PC composition 集合源，
+不是原生银行/VM 的安装入口；普通固件不声明该能力并拒绝此字段。
+不得新增 `surface.collection` 等未实现字段，或把离线测试称作 P4 输入/耗时已验收。
+
+通用命名变量绑定、PC 数据源组合与对应配额见
+[composition.md](composition.md)。新绑定必须协商 widgetVariableBindings；
+旧版固定 dashboard 绑定与资源配额不变。
+
+滚动卡片及固定导航使用 [app-viewport.md](app-viewport.md) 的独立能力，不改变旧节点坐标语义。
+整数/枚举表单使用 [app-form.md](app-form.md) 的 opt-in `widgetAppForm`，`field_bind` 仅适用于该本地表单的 text/button 节点；确认前不改已提交值。
+多区域独立滚动须额外声明 `widgetAppViewports=p4-app-viewports-v1`，最多三个不重叠视口，
+全局节点/变量/素材预算不变；不支持任意 HTML、无限列表或惯性滚动。
+
+多级详情和返回使用 [app-navigation.md](app-navigation.md) 的显式本地页面栈；
+必须协商独立能力，不把顺序翻页冒充导航栈。
+
 ## 场景与数据层（0.7.90）
 
 资源包可声明 `surface.scene_view` 或 `surface.data_view`，两者及 `game_view`
@@ -73,6 +94,13 @@ PC 将此 PNG 编译为 P4J1：12 字节头、16 位宽高和有界 baseline JPE
 当前设备正文仍由紧凑 16px 中文字库采样绘制，大字号不是矢量字体；不要把
 网页预览宣称为逐像素一致的设备效果。常用 `· ° ℃ – — − …` 使用受控原生
 几何补字，避免退化成问号；功能图标必须使用 icon，不能依赖 emoji 字体。
+
+静态应用层复用既有背景 framebuffer 作完整帧缓存，不要求声明滚动视口。
+缓存精确比较解析后的 surface（含 field_bind 当前文字、var_bind 值、显隐、
+禁用/按压状态和视口偏移）、dashboard 值、页码及进度；绑定变化会重新绘制。
+旋转/浮动节点、游戏/scene/data、横版、切果、媒体和乐器动态层不进入此缓存。
+确认弹窗及外层连接/触点/启动提示继续逐帧绘制，不写入缓存。此优化不改变
+输入、存档、节点/变量上限或音频调度，也不代表首次绘制或实机帧耗时已获保证。
 
 ## 可选抗锯齿字形子集
 
@@ -165,7 +193,7 @@ badge/note/footer/progress；meter 只绑定 progress。不读取任意对象路
 
 # 既有小游戏画面扩展
 
-维护已有 `snake`、`blocks`、`flappy` 包时，可使用
+维护已有 `snake`、`blocks`、`flappy` 包（以及新建原生 `gomoku` 包，见下节）时，可使用
 `surface.game_view={engine:"p4-game-surface-v1",x,y,w,h}`；
 必须确认设备声明 `widgetGameSurface=p4-game-surface-v1`。
 该视口与既有 C 玩法核心相连，不是静态截图，也不允许任意代码。
@@ -180,6 +208,21 @@ PC 预览和玩法自测使用相同固件核心编译的有界 WASM。
 行为；50 表示相同时间内升降位移为原来一半，不改变管道横移、tick 或画面刷新。
 参数属于资源包，后续调节只需重发同 ID 包。PC、固件与同源 WASM 均解释此参数，
 旧固件必须在传输前拒绝，不能静默忽略。
+
+# 原生五子棋画面
+
+`game.type="gomoku"` 的新包必须声明 `surface.game_view={engine:"p4-game-surface-v1",x,y,w,h}`，
+需要设备同时声明 `widgetGameSurface=p4-game-surface-v1` 与 `widgetGamePresets` 含 `gomoku`。
+固件按 `cell=floor(min(w,h)/15)` 取整并居中：`ox=x+(w-15*cell)/2`，`oy=y+(h-15*cell)/2`；
+推荐 `w=h=420`（cell=28）。每格至少 8 px。
+
+- 棋盘线、星位与木纹画在首张 `encoding:"jpeg"` 的 640×480 背景里，线必须穿过每格中心
+  `(ox+i*cell+cell/2, oy+j*cell+cell/2)`，否则棋子会偏离交叉点。
+- 游戏层只绘制：黑/白圆形棋子（带高光与阴影）、当前光标（描边方框）、最近一手红点、
+  五连高亮底色。空格保留背景，不要在背景中烘焙棋子或文案。
+- HUD 走 dashboard：`metricValue` 绑定 `score_var` 显示手数（`state_mask` 只在 playing 显示），
+  result 状态用 `show:{var:<score_var>,min,max}` 分别显示 1000–1999 黑胜、2000–2999 白胜、
+  3000–3999 和棋的文案；ready 状态显示开始提示。PC 预览与玩法自测使用同一 C 核心编译的 WASM。
 
 # Generic runtime additions (firmware 0.7.91)
 
@@ -208,3 +251,21 @@ record retention, and image-budget rejection in both the PC and firmware
 interpreters. Offline capability fixtures are not evidence of a connected
 device's capabilities.
 
+## 通用服务桥界面（候选）
+
+原生服务状态、稳定键列表、类型化 meter 参数动作、显示时间轴及动态图片统一走
+[service-bridge.md](service-bridge.md)。纯标量桥可以复用 legacy host、原有能力与配额，
+不声明新增 services/host_contract/presentation；动态 image/timeline/event 参数或
+local-media 才强制显式 `surface.services="p4-service-bridge-v1"`。此声明
+依赖 app-surface/app-graphics/variable-bindings、host-context 和 input；需读取真实设备
+`widgetServiceBridge`，集合仍单独协商，不能由普通 surface 或客户端版本推断。
+`runtime.host_contract` 与 PC application 声明精确配对，更新任一端须重新绑定并同步；
+旧界面不能执行新版宿主动作；配对 framing 将所有数值零统一为 `i0;`，其他有限浮点保留类型。
+
+image 节点的 `image_bind` 只指向桥计划 images 别名；动态图片失败时保留静态 image，
+不能混用 tile/motion/rotate_ms 或编码动画资源。最多两张 8–192 像素不透明图片，
+宿主管理缓存，不接路径/URL。meter 的 `value_param/value_min/value_max` 仅桥能力
+下用于已声明的 int 事件参数，非任意表达式或设备自由文本输入。时间轴只外推
+确认状态，不能触发执行或充当播放回执；既有节点、图片、包体预算不放宽。
+`PET_SERVICE_BRIDGE_ENABLED=0` 为默认，仅独立候选开启；PC 预览、离线向量和
+编译结果不等于真实输入、USB、音频或 HIL 已验收。

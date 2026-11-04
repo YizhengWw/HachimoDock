@@ -1,4 +1,6 @@
-export const LOCAL_SOURCES = new Set(["computer.status", "todos.upcoming"]);
+export const LOCAL_SOURCES = new Set(["computer.status", "todos.upcoming", "location.current"]);
+// Authenticated PC providers: tokens stay on this PC; packages only subscribe to the source name.
+export const AUTH_SOURCES = new Set(["github.me", "codex.usage"]);
 export function localDateTime(iso) {
   if (!iso) return "";
   const date = new Date(iso);

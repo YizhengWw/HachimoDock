@@ -1,0 +1,53 @@
+{
+  "runtime": {
+    "schema_version": 1, "engine": "p4-bounded-runtime-v4", "navigation": "p4-app-navigation-v1",
+    "vars": {
+      "title": {"type":"string","init":"中"}, "titleDraft": {"type":"string","init":"中"},
+      "focus": {"type":"int","init":0}, "editing": {"type":"int","init":0},
+      "keyIndex": {"type":"int","init":0}, "keyLabel": {"type":"string","init":"a"},
+      "count": {"type":"int","init":0}, "step": {"type":"int","init":2}
+    },
+    "limits": {"count":[-100,100],"step":[1,10]},
+    "states":["ready"],"initial_state":"ready",
+    "pages":[{"id":"edit"},{"id":"home"}],"initial_page":"edit",
+    "input":{"engine":"p4-input-v1","repeat":["field.prev","field.next","value.down","value.up"]},
+    "form": {
+      "engine":"p4-app-form-v2","page":"edit","focus_var":"focus","active_var":"editing",
+      "fields":[{"id":"name","var":"title","draft_var":"titleDraft","kind":"text","max_bytes":10}],
+      "keyboard":{"index_var":"keyIndex","label_var":"keyLabel","characters":["a","中","😀"," "],"space_label":"Space"},
+      "actions":{"previous":"field.prev","next":"field.next","decrease":"value.down","increase":"value.up","accept":"form.accept","cancel":"form.cancel","append":"text.append","erase":"text.erase"}
+    },
+    "transitions":[
+      {"from":"*","on":"field.prev"},{"from":"*","on":"field.next"},
+      {"from":"*","on":"value.down"},{"from":"*","on":"value.up"},
+      {"from":"*","on":"form.accept"},{"from":"*","on":"form.cancel"},
+      {"from":"*","on":"text.append"},{"from":"*","on":"text.erase"},
+      {"from":"*","on":"back","page":{"back":true}},
+      {"from":"*","on":"leave","page":{"push":"home"}},
+      {"from":"*","on":"add"},{"from":"*","on":"subtract"}
+    ],
+    "tick":[],"persist":{"version":1,"vars":["title"],"states":{"ready":"ready"},"page":true},
+    "dashboard":{"title":"Mixed execution contract","metricValue":{"var":"count"},"visualStyle":"clean","visualPalette":"mono","visualLayout":"tool","visualSprite":"gauge"},
+    "surface":{"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1","background":0,"elements":[
+      {"type":"text","x":20,"y":20,"w":260,"h":32,"page":0,"color":65535,"field_bind":"name"},
+      {"type":"text","x":20,"y":60,"w":100,"h":32,"page":0,"color":65535,"var_bind":"keyLabel"},
+      {"type":"text","x":140,"y":60,"w":100,"h":32,"page":0,"color":65535,"var_bind":"editing"},
+      {"type":"text","x":260,"y":60,"w":100,"h":32,"color":65535,"var_bind":"count"},
+      {"type":"button","x":20,"y":120,"w":180,"h":48,"page":0,"color":65535,"foreground":0,"text":"Leave","action":"leave"},
+      {"type":"button","x":220,"y":120,"w":180,"h":48,"page":1,"color":65535,"foreground":0,"text":"Back","action":"back"},
+      {"type":"button","x":20,"y":200,"w":180,"h":48,"color":65535,"foreground":0,"text":"Add","action":"add"},
+      {"type":"button","x":220,"y":200,"w":180,"h":48,"color":65535,"foreground":0,"text":"Subtract","action":"subtract"}
+    ]},
+    "program":{"engine":"p4-component-program-v1","image":{"engine":"p4-integer-program-v1","schema":1,"cells":1,"fuel":64,"code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["ADD",1,1,2,0],["STORE",0,1,0,0],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},"outputs":["count",null,null,null,null,null,null,null],"actions":{"add":[{"var":"step"}],"subtract":[-1]},"timers":[{"id":1,"delayMs":200,"intervalMs":0,"words":[1]}]}
+  },
+  "buttons":[
+    {"event":"joystick.up","action":"field.prev","control":"joystick","label":"Previous"},
+    {"event":"joystick.down","action":"field.next","control":"joystick","label":"Next"},
+    {"event":"knob.rotate_ccw","action":"value.down","control":"joystick","label":"Decrease"},
+    {"event":"knob.rotate_cw","action":"value.up","control":"joystick","label":"Increase"},
+    {"event":"button.sw1.short_press","action":"form.accept","control":"sw1","label":"Edit / accept"},
+    {"event":"button.sw2.short_press","action":"form.cancel","control":"sw2","label":"Cancel"},
+    {"event":"button.encoder.short_press","action":"text.append","control":"encoder","label":"Append"},
+    {"event":"button.encoder.long_press","action":"text.erase","control":"encoder","label":"Erase"}
+  ]
+}

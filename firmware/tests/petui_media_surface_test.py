@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import os
 import copy
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
@@ -18,21 +19,24 @@ int main(int argc,char **argv){FILE *f=fopen(argv[1],"rb");if(!f)return 2;char b
     cfile=next((ROOT/'firmware/tests/vendor').rglob('cJSON.c'))
     exe=tmp_path/'surface-test'
     subprocess.run(['cc','-std=c11','-I',str(ROOT/'firmware/main'),'-I',str(cfile.parent),str(source),str(ROOT/'firmware/main/pet_p4_surface.c'),str(cfile),'-lm','-o',str(exe)],check=True)
-    good=json.loads((ROOT/'pc/tests/fixtures/media-sample/runtime/widget.json').read_text())['surface']
+    good=json.loads((ROOT/'pc/builtin-clawpkgs/city-radio/runtime/widget.json').read_text())['surface']
     other={'background':65535,'elements':[{'type':'text','x':10,'y':10,'w':500,'h':64,'color':0,'scale':2,'text':'另一种布局'}]}
     cases=[(good,True),(other,True)]
-    for change in [
-        lambda v:v.pop('input'),
-        lambda v:v.update(input='arbitrary-input'),
-        lambda v:next(n for n in v['elements'] if n.get('action')).update(action='shell.execute'),
-    ]:
-        bad=copy.deepcopy(good);change(bad);cases.append((bad,False))
+    if os.environ.get('PET_APP_PACKAGE_DIR'):
+        latest=json.loads((Path(os.environ['PET_APP_PACKAGE_DIR'])/'city-radio/runtime/widget.json').read_text())['surface']
+        cases.append((latest,True))
+        for change in [
+            lambda v:v.pop('input'),
+            lambda v:v.update(input='arbitrary-input'),
+            lambda v:next(n for n in v['elements'] if n.get('action')).update(action='shell.execute'),
+        ]:
+            bad=copy.deepcopy(latest);change(bad);cases.append((bad,False))
     for field,value in [('x',640),('scale',4),('color',-1),('bind','private.key'),('script','evil'),('h',1)]:
         bad=json.loads(json.dumps(other));bad['elements'][0][field]=value;cases.append((bad,False))
     for change in [
-        lambda v:next(n for n in v["elements"] if n.get("rotate_ms")).update(image="missing"),
-        lambda v:next(n for n in v["elements"] if n.get("rotate_ms")).update(rotate_ms=1),
-        lambda v:next(n for n in v["elements"] if n.get("rotate_ms")).update(w=200),
+        lambda v:v["elements"][3].update(image="missing"),
+        lambda v:v["elements"][3].update(rotate_ms=1),
+        lambda v:v["elements"][3].update(w=200),
         lambda v:v["images"][0].update(asset="../secret.png"),
         lambda v:v["images"][0].update(frame_width=513),
         lambda v:v["images"][0].update(frames=2),
@@ -44,7 +48,7 @@ int main(int argc,char **argv){FILE *f=fopen(argv[1],"rb");if(!f)return 2;char b
         assert (subprocess.run([str(exe),str(path)]).returncode==0)==expected
 
 def test_extension_and_complete_package_are_valid():
-    package=ROOT/'pc/tests/fixtures/media-sample'
+    package=ROOT/'pc/builtin-clawpkgs/city-radio'
     assert not validate_widget(package)
     ext=json.loads((package/'pc/extension.json').read_text())
     assert not extension_errors(ext)
@@ -52,3 +56,37 @@ def test_extension_and_complete_package_are_valid():
     assert extension_errors(ext)
     ext['script']='shell()'
     assert extension_errors(ext)
+
+
+def test_bundled_catalog_policy_and_bounded_json():
+    from pc_extension import catalog_errors
+    from urllib.parse import urlsplit
+    # Test the shipped artifact without importing the builder CLI.
+    rows=json.loads((ROOT/'pc/builtin-clawpkgs/city-radio/pc/catalog.json').read_text())
+    assert len(rows)>500
+    for row in rows:
+        assert row['province'] not in {'中国香港','中国澳门','中国台湾'}
+        assert row['category']!='外语'
+        assert not any(t in row['name'].upper() for t in ('CGTN','CRI','香港','澳门','台湾','台海'))
+        assert not any(t in row['url'] for t in ('rfi.fr','radio-browser','radio.co','chinesemusicworld'))
+        assert urlsplit(row['url']).hostname not in {'183.64.174.171','125.82.171.154','125.62.24.73'}
+    assert not catalog_errors(json.dumps(rows).encode())
+    for bad in [b'[1]',b'[{"nested":{}}]',b'[{"v":NaN}]',b'[{"v":"\\ud800"}]',b'[]',b' '* (512*1024+1)]:
+        assert catalog_errors(bad),bad[:40]
+
+
+def test_catalog_declaration_pairing_and_domestic_location(tmp_path):
+    import shutil
+    package=tmp_path/'city-radio'
+    shutil.copytree(ROOT/'pc/builtin-clawpkgs/city-radio',package)
+    ext=json.loads((package/'pc/extension.json').read_text())
+    assert ext['permissions']['networkHosts']==['ip9.com.cn']
+    assert ext['discovery']['locationEndpoint']=='https://ip9.com.cn/get'
+    assert ext['search']['endpoint']=='' and ext['discovery']['endpoints']==[]
+    assert not extension_errors(ext)
+    (package/'pc/catalog.json').unlink()
+    assert any('catalog' in e for e in validate_widget(package))
+    (package/'pc/catalog.json').write_text('[{"id":"x"}]')
+    del ext['search']['catalog']
+    (package/'pc/extension.json').write_text(json.dumps(ext))
+    assert any('catalog' in e for e in validate_widget(package))

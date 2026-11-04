@@ -1,5 +1,6 @@
 """Guard the ESP-SR integration contracts found by physical-board testing."""
 from pathlib import Path
+import configparser
 import re
 
 SOURCE = (Path(__file__).resolve().parents[1] / "main/pet_p4_audio_frontend.c").read_text()
@@ -20,9 +21,28 @@ def test_fd_benchmark_is_explicitly_isolated_from_shipping_firmware():
 
 def test_platformio_firmware_version_matches_cmake_release_version():
     root = Path(__file__).resolve().parents[1]
-    cmake = re.search(r'set\(PROJECT_VER "([^"]+)"\)', (root / "CMakeLists.txt").read_text()).group(1)
-    platformio = re.search(r'^custom_p4_project_version\s*=\s*(\S+)', (root / "platformio.ini").read_text(), re.M).group(1)
+    cmake = re.search(r'set\(PROJECT_VER "([^" ]+)"\)', (root / "CMakeLists.txt").read_text()).group(1)
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(root / "platformio.ini")
+    # Validate the real default, not the first version override or only shipping
+    # candidates: an older default label must remain visible as a mismatch.
+    defaults = re.split(r"[\s,]+", config["platformio"]["default_envs"].strip())
+    assert defaults and all(defaults)
+    for name in defaults:
+        assert config[f"env:{name}"]["custom_p4_project_version"] == cmake, name
+
+
+def test_public_chip_pair_versions_match_cmake_release_version():
+    root = Path(__file__).resolve().parents[1]
+    cmake = re.search(r'set\(PROJECT_VER "([^" ]+)"\)', (root / "CMakeLists.txt").read_text()).group(1)
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(root / "platformio.ini")
+    public = "env:esp32_p4_program_public_candidate"
+    platformio = config[public]["custom_p4_project_version"]
     assert platformio == cmake
+    v3 = config["env:esp32_p4_program_public_candidate_v3"]
+    assert v3["extends"] == public
+    assert v3.get("custom_p4_project_version", platformio) == cmake
 
 
 def test_p4_v3_uses_its_validated_full_duplex_aec_not_legacy_voip():
@@ -86,7 +106,10 @@ def test_runtime_failure_stops_capture_without_raw_echo_upload():
     audio = (root / "pet_p4_audio.c").read_text()
     fallback = audio.split('pet_p4_audio_diagnostic("aec_fallback"', 1)[1].split("if (playback_gates_capture", 1)[0]
     assert 'reason = "aec_unavailable"' in fallback
-    assert "g_capture_requested, false" in fallback and "break;" in fallback
+    assert "capture_worker_cancel(capture_work)" in fallback and "break;" in fallback
+    cancel = audio.split("static void capture_worker_cancel(", 1)[1].split("static void capture_worker_done(", 1)[0]
+    assert "reservation.serial == g_capture_request_serial" in cancel
+    assert "g_capture_requested, false" in cancel and "g_capture_request_serial = 0" in cancel
     control = audio.split("esp_err_t pet_p4_audio_conversation_set(", 1)[1].split("esp_err_t pet_p4_audio_stream_begin", 1)[0]
     assert "half_duplex || !pet_p4_afe_ready()" not in control
     assert "pet_p4_afe_prepare()" not in control  # DSP remains capture-owner-only.
@@ -113,8 +136,8 @@ def test_audio_uses_origin_link_without_per_frame_tx_drain():
     assert "transport_send_line_impl(line, ctx, !audio)" in main
     logger = main.split("static int transport_log_vprintf(", 1)[1].split("static void transport_send_line_impl(", 1)[0]
     assert "pet_p4_audio_active()" not in logger
-    assert "uart_queue_all(g_transport_log_buffer, len)" in logger
-    assert "usb_queue_all(g_transport_log_buffer, len)" in logger
+    assert "uart_queue_all(g_transport_log_buffer, len, NULL)" in logger
+    assert "usb_queue_all(g_transport_log_buffer, len, NULL)" in logger
     assert "uart_wait_tx_done" not in logger
     assert "usb_serial_jtag_wait_tx_done" not in logger
     assert "if (!g_transport_ready)" in logger

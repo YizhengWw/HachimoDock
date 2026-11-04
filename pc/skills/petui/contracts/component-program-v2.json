@@ -1,0 +1,664 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-component-program-v2",
+ "notes": "Shared p4-component-program-v2 vectors. runtime: a complete valid v2 package (program engine p4-component-program-v2, image engine p4-integer-program-v2: code <=1024, fuel <=16384 with the same 64-per-turn quantum, cells <=256, opcodes TEXT a,b / CELLGET a,b,c / CELLSET a,b,c). The package cells grid is mirrored into VM cells [0, cols*rows) (row-major), so transitions may only read it; the package texts count bounds TEXT. reject: JSON-pointer patches every validator must refuse. v1ImageReject: patches to the v1 contract runtime (component-program-v1.json) that a v2 build must still refuse, because a v1 image keeps the v1 budgets and op table. cases: events run through the shared C core; expected outputs are the projected variables after the commit, cells the VM cell values, grid the clamped p4-cells-v1 rows. Devices advertise widgetProgram p4-component-program-v2 and list both engines in widgetPrograms; v1 packages stay valid. A reject entry with scope \"package\" is refused by the whole-package validators (Python, Rust, firmware runtime parser) but is outside the component-program descriptor parser itself.",
+ "limits": {
+  "v1": {
+   "code": 256,
+   "fuel": 4096,
+   "cells": 64,
+   "ops": [
+    "HALT",
+    "CONST",
+    "MOVE",
+    "ADD",
+    "SUB",
+    "MUL",
+    "DIV",
+    "MOD",
+    "LT",
+    "EQ",
+    "JUMP",
+    "JZ",
+    "LOAD",
+    "STORE",
+    "EVENT",
+    "OUTPUT"
+   ]
+  },
+  "v2": {
+   "code": 1024,
+   "fuel": 16384,
+   "cells": 256,
+   "quantum": 64,
+   "ops": [
+    "HALT",
+    "CONST",
+    "MOVE",
+    "ADD",
+    "SUB",
+    "MUL",
+    "DIV",
+    "MOD",
+    "LT",
+    "EQ",
+    "JUMP",
+    "JZ",
+    "LOAD",
+    "STORE",
+    "EVENT",
+    "OUTPUT",
+    "TEXT",
+    "CELLGET",
+    "CELLSET"
+   ],
+   "imageVersion": 2
+  }
+ },
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "texts": [
+   "empty",
+   "one stone",
+   "two stones"
+  ],
+  "cells": {
+   "engine": "p4-cells-v1",
+   "cols": 2,
+   "rows": 2,
+   "bits": 2
+  },
+  "vars": {
+   "px": {
+    "type": "int",
+    "init": 1
+   },
+   "py": {
+    "type": "int",
+    "init": 0
+   },
+   "idx": {
+    "type": "int",
+    "init": 0
+   },
+   "total": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "limits": {
+   "px": [
+    0,
+    1
+   ],
+   "py": [
+    0,
+    1
+   ],
+   "idx": [
+    0,
+    2
+   ],
+   "total": [
+    0,
+    12
+   ]
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+   {
+    "from": "*",
+    "on": "mark"
+   },
+   {
+    "from": "*",
+    "on": "cursor.left",
+    "inc": {
+     "px": -1
+    }
+   },
+   {
+    "from": "*",
+    "on": "cursor.right",
+    "inc": {
+     "px": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "cursor.down",
+    "inc": {
+     "py": 1
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "Program v2 contract",
+   "headline": {
+    "text_at": "idx"
+   },
+   "visualStyle": "clean",
+   "visualPalette": "mint",
+   "visualLayout": "tool",
+   "visualSprite": "star"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 500,
+     "h": 60,
+     "color": 65535,
+     "text_at": "idx"
+    },
+    {
+     "type": "cells",
+     "x": 20,
+     "y": 100,
+     "w": 160,
+     "h": 160,
+     "color": 65535,
+     "foreground": 63488,
+     "stroke": 2016,
+     "cursor": {
+      "x_var": "px",
+      "y_var": "py",
+      "color": 65504
+     }
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 400,
+     "w": 220,
+     "h": 64,
+     "color": 2016,
+     "text": "Mark",
+     "action": "mark"
+    },
+    {
+     "type": "button",
+     "x": 260,
+     "y": 400,
+     "w": 220,
+     "h": 64,
+     "color": 2016,
+     "text": "Right",
+     "action": "cursor.right"
+    }
+   ]
+  },
+  "program": {
+   "engine": "p4-component-program-v2",
+   "image": {
+    "engine": "p4-integer-program-v2",
+    "schema": 2,
+    "cells": 4,
+    "fuel": 256,
+    "code": [
+     [
+      "EVENT",
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      "EVENT",
+      1,
+      0,
+      0,
+      1
+     ],
+     [
+      "CELLGET",
+      2,
+      0,
+      1,
+      0
+     ],
+     [
+      "CONST",
+      3,
+      0,
+      0,
+      1
+     ],
+     [
+      "ADD",
+      2,
+      2,
+      3,
+      0
+     ],
+     [
+      "CELLSET",
+      0,
+      1,
+      2,
+      0
+     ],
+     [
+      "TEXT",
+      4,
+      2,
+      0,
+      0
+     ],
+     [
+      "OUTPUT",
+      0,
+      4,
+      0,
+      0
+     ],
+     [
+      "CONST",
+      5,
+      0,
+      0,
+      0
+     ],
+     [
+      "CONST",
+      6,
+      0,
+      0,
+      0
+     ],
+     [
+      "LOAD",
+      7,
+      6,
+      0,
+      0
+     ],
+     [
+      "ADD",
+      5,
+      5,
+      7,
+      0
+     ],
+     [
+      "CONST",
+      6,
+      0,
+      0,
+      1
+     ],
+     [
+      "LOAD",
+      7,
+      6,
+      0,
+      0
+     ],
+     [
+      "ADD",
+      5,
+      5,
+      7,
+      0
+     ],
+     [
+      "CONST",
+      6,
+      0,
+      0,
+      2
+     ],
+     [
+      "LOAD",
+      7,
+      6,
+      0,
+      0
+     ],
+     [
+      "ADD",
+      5,
+      5,
+      7,
+      0
+     ],
+     [
+      "CONST",
+      6,
+      0,
+      0,
+      3
+     ],
+     [
+      "LOAD",
+      7,
+      6,
+      0,
+      0
+     ],
+     [
+      "ADD",
+      5,
+      5,
+      7,
+      0
+     ],
+     [
+      "OUTPUT",
+      1,
+      5,
+      0,
+      0
+     ],
+     [
+      "HALT",
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "outputs": [
+    "idx",
+    "total",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "actions": {
+    "mark": [
+     {
+      "var": "px"
+     },
+     {
+      "var": "py"
+     }
+    ]
+   },
+   "timers": []
+  }
+ },
+ "reject": [
+  {
+   "name": "v2 image needs the v2 program engine",
+   "path": "/program/engine",
+   "value": "p4-component-program-v1"
+  },
+  {
+   "name": "unknown program engine",
+   "path": "/program/engine",
+   "value": "p4-component-program-v3"
+  },
+  {
+   "name": "cells above 256",
+   "path": "/program/image/cells",
+   "value": 257
+  },
+  {
+   "name": "fuel above 16384",
+   "path": "/program/image/fuel",
+   "value": 16385
+  },
+  {
+   "name": "schema must be nonzero",
+   "path": "/program/image/schema",
+   "value": 0
+  },
+  {
+   "name": "grid needs cells >= cols*rows",
+   "path": "/program/image/cells",
+   "value": 3
+  },
+  {
+   "name": "INTENT stays forbidden",
+   "path": "/program/image/code/0/0",
+   "value": "INTENT"
+  },
+  {
+   "name": "TEXT operands are a,b only",
+   "path": "/program/image/code/6",
+   "value": [
+    "TEXT",
+    4,
+    2,
+    1,
+    0
+   ]
+  },
+  {
+   "name": "CELLGET immediate must be zero",
+   "path": "/program/image/code/2",
+   "value": [
+    "CELLGET",
+    2,
+    0,
+    1,
+    5
+   ]
+  },
+  {
+   "name": "CELLSET register out of range",
+   "path": "/program/image/code/5",
+   "value": [
+    "CELLSET",
+    16,
+    1,
+    2,
+    0
+   ]
+  },
+  {
+   "name": "outputs must stay the sole writers",
+   "path": "/transitions/1/inc",
+   "value": {
+    "idx": 1
+   }
+  },
+  {
+   "name": "text_at output needs an int",
+   "path": "/surface/elements/0/text_at",
+   "value": "missing",
+   "scope": "package"
+  },
+  {
+   "name": "transitions may not write a mirrored grid",
+   "path": "/transitions/1/cells",
+   "value": [
+    {
+     "op": "cell",
+     "x": 0,
+     "y": 0,
+     "set": 1
+    }
+   ],
+   "scope": "package"
+  }
+ ],
+ "v1ImageReject": [
+  {
+   "name": "v1 image keeps 64 cells",
+   "path": "/program/image/cells",
+   "value": 65
+  },
+  {
+   "name": "v1 image keeps 4096 fuel",
+   "path": "/program/image/fuel",
+   "value": 4097
+  },
+  {
+   "name": "v1 image has no TEXT",
+   "path": "/program/image/code/0",
+   "value": [
+    "TEXT",
+    0,
+    0,
+    0,
+    0
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "name": "one mark increments the addressed grid cell, selects text 1 and sums the mirror",
+   "events": [
+    {
+     "action": "mark"
+    }
+   ],
+   "expected": {
+    "outputs": {
+     "idx": 1,
+     "total": 1
+    },
+    "cells": [
+     0,
+     1,
+     0,
+     0
+    ],
+    "grid": [
+     "01",
+     "00"
+    ]
+   }
+  },
+  {
+   "name": "two marks reach text 2",
+   "events": [
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    }
+   ],
+   "expected": {
+    "outputs": {
+     "idx": 2,
+     "total": 2
+    },
+    "cells": [
+     0,
+     2,
+     0,
+     0
+    ],
+    "grid": [
+     "02",
+     "00"
+    ]
+   }
+  },
+  {
+   "name": "TEXT clamps the index to the last entry while the VM keeps counting",
+   "events": [
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    }
+   ],
+   "expected": {
+    "outputs": {
+     "idx": 2,
+     "total": 3
+    },
+    "cells": [
+     0,
+     3,
+     0,
+     0
+    ],
+    "grid": [
+     "03",
+     "00"
+    ]
+   }
+  },
+  {
+   "name": "the grid clamps to 2^bits-1 even when the VM cell is larger",
+   "events": [
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    },
+    {
+     "action": "mark"
+    }
+   ],
+   "expected": {
+    "outputs": {
+     "idx": 2,
+     "total": 4
+    },
+    "cells": [
+     0,
+     4,
+     0,
+     0
+    ],
+    "grid": [
+     "03",
+     "00"
+    ]
+   }
+  },
+  {
+   "name": "the cursor variables address a different cell",
+   "events": [
+    {
+     "action": "cursor.left"
+    },
+    {
+     "action": "cursor.down"
+    },
+    {
+     "action": "mark"
+    }
+   ],
+   "expected": {
+    "outputs": {
+     "idx": 1,
+     "total": 1
+    },
+    "cells": [
+     0,
+     0,
+     1,
+     0
+    ],
+    "grid": [
+     "00",
+     "10"
+    ]
+   }
+  }
+ ]
+}

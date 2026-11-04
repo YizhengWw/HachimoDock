@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Local BSP adaptation: guard the touch API with BSP_CONFIG_NO_GRAPHIC_LIB.
+ * See this component LICENSE and licenses/DEPENDENCY-LICENSE-NOTICE.md. */
 #pragma once
 #include "esp_lcd_touch.h"
 

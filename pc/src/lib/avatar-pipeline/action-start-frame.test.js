@@ -4,6 +4,7 @@ import {ACTION_START_POSES,buildActionStartPrompt,ensureActionStartFrame} from '
 import {CUSTOM_GENERATION_FAMILIES} from './families.js';
 import {buildVolcanoTaskPayload,runVolcanoFamily} from './providers/volcano.js';
 import {canAutoResume} from './session.js';
+import {SUBJECT_MOTION_POLICY_EN} from './motion-semantics.js';
 
 test('all eleven actions have different pose designs; start frames are not used as locked ending frames',()=>{
  assert.equal(Object.keys(ACTION_START_POSES).length,11);assert.equal(new Set(Object.values(ACTION_START_POSES)).size,11);
@@ -43,6 +44,6 @@ test('action-specific first-frame role reaches the actual video submit request',
   return new Response(new Uint8Array([1]));
  };
  try{await runVolcanoFamily({config:{apiKey:'fixture',model:'doubao-seedance-2-0-fast-260128',firstFrameOnly:true},prompt:'move',imageDataUrl:'data:image/png;base64,Ag=='});
- assert.equal(bodies.length,1);assert.deepEqual(bodies[0].content.filter(c=>c.type==='image_url').map(c=>c.role),['first_frame']);
+ assert.equal(bodies.length,1);assert.ok(bodies[0].content.find(c=>c.type==='text').text.includes(SUBJECT_MOTION_POLICY_EN));assert.deepEqual(bodies[0].content.filter(c=>c.type==='image_url').map(c=>c.role),['first_frame']);
  }finally{globalThis.fetch=old;}
 });

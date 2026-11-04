@@ -396,6 +396,63 @@ def partition_entry(partitions_path: Path, label: str) -> tuple[int, int]:
     raise ValueError(f"partition {label!r} not found in {partitions_path}")
 
 
+CURRENT_DATA_LAYOUT = {
+    "storage": (0x620000, 0x8E0000),
+    "appearance0": (0xF00000, 0x880000),
+    "appearance1": (0x1780000, 0x880000),
+}
+
+
+def validate_factory_partition_layout(project_dir: Path, build_dir: Path) -> dict:
+    """Reject stale generated tables before merging relocated resource images.
+
+    This only validates build artifacts; it never migrates or formats a device.
+    """
+    expected = {"nvs": (0x9000, 0x6000), "phy_init": (0xF000, 0x1000),
+                "ota_0": (0x10000, 0x300000),
+                "ota_1": (0x310000, 0x300000),
+                "otadata": (0x610000, 0x2000), **CURRENT_DATA_LAYOUT}
+    for label, bounds in expected.items():
+        if partition_entry(project_dir / "partitions.csv", label) != bounds:
+            raise ValueError("factory requires the current 17MiB appearance / dual 3MiB OTA layout: " + label)
+    expected_types = {"nvs": (1, 2), "phy_init": (1, 1),
+                      "ota_0": (0, 0x10), "ota_1": (0, 0x11),
+                      "otadata": (1, 0), "storage": (1, 0x82),
+                      "appearance0": (1, 0x40), "appearance1": (1, 0x41)}
+    table = (build_dir / "partitions.bin").read_bytes()
+    if not table or len(table) % 32:
+        raise ValueError("truncated generated partition table")
+    entries = {}
+    md5_verified = False
+    for pos in range(0, len(table) - 31, 32):
+        magic, kind, subtype, offset, size, label, flags = struct.unpack_from("<HBBII16sI", table, pos)
+        if magic == 0xEBEB:
+            if (table[pos + 2:pos + 16] != b"\xff" * 14
+                    or table[pos + 16:pos + 32] != hashlib.md5(table[:pos]).digest()
+                    or any(byte != 0xFF for byte in table[pos + 32:])):
+                raise ValueError("generated partition table MD5 or padding mismatch")
+            md5_verified = True
+            break
+        if magic == 0xFFFF:
+            break
+        if magic != 0x50AA:
+            raise ValueError("invalid generated partition table")
+        name = label.split(b"\0", 1)[0].decode("ascii")
+        if name in entries:
+            raise ValueError("duplicate generated partition label: " + name)
+        if name in expected_types and ((kind, subtype) != expected_types[name] or flags != 0):
+            raise ValueError("generated partition type mismatch: " + name)
+        entries[name] = (offset, size)
+    if not md5_verified:
+        raise ValueError("generated partition table MD5 is missing")
+    if entries != expected:
+        raise ValueError("stale/legacy partitions.bin; rebuild before factory merge; OTA cannot migrate layouts")
+    return {"id": "p4-storage-plus2m-ota3m-appearance17m-v2", "appearanceBytes": 0x1100000,
+            "otaUpdatesPartitionTable": False, "legacyMigrationRequired": True,
+            "partitions": {label: {"offset": f"0x{offset:x}", "bytes": size}
+                           for label, (offset, size) in expected.items()}}
+
+
 def wav_matches_device_contract(path: Path, sample_rate: int) -> bool:
     try:
         with wave.open(str(path), "rb") as handle:
@@ -848,6 +905,12 @@ def build_factory_image(
     esptool: Path,
     output: Path,
 ) -> dict:
+    layout = validate_factory_partition_layout(project_dir, build_dir)
+    if (spiffs_offset != CURRENT_DATA_LAYOUT["storage"][0]
+            or spiffs_image.stat().st_size != CURRENT_DATA_LAYOUT["storage"][1]
+            or raw_appearance_offset != CURRENT_DATA_LAYOUT["appearance0"][0]
+            or raw_appearance_image.stat().st_size != CURRENT_DATA_LAYOUT["appearance0"][1]):
+        raise ValueError("factory resource images do not match the current partition layout")
     flasher, segments = resolve_flash_segments(build_dir)
     chip_bounds = image_revision_range((build_dir / "firmware.bin").read_bytes())
     if image_revision_range((build_dir / "bootloader.bin").read_bytes()) != chip_bounds:
@@ -908,6 +971,7 @@ def build_factory_image(
         "schemaVersion": 1,
         "format": FACTORY_FORMAT,
         "completeInstall": True,
+        "partitionLayout": layout,
         "chipRevisionMin": chip_bounds[0],
         "chipRevisionMax": chip_bounds[1],
         "chipFamily": "v3" if chip_bounds[0] >= 300 else "v1",

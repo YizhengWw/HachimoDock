@@ -7,20 +7,50 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 
 把自然语言需求实现为可在 ESP32-P4 上运行的 `.clawpkg` 组件，并在校验通过后发布到 Pet Manager 的正式本地组件库。
 
+## 扩展能力与设备协商
+
+创作扩展能力包时，先读取设备当前能力 JSON，再选择声明。`p4-quota-v3`、
+`p4-graphics-v2`、格子/文本表、程序 v2、音序/采样/视频、应用壳和文本输入
+分别协商；不能由版本号、包内声明、离线默认能力表或另一个能力推断支持。
+编译实现、离线测试、设备验收是三个不同状态，只有真实设备报告的能力才可用于同步。
+新增能力仍在统一验收期间，不得将候选目标的编译结果写成已在普通固件开放。
+
+- 格子状态与包内文本表：读取 [cells-texts.md](references/cells-texts.md)，分别核验 `widgetCells`、`widgetTexts`。
+- 新图形预算：读取 [graphics-v2.md](references/graphics-v2.md)，不能全局提高旧包预算。
+- 粒子与关键帧背景：读取 [particles.md](references/particles.md)、[keyframe-background.md](references/keyframe-background.md)，分别核验能力；静态背景不要求关键帧能力。
+- 多刚体与旋转精灵：读取 [bodies-preview.md](references/bodies-preview.md)，核验 `widgetBodies`；不把单角色 motion 的能力当成多刚体能力。
+- 多页应用、文本表单、集合、长文、通知和 PC HTTP 数据：读取 [d-host-and-surfaces.md](references/d-host-and-surfaces.md)，逐项核验能力与宿主配置；旧表单限制不用于描述显式 v3 表单。
+- 多服务组合、本地文件导入、动态封面和播放进度：读取 [service-bridge.md](references/service-bridge.md)，核验服务桥的精确协商与包配对；没有服务桥能力时不得伪造能力下发。
+- 合成旋律、短采样、组件视频、大图分片、跨组件事件与持久闹钟：读取 [component-media-events.md](references/component-media-events.md)，逐项核验独立能力；固定 sfx 的六个提示音不是这组扩展的上限，也不代表允许任意媒体/程序混用。
+- 各能力的精确字段与拒绝边界同时见 `contracts/` 中对应向量。向量不是可发布模板。
+- 账号与支付不属于本轮功能。联网请求由 PC 宿主按用户授予的域名权限执行。
+
 ## 工作流
 
 1. 完整读取 [references/contract.md](references/contract.md)。契约是实现与校验的唯一依据。
 2. 判断需求属于 `game` 还是 `tool`：
+   - 需要设备端通用算法/事件程序时，完整读取 [references/component-program.md](references/component-program.md) 和 [references/program-preview.md](references/program-preview.md)。依据实际 `widgetProgram`/`widgetPrograms` 选择 v1/v2，并同时遵守设备报告的 cells/code/fuel/quantum 上限；缺失能力时拒绝同步。公开候选仍只有一个 PROGRAM 租约、总燃料 4096，不因 v2 私有上限更高而扩大。发布与设备执行验收分别报告，同源预览与自测不等于 P4 执行/声学验收。
+   - 需要持久的公开 GET 与本地步骤串联、失败断点恢复或取消时，完整读取 [references/workflows.md](references/workflows.md)。使用显式组合 v3，共享有界工作队列；失败只允许明确恢复，不自动重提。尚不支持任意鉴权写请求或付费任务的未知结果恢复。
+   - 需要任意命名变量驱动文字/进度/显隐，或组合计数、计时、本地时钟与公开 JSON 数据时，完整读取 [references/composition.md](references/composition.md)。分类汇总、筛选、排序、记录集合和多步本地事务可使用显式组合 v2，须核验宿主动作上下文能力；不能冒称已支持异步付费服务恢复。使用通用绑定与受控服务组合，不按组件 ID 添加代码；超出配额或需要鉴权/音频等服务时明确能力边界。
+   - 需要"达到阈值才触发"、"有/没有资源时走不同分支"、变量相加或场景规则读写变量时，完整读取 [references/logic.md](references/logic.md)，声明 `logic: "p4-logic-v1"` 并核验 `widgetLogic`；它只提供有界比较、2 条 `all`、`else` 与 `{var}` 增量，不是表达式或脚本。
+   - 变量、状态、页面、transition、节点或内容池项数超出 v1 上限时，完整读取 [references/quota.md](references/quota.md)，从实际 `widgetQuota`/`widgetQuotas` 选择显式 v2 或 v3；图片、精灵、表单及持久化仍按各自独立契约限制，不能把某一配额档位用于全局放宽。
+   - 组件需要按键、结算或场景事件的短提示音时，完整读取 [references/sfx.md](references/sfx.md)，声明 `sfx: {"engine": "p4-sfx-v1", ...}` 并核验 `widgetSfx`；只有 6 个固定预设、最多 8 个 cue，没有采样、音乐或语音，不与木鱼/播放器混用。
    - 离线随机内容池、排除抽签、思考卡或设备端日期倒计时，完整读取 [references/local-tools.md](references/local-tools.md)。使用通用 local 引擎并校验 widgetLocalTools，不按组件 ID 写固件分支；断电后日期工具必须重新校时。
    - 近期资讯/新闻简报读取 [references/news.md](references/news.md)，采用有来源、时间窗和数量约束的 PC 资讯宿主，不把模型记忆当作联网结果。
    - 需要应用级布局、图标按钮、精细字号或原生 640×480 背景时，完整读取 [references/app-surface.md](references/app-surface.md)，核对设备图形能力；不得为了迁就旧图片配额静默降低分辨率或删掉图标。
+   - 需要 PC 数据源驱动的可见集合行时，另完整读取 [references/host-collection.md](references/host-collection.md) 和 composition 契约；仅 UI 候选明确协商后使用，普通设备不支持时不得伪造能力或声称本地独立动态应用已完成。
+   - 需要手机式滚动卡片、固定标题/底栏、打卡进度或记录历史时，另完整读取 [references/app-viewport.md](references/app-viewport.md) 与 [references/composition.md](references/composition.md)。使用通用裁切视口和 ledger，不按组件名字添加宿主逻辑；滚动须协商 widgetAppViewport，不冒充完整手机操作系统。
+   - 本地应用需要多级详情、返回和页面级动作时，完整读取 [references/app-navigation.md](references/app-navigation.md)，协商 widgetAppNavigation；host 表单与动态列表不能冒用该本地导航能力。
+   - 本地整数/枚举选择器与确认/取消编辑须完整读取 [references/app-form.md](references/app-form.md)，协商 widgetAppForm；该 v1 表单最多3字段。多字段文本、数字/Latin/拼音输入另读 [references/d-host-and-surfaces.md](references/d-host-and-surfaces.md) 并核验 widgetAppFormV3；提交/草稿隔离及实体可达要求保持，不能由 v1 能力推断 v3。
    - 组件需要点击、选择或直接操作画面时，读取 [references/touch.md](references/touch.md)。按需求灵活添加触屏区域，复用实体按键动作；应用点击与切果连续划线不是同一种能力，不能把可触屏等同于支持任意手势。
    - 需要滑动翻页、摇杆连发、按下即响应、确认弹窗或按状态显示按钮时，另读 [references/input-policy.md](references/input-policy.md)。这些能力必须由 `widgetInput=p4-input-v1` 明确协商，不能仅通过提高版本号假定设备支持。
    - 需要按住蓄力、松开发射和连续平台运动时，另读 [references/motion.md](references/motion.md)，使用 `widgetMotion=p4-motion-v1` 的通用单角色场景能力，不冒充任意物理引擎。
+   - 需要完整横版跑跳、tile地图、巡逻敌人、移动平台和检查点时，完整读取 [references/side-scene.md](references/side-scene.md)，核验 `widgetSideScene=p4-side-scene-v1`；独立图集遵循该契约，不能退化为单角色蓄力跳跃示例。
    - 需要连续向前的随机平台和跟随镜头时，使用同一 motion 中的 `track` 扩展，另核验 `widgetPlatformTrack=p4-platform-track-v1`；不能用每次落台重置角色位置冒充连续前进。
    - 有目标、玩家输入、即时反馈、局面变化和回合结算时，使用 `game`。
    - 以计时、提醒、追踪、展示、查询或控制为主要价值时，使用 `tool`。
-   - 展示行情等实时数据时，另读 [references/live-data.md](references/live-data.md)，确认 PC 数据源与设备能力；组件只订阅数据，不自行联网。
+   - 展示行情等实时数据时，另读 [references/live-data.md](references/live-data.md)，确认 PC 数据源与设备能力；组件只订阅数据，不自行联网。需要登录态的数据（如 `github.me`）走 PC 鉴权提供器，令牌只在 PC；接口未确认的源（如 `codex.usage`）不得假装可用。
+   - 把设备当快捷键面板向电脑发组合键时，另读 [references/hotkeys.md](references/hotkeys.md)，使用宿主服务 `hotkeys` 的白名单组合键与场景声明；发送默认关闭，由用户在 PC 开启。
    - 维护城市天气应用时，另读 [references/location-forecast.md](references/location-forecast.md)，使用包内声明式接口、字段映射、城市与文案；宿主只解释受控能力，不运行包内代码。
    - 分类知识库或长文阅读工具另读 [references/knowledge-library.md](references/knowledge-library.md)，知识和来源在 PC 资源包中，设备按页读取；校验数量、长度、随机不重复与授权，不用重复段落凑字数。
    - 农历/黄历工具另读 [references/calendar.md](references/calendar.md)，历法与民俗内容保留在 PC 数据包，宿主负责日期切换和时区，不把宜忌作为现实决策建议。
@@ -64,6 +94,7 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
    ```
 
    游戏自测必须从真实输入映射出发，跑通开始、每个玩法动作的即时可见反馈、自动推进、得分或进展、成功/失败结算和重开。互动工具必须让每个声明输入在可达状态中产生即时可见变化，并验证声明的 tick/自动运动确实推进画面。只验证 action 名存在、速度字段变化或单帧动画不算通过。
+   普通应用自测也探索同一状态/页面内的变量变化，例如先计数再清零。探索受 512 个快照和 32 层输入深度约束，并报告是否截断；这不是无限状态空间或全部路径证明。
    实时列表自测覆盖 0/1/6/11/16/20 行的分页可达性与真实按键反馈；它不验证网络取价、时效或设备画面，这些必须另外验收，不能把结构/模拟通过写成实时链路已通过。
 11. 修复全部结构、素材和玩法错误。使用 PNG 时还要逐条核对没有素材缺失、格式、尺寸、帧数、总像素、文件大小或帧间闪烁风险。只有结构校验与适用的场景/玩法自测退出码都为 `0` 时才允许发布；发布器还会重复执行自测，不能跳过。
 12. 原子发布到正式本地组件库：
@@ -93,6 +124,7 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 - 先用变量、状态、transition、tick 和 dashboard 表达需求；只有确实需要坐标、移动、碰撞或边界行为时才增加 `scene`。
 - 实时数据工具遵循契约 5.1 与 `references/live-data.md`；当前已实现 `stocks.watchlist`，其他 source 先确认或补齐 PC 提供器。股票默认项、刷新周期、鉴权都属于 PC，不写入组件包，不假装任意 URL 可以直接工作。
 - 新小游戏使用通用 `scene`，不得声明旧版 `game.type=blocks|snake|flappy`；旧版 `game` 仅用于读取和维护兼容包。
+- 例外：用户要求五子棋 / 五子对弈 / 连珠时，使用原生预设 `game.type="gomoku"`（契约 §6「原生五子棋预设」、app-surface.md「原生五子棋画面」），固定 action 表 `place|left|right|up|down|undo`，需设备 `widgetGamePresets` 含 `gomoku`；description 规则不变，仍需说明目标、规则与结束条件。其他棋类不得借用该预设。
 - 文案出现移动、飞行、射击、子弹、敌人或碰撞时，runtime 必须真实实现对应 scene 机制；不得只在 Dashboard 中描述不存在的玩法。
 - 新游戏的核心视觉元素默认使用受控横向 PNG sprite sheet：玩家/主角必须优先使用 PNG，主要敌人或目标在配额允许时也使用 PNG；最多 4 个精灵、每个 1-8 帧、单帧 8-64 像素、1-20 fps、全部帧合计最多 4096 像素、单个源 PNG 不超过 128 KiB。PNG 只作为静态素材，不能包含脚本；PC 会预编译后随组件事务下发。
 - `scene.entities[*].shape` 可使用 `rect|player-ship|enemy-ship|bullet|star|paddle|ball|circle|capsule|triangle|diamond|heart|cloud|coin|character`。优先用于平台、弹丸、金币、装饰和极简几何题材；省略时才使用兼容默认值 `rect`。若当前 Agent 没有生成或绘制 PNG 的能力，必须先说明限制并选择语义形状，禁止静默用矩形/方块冒充主体。
@@ -130,3 +162,11 @@ description: Generate, validate, and publish ESP32-P4 desktop-pet games, tools, 
 - 优化/修复任务保留了原 `component.json.id`，交付说明包含组件中心刷新与“保存并同步”的设备覆盖步骤。
 
 媒体切图扩展：已支持 widgetSurfaceImages=p4-surface-images-v1 时，遵循 references/pc-extensions.md 的 surface.images 契约；这是媒体独立配额，不扩大游戏 scene 精灵配额。
+
+### D 能力开发路由
+
+涉及 pc-fetch、应用壳标签页、form v3、data rows、长文/figure 或通知时，读取 [D 宿主与展示参考](references/d-host-and-surfaces.md)。该参考区分已接入入口与仍待公共 C 钩子及统一构建/HIL 的能力；不得把独立测试通过宣传为完整设备支持。
+
+### 通用服务桥候选路由
+
+需要原生服务投影、稳定键列表、类型化参数动作、显示时间轴、动态图片或显式本地媒体导入时，完整读取 [service-bridge.md](references/service-bridge.md)。纯标量桥可复用 legacy host 及原有能力；动态 image/timeline/event 参数或 local-media 必须显式声明 `surface.services="p4-service-bridge-v1"`、核验真实设备候选能力及各依赖，并用 `host_contract` 配对 PC 声明与设备 runtime（所有数值零统一 `i0;`，其他有限浮点保留）；不得按组件 ID 写特例或把 PC 预览当成设备支持。候选默认关闭，未完成统一固件/HIL验收；本地媒体不开放在线歌曲、任意 URL、账号或支付，不同步用户全局 skill。

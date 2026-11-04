@@ -1,0 +1,30 @@
+{
+ "runtime":{"vars":{"x":{"type":"int","init":12},"y":{"type":"int","init":8},"w":{"type":"int","init":16},"h":{"type":"int","init":6},"r":{"type":"int","init":5},"label":{"type":"string","init":"not coordinates"}}},
+ "valid":[
+  {"engine":"p4-canvas-v1","x":20,"y":30,"w":64,"h":48,"commands":[{"op":"line","x":0,"y":0,"x2":63,"y2":47,"color":65535},{"op":"rect","x":1,"y":2,"w":{"var":"w"},"h":{"var":"h"},"color":2016},{"op":"circle","x":{"var":"x"},"y":{"var":"y"},"r":{"var":"r"},"color":63488}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"circle","x":0,"y":0,"r":12,"color":255}]},
+  {"engine":"p4-canvas-v1","x":639,"y":479,"w":1,"h":1,"commands":[{"op":"line","x":0,"y":0,"x2":0,"y2":0,"color":1}]}
+ ],
+ "invalid":[
+  {"engine":"script","x":0,"y":0,"w":10,"h":10,"commands":[]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":0,"h":10,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":true,"h":10,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":630,"y":0,"w":32,"h":10,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":321,"h":10,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":241,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":-1,"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":0,"y":0,"w":0,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"line","x":0,"y":0,"x2":32,"y2":0,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"circle","x":0,"y":0,"r":18446744073709551615,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"circle","x":0,"y":0,"r":13,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":{"var":"label"},"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":{"var":"absent"},"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":{"var":"../x"},"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":{"var":"x","offset":1},"y":0,"w":1,"h":1,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":65536}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1,"url":"https://example.invalid"}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"shader","x":0,"y":0,"color":1}]},
+  {"engine":"p4-canvas-v1","x":0,"y":0,"w":32,"h":24,"commands":[{"op":"rect","x":0,"y":0,"w":1,"h":1,"color":1}],"pointer":4096}
+ ]
+}

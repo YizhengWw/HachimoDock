@@ -5,6 +5,13 @@ import { CUSTOM_GENERATION_FAMILIES } from "./families.js";
 import { DEFAULT_VOLCANO_IMAGE_MODEL } from "./providers/volcano-image.js";
 
 // Reconstruct display state from durable evidence, never from an absent UI progress object.
+// No raw provider errors, titles, URLs or media are exposed by this summary.
+export function localVideoInspectionNotice(session) {
+  const failed=Object.values(session?.actions||{}).some(action=>action?.videoBytes?.byteLength>0 && (
+    action.inspectionFailure || (action.failed && !action.inspection && !action.validated && !action.qualityIntent)));
+  return failed ? "视频已生成并保存，本地视频检查未通过。恢复将复用已有视频，不会重新生成该片段。" : "";
+}
+
 export function summarizeGenerationSession(session) {
   const ids = session.manifest?.entries?.map(e => e.family) || CUSTOM_GENERATION_FAMILIES.map(e => e.family);
   const actions = session.actions || {};
@@ -21,16 +28,18 @@ export function summarizeGenerationSession(session) {
   else if (session.reference && !session.referenceApproved) label = "参考图已准备，等待确认";
   else if (completed > 0) label = "部分已保存，可继续";
   const families = Object.fromEntries(ids.map(id => [id, { status: actions[id]?.videoBytes?.byteLength > 0 ? "done" : actions[id]?.failed ? "failed" : actions[id]?.taskId ? "polling" : "pending" }]));
-  return { status, label, completed, total, failed, families };
+  const localInspectionNotice=localVideoInspectionNotice(session);
+  if(status==="failed" && localInspectionNotice)label="视频已保存，本地检查未通过";
+  return { status, label, completed, total, failed, families, localInspectionNotice };
 }
 
 export function canAutoResume(session) {
   if(!session?.automatic || session.finished || session.dismissed || session.pausedByUser || (session.autoResumes||0)>=3)return false;
   if(['failed','conversion_failed'].includes(session.phase))return false;
-  if(session.imageIntent&&!session.reference || session.thinkingIntent&&!session.manifest || session.referenceQualityIntent&&!session.referenceQuality)return false;
+  if(session.imageIntent&&!session.reference&&!session.imageResult || session.thinkingIntent&&!session.manifest || session.referenceQualityIntent&&!session.referenceQuality)return false;
   if(session.referenceQuality?.pass===false)return false;
   return !Object.values(session.actions||{}).some(a=>a.failed || a.quality?.pass===false || a.qualityIntent&&!a.quality || a.intent&&!a.taskId&&!a.videoBytes
-    || a.startFrameIntent&&!a.startFrameRaw || a.startFrameQuality?.pass===false || a.startFrameQualityIntent&&!a.startFrameQuality);
+    || a.startFrameIntent&&!a.startFrameRaw&&!a.startFrameResult || a.startFrameQuality?.pass===false || a.startFrameQualityIntent&&!a.startFrameQuality);
 }
 export function serialQueue() {
   let tail = Promise.resolve();
@@ -71,9 +80,9 @@ export function assertResumableAction(action, provider) {
 // accepted/unknown video submission or a partially saved appearance implicitly.
 export function generationSessionNeedsProtection(session) {
   if (!session || session.finished || session.dismissed) return false;
-  if (session.appearanceId || session.reference) return true;
+  if (session.appearanceId || session.reference || session.imageResult) return true;
   return Object.values(session.actions || {}).some(action =>
-    action && (action.intent || action.taskId || action.videoBytes || action.videoUrl));
+    action && (action.intent || action.taskId || action.videoBytes || action.videoUrl || action.startFrameResult));
 }
 
 async function database() {

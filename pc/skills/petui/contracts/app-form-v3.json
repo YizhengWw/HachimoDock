@@ -1,0 +1,908 @@
+{
+ "engine": "p4-app-form-v3",
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "quota": "p4-quota-v2",
+  "navigation": "p4-app-navigation-v1",
+  "vars": {
+   "name": {
+    "type": "string",
+    "init": "中"
+   },
+   "nameDraft": {
+    "type": "string",
+    "init": "中"
+   },
+   "nick": {
+    "type": "string",
+    "init": ""
+   },
+   "nickDraft": {
+    "type": "string",
+    "init": ""
+   },
+   "code": {
+    "type": "string",
+    "init": "42"
+   },
+   "codeDraft": {
+    "type": "string",
+    "init": "42"
+   },
+   "focus": {
+    "type": "int",
+    "init": 0
+   },
+   "editing": {
+    "type": "int",
+    "init": 0
+   },
+   "key": {
+    "type": "int",
+    "init": 0
+   },
+   "cursor": {
+    "type": "int",
+    "init": 0
+   },
+   "buffer": {
+    "type": "string",
+    "init": ""
+   },
+   "label": {
+    "type": "string",
+    "init": ""
+   },
+   "cands": {
+    "type": "string",
+    "init": ""
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "pages": [
+   {
+    "id": "edit"
+   },
+   {
+    "id": "home"
+   }
+  ],
+  "initial_page": "edit",
+  "input": {
+   "engine": "p4-input-v1",
+   "repeat": [
+    "field.prev",
+    "field.next",
+    "key.down",
+    "key.up"
+   ]
+  },
+  "form": {
+   "engine": "p4-app-form-v3",
+   "page": "edit",
+   "focus_var": "focus",
+   "active_var": "editing",
+   "fields": [
+    {
+     "id": "name",
+     "var": "name",
+     "draft_var": "nameDraft",
+     "kind": "text",
+     "max_bytes": 12,
+     "keyboard": "pinyin"
+    },
+    {
+     "id": "nick",
+     "var": "nick",
+     "draft_var": "nickDraft",
+     "kind": "text",
+     "max_bytes": 6,
+     "keyboard": "latin"
+    },
+    {
+     "id": "code",
+     "var": "code",
+     "draft_var": "codeDraft",
+     "kind": "text",
+     "max_bytes": 4,
+     "keyboard": "numeric"
+    }
+   ],
+   "keyboard": {
+    "key_var": "key",
+    "cursor_var": "cursor",
+    "buffer_var": "buffer",
+    "label_var": "label",
+    "candidates_var": "cands"
+   },
+   "actions": {
+    "previous": "field.prev",
+    "next": "field.next",
+    "decrease": "key.down",
+    "increase": "key.up",
+    "accept": "form.accept",
+    "cancel": "form.cancel",
+    "append": "text.append",
+    "erase": "text.erase"
+   }
+  },
+  "transitions": [
+   {
+    "from": "*",
+    "on": "field.prev"
+   },
+   {
+    "from": "*",
+    "on": "field.next"
+   },
+   {
+    "from": "*",
+    "on": "key.down"
+   },
+   {
+    "from": "*",
+    "on": "key.up"
+   },
+   {
+    "from": "*",
+    "on": "form.accept"
+   },
+   {
+    "from": "*",
+    "on": "form.cancel"
+   },
+   {
+    "from": "*",
+    "on": "text.append"
+   },
+   {
+    "from": "*",
+    "on": "text.erase"
+   },
+   {
+    "from": "*",
+    "on": "back",
+    "page": {
+     "back": true
+    }
+   },
+   {
+    "from": "*",
+    "on": "leave",
+    "page": {
+     "push": "home"
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "Text form",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "persist": {
+   "version": 1,
+   "vars": [
+    "name",
+    "nick",
+    "code"
+   ],
+   "states": {
+    "ready": "ready"
+   },
+   "page": true
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "page": 0,
+     "color": 65535,
+     "field_bind": "name"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 60,
+     "w": 300,
+     "h": 32,
+     "page": 0,
+     "color": 65535,
+     "field_bind": "nick"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 100,
+     "w": 300,
+     "h": 32,
+     "page": 0,
+     "color": 65535,
+     "field_bind": "code"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 140,
+     "w": 600,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "label"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 180,
+     "w": 600,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "cands"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 220,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "editing"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 280,
+     "w": 200,
+     "h": 48,
+     "page": 0,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Leave",
+     "action": "leave"
+    },
+    {
+     "type": "button",
+     "x": 240,
+     "y": 280,
+     "w": 200,
+     "h": 48,
+     "page": 1,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Back",
+     "action": "back"
+    }
+   ]
+  }
+ },
+ "buttons": [
+  {
+   "event": "joystick.up",
+   "action": "field.prev",
+   "control": "joystick",
+   "label": "Previous"
+  },
+  {
+   "event": "joystick.down",
+   "action": "field.next",
+   "control": "joystick",
+   "label": "Next"
+  },
+  {
+   "event": "knob.rotate_ccw",
+   "action": "key.down",
+   "control": "joystick",
+   "label": "Key down"
+  },
+  {
+   "event": "knob.rotate_cw",
+   "action": "key.up",
+   "control": "joystick",
+   "label": "Key up"
+  },
+  {
+   "event": "button.sw1.short_press",
+   "action": "form.accept",
+   "control": "sw1",
+   "label": "Edit / accept"
+  },
+  {
+   "event": "button.sw2.short_press",
+   "action": "form.cancel",
+   "control": "sw2",
+   "label": "Cancel"
+  },
+  {
+   "event": "button.encoder.short_press",
+   "action": "text.append",
+   "control": "encoder",
+   "label": "Append"
+  },
+  {
+   "event": "button.encoder.long_press",
+   "action": "text.erase",
+   "control": "encoder",
+   "label": "Erase"
+  }
+ ],
+ "cases": [
+  {
+   "actions": [
+    "text.append"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.up",
+    "key.up",
+    "key.up",
+    "key.up",
+    "text.append"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    1,
+    6,
+    0,
+    "6",
+    "6",
+    "[媽] 嗎 嘛 買 売"
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.up",
+    "key.up",
+    "key.up",
+    "key.up",
+    "text.append",
+    "key.down",
+    "key.down",
+    "text.append",
+    "field.next",
+    "form.accept"
+   ],
+   "vars": [
+    "中",
+    "中密",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    1,
+    4,
+    0,
+    "",
+    "ghi4",
+    ""
+   ],
+   "text": [
+    "中密",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.up",
+    "key.up",
+    "key.up",
+    "key.up",
+    "text.append",
+    "key.down",
+    "key.down",
+    "text.append",
+    "field.next",
+    "form.accept",
+    "form.accept"
+   ],
+   "vars": [
+    "中密",
+    "中密",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中密",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.up",
+    "key.up",
+    "key.up",
+    "key.up",
+    "text.append",
+    "form.cancel",
+    "form.cancel"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "field.next",
+    "form.accept",
+    "key.up",
+    "key.up",
+    "field.next",
+    "field.next",
+    "text.append",
+    "text.append",
+    "form.accept"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "ii",
+    "ii",
+    "42",
+    "42",
+    1,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "ii",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "field.next",
+    "field.next",
+    "form.accept",
+    "key.up",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.erase",
+    "form.accept"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "421",
+    "421",
+    2,
+    0,
+    0,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "421"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.up",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append",
+    "text.append"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    1,
+    3,
+    0,
+    "33",
+    "de",
+    "[的] 得 等 非 飛"
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "leave",
+    "text.append"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "home",
+   "history": [
+    "edit"
+   ]
+  },
+  {
+   "actions": [
+    "form.accept",
+    "text.erase",
+    "@hide"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "field.next",
+    "field.next",
+    "field.next"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    2,
+    0,
+    2,
+    0,
+    "",
+    "",
+    ""
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "key.down",
+    "key.down",
+    "text.append",
+    "field.prev",
+    "field.prev"
+   ],
+   "vars": [
+    "中",
+    "中",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    1,
+    6,
+    0,
+    "6",
+    "6",
+    "[媽] 嗎 嘛 買 売"
+   ],
+   "text": [
+    "中",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  },
+  {
+   "actions": [
+    "form.accept",
+    "text.append"
+   ],
+   "restore": {
+    "name": "太长太长太长太长",
+    "nameDraft": "太长太长太长太长"
+   },
+   "vars": [
+    "太长太长太长太长",
+    "太长太长太长太长",
+    "",
+    "",
+    "42",
+    "42",
+    0,
+    1,
+    2,
+    0,
+    "2",
+    "a",
+    "[啊] 愛 安 暗 案"
+   ],
+   "text": [
+    "太长太长太长太长",
+    "",
+    "42"
+   ],
+   "page": "edit",
+   "history": []
+  }
+ ],
+ "invalid": [
+  {
+   "path": [
+    "form",
+    "fields",
+    0,
+    "keyboard"
+   ],
+   "value": "qwerty"
+  },
+  {
+   "path": [
+    "form",
+    "fields",
+    0,
+    "max_bytes"
+   ],
+   "value": 64
+  },
+  {
+   "path": [
+    "form",
+    "fields",
+    0,
+    "max_bytes"
+   ],
+   "value": 1
+  },
+  {
+   "path": [
+    "form",
+    "keyboard",
+    "key_var"
+   ],
+   "value": "focus"
+  },
+  {
+   "path": [
+    "form",
+    "keyboard",
+    "buffer_var"
+   ],
+   "value": "key"
+  },
+  {
+   "path": [
+    "vars",
+    "key",
+    "init"
+   ],
+   "value": 1
+  },
+  {
+   "path": [
+    "vars",
+    "buffer",
+    "init"
+   ],
+   "value": "6"
+  },
+  {
+   "path": [
+    "form",
+    "actions",
+    "append"
+   ],
+   "value": "tab.next"
+  },
+  {
+   "path": [
+    "transitions",
+    6
+   ],
+   "value": {
+    "from": "*",
+    "on": "text.append",
+    "inc": {
+     "key": 1
+    }
+   }
+  },
+  {
+   "path": [
+    "persist",
+    "vars"
+   ],
+   "value": [
+    "name",
+    "buffer"
+   ]
+  },
+  {
+   "path": [
+    "input",
+    "repeat"
+   ],
+   "value": [
+    "text.append"
+   ]
+  },
+  {
+   "path": [
+    "form",
+    "fields",
+    0,
+    "kind"
+   ],
+   "value": "integer"
+  },
+  {
+   "path": [
+    "form",
+    "fields"
+   ],
+   "value": []
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "field_bind"
+   ],
+   "value": "missing"
+  },
+  {
+   "path": [
+    "limits"
+   ],
+   "value": {
+    "key": [
+     0,
+     5
+    ]
+   }
+  }
+ ]
+}

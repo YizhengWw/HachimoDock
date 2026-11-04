@@ -199,10 +199,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
     releaseNotes: "",
     sourceUrl: "",
   });
-  const [covers, setCovers] = useState([]),
-    [rights, setRights] = useState(false),
-    [privacy, setPrivacy] = useState(false),
-    [tested, setTested] = useState(false);
+  const [covers, setCovers] = useState([]);
   const [busy, setBusy] = useState(false),
     [checking, setChecking] = useState(false),
     [error, setError] = useState("");
@@ -213,7 +210,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
     const seq = ++prepareSeq.current;
     setPrepared(null);
     setError("");
-    setCovers([]);setRights(false);setPrivacy(false);setTested(false);pending.current=null;dirty.current=false;
+    setCovers([]);pending.current=null;dirty.current=false;
     if (!path) {
       setChecking(false);
       return;
@@ -278,7 +275,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
   }
   async function submit(event) {
     event.preventDefault();
-    if (busy || submitting.current || !prepared?.canPublish || !rights || !privacy || !tested) return;
+    if (busy || submitting.current || !prepared?.canPublish) return;
     submitting.current=true;
     setBusy(true);
     setError("");
@@ -312,8 +309,6 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
         covers: covers.map((url) => url.split(",")[1]),
         expectedContentHash: prepared.contentHash,
         requestId: pending.current.requestId,
-        rightsConfirmed: true,
-        privacyConfirmed: true,
       });
       localStorage.setItem(NAME_KEY, form.author.trim());
       localStorage.removeItem(key);
@@ -378,7 +373,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
               ))}
           </select>
         </label>
-        {checking && <p role="status">正在检查包结构、授权文件与敏感内容…</p>}
+        {checking && <p role="status">正在检查组件文件…</p>}
         {prepared && (
           <div className="community-package-check">
             <ShieldCheck size={20} />
@@ -390,7 +385,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
                 {prepared.id} · {readableBytes(prepared.packageBytes)} ·{" "}
                 {prepared.files.length} 个文件
               </p>
-              <small>{prepared.warning}</small>
+              {prepared.warning && <small>{prepared.warning}</small>}
               <details>
                 <summary>查看将公开的文件</summary>
                 <ul>
@@ -419,9 +414,8 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
               )}
             </select>
           </label>
-          {field("summary", "一句话介绍", 160)}
-          {field("license", "许可证名称（与包内 LICENSE.txt 一致）", 100)}
         </div>
+        {field("summary", "一句话介绍", 160)}
         {field("description", "玩法与使用说明", 3000, true)}
         {field("releaseNotes", "本次更新说明", 2000, true)}
         {field("sourceUrl", "来源链接（选填，派生作品请注明公开来源）", 500)}
@@ -441,32 +435,6 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
             <img key={index} src={src} alt={`发布截图 ${index + 1}`} />
           ))}
         </div>
-        <div className="community-publish-checks">
-          <label className="community-check">
-            <input
-              type="checkbox"
-              checked={tested}
-              onChange={(e) => setTested(e.target.checked)}
-            />
-            已在设备测试主要玩法、按键和退出功能
-          </label>
-          <label className="community-check">
-            <input
-              type="checkbox"
-              checked={rights}
-              onChange={(e) => setRights(e.target.checked)}
-            />
-            我有权发布代码、图片和音频，已保留必要署名及许可证
-          </label>
-          <label className="community-check">
-            <input
-              type="checkbox"
-              checked={privacy}
-              onChange={(e) => setPrivacy(e.target.checked)}
-            />
-            确认公开以上作者名、截图和文件，不包含 Key、证书、内部接口或个人信息
-          </label>
-        </div>
         {error && (
           <p className="community-error" role="alert">
             {error}
@@ -482,9 +450,6 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
             disabled={
               !prepared?.canPublish ||
               !covers.length ||
-              !rights ||
-              !privacy ||
-              !tested ||
               checking
             }
             loading={busy}
@@ -495,7 +460,7 @@ function Publish({ localItems, owned, onClose, onPublished, selectedPath }) {
         </footer>
         </fieldset>
       </form>
-      {discard&&<WorkflowConfirm title="放弃未提交修改？" description="这会清除本次填写的内容、截图和授权勾选。已发布的作品不受影响。" confirmLabel={discard.close?'放弃并关闭':'放弃并切换'} onCancel={()=>setDiscard(null)} onConfirm={()=>{const action=discard;setDiscard(null);dirty.current=false;if(action.close)onClose();else setPath(action.path);}}/>}
+      {discard&&<WorkflowConfirm title="放弃未提交修改？" description="这会清除本次填写的内容和截图。已发布的作品不受影响。" confirmLabel={discard.close?'放弃并关闭':'放弃并切换'} onCancel={()=>setDiscard(null)} onConfirm={()=>{const action=discard;setDiscard(null);dirty.current=false;if(action.close)onClose();else setPath(action.path);}}/>}
     </Dialog>
   );
 }

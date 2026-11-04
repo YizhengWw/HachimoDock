@@ -10,7 +10,7 @@ pub struct Location{pub city:String,pub lat:f64,pub lon:f64}
 impl Location{pub fn valid(&self)->bool{!self.city.trim().is_empty()&&self.city.len()<=60&&!self.city.chars().any(char::is_control)&&self.lat.is_finite()&&self.lon.is_finite()&&self.lat.abs()<=90.0&&self.lon.abs()<=180.0}}
 #[derive(Clone,Debug,Default,PartialEq,Serialize,Deserialize)]
 #[serde(default)]
-pub struct GeoCache{pub key:String,pub location:Location,pub next:i64,pub error:String}
+pub struct GeoCache{pub key:String,pub location:Location,pub next:i64,pub error:String,pub source:String}
 #[derive(Clone,Debug,Default,PartialEq,Serialize,Deserialize)]
 #[serde(default)]
 pub struct Cache{pub key:String,pub next:i64,pub fetched:i64,pub modified:String,pub data:Value,pub error:String}
@@ -18,7 +18,7 @@ static GEO:OnceLock<Mutex<HashMap<String,(GeoCache,bool)>>>=OnceLock::new();
 static PENDING:OnceLock<Mutex<HashMap<String,(Cache,bool)>>>=OnceLock::new();
 fn geo_key(p:&Profile)->String{
     use sha2::{Digest,Sha256};
-    format!("{:x}",Sha256::digest(serde_json::to_vec(&p.geo).expect("geo serialization")))
+    format!("{:x}",Sha256::digest(crate::json_canonical::canonical_vec(&p.geo).expect("geo serialization")))
 }
 fn cache_key(p:&Profile,l:&Location)->String{format!("{}:{:.3},{:.3}",p.key(),l.lat,l.lon)}
 fn parse_geo(p:&Profile,data:&Value)->Result<Location,String>{
@@ -63,6 +63,10 @@ fn lookup_geo(p:&Profile)->Result<Location,String>{
     parse_geo(p,&body(response,16384).map_err(|_|p.text("locateFailedNote"))?)
 }
 pub fn locate_background(p:&Profile,cache:&mut GeoCache,now:i64){
+    if let Some((location,error,source))=crate::shared_location::weather(){
+        *cache=GeoCache{key:"shared-city-v1".into(),location,next:0,error,source};
+        return;
+    }
     let key=geo_key(p);
     if cache.key!=key||cache.next>now.saturating_add(604800){*cache=GeoCache{key:key.clone(),..Default::default()};}
     let mut entries=GEO.get_or_init(Default::default).lock().unwrap();

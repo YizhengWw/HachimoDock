@@ -1,0 +1,221 @@
+{
+  "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "navigation": "p4-app-navigation-v1",
+    "vars": {
+      "hits": {
+        "type": "int",
+        "init": 0
+      }
+    },
+    "states": [
+      "ready"
+    ],
+    "initial_state": "ready",
+    "pages": [
+      {
+        "id": "home"
+      },
+      {
+        "id": "list"
+      },
+      {
+        "id": "detail"
+      },
+      {
+        "id": "settings"
+      }
+    ],
+    "initial_page": "home",
+    "input": {
+      "engine": "p4-input-v1"
+    },
+    "transitions": [
+      {
+        "from": "*",
+        "from_page": "home",
+        "on": "open",
+        "page": {
+          "push": "list"
+        },
+        "inc": {
+          "hits": 1
+        }
+      },
+      {
+        "from": "*",
+        "from_page": "list",
+        "on": "open",
+        "page": {
+          "push": "detail"
+        },
+        "inc": {
+          "hits": 1
+        }
+      },
+      {
+        "from": "*",
+        "on": "back",
+        "page": {
+          "back": true
+        },
+        "inc": {
+          "hits": 1
+        }
+      },
+      {
+        "from": "*",
+        "on": "replace",
+        "page": {
+          "replace": "settings"
+        }
+      },
+      {
+        "from": "*",
+        "on": "reset",
+        "page": {
+          "reset": "home"
+        }
+      },
+      {
+        "from": "*",
+        "on": "push",
+        "page": {
+          "push": "detail"
+        },
+        "inc": {
+          "hits": 1
+        }
+      }
+    ],
+    "tick": [],
+    "dashboard": {
+      "title": "Navigation",
+      "metricValue": {
+        "var": "hits"
+      }
+    },
+    "surface": {
+      "engine": "p4-app-surface-v1",
+      "graphics": "p4-app-graphics-v1",
+      "background": 0,
+      "elements": [
+        {
+          "type": "text",
+          "x": 20,
+          "y": 20,
+          "w": 400,
+          "h": 40,
+          "color": 65535,
+          "text": "Navigation"
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "root back has no effects",
+      "actions": [
+        "back"
+      ],
+      "page": "home",
+      "history": [],
+      "hits": 0
+    },
+    {
+      "name": "two-level detail and back",
+      "actions": [
+        "open",
+        "open",
+        "back",
+        "back",
+        "back"
+      ],
+      "page": "home",
+      "history": [],
+      "hits": 4
+    },
+    {
+      "name": "wrong page action blocked",
+      "actions": [
+        "open",
+        "open",
+        "open"
+      ],
+      "page": "detail",
+      "history": [
+        "home",
+        "list"
+      ],
+      "hits": 2
+    },
+    {
+      "name": "replace preserves parent",
+      "actions": [
+        "open",
+        "replace",
+        "back"
+      ],
+      "page": "home",
+      "history": [],
+      "hits": 2
+    },
+    {
+      "name": "reset discards history",
+      "actions": [
+        "open",
+        "open",
+        "reset",
+        "back"
+      ],
+      "page": "home",
+      "history": [],
+      "hits": 2
+    },
+    {
+      "name": "depth overflow has no effects",
+      "actions": [
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push",
+        "push"
+      ],
+      "page": "detail",
+      "history": [
+        "home",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail",
+        "detail"
+      ],
+      "hits": 16
+    }
+  ],
+  "revision": 2,
+  "maxDepth": 16
+}

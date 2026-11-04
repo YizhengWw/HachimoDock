@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 
 #include "../main/pet_p4_game.h"
 
@@ -243,7 +244,218 @@ static void test_bounded_runtime_uses_data_rules_for_a_new_game(void) {
   assert(!pet_p4_game_configure_bounded(&game, &config, 17));
 }
 
+/* ---- gomoku ------------------------------------------------------------- */
+
+#define G PET_P4_GAME_GOMOKU_SIZE
+
+static int gomoku_at(int x, int y) { return y * G + x; }
+
+static void gomoku_start(pet_p4_game_engine_t *game) {
+  assert(pet_p4_game_configure(game, PET_P4_GAME_GOMOKU, 300, 5));
+  assert(game->width == G && game->height == G);
+  assert(!game->running);
+  assert(pet_p4_game_command(game, PET_P4_GAME_COMMAND_PLACE, 10));
+  assert(game->running && !game->game_over && game->score == 0);
+  assert(game->gomoku_cursor_x == 7 && game->gomoku_cursor_y == 7);
+}
+
+static void gomoku_move_cursor(pet_p4_game_engine_t *game, int x, int y, uint64_t now) {
+  while (game->gomoku_cursor_x > x) assert(pet_p4_game_command(game, PET_P4_GAME_COMMAND_LEFT, now));
+  while (game->gomoku_cursor_x < x) assert(pet_p4_game_command(game, PET_P4_GAME_COMMAND_RIGHT, now));
+  while (game->gomoku_cursor_y > y) assert(pet_p4_game_command(game, PET_P4_GAME_COMMAND_NORTH, now));
+  while (game->gomoku_cursor_y < y) assert(pet_p4_game_command(game, PET_P4_GAME_COMMAND_SOUTH, now));
+}
+
+/* Lay a position directly (both colours), then let black play the final
+ * stone through the real cursor/place path so win detection runs. */
+static void gomoku_set(pet_p4_game_engine_t *game, int x, int y, uint8_t color) {
+  game->board[gomoku_at(x, y)] = color;
+  game->gomoku_stones += 1;
+  if (color == 1) game->gomoku_rounds += 1;
+}
+
+static void test_gomoku_player_wins_in_all_four_directions(void) {
+  static const int dirs[4][2] = {{1, 0}, {0, 1}, {1, 1}, {1, -1}};
+  for (int d = 0; d < 4; d += 1) {
+    pet_p4_game_engine_t game;
+    pet_p4_game_frame_t frame;
+    gomoku_start(&game);
+    int sx = 3, sy = d == 3 ? 9 : 3;
+    for (int i = 0; i < 4; i += 1) gomoku_set(&game, sx + i * dirs[d][0], sy + i * dirs[d][1], 1);
+    /* white stones elsewhere keep the board honest but irrelevant */
+    gomoku_set(&game, 12, 12, 2);
+    gomoku_set(&game, 13, 12, 2);
+    gomoku_set(&game, 12, 13, 2);
+    int fx = sx + 4 * dirs[d][0], fy = sy + 4 * dirs[d][1];
+    gomoku_move_cursor(&game, fx, fy, 20);
+    assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 30));
+    assert(game.game_over && !game.running);
+    assert(game.gomoku_outcome == 1);
+    assert(game.gomoku_win_len == 5);
+    assert(game.score == 1000 + 8); /* five black + three white stones */
+    pet_p4_game_get_frame(&game, &frame);
+    int highlighted = 0;
+    for (int i = 0; i < G * G; i += 1) {
+      if (frame.cells[i] & PET_P4_GAME_GOMOKU_WIN) {
+        highlighted += 1;
+        assert((frame.cells[i] & PET_P4_GAME_GOMOKU_STONE_MASK) == 1);
+      }
+      assert(!(frame.cells[i] & PET_P4_GAME_GOMOKU_CURSOR));
+    }
+    assert(highlighted == 5);
+    /* nothing moves after the result; place restarts an empty board */
+    assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_LEFT, 40));
+    assert(!pet_p4_game_process(&game, 2000));
+    assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 50));
+    assert(game.running && !game.game_over && game.score == 0);
+    assert(occupied(&game.frame) == 1); /* only the cursor overlay */
+  }
+}
+
+static void test_gomoku_ai_replies_on_tick_and_blocks_an_open_four(void) {
+  pet_p4_game_engine_t game;
+  pet_p4_game_frame_t frame;
+  gomoku_start(&game);
+  /* black: three in a row at (5..7, 7); white: two harmless stones */
+  gomoku_set(&game, 5, 7, 1);
+  gomoku_set(&game, 6, 7, 1);
+  gomoku_set(&game, 7, 7, 1);
+  gomoku_set(&game, 2, 2, 2);
+  gomoku_set(&game, 2, 12, 2);
+  gomoku_move_cursor(&game, 8, 7, 20);
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 30)); /* open four 5..8 */
+  assert(game.gomoku_ai_pending && game.score == 6); /* 4 black + 2 white, white to answer */
+  pet_p4_game_get_frame(&game, &frame);
+  assert(frame.cells[gomoku_at(8, 7)] == (1 | PET_P4_GAME_GOMOKU_LAST | PET_P4_GAME_GOMOKU_CURSOR));
+  /* place is ignored while white is thinking; cursor keeps moving */
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_RIGHT, 31));
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 32));
+  assert(!pet_p4_game_process(&game, 309)); /* tick clock runs from start (10) */
+  assert(game.gomoku_ai_pending);
+  struct timespec t0, t1;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  assert(pet_p4_game_process(&game, 310));
+  clock_gettime(CLOCK_MONOTONIC, &t1);
+  assert(!game.gomoku_ai_pending && !game.game_over);
+  assert(game.score == 7); /* the reply is visible to the HUD as the odd->even step */
+  assert(game.board[gomoku_at(4, 7)] == 2 || game.board[gomoku_at(9, 7)] == 2);
+  assert(game.gomoku_ai_reads > 0 && game.gomoku_ai_reads <= PET_P4_GAME_GOMOKU_AI_MAX_READS);
+  long long elapsed_us = (t1.tv_sec - t0.tv_sec) * 1000000LL + (t1.tv_nsec - t0.tv_nsec) / 1000;
+  assert(elapsed_us < 20000); /* host sanity bound; the device budget is the read count */
+  pet_p4_game_get_frame(&game, &frame);
+  int ai = game.gomoku_last_ai;
+  assert((frame.cells[ai] & PET_P4_GAME_GOMOKU_STONE_MASK) == 2);
+  assert(frame.cells[ai] & PET_P4_GAME_GOMOKU_LAST);
+  assert(!(frame.cells[gomoku_at(8, 7)] & PET_P4_GAME_GOMOKU_LAST));
+  /* a second tick with nothing pending changes nothing */
+  assert(!pet_p4_game_process(&game, 610));
+}
+
+static void test_gomoku_ai_completes_its_own_five_over_blocking(void) {
+  pet_p4_game_engine_t game;
+  gomoku_start(&game);
+  /* white has an open diagonal four; black also threatens a five */
+  for (int i = 0; i < 4; i += 1) gomoku_set(&game, 3 + i, 3 + i, 2);
+  for (int i = 0; i < 4; i += 1) gomoku_set(&game, 1 + i, 12, 1);
+  gomoku_move_cursor(&game, 10, 12, 20); /* black plays away from both threats */
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 30));
+  assert(pet_p4_game_process(&game, 330));
+  assert(game.game_over && game.gomoku_outcome == 2);
+  assert(game.board[gomoku_at(7, 7)] == 2 || game.board[gomoku_at(2, 2)] == 2);
+  assert(game.gomoku_win_len == 5 && game.gomoku_win_dir == 2);
+  assert(game.score == 2000 + game.gomoku_stones && game.gomoku_stones == 10);
+}
+
+static void test_gomoku_undo_takes_back_the_last_pair(void) {
+  pet_p4_game_engine_t game;
+  gomoku_start(&game);
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_UNDO, 11)); /* nothing yet */
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 12)); /* centre */
+  assert(game.score == 1);
+  /* undo before the reply removes only the player's stone */
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_UNDO, 13));
+  assert(game.score == 0 && !game.gomoku_ai_pending && occupied(&game.frame) == 1);
+  assert(!pet_p4_game_process(&game, 400)); /* no pending reply left */
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 500));
+  assert(pet_p4_game_process(&game, 800));
+  int ai = game.gomoku_last_ai;
+  assert(game.board[ai] == 2 && game.board[gomoku_at(7, 7)] == 1 && game.score == 2);
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_RIGHT, 810));
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_UNDO, 820));
+  assert(game.board[ai] == 0 && game.board[gomoku_at(7, 7)] == 0 && game.score == 0);
+  assert(game.gomoku_cursor_x == 7 && game.gomoku_cursor_y == 7); /* cursor returns to the undone stone */
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_UNDO, 830)); /* single level */
+}
+
+static void test_gomoku_cursor_clamps_and_rejects_occupied_cells(void) {
+  pet_p4_game_engine_t game;
+  gomoku_start(&game);
+  gomoku_move_cursor(&game, 0, 0, 20);
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_LEFT, 21));
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_NORTH, 22));
+  gomoku_move_cursor(&game, G - 1, G - 1, 23);
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_RIGHT, 24));
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_SOUTH, 25));
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 26));
+  assert(pet_p4_game_process(&game, 326));
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 327)); /* occupied */
+  gomoku_move_cursor(&game, game.gomoku_last_ai % G, game.gomoku_last_ai / G, 328);
+  assert(!pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 329)); /* on a white stone */
+}
+
+static void test_gomoku_full_board_is_a_draw(void) {
+  pet_p4_game_engine_t game;
+  gomoku_start(&game);
+  /* colour(x, y) = ((x + 2y) mod 4 < 2) never connects five in any direction
+   * and gives black 113 cells; leave the black centre for the final move. */
+  for (int y = 0; y < G; y += 1) {
+    for (int x = 0; x < G; x += 1) {
+      if (x == 7 && y == 7) continue;
+      gomoku_set(&game, x, y, (uint8_t) ((x + 2 * y) % 4 < 2 ? 1 : 2));
+    }
+  }
+  assert(game.gomoku_rounds == 112 && game.gomoku_stones == 224);
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 30));
+  assert(game.game_over && game.gomoku_outcome == 3 && game.gomoku_win_len == 0);
+  assert(game.score == 3000 + 225);
+  assert(!pet_p4_game_process(&game, 1000));
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 40));
+  assert(game.running && game.score == 0);
+}
+
+static void test_gomoku_ai_work_stays_bounded_from_an_empty_board(void) {
+  pet_p4_game_engine_t game;
+  gomoku_start(&game);
+  assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, 12));
+  assert(pet_p4_game_process(&game, 312));
+  /* the very first reply scans the maximum number of empty cells */
+  assert(game.gomoku_ai_reads == (G * G - 1) * 4 * 9);
+  assert(game.gomoku_ai_reads <= PET_P4_GAME_GOMOKU_AI_MAX_READS);
+  /* first reply sits next to the opening stone, not in a corner */
+  int ax = game.gomoku_last_ai % G, ay = game.gomoku_last_ai / G;
+  assert(ax >= 6 && ax <= 8 && ay >= 6 && ay <= 8);
+  /* a naive player who always places at the lowest free cell loses to the AI */
+  uint64_t now = 312;
+  for (int round = 0; round < 120 && !game.game_over; round += 1) {
+    int target = -1;
+    for (int i = 0; i < G * G; i += 1) if (game.board[i] == 0) { target = i; break; }
+    assert(target >= 0);
+    gomoku_move_cursor(&game, target % G, target / G, now + 1);
+    assert(pet_p4_game_command(&game, PET_P4_GAME_COMMAND_PLACE, now + 2));
+    now += 300;
+    if (!game.game_over) assert(pet_p4_game_process(&game, now));
+  }
+  assert(game.game_over && game.gomoku_outcome == 2);
+}
+
 int main(void) {
+  test_gomoku_player_wins_in_all_four_directions();
+  test_gomoku_ai_replies_on_tick_and_blocks_an_open_four();
+  test_gomoku_ai_completes_its_own_five_over_blocking();
+  test_gomoku_undo_takes_back_the_last_pair();
+  test_gomoku_cursor_clamps_and_rejects_occupied_cells();
+  test_gomoku_full_board_is_a_draw();
+  test_gomoku_ai_work_stays_bounded_from_an_empty_board();
   test_blocks_move_drop_and_game_over();
   test_snake_moves_eats_and_turns();
   test_flappy_flaps_scrolls_scores_and_restarts();

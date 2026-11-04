@@ -1,3 +1,10 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Locally modified adaptation of Waveshare's ESP32-P4-WIFI6-Touch-LCD-4.3 BSP.
+ * See this component's LICENSE and the repository's
+ * licenses/DEPENDENCY-LICENSE-NOTICE.md for upstream provenance and notices.
+ */
 #pragma once
 #include "esp_lcd_types.h"
 #include "esp_lcd_mipi_dsi.h"

@@ -53,7 +53,19 @@ export function normalizeUsbStatusPayload(status) {
   const capabilities = status?.capabilities && typeof status.capabilities === "object"
     ? status.capabilities
     : null;
+  // Connection IDs are native u64 values serialized as decimal strings. Never
+  // round them through Number, or substitute a local timestamp/generation.
+  const rawConnectionId = status?.connectionId;
+  const connectionId = status?.connected && typeof rawConnectionId === "string"
+    && /^[1-9][0-9]{0,19}$/.test(rawConnectionId)
+    && BigInt(rawConnectionId) <= 18446744073709551615n ? rawConnectionId : "";
+  const rawBootId = typeof status?.bootId === "string" && status.bootId
+    ? status.bootId : capabilities?.debugBootId;
+  const bootId = status?.connected && typeof rawBootId === "string"
+    && /^[0-9a-f]{16}$/.test(rawBootId) ? rawBootId : "";
   return {
+    connectionId,
+    bootId,
     connected: !!status?.connected,
     portName: status?.portName || "",
     baudRate: Number(status?.baudRate) || 0,
@@ -77,6 +89,8 @@ export function usbStatusSnapshotsEqual(left, right) {
     && left.portName === right.portName
     && left.baudRate === right.baudRate
     && left.boardDeviceId === right.boardDeviceId
+    && left.connectionId === right.connectionId
+    && left.bootId === right.bootId
     && left.runtime === right.runtime
     && left.deviceModel === right.deviceModel
     && left.firmware === right.firmware

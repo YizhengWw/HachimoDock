@@ -1,0 +1,1679 @@
+{
+  "schemaVersion": 1,
+  "profile": "p4-events-v1-internal-actions",
+  "queries": [
+    "event:done",
+    "event:other",
+    "ring",
+    "missing",
+    "ordinary",
+    "alarm.fake",
+    "event:bad:name"
+  ],
+  "vectors": [
+    {
+      "name": "subscriber has no physical event binding",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": true,
+      "internal": [
+        "event:done"
+      ]
+    },
+    {
+      "name": "emit allowlist does not create subscription",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "pet",
+            "emit": "done",
+            "inc": {
+              "n": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-send",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "pet",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "pet"
+        },
+        {
+          "action": "clear",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": true,
+      "internal": []
+    },
+    {
+      "name": "exact alarm target has no physical binding",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "ring",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "persist": {
+          "version": 1,
+          "vars": [
+            "remind_in",
+            "n"
+          ],
+          "states": {
+            "idle": "idle"
+          }
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "alarms": [
+          {
+            "id": "timer",
+            "at_ms_var": "remind_in",
+            "action": "ring",
+            "background": true,
+            "text": "Track C one minute"
+          }
+        ],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": true,
+      "internal": [
+        "ring"
+      ]
+    },
+    {
+      "name": "event profile is required",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "wrong event engine grants nothing",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "wrong",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "invalid event suffix grants nothing",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:bad:name",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "alarm target must name a transition",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "ring",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "persist": {
+          "version": 1,
+          "vars": [
+            "remind_in",
+            "n"
+          ],
+          "states": {
+            "idle": "idle"
+          }
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "alarms": [
+          {
+            "id": "timer",
+            "at_ms_var": "remind_in",
+            "action": "missing",
+            "background": true,
+            "text": "Track C one minute"
+          }
+        ],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "removed alarm declaration no longer exempts ring",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "ring",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "persist": {
+          "version": 1,
+          "vars": [
+            "remind_in",
+            "n"
+          ],
+          "states": {
+            "idle": "idle"
+          }
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "ordinary action is never exempt",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "ordinary",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": false,
+      "internal": [
+        "event:done"
+      ]
+    },
+    {
+      "name": "alarm-like prefix is not a declaration",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "alarm.fake",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": false,
+      "internal": [
+        "event:done"
+      ]
+    },
+    {
+      "name": "alarm persistence declaration required",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "ring",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "alarms": [
+          {
+            "id": "timer",
+            "at_ms_var": "remind_in",
+            "action": "ring",
+            "background": true,
+            "text": "Track C one minute"
+          }
+        ],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "alarm delay variable must exist",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "ring",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "persist": {
+          "version": 1,
+          "vars": [
+            "remind_in",
+            "n"
+          ],
+          "states": {
+            "idle": "idle"
+          }
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "alarms": [
+          {
+            "id": "timer",
+            "at_ms_var": "unknown",
+            "action": "ring",
+            "background": true,
+            "text": "Track C one minute"
+          }
+        ],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    },
+    {
+      "name": "declared touch action retains its existing binding path",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "clear",
+            "set": {
+              "n": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "event:done",
+            "inc": {
+              "n": 1
+            }
+          },
+          {
+            "from": "*",
+            "on": "ordinary",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": []
+        },
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-event-recv",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            },
+            {
+              "type": "button",
+              "x": 20,
+              "y": 200,
+              "w": 160,
+              "h": 40,
+              "color": 1234,
+              "font_size": 17,
+              "text": "Ordinary",
+              "action": "ordinary"
+            }
+          ]
+        },
+        "input": {
+          "engine": "p4-input-v1"
+        }
+      },
+      "buttons": [
+        {
+          "action": "clear",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "clear"
+        }
+      ],
+      "ok": true,
+      "internal": [
+        "event:done"
+      ]
+    },
+    {
+      "name": "invalid matching alarm action never gains exemption",
+      "runtime": {
+        "engine": "p4-bounded-runtime-v4",
+        "states": [
+          "idle"
+        ],
+        "initial_state": "idle",
+        "vars": {
+          "remind_in": {
+            "type": "int",
+            "init": 0
+          },
+          "n": {
+            "type": "int",
+            "init": 0
+          }
+        },
+        "transitions": [
+          {
+            "from": "*",
+            "on": "set",
+            "set": {
+              "remind_in": 60000
+            }
+          },
+          {
+            "from": "*",
+            "on": "cancel",
+            "set": {
+              "remind_in": 0
+            }
+          },
+          {
+            "from": "*",
+            "on": "bad target",
+            "inc": {
+              "n": 1
+            }
+          }
+        ],
+        "tick": [],
+        "events": {
+          "engine": "p4-events-v1",
+          "emit": [
+            "done",
+            "ping"
+          ]
+        },
+        "persist": {
+          "version": 1,
+          "vars": [
+            "remind_in",
+            "n"
+          ],
+          "states": {
+            "idle": "idle"
+          }
+        },
+        "surface": {
+          "engine": "p4-app-surface-v1",
+          "graphics": "p4-app-graphics-v1",
+          "bindings": "p4-variable-bindings-v1",
+          "background": 0,
+          "elements": [
+            {
+              "type": "panel",
+              "x": 0,
+              "y": 0,
+              "w": 640,
+              "h": 480,
+              "color": 4226
+            },
+            {
+              "type": "text",
+              "x": 340,
+              "y": 16,
+              "w": 290,
+              "h": 48,
+              "color": 65535,
+              "font_size": 18,
+              "bind": "title"
+            },
+            {
+              "type": "text",
+              "x": 360,
+              "y": 100,
+              "w": 260,
+              "h": 48,
+              "color": 65535,
+              "font_size": 24,
+              "bind": "metricValue"
+            },
+            {
+              "type": "text",
+              "x": 10,
+              "y": 420,
+              "w": 620,
+              "h": 40,
+              "color": 65535,
+              "font_size": 16,
+              "bind": "footer"
+            }
+          ]
+        },
+        "alarms": [
+          {
+            "id": "timer",
+            "at_ms_var": "remind_in",
+            "action": "bad target",
+            "background": true,
+            "text": "Track C one minute"
+          }
+        ],
+        "schema_version": 1,
+        "dashboard": {
+          "title": "private-cext-alarm",
+          "metricValue": {
+            "var": "n"
+          },
+          "footer": "Private Track C acceptance only; global key exits",
+          "visualStyle": "clean",
+          "visualPalette": "mono",
+          "visualLayout": "tool",
+          "visualSprite": "timer"
+        }
+      },
+      "buttons": [
+        {
+          "action": "set",
+          "control": "SW1",
+          "event": "button.sw1.short_press",
+          "label": "set"
+        },
+        {
+          "action": "cancel",
+          "control": "SW2",
+          "event": "button.sw2.short_press",
+          "label": "cancel"
+        }
+      ],
+      "ok": false,
+      "internal": []
+    }
+  ]
+}

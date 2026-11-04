@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "private": true,
+  "installed": false,
+  "published": false,
+  "deviceEvidence": false,
+  "authoringCapabilitiesAreNotDeviceReport": true,
+  "packages": [
+    {
+      "id": "private-cext-sequence",
+      "path": "private-cext-sequence",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": []
+    },
+    {
+      "id": "private-cext-sample",
+      "path": "private-cext-sample",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": [
+        {
+          "source": "pc/public/instruments/wooden-fish/knock.wav",
+          "asset": "assets/ding.wav",
+          "sha256": "e148ea46fb5c7f51d5e833986dfba51b077f8e8197335e0bf38a7642993bb355"
+        }
+      ]
+    },
+    {
+      "id": "private-cext-clip",
+      "path": "private-cext-clip",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": [
+        {
+          "source": "pc/public/terrier-clips/touch.lick.mp4",
+          "asset": "assets/intro.mp4",
+          "sha256": "dfed887d24279e0fa77dab40c2da02ac2464314590900ee6d421d28d5b317845"
+        }
+      ]
+    },
+    {
+      "id": "private-cext-big",
+      "path": "private-cext-big",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": [
+        {
+          "source": "firmware/assets/component-center/background.png",
+          "asset": "assets/map.png",
+          "sha256": "c730626d76c923f964ebcbc53ee3386c111061a8c50f7418bcac05ffa3cb23fe"
+        }
+      ]
+    },
+    {
+      "id": "private-cext-event-send",
+      "path": "private-cext-event-send",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": []
+    },
+    {
+      "id": "private-cext-event-recv",
+      "path": "private-cext-event-recv",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": []
+    },
+    {
+      "id": "private-cext-alarm",
+      "path": "private-cext-alarm",
+      "status": "offline-valid",
+      "validation_errors": [],
+      "assets": []
+    }
+  ]
+}

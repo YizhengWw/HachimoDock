@@ -8,6 +8,7 @@
  ******************************************************************************/
 
 #include "lvgl.h"
+#include "pet_p4_font_bitmap.h"
 
 #ifndef PET_P4_FONT_CN_16
 #define PET_P4_FONT_CN_16 1
@@ -20,6 +21,10 @@
  *----------------*/
 
 /*Store the image of the glyphs*/
+#if PET_FONT_BITMAP_PACKED
+#define PET_FONT_GLYPH_BITMAP pet_font_bitmap
+#else
+#define PET_FONT_GLYPH_BITMAP glyph_bitmap
 static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
     /* U+0020 " " */
     0x0,
@@ -125087,10 +125092,15 @@ static LV_ATTRIBUTE_LARGE_CONST const uint8_t glyph_bitmap[] = {
 };
 
 
+#endif /* Original, byte-identical glyph_bitmap for unpacked builds. */
 /*---------------------
  *  GLYPH DESCRIPTION
  *--------------------*/
 
+#if PET_FONT_METRICS_PACKED
+#define PET_FONT_GLYPH_METRICS pet_font_metrics
+#else
+#define PET_FONT_GLYPH_METRICS glyph_dsc
 static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 0, .adv_w = 0, .box_w = 0, .box_h = 0, .ofs_x = 0, .ofs_y = 0} /* id = 0 reserved */,
     {.bitmap_index = 0, .adv_w = 74, .box_w = 1, .box_h = 1, .ofs_x = 0, .ofs_y = 0},
@@ -146301,6 +146311,7 @@ static const lv_font_fmt_txt_glyph_dsc_t glyph_dsc[] = {
     {.bitmap_index = 554068, .adv_w = 256, .box_w = 2, .box_h = 15, .ofs_x = 7, .ofs_y = -1},
     {.bitmap_index = 554072, .adv_w = 256, .box_w = 9, .box_h = 12, .ofs_x = 3, .ofs_y = 0}
 };
+#endif /* Original, unchanged metric table for unpacked builds. */
 
 /*---------------------
  *  CHARACTER MAPPING
@@ -146674,6 +146685,9 @@ static const lv_font_fmt_txt_cmap_t cmaps[] =
 
 
 /*Map glyph_ids to kern left classes*/
+#if PET_FONT_METRICS_PACKED
+#define kern_left_class_mapping pet_font_kern_left
+#else
 static const uint8_t kern_left_class_mapping[] =
 {
     0, 0, 0, 1, 0, 0, 0, 2,
@@ -149328,8 +149342,12 @@ static const uint8_t kern_left_class_mapping[] =
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0
 };
+#endif
 
 /*Map glyph_ids to kern right classes*/
+#if PET_FONT_METRICS_PACKED
+#define kern_right_class_mapping pet_font_kern_right
+#else
 static const uint8_t kern_right_class_mapping[] =
 {
     0, 0, 0, 1, 0, 0, 0, 2,
@@ -151984,6 +152002,7 @@ static const uint8_t kern_right_class_mapping[] =
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0
 };
+#endif
 
 /*Kern values between classes*/
 static const int8_t kern_class_values[] =
@@ -152332,8 +152351,8 @@ static const lv_font_fmt_txt_dsc_t font_dsc = {
 #else
 static lv_font_fmt_txt_dsc_t font_dsc = {
 #endif
-    .glyph_bitmap = glyph_bitmap,
-    .glyph_dsc = glyph_dsc,
+    .glyph_bitmap = PET_FONT_GLYPH_BITMAP,
+    .glyph_dsc = PET_FONT_GLYPH_METRICS,
     .cmaps = cmaps,
     .kern_dsc = &kern_classes,
     .kern_scale = 16,

@@ -30,7 +30,13 @@ import {
   saveAgentAppearanceMap,
   saveEnabledAgents,
 } from "../lib/agent-appearance-config.js";
-import { applyDesktopPetAssignment } from "../lib/desktop-pet-assignment.js";
+import {
+  applyDesktopPetAssignment,
+  appearanceConfirmationRequired,
+  createDesktopPetIntentId,
+  APPEARANCE_SYNC_CANCELLED_MESSAGE,
+  FOLLOW_ASSIGNMENT_BUSY_MESSAGE,
+} from "../lib/desktop-pet-assignment.js";
 import { getAppearance, listAppearances } from "../lib/appearance-store.js";
 import { buildRealtimeChatStartInput, PERSONA_VOICE_UPDATED_EVENT } from "../lib/persona-voice.js";
 import { componentPetVoice, createComponentVoiceSync } from "../lib/component-pet-voice.js";
@@ -119,25 +125,34 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
     [activeComponentRevision, currentComponentTarget],
   );
   const [appearanceSync, setAppearanceSync] = useState(EMPTY_APPEARANCE_SYNC);
+  const [appearanceRecovery, setAppearanceRecovery] = useState(null);
   const appearanceSyncTokenRef = useRef(0);
+  const appearanceAssignmentOwnerRef = useRef(null);
+  const appearanceUsbRef = useRef(usb);
+  appearanceUsbRef.current = usb;
+  useEffect(() => () => { appearanceAssignmentOwnerRef.current = null; }, []);
   // 实时对话（2026-09-18）：Rust 持有会话，这里只镜像状态并把板端按键请求解析成当前形象。
   const [realtimeChat, setRealtimeChat] = useState({ active: false, state: "idle", error: "", reason: "" });
   const realtimeReconcilerRef = useRef(null);
 
-  // --- USB status poll (3s); serial auto-connect is owned by the Rust backend. ---
+  // --- USB status poll (3s) + event hints; Rust owns serial auto-connect. ---
   useEffect(() => {
     let cancelled = false;
     let inFlight = false;
     let slowWarningTimer = null;
+    let refreshPending = false;
+    let revision = 0;
+    const unlisteners = [];
     const check = async () => {
       if (cancelled || inFlight) return;
       inFlight = true;
+      const startedAt = revision;
       slowWarningTimer = setTimeout(() => {
         console.warn("[DeviceContext] usb_get_status is taking longer than expected");
       }, USB_STATUS_SLOW_WARNING_MS);
       try {
         const status = await invoke("usb_get_status");
-        if (cancelled) return;
+        if (cancelled || startedAt !== revision) return;
         const nextUsb = normalizeUsbStatusPayload(status);
         setUsb((currentUsb) => (
           usbStatusSnapshotsEqual(currentUsb, nextUsb) ? currentUsb : nextUsb
@@ -149,14 +164,44 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
         if (slowWarningTimer) clearTimeout(slowWarningTimer);
         slowWarningTimer = null;
         inFlight = false;
+        if (!cancelled && refreshPending) {
+          refreshPending = false;
+          void check();
+        }
       }
     };
+    const requestRefresh = () => {
+      if (cancelled) return;
+      // A hint invalidates an older read, never authorizes connection/identity.
+      revision += 1;
+      refreshPending = true;
+      if (!inFlight) {
+        refreshPending = false;
+        void check();
+      }
+    };
+    const retainListener = (stop) => {
+      if (cancelled) stop();
+      else unlisteners.push(stop);
+    };
+    listen("usb-message", (event) => {
+      const topic = event?.payload?.topic;
+      if (topic === "hello" || topic === "availability") requestRefresh();
+    }).then((stop) => {
+      retainListener(stop);
+      // Recover a status change between the initial query and subscription.
+      requestRefresh();
+    }).catch(() => {});
+    listen("usb-disconnected", requestRefresh).then(retainListener).catch(() => {});
     check();
     const id = setInterval(check, USB_STATUS_POLL_MS);
     return () => {
       cancelled = true;
+      revision += 1;
+      refreshPending = false;
       clearInterval(id);
       if (slowWarningTimer) clearTimeout(slowWarningTimer);
+      unlisteners.forEach((stop) => { try { stop(); } catch { /* already closed */ } });
     };
   }, []);
 
@@ -317,15 +362,32 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
 
   const applyDesktopPet = useCallback(
     async (agentId, appearance, options = {}) => {
+      if (appearanceAssignmentOwnerRef.current) throw new Error(FOLLOW_ASSIGNMENT_BUSY_MESSAGE);
       const { initialProgress, onProgress } = options;
       const syncToken = appearanceSyncTokenRef.current + 1;
       appearanceSyncTokenRef.current = syncToken;
+      const owner = {
+        token: syncToken,
+        intentId: createDesktopPetIntentId(),
+        boardDeviceId: usb.boardDeviceId || onlineBoardDeviceId || binding?.boardDeviceId || "",
+        connectionId: usb.connectionId || "",
+        bootId: usb.bootId || "",
+        cancelRequested: false,
+      };
+      appearanceAssignmentOwnerRef.current = owner;
+      const isCurrent = (intentId = owner.intentId) => appearanceAssignmentOwnerRef.current === owner
+        && intentId === owner.intentId && !owner.cancelRequested
+        && appearanceUsbRef.current.connected === true
+        && (!owner.boardDeviceId || appearanceUsbRef.current.boardDeviceId === owner.boardDeviceId)
+        && (!owner.connectionId || appearanceUsbRef.current.connectionId === owner.connectionId)
+        && (!owner.bootId || appearanceUsbRef.current.bootId === owner.bootId);
       const appearanceSyncMeta = {
         agentId,
         appearanceId: appearance?.id || "",
         appearanceName: appearance?.name || "",
       };
       const emitAppearanceSyncProgress = (progress) => {
+        if (appearanceAssignmentOwnerRef.current !== owner) return;
         setAppearanceSync((current) => ({
           pending: true,
           cancelling: current.cancelling,
@@ -334,14 +396,28 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
         }));
         onProgress?.(progress);
       };
-      emitAppearanceSyncProgress(initialProgress || {
-        text: appearance?.name
-          ? `正在切换到「${appearance.name}」，优先使用设备已有素材…`
-          : "正在切换形象，优先使用设备已有素材…",
-        percent: 0,
-      });
       const currentAppearanceId = currentDisplay.appearance?.id || "";
       try {
+        emitAppearanceSyncProgress({
+          ...initialProgress,
+          text: "正在确认…",
+          stage: "confirming",
+          followOnly: true,
+          indeterminate: true,
+          percent: 0,
+        });
+        // A fresh click after OTA/replug binds native status, not the previous
+        // 3-second UI poll. Once pinned, any later boot/generation change still
+        // cancels this intent; never retarget an operation already in progress.
+        const freshUsb = normalizeUsbStatusPayload(await invoke("usb_get_status"));
+        if (appearanceAssignmentOwnerRef.current !== owner || owner.cancelRequested
+          || !freshUsb.connected || !owner.boardDeviceId || freshUsb.boardDeviceId !== owner.boardDeviceId) {
+          throw appearanceConfirmationRequired();
+        }
+        owner.connectionId = freshUsb.connectionId;
+        owner.bootId = freshUsb.bootId;
+        appearanceUsbRef.current = freshUsb;
+        setUsb(freshUsb);
         const { nextMap, notice } = await applyDesktopPetAssignment({
           invoke,
           listen,
@@ -349,9 +425,11 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
           agentId,
           appearance,
           agentOptions,
-          boardDeviceId: usb.boardDeviceId || onlineBoardDeviceId || binding?.boardDeviceId || "",
+          boardDeviceId: owner.boardDeviceId,
           currentAppearanceId,
+          followIntentId: owner.intentId,
           onProgress: emitAppearanceSyncProgress,
+          isCurrent,
         });
         setAgentAppearanceMap(nextMap);
         const enabled = new Set(assignedAgentIds(nextMap, agentId));
@@ -359,8 +437,28 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
         setBridgeSelectedAgentId(agentId);
         saveAgentAppearanceMap(nextMap);
         saveEnabledAgents(enabled);
+        setAppearanceRecovery(current => current?.boardDeviceId === owner.boardDeviceId ? null : current);
         return { nextMap, notice };
+      } catch (error) {
+        if (error?.code === "appearance-confirmation-required" || error?.message === APPEARANCE_SYNC_CANCELLED_MESSAGE) {
+          setAppearanceRecovery({
+            boardDeviceId: owner.boardDeviceId,
+            phase: "needed",
+            checking: false,
+            message: "暂时无法确认设备状态，本次未切换。请检查连接后再试。",
+          });
+        }
+        // Profile persistence already completed in this explicitly reported
+        // partial outcome. Mirror it, while callers still show the bridge error.
+        const committed = error?.committedAssignment;
+        if (committed && appearanceAssignmentOwnerRef.current === owner) {
+          setAgentAppearanceMap(committed.nextMap);
+          setEnabledAgents(new Set(committed.enabledAgents));
+          setBridgeSelectedAgentId(committed.agentId);
+        }
+        throw error;
       } finally {
+        if (appearanceAssignmentOwnerRef.current === owner) appearanceAssignmentOwnerRef.current = null;
         if (appearanceSyncTokenRef.current === syncToken) {
           setAppearanceSync({
             pending: false,
@@ -371,13 +469,14 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
         }
       }
     },
-    [agentAppearanceMap, agentOptions, binding, currentDisplay, onlineBoardDeviceId, usb.boardDeviceId],
+    [agentAppearanceMap, agentOptions, binding, currentDisplay, onlineBoardDeviceId, usb.boardDeviceId, usb.connectionId, usb.bootId],
   );
 
   const cancelAppearanceSync = useCallback(async () => {
     if (!appearanceSync.pending || appearanceSync.cancelling) {
       return { requested: false };
     }
+    if (appearanceAssignmentOwnerRef.current) appearanceAssignmentOwnerRef.current.cancelRequested = true;
     setAppearanceSync((current) => ({
       ...current,
       cancelling: true,
@@ -524,6 +623,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       currentComponent,
       currentComponentTarget,
       appearanceSync,
+      appearanceRecovery,
       realtimeChat,
       usageHelp,
       setUsageHelp,
@@ -554,6 +654,7 @@ export function DeviceContextProvider({ binding: bindingProp, onBindingChange, c
       currentComponent,
       currentComponentTarget,
       appearanceSync,
+      appearanceRecovery,
       realtimeChat,
       usageHelp,
       startRealtimeChat,

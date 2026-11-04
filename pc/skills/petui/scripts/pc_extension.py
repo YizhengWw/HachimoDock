@@ -69,20 +69,27 @@ def extension_errors(e):
     try:
         obj(e, {"schemaVersion", "engine", "permissions", "search", "panel"}, {"discovery"})
         if type(e["schemaVersion"]) is not int or e["schemaVersion"] != 1 or e["engine"] != "pc-declarative-media-v1": raise ValueError("engine")
+        s=e["search"]
+        # A bundled pc/catalog.json replaces the remote search endpoint; rows stay a root array.
+        offline=isinstance(s,dict) and "catalog" in s
+        if offline and s["catalog"]!="pc/catalog.json": raise ValueError("catalog")
         p=e["permissions"];obj(p, {"networkHosts", "publicAudio", "storage"})
-        if p["publicAudio"] is not True or p["storage"] is not True or not isinstance(p["networkHosts"],list) or not 1 <= len(p["networkHosts"]) <= 4: raise ValueError("permissions")
+        if p["publicAudio"] is not True or p["storage"] is not True or not isinstance(p["networkHosts"],list) or not (0 if offline else 1) <= len(p["networkHosts"]) <= 4: raise ValueError("permissions")
         for h in p["networkHosts"]:
             text(h,253)
             if '.' not in h or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", x) for x in h.split('.')): raise ValueError("host")
             try: ipaddress.ip_address(h)
             except ValueError: pass
             else: raise ValueError("literal host")
-        s=e["search"];obj(s,{"endpoint", "queryParam", "params", "itemsPath", "fields"},{"browseQuery"})
+        obj(s,{"queryParam", "params", "itemsPath", "fields"},{"endpoint","browseQuery","catalog"})
         if s.get("browseQuery") is not None:
             text(s["browseQuery"],120)
             if len(s["browseQuery"])>30: raise ValueError("browseQuery")
-        u=url(s["endpoint"])
-        if u.scheme!='https' or u.query or u.hostname not in p["networkHosts"]: raise ValueError("scope")
+        if offline:
+            if s.get("endpoint","") or s["itemsPath"]!="": raise ValueError("offline search")
+        else:
+            u=url(s["endpoint"])
+            if u.scheme!='https' or u.query or u.hostname not in p["networkHosts"]: raise ValueError("scope")
         if not isinstance(s["params"],dict) or len(s["params"])>12 or s["queryParam"] in s["params"]: raise ValueError("params")
         for key in [s["queryParam"], *s["params"]]:
             if not re.fullmatch(r"[A-Za-z0-9_]{1,40}",key): raise ValueError("query")
@@ -92,17 +99,24 @@ def extension_errors(e):
         for v in f.values():
             if v is not None: pointer(v)
         if 'discovery' in e:
-            d=e['discovery'];obj(d,{'endpoints','locationEndpoint','cityField','countryField','country','aliases','stationRegion','popularity','votes','nationalCount','localSupplement','refreshSec','autoPlayOnEnter'})
-            if not isinstance(d['endpoints'],list) or not 1<=len(d['endpoints'])<=3:raise ValueError('endpoints')
-            for raw in [*d['endpoints'],d['locationEndpoint']]:
+            d=e['discovery'];obj(d,{'cityField','countryField','country','aliases','stationRegion','popularity','votes','nationalCount','localSupplement','refreshSec','autoPlayOnEnter'},{'endpoints','locationEndpoint','regionAliases'})
+            endpoints=d.get('endpoints',[]);location=d.get('locationEndpoint','')
+            if not isinstance(endpoints,list) or not isinstance(location,str):raise ValueError('endpoints')
+            # Offline catalogs carry no mirrors; remote discovery needs 1-3 mirrors and a location service.
+            if offline:
+                if endpoints:raise ValueError('offline endpoints')
+            elif not 1<=len(endpoints)<=3 or not location:raise ValueError('endpoints')
+            for raw in [*endpoints,*([location] if location else [])]:
                 u=url(raw)
                 if u.scheme!='https' or u.hostname not in p['networkHosts']:raise ValueError('scope')
             for k in ['cityField','countryField','stationRegion','popularity','votes']:pointer(d[k])
             if not re.fullmatch('[A-Z]{2}',d['country']) or type(d['autoPlayOnEnter']) is not bool:raise ValueError('policy')
             for k,lo,hi in [('nationalCount',1,100),('localSupplement',1,30),('refreshSec',3600,604800)]:
                 if type(d[k]) is not int or not lo<=d[k]<=hi:raise ValueError(k)
-            if not isinstance(d['aliases'],dict) or len(d['aliases'])>80:raise ValueError('aliases')
-            for a,b in d['aliases'].items():text(a,80);text(b,80)
+            for key in ('aliases','regionAliases'):
+                aliases=d.get(key,{})
+                if not isinstance(aliases,dict) or len(aliases)>80:raise ValueError(key)
+                for a,b in aliases.items():text(a,80);text(b,80)
             if s['itemsPath']!='':raise ValueError('discovery rows must be a root array')
         ui=e["panel"];obj(ui,{"title","description","searchPlaceholder","attribution","attributionUrl","sections"})
         for k,maximum in [("title",120),("description",1200),("searchPlaceholder",180),("attribution",120)]: text(ui[k],maximum)
@@ -111,4 +125,29 @@ def extension_errors(e):
         if not isinstance(sections,list) or not 1<=len(sections)<=5 or len(set(sections))!=len(sections) or set(sections)-{"search","library","history","volume","sleep"}: raise ValueError("sections")
     except (ValueError,TypeError,KeyError,AttributeError):
         return ["pc/extension.json 配置无效：需要受控域名、GET 搜索映射与声明式面板"]
+    return []
+
+
+CATALOG_MAX_BYTES = 512 * 1024
+CATALOG_MAX_ROWS = 2000
+
+
+def catalog_errors(raw):
+    """Bundled pc/catalog.json: a flat JSON array of objects with text/number/bool values, bounded."""
+    import json, math
+    if raw is None: return ["缺少 pc/catalog.json"]
+    if len(raw) > CATALOG_MAX_BYTES: return ["包内电台目录超过 512 KiB"]
+    try: rows = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError): return ["包内电台目录不是有效 JSON"]
+    if not isinstance(rows, list) or not 1 <= len(rows) <= CATALOG_MAX_ROWS: return [f"包内电台目录需要 1-{CATALOG_MAX_ROWS} 条对象"]
+    for row in rows:
+        if not isinstance(row, dict) or len(row) > 16: return ["包内电台目录的条目必须是最多 16 个字段的对象"]
+        for key, value in row.items():
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,40}", key): return ["包内电台目录的字段名无效"]
+            if isinstance(value, str):
+                # Match Rust char::is_control: C0 plus DEL/C1; ordinary Unicode
+                # separators/format characters remain accepted, as in native.
+                if any(0xD800 <= ord(c) <= 0xDFFF for c in value) or len(value.encode()) > 2048 or any(ord(c) < 32 or 0x7F <= ord(c) <= 0x9F for c in value): return ["包内电台目录的文本字段无效"]
+            elif isinstance(value, float) and not math.isfinite(value): return ["包内电台目录不是有效 JSON"]
+            elif value is not None and not isinstance(value, (bool, int, float)): return ["包内电台目录的条目只能包含文本、数字和布尔值"]
     return []

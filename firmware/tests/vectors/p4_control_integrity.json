@@ -1,0 +1,5 @@
+[
+  {"body":"{}","bytes":2,"hash":"5465b825"},
+  {"body":"{\"topic\":\"reply\",\"payload\":{\"count\":10}}","bytes":40,"hash":"efa5e556"},
+  {"body":"{\"topic\":\"hello\",\"payload\":{\"text\":\"中文😀\"}}","bytes":49,"hash":"7d2294a4"}
+]

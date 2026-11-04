@@ -1,0 +1,741 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-longtext-count-writers-v1",
+ "notes": "Minimal eight guest target rejections: transition main/else and tick main/then x set/inc, only when the variable is explicitly longtext.count_var. Three compatibility positives: baseline, read sources/conditions with existing persist/limits, and the same variable name without count_var ownership. Complete package recipes patch runtime/widget.json; no execution/projection synchronization changes.",
+ "bases": {
+  "reader": {
+   "schema_version": 1,
+   "engine": "p4-bounded-runtime-v4",
+   "vars": {
+    "page": {
+     "type": "int",
+     "init": 0
+    },
+    "pages": {
+     "type": "int",
+     "init": 1
+    },
+    "probe": {
+     "type": "int",
+     "init": 0
+    }
+   },
+   "states": [
+    "ready"
+   ],
+   "initial_state": "ready",
+   "pages": [
+    {
+     "id": "read"
+    }
+   ],
+   "initial_page": "read",
+   "input": {
+    "engine": "p4-input-v1"
+   },
+   "transitions": [
+    {
+     "from": "*",
+     "on": "next",
+     "inc": {
+      "page": 1
+     }
+    },
+    {
+     "from": "*",
+     "on": "prev",
+     "inc": {
+      "page": -1
+     }
+    }
+   ],
+   "tick": [],
+   "dashboard": {
+    "title": "Reader",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+   },
+   "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "bindings": "p4-variable-bindings-v1",
+    "background": 0,
+    "texts": [
+     {
+      "id": "body",
+      "text": "a\nb\nc\nd\ne\nf\ng\nh"
+     }
+    ],
+    "elements": [
+     {
+      "type": "longtext",
+      "x": 0,
+      "y": 0,
+      "w": 640,
+      "h": 40,
+      "color": 65535,
+      "text_id": "body",
+      "page_var": "page",
+      "count_var": "pages",
+      "font_size": 16,
+      "line_height": 20
+     }
+    ]
+   },
+   "logic": "p4-logic-v1"
+  },
+  "unowned": {
+   "schema_version": 1,
+   "engine": "p4-bounded-runtime-v4",
+   "vars": {
+    "page": {
+     "type": "int",
+     "init": 0
+    },
+    "pages": {
+     "type": "int",
+     "init": 1
+    },
+    "probe": {
+     "type": "int",
+     "init": 0
+    }
+   },
+   "states": [
+    "ready"
+   ],
+   "initial_state": "ready",
+   "pages": [
+    {
+     "id": "read"
+    }
+   ],
+   "initial_page": "read",
+   "input": {
+    "engine": "p4-input-v1"
+   },
+   "transitions": [
+    {
+     "from": "*",
+     "on": "next",
+     "inc": {
+      "page": 1
+     }
+    },
+    {
+     "from": "*",
+     "on": "prev",
+     "inc": {
+      "page": -1
+     }
+    }
+   ],
+   "tick": [],
+   "dashboard": {
+    "title": "Reader",
+    "visualStyle": "clean",
+    "visualPalette": "mono",
+    "visualLayout": "tool",
+    "visualSprite": "gauge"
+   },
+   "surface": {
+    "engine": "p4-app-surface-v1",
+    "graphics": "p4-app-graphics-v1",
+    "bindings": "p4-variable-bindings-v1",
+    "background": 0,
+    "texts": [
+     {
+      "id": "body",
+      "text": "a\nb\nc\nd\ne\nf\ng\nh"
+     }
+    ],
+    "elements": [
+     {
+      "type": "longtext",
+      "x": 0,
+      "y": 0,
+      "w": 640,
+      "h": 40,
+      "color": 65535,
+      "text_id": "body",
+      "page_var": "page",
+      "font_size": 16,
+      "line_height": 20
+     }
+    ]
+   },
+   "logic": "p4-logic-v1"
+  }
+ },
+ "packages": {
+  "reader": {
+   "component.json": {
+    "id": "phase2-contract",
+    "name": "Contract",
+    "version": "1.0.0",
+    "kind": "tool",
+    "description": "Bounded contract fixture"
+   },
+   "negative-screen.json": {
+    "dashboard": {
+     "title": "Reader",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "gauge"
+    }
+   },
+   "runtime/widget.json": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "vars": {
+     "page": {
+      "type": "int",
+      "init": 0
+     },
+     "pages": {
+      "type": "int",
+      "init": 1
+     },
+     "probe": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "pages": [
+     {
+      "id": "read"
+     }
+    ],
+    "initial_page": "read",
+    "input": {
+     "engine": "p4-input-v1"
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "next",
+      "inc": {
+       "page": 1
+      }
+     },
+     {
+      "from": "*",
+      "on": "prev",
+      "inc": {
+       "page": -1
+      }
+     }
+    ],
+    "tick": [],
+    "dashboard": {
+     "title": "Reader",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "gauge"
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "texts": [
+      {
+       "id": "body",
+       "text": "a\nb\nc\nd\ne\nf\ng\nh"
+      }
+     ],
+     "elements": [
+      {
+       "type": "longtext",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 40,
+       "color": 65535,
+       "text_id": "body",
+       "page_var": "page",
+       "count_var": "pages",
+       "font_size": 16,
+       "line_height": 20
+      }
+     ]
+    },
+    "logic": "p4-logic-v1"
+   },
+   "buttons.json": [
+    {
+     "event": "button.sw1.short_press",
+     "action": "next",
+     "control": "sw1",
+     "label": "next"
+    },
+    {
+     "event": "button.sw2.short_press",
+     "action": "prev",
+     "control": "sw2",
+     "label": "prev"
+    }
+   ],
+   "share.json": {
+    "title": "Contract"
+   }
+  },
+  "unowned": {
+   "component.json": {
+    "id": "phase2-contract",
+    "name": "Contract",
+    "version": "1.0.0",
+    "kind": "tool",
+    "description": "Bounded contract fixture"
+   },
+   "negative-screen.json": {
+    "dashboard": {
+     "title": "Reader",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "gauge"
+    }
+   },
+   "runtime/widget.json": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "vars": {
+     "page": {
+      "type": "int",
+      "init": 0
+     },
+     "pages": {
+      "type": "int",
+      "init": 1
+     },
+     "probe": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "pages": [
+     {
+      "id": "read"
+     }
+    ],
+    "initial_page": "read",
+    "input": {
+     "engine": "p4-input-v1"
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "next",
+      "inc": {
+       "page": 1
+      }
+     },
+     {
+      "from": "*",
+      "on": "prev",
+      "inc": {
+       "page": -1
+      }
+     }
+    ],
+    "tick": [],
+    "dashboard": {
+     "title": "Reader",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "gauge"
+    },
+    "surface": {
+     "engine": "p4-app-surface-v1",
+     "graphics": "p4-app-graphics-v1",
+     "bindings": "p4-variable-bindings-v1",
+     "background": 0,
+     "texts": [
+      {
+       "id": "body",
+       "text": "a\nb\nc\nd\ne\nf\ng\nh"
+      }
+     ],
+     "elements": [
+      {
+       "type": "longtext",
+       "x": 0,
+       "y": 0,
+       "w": 640,
+       "h": 40,
+       "color": 65535,
+       "text_id": "body",
+       "page_var": "page",
+       "font_size": 16,
+       "line_height": 20
+      }
+     ]
+    },
+    "logic": "p4-logic-v1"
+   },
+   "buttons.json": [
+    {
+     "event": "button.sw1.short_press",
+     "action": "next",
+     "control": "sw1",
+     "label": "next"
+    },
+    {
+     "event": "button.sw2.short_press",
+     "action": "prev",
+     "control": "sw2",
+     "label": "prev"
+    }
+   ],
+   "share.json": {
+    "title": "Contract"
+   }
+  }
+ },
+ "cases": [
+  {
+   "name": "independent-derived-baseline",
+   "base": "reader",
+   "ok": true,
+   "patches": []
+  },
+  {
+   "name": "reject-main-set-literal",
+   "base": "reader",
+   "branch": "main",
+   "op": "set",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "gte",
+       "value": 1
+      },
+      "set": {
+       "pages": 99
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "reject-main-inc-literal",
+   "base": "reader",
+   "branch": "main",
+   "op": "inc",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "gte",
+       "value": 1
+      },
+      "inc": {
+       "pages": 1
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "reject-else-set-literal",
+   "base": "reader",
+   "branch": "else",
+   "op": "set",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "lt",
+       "value": 1
+      },
+      "else": {
+       "set": {
+        "pages": 99
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "reject-else-inc-literal",
+   "base": "reader",
+   "branch": "else",
+   "op": "inc",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "lt",
+       "value": 1
+      },
+      "else": {
+       "inc": {
+        "pages": 1
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "reject-tick-set-literal",
+   "base": "reader",
+   "branch": "tick",
+   "op": "set",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "tick"
+     ],
+     "value": [
+      {
+       "every_ms": 100,
+       "set": {
+        "pages": 99
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "reject-tick-inc-literal",
+   "base": "reader",
+   "branch": "tick",
+   "op": "inc",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "tick"
+     ],
+     "value": [
+      {
+       "every_ms": 100,
+       "inc": {
+        "pages": 1
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "reject-then-set-literal",
+   "base": "reader",
+   "branch": "then",
+   "op": "set",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "tick"
+     ],
+     "value": [
+      {
+       "every_ms": 100,
+       "when": {
+        "var": "pages",
+        "lte": 1000
+       },
+       "then": {
+        "set": {
+         "pages": 99
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "reject-then-inc-literal",
+   "base": "reader",
+   "branch": "then",
+   "op": "inc",
+   "ok": false,
+   "patches": [
+    {
+     "path": [
+      "tick"
+     ],
+     "value": [
+      {
+       "every_ms": 100,
+       "when": {
+        "var": "pages",
+        "lte": 1000
+       },
+       "then": {
+        "inc": {
+         "pages": 1
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "allow-read-sources-conditions-persist-limits",
+   "base": "reader",
+   "ok": true,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "gte",
+       "value": 1
+      },
+      "set": {
+       "probe": {
+        "var": "pages"
+       }
+      },
+      "else": {
+       "inc": {
+        "probe": {
+         "var": "pages"
+        }
+       }
+      }
+     }
+    },
+    {
+     "path": [
+      "tick"
+     ],
+     "value": [
+      {
+       "every_ms": 100,
+       "set": {
+        "probe": {
+         "var": "pages"
+        }
+       },
+       "when": {
+        "var": "pages",
+        "lte": 1000
+       },
+       "then": {
+        "inc": {
+         "probe": {
+          "var": "pages"
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "path": [
+      "persist"
+     ],
+     "value": {
+      "version": 1,
+      "vars": [
+       "pages"
+      ],
+      "states": {
+       "ready": "ready"
+      }
+     }
+    },
+    {
+     "path": [
+      "limits"
+     ],
+     "value": {
+      "pages": [
+       0,
+       100
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "allow-unowned-main-set",
+   "base": "unowned",
+   "branch": "main",
+   "op": "set",
+   "ok": true,
+   "patches": [
+    {
+     "path": [
+      "transitions",
+      0
+     ],
+     "value": {
+      "from": "*",
+      "on": "next",
+      "when": {
+       "var": "pages",
+       "op": "gte",
+       "value": 1
+      },
+      "set": {
+       "pages": 99
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

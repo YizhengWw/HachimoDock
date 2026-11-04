@@ -1,6 +1,7 @@
 /**
- * [Input] Device and bundled firmware version strings such as `0.7.34-p4`.
- * [Output] Numeric comparison plus update/latest/unknown sidebar disposition.
+ * [Input] Device and bundled firmware version strings such as `0.7.34-p4` or `0.7.103-p4-r144`.
+ * [Output] Numeric comparison (the `-rNNN` build revision breaks ties between equal
+ *          numeric cores) plus update/latest/unknown sidebar disposition.
  * [Pos] Pure firmware-version helper in pc/src/lib.
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
@@ -10,6 +11,14 @@ export function parseFirmwareVersion(value) {
   const core = normalized.split("-", 1)[0];
   if (!/^\d+(?:\.\d+){0,3}$/.test(core)) return null;
   return core.split(".").map(Number);
+}
+
+// Build revision `-rNNN` of a P4 label (`0.7.103-p4-r144`, `0.7.103-p4-r142-framework`).
+// Labels without one (`0.7.34-p4`) count as revision 0 so a revisioned build of the
+// same numeric core is newer than an unrevisioned one.
+export function parseFirmwareRevision(value) {
+  const match = /-r(\d{1,6})(?:-|$)/.exec(String(value || "").trim());
+  return match ? Number(match[1]) : 0;
 }
 
 export function compareFirmwareVersions(left, right) {
@@ -22,6 +31,9 @@ export function compareFirmwareVersions(left, right) {
     if (delta < 0) return -1;
     if (delta > 0) return 1;
   }
+  const revisionDelta = parseFirmwareRevision(left) - parseFirmwareRevision(right);
+  if (revisionDelta < 0) return -1;
+  if (revisionDelta > 0) return 1;
   return 0;
 }
 

@@ -172,24 +172,26 @@ fn device_state_payload(event: &str, payload: &Value) -> Option<Value> {
             (
                 if running { "working" } else { "idle" },
                 if running {
-                    "DeepSeek Harness 工作中"
+                    "工作中"
                 } else {
-                    "DeepSeek Harness 待机"
+                    "休息中"
                 },
                 "session",
             )
         }
         "turn" => match payload.get("phase").and_then(Value::as_str) {
-            Some("start") => ("working", "DeepSeek Harness 工作中", "turn/start"),
-            Some("end") => ("done", "DeepSeek Harness 已完成", "turn/end"),
+            Some("start") => ("working", "工作中", "turn/start"),
+            Some("end") => ("done", "已完成", "turn/end"),
             _ => return None,
         },
         "tool" => match payload.get("phase").and_then(Value::as_str) {
-            Some("start") => ("tool_running", "DeepSeek Harness 调用工具", "tool/start"),
-            Some("end") => ("working", "DeepSeek Harness 处理中", "tool/end"),
+            Some("start") => ("tool_running", "调用工具", "tool/start"),
+            Some("end") => ("working", "处理中", "tool/end"),
             _ => return None,
         },
-        "session-title" => ("idle", "DeepSeek Harness", "session/title"),
+        // Title updates are metadata, not lifecycle transitions. Session
+        // discovery retains titles separately; do not turn an active pet idle.
+        "session-title" => return None,
         _ => return None,
     };
     let mut output = serde_json::Map::new();
@@ -710,6 +712,15 @@ mod tests {
             "done"
         );
         assert!(device_state_payload("approval", &json!({})).is_none());
+    }
+
+    #[test]
+    fn session_title_metadata_never_replaces_pet_lifecycle() {
+        let metadata = json!({"sessionId":"a", "title":"DeepSeek Harness", "session":{"id":"a","status":"running"}});
+        assert!(device_state_payload("session-title", &metadata).is_none());
+        let working = device_state_payload("turn", &json!({"sessionId":"a","phase":"start"})).unwrap();
+        assert_eq!(working["statusText"], "工作中");
+        assert_eq!(working["state"], "working");
     }
 
     #[test]

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "name":"negative preview delta cannot rewind the monotonic clock",
+      "runtime":{"initial_state":"idle","states":["idle"],"vars":{"count":{"type":"int","init":0}},"transitions":[],"tick":[{"every_ms":1000,"inc":{"count":1}}]},
+      "events":[{"ms":-1000},{"ms":1000}],
+      "expected":{"state":"idle","page":"","vars":{"count":1}}
+    },
+    {
+      "name": "global timer remains active after a state transition",
+      "runtime": {"initial_state":"idle","states":["idle","run"],"vars":{"count":{"type":"int","init":0}},"transitions":[{"from":"idle","on":"start","to":"run"}],"tick":[{"every_ms":1000,"inc":{"count":1}}]},
+      "events": [{"ms":1000},{"action":"start"},{"ms":5000}],
+      "expected": {"state":"run","page":"","vars":{"count":6}}
+    },
+    {
+      "name": "scoped timers discard inactive elapsed time",
+      "runtime": {"initial_state":"idle","states":["idle","run"],"vars":{"count":{"type":"int","init":0}},"transitions":[{"from":"idle","on":"start","to":"run"},{"from":"run","on":"stop","to":"idle"}],"tick":[{"every_ms":1000,"while_state":"run","inc":{"count":1}}]},
+      "events": [{"ms":5000},{"action":"start"},{"ms":2000},{"action":"stop"},{"ms":5000}],
+      "expected": {"state":"idle","page":"","vars":{"count":2}}
+    },
+    {
+      "name": "completion runs once and restarts reset timer epochs",
+      "runtime": {"initial_state":"idle","states":["idle","run","done"],"vars":{"left":{"type":"int","init":3},"count":{"type":"int","init":0}},"transitions":[{"from":"idle","on":"start","to":"run"},{"from":"done","on":"start","to":"run","set":{"left":3}}],"tick":[{"every_ms":1000,"while_state":"run","inc":{"left":-1},"when":{"var":"left","lte":0},"then":{"to":"done","inc":{"count":1}}}]},
+      "events": [{"action":"start"},{"ms":3000},{"ms":10000},{"action":"start"},{"ms":1000}],
+      "expected": {"state":"run","page":"","vars":{"left":2,"count":1}}
+    },
+    {
+      "name": "set copies the pre-effect variable snapshot before increment",
+      "runtime": {"initial_state":"idle","states":["idle"],"vars":{"a":{"type":"int","init":5},"b":{"type":"int","init":9}},"transitions":[{"from":"*","on":"swap","set":{"a":{"var":"b"},"b":{"var":"a"}},"inc":{"a":1}}],"tick":[]},
+      "events": [{"action":"swap"}],
+      "expected": {"state":"idle","page":"","vars":{"a":10,"b":5}}
+    },
+    {
+      "name": "integer effects respect global and declared bounds",
+      "runtime": {"initial_state":"idle","states":["idle"],"vars":{"a":{"type":"int","init":999999999},"b":{"type":"int","init":4}},"limits":{"b":[0,5]},"transitions":[{"from":"*","on":"add","inc":{"a":4,"b":4}}],"tick":[]},
+      "events": [{"action":"add"}],
+      "expected": {"state":"idle","page":"","vars":{"a":1000000000,"b":5}}
+    },
+    {
+      "name": "page navigation wraps in both directions",
+      "runtime": {"initial_state":"idle","states":["idle"],"initial_page":"one","pages":[{"id":"one"},{"id":"two"}],"vars":{},"transitions":[{"from":"*","on":"next","page":"next"},{"from":"*","on":"back","page":"prev"}],"tick":[]},
+      "events": [{"action":"next"},{"action":"next"},{"action":"back"}],
+      "expected": {"state":"idle","page":"two","vars":{}}
+    },
+    {
+      "name": "one advance performs at most ten timer steps",
+      "runtime": {"initial_state":"idle","states":["idle"],"vars":{"count":{"type":"int","init":0}},"transitions":[],"tick":[{"every_ms":1000,"inc":{"count":1}}]},
+      "events": [{"ms":100000}],
+      "expected": {"state":"idle","page":"","vars":{"count":10}}
+    }
+  ]
+}

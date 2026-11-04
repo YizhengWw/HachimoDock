@@ -10,6 +10,7 @@ OPERATIONS={
     'weather':{'refresh','todo','details','choose_city','previous','next'},
     'notes':{'record','save','todo','delete','previous','next'},
     'todos':{'open','toggle','filter','previous','next','up','down','row_a','row_b','row_c','row_d','row_e'},
+    'hotkeys':{'profile','key_1','key_2','key_3','key_4','key_5','key_6'},
     'knowledge':{'speak','favorite','previous','next','random','category'},
     'books':{'previous','next','random','category'},
     'news':{'refresh','toggle','previous','next','up','down'},
@@ -18,8 +19,40 @@ OPERATIONS={
 }
 def bounded_string(value,limit):
     return isinstance(value,str) and bool(value.strip()) and len(value.encode())<=limit and not any(ord(c)<32 or 127<=ord(c)<=159 for c in value)
-def application_errors(value,runtime):
+HOTKEY_MODIFIERS={'ctrl','shift','alt','cmd'}
+HOTKEY_NAMED={'f1','f2','f3','f4','f5','f6','f7','f8','f9','f10','f11','f12','enter','esc','tab','space','backspace','delete','up','down','left','right','home','end','pageup','pagedown','minus','equal','comma','period','slash','semicolon','quote','backquote','lbracket','rbracket','backslash'}
+def hotkey_chord_valid(parts):
+    if not isinstance(parts,list) or not 1<=len(parts)<=4 or not all(isinstance(p,str) for p in parts):return False
+    key=parts[-1].lower();mods=[m.lower() for m in parts[:-1]]
+    if not ((len(key)==1 and key in 'abcdefghijklmnopqrstuvwxyz0123456789') or key in HOTKEY_NAMED):return False
+    return all(m in HOTKEY_MODIFIERS for m in mods) and len(set(mods))==len(mods)
+def hotkeys_profile_errors(content):
+    def text(v,n):return isinstance(v,str) and v.strip() and len(v.encode())<=n and not any(ord(c)<32 or ord(c)==127 for c in v)
     try:
+        assert isinstance(content,list) and 1<=len(content)<=4
+        ids=set()
+        for p in content:
+            assert isinstance(p,dict) and set(p)=={'id','title','keys'}
+            assert re.fullmatch(r'[a-z0-9-]{1,24}',p['id']) and p['id'] not in ids;ids.add(p['id'])
+            assert text(p['title'],30) and isinstance(p['keys'],list) and 1<=len(p['keys'])<=6
+            for k in p['keys']:
+                assert isinstance(k,dict) and set(k)=={'label','chord'} and text(k['label'],30) and hotkey_chord_valid(k['chord'])
+        return []
+    except (AssertionError,KeyError,TypeError,ValueError,AttributeError):return ['hotkeys 场景声明无效：1-4 个场景，每个 1-6 个白名单组合键']
+
+def application_errors(value,runtime):
+    if isinstance(value,dict) and value.get('engine')=='pc-service-bridge-v1':
+        from service_bridge import bridge_errors
+        return bridge_errors(value,runtime)
+    if isinstance(runtime,dict) and 'services' in runtime.get('surface',{}):return ['服务桥界面需要 pc-service-bridge-v1 声明']
+    if isinstance(value,dict) and value.get('engine') in ('pc-app-composition-v1','pc-app-composition-v2','pc-app-composition-v3'):
+        from app_composition import composition_errors
+        return composition_errors(value,runtime)
+    if isinstance(value,dict) and value.get('engine')=='pc-fetch-v1':
+        from pc_fetch import fetch_errors
+        return fetch_errors(value,runtime)
+    try:
+        assert 'collection_view' not in runtime.get('surface',{})
         assert isinstance(value,dict) and set(value)<={'schemaVersion','engine','service','actions','content','location','autoRead'}
         assert type(value['schemaVersion']) is int and value['schemaVersion']==1 and value['engine'] in ('pc-app-services-v1','pc-app-services-v2','pc-app-services-v3','pc-app-calendar-v1','pc-app-books-v1','pc-app-news-v1')
         service=value['service'];assert service in OPERATIONS
@@ -53,6 +86,14 @@ def application_errors(value,runtime):
         assert {r['on'] for r in runtime['transitions']}==set(actions)
         assert all(set(r)=={'from','on'} and r['from']=='*' for r in runtime['transitions'])
         content=value.get('content',[])
+        if service=='hotkeys':
+            # Mirror hotkeys::validate_profiles: 1-4 profiles, 1-6 whitelisted chords each.
+            hotkey_errors=hotkeys_profile_errors(content)
+            if hotkey_errors:return hotkey_errors
+            keys=min(len(p['keys']) for p in content)
+            assert 'profile' in actions.values()
+            assert all(1<=int(v[4:])<=keys for v in actions.values() if v.startswith('key_'))
+            return []
         if news:
             assert input_v1 and set(actions.values())==OPERATIONS['news']
             assert isinstance(content,list) and len(content)==3

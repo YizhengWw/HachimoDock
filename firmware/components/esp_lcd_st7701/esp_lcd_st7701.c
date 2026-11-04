@@ -13,6 +13,20 @@
 
 static const char *TAG = "st7701";
 
+#if SOC_MIPI_DSI_SUPPORTED
+esp_err_t esp_lcd_new_panel_st7701_mipi_only(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config,
+                                          esp_lcd_panel_handle_t *ret_panel)
+{
+    ESP_LOGI(TAG, "version: %d.%d.%d", ESP_LCD_ST7701_VER_MAJOR, ESP_LCD_ST7701_VER_MINOR, ESP_LCD_ST7701_VER_PATCH);
+    ESP_RETURN_ON_FALSE(panel_dev_config && ret_panel, ESP_ERR_INVALID_ARG, TAG, "Invalid arguments");
+    st7701_vendor_config_t *vendor_config = (st7701_vendor_config_t *)panel_dev_config->vendor_config;
+    ESP_RETURN_ON_FALSE(vendor_config, ESP_ERR_INVALID_ARG, TAG, "`vendor_config` is necessary");
+    ESP_RETURN_ON_FALSE(vendor_config->flags.use_mipi_interface, ESP_ERR_INVALID_ARG, TAG, "MIPI interface is necessary");
+
+    return esp_lcd_new_panel_st7701_mipi(io, panel_dev_config, ret_panel);
+}
+#endif
+
 esp_err_t esp_lcd_new_panel_st7701(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config,
                                    esp_lcd_panel_handle_t *ret_panel)
 {

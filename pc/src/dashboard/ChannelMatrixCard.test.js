@@ -136,7 +136,8 @@ test("Follow-only switches are not presented as appearance transfers", () => {
   assert.match(source, /const followOnly = appearance\.id === currentDisplay\.appearance\?\.id/);
   assert.match(source, /syncProgress\.followOnly \? "正在切换跟随" : "正在切换形象"/);
   assert.match(source, /\{!syncProgress\.followOnly && <Button/);
-  assert.match(source, /沿用设备当前的「\{appearanceName\}」，无需重新传输素材/);
+  assert.match(source, /text: "正在确认…"/);
+  assert.match(source, /initialProgress: followOnly/);
   // Pre-transfer device steps sweep instead of freezing at 0%.
   assert.match(source, /syncProgress\.indeterminate \? "准备中"/);
   assert.match(extractCssRule(styles, ".channel-matrix-sync__bar.is-indeterminate > span"), /animation:/);

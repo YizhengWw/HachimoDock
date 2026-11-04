@@ -20,7 +20,7 @@ if(c.kind==='deck'){
     }ok(reached.size===c.groups[group].items.length);
     if(Object.values(c.actions).includes('exclude')){
       for(let i=0;i<c.groups[group].items.length;i++){action('exclude');if(i<c.groups[group].items.length-1)advance();}ok(s.local.phase===4);
-      action('draw');ok(s.local.phase===4);action('reset');ok(s.vars[`local${1+2*group}`]===0);action('draw');advance();ok(s.local.phase===2);
+      action('draw');ok(s.local.phase===4);action('reset');ok(s.vars[`local${1+2*group}`]===0);if(c.groups.some(g=>g.items.length>24)){ok(s.vars[`local${7+2*group}`]===0);ok(s.vars[`local${8+2*group}`]===0);}action('draw');advance();ok(s.local.phase===2);
     }
   }
   if(Object.values(c.actions).includes('close')){action('draw');action('close');advance();ok(s.local.phase===0);}

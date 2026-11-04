@@ -35,6 +35,8 @@ use crate::volcengine_asr::{StreamingSpeechEvent, StreamingSpeechRecognizer};
 
 #[path = "realtime_barge.rs"]
 mod barge_policy;
+#[path = "realtime_audio_ack.rs"]
+mod audio_ack;
 
 pub const STATE_EVENT: &str = "realtime-chat-state";
 pub const REQUEST_EVENT: &str = "realtime-chat-request";
@@ -120,6 +122,7 @@ pub struct RealtimeChatStatus {
     pub turns: u32,
     pub search_state: String,
     pub search_error: String,
+    pub device_stop_state: String,
 }
 
 fn clear_search(status: &mut RealtimeChatStatus) {
@@ -144,9 +147,19 @@ enum Input {
     Pcm(Vec<u8>, Option<bool>),
 }
 
+struct CaptureTransport {
+    usb: UsbSerialManager,
+    connection: String,
+    boot: String,
+}
+
 struct Session {
     id: String,
     board_device_id: String,
+    transport: Option<CaptureTransport>,
+    capture_stream: Mutex<Option<String>>,
+    audio_requests: Arc<Mutex<audio_ack::Requests>>,
+    audio_egress: Mutex<()>,
     cancelled: AtomicBool,
     duplex: AtomicBool,
     capture_armed: AtomicBool,
@@ -183,9 +196,19 @@ fn active_slot() -> &'static Mutex<Option<Arc<Session>>> {
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-fn active_session() -> Option<Arc<Session>> {
-    active_slot().lock().ok().and_then(|slot| slot.clone())
-        .filter(|session| session.status.lock().map(|s| s.active).unwrap_or(false))
+fn refresh_device_stop_metadata(session:&Session){
+    let confirmed=session.audio_requests.lock().map(|r|r.stopped()).unwrap_or(false);
+    if confirmed&&session.cancelled.load(Ordering::SeqCst){
+        if let Ok(mut status)=session.status.lock(){status.active=false;status.state="ended".into();status.device_stop_state="acknowledged_idle_observed".into();}
+    }
+}
+fn active_session()->Option<Arc<Session>>{
+    let session=active_slot().lock().ok().and_then(|slot|slot.clone())?;
+    // A late exact stop ACK/status can resolve an earlier unknown without
+    // another physical send. No new owner is admitted before this actual proof.
+    refresh_device_stop_metadata(&session);
+    let active=session.status.lock().map(|s|s.active).unwrap_or(false);
+    active.then_some(session)
 }
 
 fn now_ms() -> u64 {
@@ -194,16 +217,28 @@ fn now_ms() -> u64 {
 
 pub fn status() -> RealtimeChatStatus {
     match active_slot().lock().ok().and_then(|slot| slot.clone()) {
-        Some(session) => session.status.lock().map(|s| s.clone()).unwrap_or_default(),
+        Some(session) => {refresh_device_stop_metadata(&session);session.status.lock().map(|s|s.clone()).unwrap_or_default()},
         None => RealtimeChatStatus::default(),
     }
 }
 
 fn publish(app: &AppHandle, session: &Session, update: impl FnOnce(&mut RealtimeChatStatus)) {
+    let Ok(owner) = active_slot().lock() else { return; };
+    if !owner.as_ref().is_some_and(|current| std::ptr::eq(current.as_ref(), session)) { return; }
     let snapshot = match session.status.lock() {
         Ok(mut status) => {
             let previous = status.state.clone();
-            update(&mut status);
+            let mut next = status.clone();
+            update(&mut next);
+            if session.cancelled.load(Ordering::SeqCst) {
+                let ended=!next.active&&next.state=="ended";
+                let stopping=next.active&&matches!(next.state.as_str(),"stopping"|"stop_unconfirmed");
+                if !ended&&!stopping { return; }
+                if stopping&&status.device_stop_state=="acknowledged_idle_observed"{return;}
+                next.reason = status.reason.clone();
+                next.error = status.error.clone();
+            }
+            *status = next;
             if status.state != previous {
                 diagnostics::record(&session.id, "state", json!({"state": status.state, "turn": status.turns}));
             }
@@ -211,19 +246,79 @@ fn publish(app: &AppHandle, session: &Session, update: impl FnOnce(&mut Realtime
         }
         Err(_) => return,
     };
+    drop(owner); // Never hold the lifecycle mutex across external event handlers.
+    if !active_slot().lock().ok().is_some_and(|slot| slot.as_ref()
+        .is_some_and(|current| std::ptr::eq(current.as_ref(), session))) { return; }
     let _ = app.emit(STATE_EVENT, &snapshot);
 }
 
 fn send_board(usb: &UsbSerialManager, board: &str, topic: &str, payload: Value) {
-    if let Err(error) = usb.send_to_board(board, topic, &payload) {
+    let owned = active_session().filter(|s| s.board_device_id == board
+        && payload["sessionId"].as_str().is_some_and(|id| id == s.id || id.starts_with(&format!("{}-", s.id))));
+    let result = if let Some(session) = owned {
+        send_session_board(usb, &session, topic, &payload)
+    } else if payload["sessionId"].as_str().is_some_and(|id| id.starts_with("rtc-")) {
+        return; // Retired realtime UI/playback callbacks cannot target a successor.
+    } else { usb.send_to_board(board, topic, &payload) };
+    if let Err(error) = result {
         eprintln!("[realtime-chat] send {topic} failed: {error}");
+    }
+}
+
+fn transport_current(session: &Session) -> bool {
+    session.transport.as_ref().is_none_or(|scope| {
+        let status = scope.usb.status();
+        status.connected && status.board_device_id == session.board_device_id
+            && status.connection_id == scope.connection && status.boot_id == scope.boot
+    })
+}
+
+fn send_bound_session_payload(usb:&UsbSerialManager,session:&Session,topic:&str,payload:&Value)->Result<(),String>{
+    if let Some(scope)=&session.transport{
+        if !active_slot().lock().ok().is_some_and(|slot|slot.as_ref().is_some_and(|s|std::ptr::eq(s.as_ref(),session))){
+            return Err("实时对话轮次已结束，本次指令未发送".into());
+        }
+        if !transport_current(session){return Err("实时对话 USB 连接已变化，本次指令未发送".into());}
+        let generation=scope.connection.parse::<u64>().map_err(|_|"实时对话连接身份无效")?;
+        usb.send_approval_bound(&session.board_device_id,generation,topic,payload)
+    }else{usb.send_to_board(&session.board_device_id,topic,payload)}
+}
+
+/// One synchronous session ordering point. The request-state guard is gone
+/// before invoking the physical writer; RX ACKs never acquire audio_egress.
+fn with_ordinary_audio_egress<T>(session:&Session,write:impl FnOnce()->Result<T,String>)->Result<T,String>{
+    let _egress=session.audio_egress.lock().map_err(|_|"实时音频发送顺序不可用，未发送")?;
+    let closing={session.audio_requests.lock().map_err(|_|"实时音频回执状态不可用")?.closing()};
+    if session.cancelled.load(Ordering::SeqCst)||closing{return Err("实时对话已停止接收普通音频指令，未发送".into());}
+    write()
+}
+
+fn send_session_board(usb:&UsbSerialManager,session:&Session,topic:&str,payload:&Value)->Result<(),String>{
+    with_ordinary_audio_egress(session,||{
+    if session.transport.is_some()&&(!transport_current(session)
+        ||!active_slot().lock().ok().is_some_and(|slot|slot.as_ref().is_some_and(|s|std::ptr::eq(s.as_ref(),session)))){
+        return Err("实时对话所有者或连接已变化，未发送".into());
+    }
+    let mut request=payload.clone();
+    if audio_ack::managed_topic(topic){
+        let id=session.audio_requests.lock().map_err(|_|"实时音频回执状态不可用")?
+            .issue(&session.id,topic,payload["sessionId"].as_str().unwrap_or(""))?;
+        request["requestId"]=json!(id);
+    }
+    send_bound_session_payload(usb,session,topic,&request)
+    })
+}
+
+fn send_player_board(usb: &UsbSerialManager, session: &Session, topic: &str, payload: Value) {
+    if send_session_board(usb, session, topic, &payload).is_err() {
+        request_failure(session, "playback_write_failed", Some("设备音频传输失败，请检查 USB 连接后重试"));
     }
 }
 
 async fn begin_capture(usb: &UsbSerialManager, session: &Session, duplex: bool) -> Result<(), String> {
     session.capture_ready.store(false, Ordering::SeqCst);
     session.capture_armed.store(true, Ordering::SeqCst);
-    usb.send_to_board(&session.board_device_id, "audio/conversation",
+    send_session_board(usb, session, "audio/conversation",
         &json!({"enabled":true,"halfDuplex": !duplex,"sessionId":session.id}))?;
     // Do not start the greeting speaker/reference clock until the DSP owner has
     // rebuilt its filters. Old firmware confirms through conversation status.
@@ -244,27 +339,20 @@ fn capture_payload_matches(session: &Session, payload: &Value) -> bool {
         && payload.get("boardDeviceId").and_then(Value::as_str)
             .map(|id| id == session.board_device_id).unwrap_or(true)
         && payload.get("conversationSessionId").and_then(Value::as_str)
-            .map(|id| id == session.id).unwrap_or(true)
+            .map(|id| id == session.id).unwrap_or(session.transport.is_none())
 }
 
-fn aec_unavailable(session: &Session, payload: &Value) {
-    let reason = match payload["aecReason"].as_str().unwrap_or("") {
-        "init_failed" => "init_failed", "stream_reset_failed" => "stream_reset_failed",
-        "reference_overflow" => "reference_overflow", "processed_queue_overflow" => "processed_queue_overflow",
-        "dsp_too_slow" => "dsp_too_slow", _ => "unprocessed_audio",
-    };
-    diagnostics::record(&session.id, "aec_fallback", json!({"ok":false,"reason":reason}));
-    let detail = match reason {
-        "init_failed" | "stream_reset_failed" => "音频处理器初始化失败",
-        "reference_overflow" => "回声参考缓冲溢出",
-        "processed_queue_overflow" => "收音处理缓冲溢出",
-        "dsp_too_slow" => "音频处理持续超时",
-        _ => "未收到有效的消回声音频",
-    };
-    if let Ok(mut s) = session.status.lock() {
-        s.error = format!("设备回声消除不可用（{detail}），已停止双向对话。请重新进入以恢复；若持续出现，请更新固件并导出实时对话日志");
-    }
-    request_stop(session, "aec_unavailable");
+fn aec_unavailable(session: &Session, topic: &str, payload: &Value) {
+    let failure = diagnostics::aec::failure(topic, payload, diagnostics::aec::Context {
+        board_id: &session.board_device_id, timeline_id: &session.id,
+        duplex: session.duplex.load(Ordering::SeqCst),
+        armed: session.capture_armed.load(Ordering::SeqCst),
+        ready: session.capture_ready.load(Ordering::SeqCst),
+    });
+    diagnostics::record(&session.id, "aec_fallback", failure.metadata);
+    let error = format!("设备音频保护已停止双向对话（{}）。请重新进入以恢复；若持续出现，请更新固件并导出实时对话日志", failure.detail);
+    // Same fail-closed stop and same ingress predicates: no raw echo to ASR.
+    request_failure(session, "aec_unavailable", Some(&error));
 }
 
 fn hud(usb: &UsbSerialManager, board: &str, session_id: &str, state: &str, name: &str, text: &str) {
@@ -300,7 +388,7 @@ pub fn route_device_audio(topic: &str, payload: &Value) -> bool {
         // Device metadata is allowlisted; never log the full audio payload.
         diagnostics::record(&id, "device", json!({"stage": payload.get("event"), "bytes": payload.get("bytes"),
             "bufferedMs": payload.get("bufferedMs"), "uptimeMs": payload.get("uptimeMs"), "seq":payload.get("seq"), "ok":payload.get("ok"), "firmware":payload.get("firmware"),
-            "reason":payload.get("aecReason"), "dspFrames":payload.get("dspFrames"), "dspLastUs":payload.get("dspLastUs"), "dspMaxUs":payload.get("dspMaxUs"),
+            "reason":diagnostics::aec::reported_reason(payload), "dspFrames":payload.get("dspFrames"), "dspLastUs":payload.get("dspLastUs"), "dspMaxUs":payload.get("dspMaxUs"),
             "dspAecUs":payload.get("dspAecUs"), "dspNsUs":payload.get("dspNsUs"), "dspVadUs":payload.get("dspVadUs"), "aecReferenceSamples":payload.get("aecReferenceSamples"),
             "internalFreeBytes":payload.get("internalFreeBytes"), "internalLargestBytes":payload.get("internalLargestBytes"),
             "captureTxLastUs":payload.get("captureTxLastUs"), "captureTxMaxUs":payload.get("captureTxMaxUs"), "captureStackMinBytes":payload.get("captureStackMinBytes")}));
@@ -311,11 +399,60 @@ pub fn route_device_audio(topic: &str, payload: &Value) -> bool {
 }
 
 fn route_session_audio(session: &Session, topic: &str, payload: &Value) -> bool {
+    if let Some(scope) = &session.transport {
+        if !transport_current(session) {
+            request_failure(session, "capture_connection_changed", Some("设备连接已变化，实时对话已停止，请重新进入"));
+            return false;
+        }
+        if topic.starts_with("audio/") || topic=="protocol/ack" {
+            let incoming = &payload["_nativeUsbScope"];
+            if !audio_ack::scope_matches((&session.board_device_id,&scope.connection,&scope.boot),
+                (incoming["boardDeviceId"].as_str(),incoming["connectionId"].as_str(),incoming["bootId"].as_str(),incoming["runtime"].as_str())) { return false; }
+        }
+    }
     if payload.get("boardDeviceId").and_then(Value::as_str)
         .is_some_and(|id| id != session.board_device_id) { return false; }
-    if topic == "protocol/ack" && session.capture_armed.load(Ordering::SeqCst)
-        && payload.get("ok").and_then(Value::as_bool) == Some(false)
-        && payload.get("requestTopic").and_then(Value::as_str).map(|s| s.starts_with("audio/")).unwrap_or(false) {
+    if topic == "protocol/ack" {
+        let request_topic=payload["requestTopic"].as_str().unwrap_or("");
+        // RTC never issues audio/control. Let notes/the actual owner consume
+        // those ACKs; neither a foreign topic nor an unissued ID can stop RTC.
+        if !audio_ack::managed_topic(request_topic)&&request_topic!="audio/query" { return false; }
+        let invalid_session_metadata=["sessionId","conversationSessionId"].iter().any(|key|
+            payload.get(*key).is_some_and(|value|!value.is_string()));
+        // Establish actual issued ID/topic ownership before classifying bad
+        // optional metadata. Foreign receipts cannot consume a pending ID;
+        // a current malformed receipt is an invalid ACK, never a silent drop.
+        let receipt=match session.audio_requests.lock(){
+            Ok(mut requests)=>requests.accept(&session.id,request_topic,payload["requestId"].as_str().unwrap_or(""),
+                if invalid_session_metadata{None}else{payload.get("sessionId").and_then(Value::as_str)},
+                if invalid_session_metadata{None}else{payload.get("conversationSessionId").and_then(Value::as_str)}),
+            Err(_)=>{request_failure(session,"audio_ack_state_unavailable",Some("音频回执状态不可用，已停止本轮对话"));return true;}
+        };
+        match receipt{
+            audio_ack::Receipt::Unmatched|audio_ack::Receipt::Retired=>return true,
+            audio_ack::Receipt::Terminal(kind)=>{
+                if let Ok(mut requests)=session.audio_requests.lock(){
+                    requests.terminal_receipt(kind,!invalid_session_metadata&&payload["ok"].is_boolean(),payload["ok"]==true);
+                }
+                return true;
+            },
+            audio_ack::Receipt::Probe=>{
+                if let Ok(mut requests)=session.audio_requests.lock(){requests.probe_receipt(!invalid_session_metadata&&payload["ok"].is_boolean(),payload["ok"]==true);}
+                return true;
+            },
+            audio_ack::Receipt::Current=>{},
+        }
+        if session.cancelled.load(Ordering::SeqCst){return true;}
+        if invalid_session_metadata {
+            request_failure(session,"device_protocol_ack_invalid",Some("设备音频回执会话字段无效，已停止本轮对话"));
+            return true;
+        }
+        if payload["ok"]==true { return true; }
+        if !session.capture_armed.load(Ordering::SeqCst) { return true; }
+        if !payload["ok"].is_boolean() {
+            request_failure(session,"device_protocol_ack_invalid",Some("设备音频回执格式无效，已停止本轮对话"));
+            return true;
+        }
         let stage = match payload["requestTopic"].as_str().unwrap_or("") {
             "audio/play_chunk" => "audio_play_chunk", "audio/play_begin" => "audio_play_begin",
             "audio/play_end" => "audio_play_end", "audio/play_subtitle" => "audio_play_subtitle",
@@ -327,31 +464,53 @@ fn route_session_audio(session: &Session, topic: &str, payload: &Value) -> bool 
             _ => "audio_command_rejected",
         };
         diagnostics::record(&session.id, "protocol_rejected", json!({"stage":stage,"reason":reason,"ok":false}));
-        if let Ok(mut s) = session.status.lock() {
-            s.error = if reason == "audio_chunk_rejected" || reason == "audio_chunk_invalid" {
+        let error: String = if reason == "audio_chunk_rejected" || reason == "audio_chunk_invalid" {
                 "设备未能接收音频数据，已停止播放；请提供实时对话日志排查 USB 传输".into()
             } else { "设备拒绝音频指令，请检查固件及设备音频状态".into() };
-        }
-        request_stop(&session, "device_protocol_error");
+        request_failure(session, "device_protocol_error", Some(&error));
         return true;
     }
     if !topic.starts_with("audio/") { return false; }
     if session.cancelled.load(Ordering::SeqCst) {
-        return topic.starts_with("audio/");
+        // Same admitted native scope was checked above. Only a post-ACK,
+        // single-probe idle observation can confirm device quiescence.
+        if topic=="audio/status"{
+            let idle=["active","conversation","playbackActive","streamActive"].iter().all(|k|payload[*k]==false)
+                &&payload["conversationSessionId"].as_str().is_some_and(|id|id.is_empty()||id==session.id);
+            if let Ok(mut requests)=session.audio_requests.lock(){requests.observe_status(idle);}
+        }
+        return true;
     }
     // Ignore pre-entry PTT frames, previous capture timelines and stale status.
     // New firmware echoes the control session independently of capture sessionId.
-    if !capture_payload_matches(&session, payload) { return true; }
+    if payload.get("conversationSessionId").is_some_and(|id| id.as_str() != Some(session.id.as_str())) { return true; }
+    // Device end/error may omit conversationSessionId. Only the capture ID
+    // learned from a current-timeline begin can bind such a terminal packet.
+    let capture_terminal = matches!(topic, "audio/end" | "audio/error")
+        && payload["sessionId"].as_str().is_some_and(|id| !id.is_empty()
+            && session.capture_stream.lock().ok().is_some_and(|capture| capture.as_deref() == Some(id)));
+    if !capture_payload_matches(&session, payload) && !capture_terminal { return true; }
+    if topic == "audio/begin" {
+        if let Some(id) = payload["sessionId"].as_str().filter(|id| !id.is_empty()) {
+            if let Ok(mut capture) = session.capture_stream.lock() { *capture = Some(id.to_owned()); }
+        }
+        return true;
+    }
     if topic == "audio/status" {
         if payload["conversation"] != true || payload["audioAecPreparing"] == true { return true; }
         if session.duplex.load(Ordering::SeqCst) && payload["audioAec"] == false {
-            aec_unavailable(&session, payload);
+            aec_unavailable(&session, topic, payload);
         } else if !session.duplex.load(Ordering::SeqCst) || payload["audioAec"] == true {
             session.capture_ready.store(true, Ordering::SeqCst);
         }
         return true;
     }
     if topic == "audio/chunk" {
+        if let Some(id) = payload["sessionId"].as_str() {
+            if session.capture_stream.lock().ok().is_some_and(|capture| capture.as_deref().is_some_and(|current| current != id)) {
+                return true;
+            }
+        }
         let processed = payload["aec"] == true && payload["vadSpeech"].is_boolean();
         let duplex = session.duplex.load(Ordering::SeqCst);
         if duplex && !processed {
@@ -359,29 +518,43 @@ fn route_session_audio(session: &Session, topic: &str, payload: &Value) -> bool 
             // until explicit conversation readiness, bounded by begin_capture.
             if !session.capture_ready.load(Ordering::SeqCst) && payload.get("conversationSessionId").is_none() { return true; }
             // Never route raw speaker echo into ASR/tool calls after an AFE failure.
-            aec_unavailable(&session, payload);
+            aec_unavailable(&session, topic, payload);
             return true;
         }
         if processed { session.capture_ready.store(true, Ordering::SeqCst); }
         if !duplex && !session.status.lock().map(|s| s.state == "listening").unwrap_or(false) { return true; }
         if let Some(data) = payload.get("data").and_then(Value::as_str) {
             if let Ok(pcm) = BASE64.decode(data) {
-                if pcm.len() != FRAME_BYTES { return true; }
-                if session.input.try_send(Input::Pcm(pcm, if duplex {payload["vadSpeech"].as_bool()} else {None})).is_err() {
-                    if let Ok(mut s) = session.status.lock() { s.error = "收音处理队列繁忙，请重新开始对话".into(); }
-                    request_stop(&session, "capture_overflow");
+                if pcm.len() != FRAME_BYTES {
+                    request_failure(session, "capture_frame_invalid", Some("设备音频帧长度无效，本轮对话已停止"));
+                    return true;
                 }
+                if let Some(id) = payload["sessionId"].as_str().filter(|id| !id.is_empty()) {
+                    if let Ok(mut capture) = session.capture_stream.lock() {
+                        if capture.is_none() { *capture = Some(id.to_owned()); }
+                    }
+                } else if session.transport.is_some() {
+                    request_failure(session, "capture_frame_invalid", Some("设备音频帧缺少录音身份，本轮对话已停止"));
+                    return true;
+                }
+                if session.input.try_send(Input::Pcm(pcm, if duplex {payload["vadSpeech"].as_bool()} else {None})).is_err() {
+                    request_failure(session, "capture_overflow", Some("收音处理队列繁忙，请重新开始对话"));
+                }
+                return true;
             }
         }
+        request_failure(session, "capture_frame_invalid", Some("设备音频帧编码无效，本轮对话已停止"));
         return true;
     }
     if topic == "audio/error" {
         let message = payload.get("error").or_else(|| payload.get("message")).and_then(Value::as_str).unwrap_or("device audio error");
-        if let Ok(mut s) = session.status.lock() { s.error = format!("设备音频错误：{message}"); }
-        request_stop(&session, "device_audio_error");
+        request_failure(session, "device_audio_error", Some(&format!("设备音频错误：{message}")));
         return true;
     }
-    // audio/begin, audio/end, audio/status: informational while the conversation runs
+    if topic == "audio/end" && capture_terminal {
+        session.capture_ready.store(false, Ordering::SeqCst);
+        request_failure(session, "device_capture_ended", Some("设备收音已结束，实时对话已停止；请重新进入"));
+    }
     true
 }
 
@@ -425,12 +598,23 @@ pub fn stop(reason: &str) -> RealtimeChatStatus {
 }
 
 fn request_stop(session: &Session, reason: &str) {
+    request_failure(session, reason, None);
+}
+
+fn request_failure(session: &Session, reason: &str, error: Option<&str>) {
+    // Publish the first cause atomically with cancellation. Late protocol/end
+    // errors cannot rewrite it; cancellation never waits for more PCM/Ready.
+    let Ok(mut status) = session.status.lock() else {
+        session.cancelled.store(true, Ordering::SeqCst);
+        session.stop_notify.notify_one();
+        return;
+    };
+    if session.cancelled.swap(true, Ordering::SeqCst) { return; }
+    status.reason = reason.to_owned();
+    // Earlier recoverable-round warnings are not a new user-stop failure.
+    status.error = error.unwrap_or_default().to_owned();
+    drop(status);
     crate::smart_home::cancel_voice_session(&session.id);
-    if let Ok(mut s) = session.status.lock() {
-        if s.reason == "asr_timeout" { s.error.clear(); }
-        s.reason = reason.to_string();
-    }
-    session.cancelled.store(true, Ordering::SeqCst);
     session.stop_notify.notify_one();
 }
 
@@ -463,6 +647,10 @@ pub fn start(app: &AppHandle, mut input: RealtimeChatStartInput) -> Result<Realt
     if !usb_status.connected || usb_status.board_device_id != board {
         return Err("设备未通过 USB 连接，实时对话需要设备在线".to_string());
     }
+    if usb_status.connection_id.parse::<u64>().ok().filter(|id| *id != 0).is_none()
+        || usb_status.boot_id.len() != 16 {
+        return Err("设备连接身份尚未确认，请等待 USB 重新连接后进入对话".into());
+    }
     if active_session().is_some() { return Err("已有实时对话，请先结束后再开始".into()); }
     crate::component_notes::stop_recording_all();
     crate::component_audio::stop(None);
@@ -471,10 +659,14 @@ pub fn start(app: &AppHandle, mut input: RealtimeChatStartInput) -> Result<Realt
     input.voice.volume = voice_chat_settings::realtime_volume()?;
 
     let (tx, rx) = mpsc::channel(128);
-    let session_id = format!("rtc-{}", now_ms());
+    let session_id = format!("rtc-{}", uuid::Uuid::new_v4());
     let session = Arc::new(Session {
         id: session_id.clone(),
         board_device_id: board.clone(),
+        transport: Some(CaptureTransport { usb:usb.clone(), connection:usb_status.connection_id.clone(), boot:usb_status.boot_id.clone() }),
+        capture_stream: Mutex::new(None),
+        audio_egress: Mutex::new(()),
+        audio_requests: Arc::new(Mutex::new(Default::default())),
         cancelled: AtomicBool::new(false),
         duplex: AtomicBool::new(usb_status.capabilities["features"]["audioAecRecovery"] == true
             || ["audioAec","audioVad","audioFullDuplex"].iter().all(|key| usb_status.capabilities["features"][*key] == true)),
@@ -511,6 +703,15 @@ pub fn start(app: &AppHandle, mut input: RealtimeChatStartInput) -> Result<Realt
                 let (reason, error) = session.status.lock().map(|s| (s.reason.clone(), s.error.clone())).unwrap_or_default();
                 finish(&app_clone, &usb, &session, &reason, &error).await;
             }
+            _ = async {
+                while transport_current(&session) && !session.cancelled.load(Ordering::SeqCst) {
+                    // Status snapshot only; no serial reader, probe or command.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            } => {
+                request_failure(&session, "capture_connection_changed", Some("设备连接已变化，实时对话已停止，请重新进入"));
+                finish(&app_clone, &usb, &session, "capture_connection_changed", "").await;
+            }
             _ = run_session(app_clone.clone(), usb.clone(), session.clone(), input, rx) => {}
         }
     });
@@ -534,6 +735,8 @@ struct Vad {
     session: Option<Arc<Session>>,
     previous_user: String,
     turn_started: Option<Instant>,
+    awaiting_fresh_silence: bool,
+    fresh_silence_run: usize,
 }
 
 #[derive(Default)]
@@ -571,7 +774,7 @@ enum VadStep {
 
 impl Vad {
     fn new() -> Self {
-        Self { noise: 200.0, processed_noise: 16.0, speech_run: 0, silence_run: 0, in_speech: false, preroll: Vec::new(), speech_started: None, soft_gap: 0, metrics: VadMetrics::default(), diagnostic_session: String::new(), reply_tail_until: None, session: None, previous_user: String::new(), turn_started: None }
+        Self { noise: 200.0, processed_noise: 16.0, speech_run: 0, silence_run: 0, in_speech: false, preroll: Vec::new(), speech_started: None, soft_gap: 0, metrics: VadMetrics::default(), diagnostic_session: String::new(), reply_tail_until: None, session: None, previous_user: String::new(), turn_started: None, awaiting_fresh_silence:false, fresh_silence_run:0 }
     }
 
     fn rms(frame: &[u8]) -> f32 {
@@ -622,6 +825,15 @@ impl Vad {
         self.metrics.rejected += usize::from(speech == Some(true) && !voiced);
         self.metrics.peak = self.metrics.peak.max(level);
         self.log_metrics();
+        if self.awaiting_fresh_silence {
+            // Lifecycle rearm only: use the existing voiced predicate and
+            // existing silence duration, never a new acoustic threshold or
+            // synthetic PCM. Continuous failed/provisional speech cannot
+            // silently open another paid recognition request.
+            self.fresh_silence_run = if voiced { 0 } else { self.fresh_silence_run.saturating_add(1) };
+            if self.fresh_silence_run >= SPEECH_END_FRAMES { self.reset(); }
+            return VadStep::Idle;
+        }
         if !self.in_speech {
             self.preroll.push(frame.to_vec());
             if self.preroll.len() > PREROLL_FRAMES {
@@ -679,6 +891,13 @@ impl Vad {
         self.silence_run = 0;
         self.preroll.clear();
         self.speech_started = None;
+        self.awaiting_fresh_silence = false;
+        self.fresh_silence_run = 0;
+    }
+
+    fn await_new_utterance(&mut self) {
+        self.reset();
+        self.awaiting_fresh_silence = true;
     }
 
     fn log_metrics(&mut self) {
@@ -704,9 +923,14 @@ enum PlayerCmd {
 struct Player {
     tx: std_mpsc::Sender<(u64, PlayerCmd)>,
     epoch: Arc<AtomicU64>,
+    ack_requests:Arc<Mutex<audio_ack::Requests>>,
 }
 impl Player {
     fn send(&self, cmd: PlayerCmd) -> Result<(), ()> {
+        {let mut requests=self.ack_requests.lock().map_err(|_|())?;
+            match &cmd{PlayerCmd::Begin(id)=>requests.playback(Some(id)).map_err(|_|())?,
+                PlayerCmd::Flush=>requests.playback(None).map_err(|_|())?,_=>{}}
+        }
         let epoch = if matches!(&cmd, PlayerCmd::Flush) {
             self.epoch.fetch_add(1, Ordering::SeqCst) + 1
         } else { self.epoch.load(Ordering::SeqCst) };
@@ -721,7 +945,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
     let await_device = subtitles && active_session().map(|s| s.id == session.id).unwrap_or(false);
     let (tx, rx) = std_mpsc::channel::<(u64, PlayerCmd)>();
     let epoch = Arc::new(AtomicU64::new(0));
-    let player = Player { tx, epoch: epoch.clone() };
+    let player = Player { tx, epoch: epoch.clone(), ack_requests:session.audio_requests.clone() };
     thread::spawn(move || {
         #[cfg(target_os = "macos")]
         let _audio_activity = {
@@ -750,8 +974,8 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
             if session.cancelled.load(Ordering::SeqCst) || epoch.load(Ordering::SeqCst) != expected { return; }
             let write_started = Instant::now();
             let (pcm, gain) = playback_pcm(&session, chunk);
-            let result = usb.send_to_board(
-                &board,
+            let result = send_session_board(
+                usb, &session,
                 "audio/play_chunk",
                 &json!({ "sessionId": turn_id, "seq": *seq, "bytes": pcm.len(), "data": BASE64.encode(&pcm) }),
             );
@@ -764,8 +988,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
             }
             if let Err(error) = result {
                 eprintln!("[realtime-chat] device audio transport write failed: {error}");
-                if let Ok(mut status) = session.status.lock() { status.error = "设备音频传输失败，请检查 USB 连接后重试".into(); }
-                request_stop(&session, "playback_write_failed");
+                request_failure(&session, "playback_write_failed", Some("设备音频传输失败，请检查 USB 连接后重试"));
                 return;
             }
             *seq += 1;
@@ -776,7 +999,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
             if expected != epoch.load(Ordering::SeqCst) { continue; }
             if current_epoch != expected {
                 pending.clear(); begin_at = None; sent_bytes = 0;
-                send_board(&usb, &board, "audio/play_flush", json!({"sessionId":turn_id}));
+                send_player_board(&usb, &session, "audio/play_flush", json!({"sessionId":turn_id}));
                 current_epoch = expected;
             }
             match cmd {
@@ -787,16 +1010,16 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
                     seq = 0;
                     begin_at = None;
                     sent_bytes = 0;
-                    send_board(
+                    send_player_board(
                         &usb,
-                        &board,
+                        &session,
                         "audio/play_begin",
                         json!({ "sessionId": turn_id, "sampleRate": 16000, "channels": 1, "format": "pcm_s16le" }),
                     );
                 }
                 PlayerCmd::Subtitle(text) => {
                     if subtitles {
-                        send_board(&usb, &board, "audio/play_subtitle", json!({"sessionId":turn_id,
+                        send_player_board(&usb, &session, "audio/play_subtitle", json!({"sessionId":turn_id,
                             "offsetBytes":sent_bytes + pending.len() as u64,"text":text}));
                     }
                 }
@@ -812,7 +1035,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
                     let chunk = std::mem::take(&mut pending);
                     flush_chunk(&usb, &turn_id, &mut seq, &chunk, &mut begin_at, &mut sent_bytes, expected);
                     if session.cancelled.load(Ordering::SeqCst) || epoch.load(Ordering::SeqCst) != expected { continue; }
-                    send_board(&usb, &board, "audio/play_end", json!({ "sessionId": turn_id, "bytes": sent_bytes }));
+                    send_player_board(&usb, &session, "audio/play_end", json!({ "sessionId": turn_id, "bytes": sent_bytes }));
                     if let Some(started) = begin_at {
                         let total = Duration::from_millis(sent_bytes * 1000 / 32_000);
                         let elapsed = started.elapsed();
@@ -828,8 +1051,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
                             && epoch.load(Ordering::SeqCst) == expected
                             && !session.completed_playback.lock().map(|id| *id == turn_id).unwrap_or(false) {
                             if Instant::now() >= deadline {
-                                if let Ok(mut status) = session.status.lock() { status.error = "设备播放完成确认超时，请检查 USB 连接".into(); }
-                                request_stop(&session, "playback_timeout");
+                                request_failure(&session, "playback_timeout", Some("设备播放完成确认超时，请检查 USB 连接"));
                                 break;
                             }
                             thread::sleep(Duration::from_millis(10));
@@ -841,7 +1063,7 @@ fn spawn_player(usb: UsbSerialManager, board: String, session: Arc<Session>) -> 
                 }
                 PlayerCmd::Flush => {
                     pending.clear();
-                    send_board(&usb, &board, "audio/play_flush", json!({ "sessionId": turn_id }));
+                    send_player_board(&usb, &session, "audio/play_flush", json!({ "sessionId": turn_id }));
                     begin_at = None;
                     sent_bytes = 0;
                 }
@@ -925,7 +1147,10 @@ async fn run_session(
 
     let mut recognizer: Option<StreamingSpeechRecognizer> = None;
     let mut capture_stats = AsrCaptureStats::default();
-    let mut asr_rx: Option<mpsc::UnboundedReceiver<StreamingSpeechEvent>> = None;
+    // Each mailbox belongs to exactly one recognizer generation. Dropping a
+    // failed round drops its mailbox; old worker callbacks never target a new one.
+    let mut asr_rx: Option<(u64, mpsc::UnboundedReceiver<StreamingSpeechEvent>)> = None;
+    let mut asr_generation = 0;
     let mut last_activity = Instant::now();
     let mut turns: u32 = 0;
     let mut latest_asr = String::new();
@@ -945,8 +1170,8 @@ async fn run_session(
         }
         if let Some((error, stage)) = asr_error.take() {
             diagnostics::record(&session.id, "asr_round_failed", json!({
-                "turn":turns+1,"stage":stage,"errorKind":diagnostics::error_kind(&error),
-                "elapsedMs":asr_started_at.elapsed().as_millis(),"chars":latest_asr.chars().count(),"ok":false
+                "generation":asr_generation,"stage":stage,"errorKind":asr_failure_cause(&error),
+                "elapsedMs":asr_started_at.elapsed().as_millis(),"count":asr_timeouts
             }));
             if !recoverable_asr_error(&error) {
                 finish(&app, &usb, &session, "asr", &error).await;
@@ -957,16 +1182,19 @@ async fn run_session(
             recognizer.take(); asr_rx.take();
             reset_timed_out_asr(&mut vad, &mut latest_asr, &mut displayed_asr,
                 &mut final_asr, &mut recognizer_terminal, &mut deferred_audio);
+            // Discard already queued PCM as well as deferred frames. Recovery
+            // only admits a fresh user utterance, never historical audio replay.
+            drain_pending(&mut rx);
             asr_timeouts = asr_timeouts.saturating_add(1);
             last_activity = Instant::now();
             publish(&app, &session, |s| {
                 s.state="listening".into(); s.transcript.clear();
                 s.reason="asr_timeout".into();
-                s.error="刚才识别超时，仍在聆听，请再说一次。".into();
+                s.error="刚才语音识别中断，仍在聆听，请再说一次。".into();
             });
             user_caption(&usb, &board, &session.id, &name, "", false);
-            hud(&usb, &board, &session.id, "listening", &name, "识别超时，请再说一次");
-            diagnostics::record(&session.id, "asr_recovered", json!({"reason":"timeout", "count":asr_timeouts, "ok":true}));
+            hud(&usb, &board, &session.id, "listening", &name, "识别中断，请再说一次");
+            diagnostics::record(&session.id, "asr_recovered", json!({"generation":asr_generation,"reason":asr_failure_cause(&error), "count":asr_timeouts}));
         }
         if let Some(speech) = pending_speech.take() {
             asr_started_at = Instant::now();
@@ -975,7 +1203,8 @@ async fn run_session(
             final_asr = speech.terminal.then(|| latest_asr.clone());
             last_activity = Instant::now();
             capture_stats = speech.stats;
-            recognizer = Some(speech.recognizer); asr_rx = Some(speech.events);
+            asr_generation = speech.recognizer.generation();
+            recognizer = Some(speech.recognizer); asr_rx = Some((asr_generation, speech.events));
             publish(&app, &session, |s| {s.state="listening".into(); s.transcript = latest_asr.clone(); s.error.clear(); s.reason.clear();});
             user_caption(&usb,&board,&session.id,&name,&latest_asr,false);
             diagnostics::record(&session.id,"asr_started",json!({"turn":turns+1,"reason":"confirmed_barge_in"}));
@@ -1007,7 +1236,10 @@ async fn run_session(
                         if speech.as_ref().is_some_and(|s|!s.reply_completed) {let _=player.send(PlayerCmd::Flush);tts.interrupt();}
                         pending_speech=speech;
                     }
-                    Err(error)=>{diagnostics::record(&session.id,"desktop_receipt",json!({"stage":"playback_finished", "ok":false, "errorKind":diagnostics::error_kind(&error)}));let _=player.send(PlayerCmd::Flush);publish(&app,&session,|s|s.error=error);}
+                    Err(error)=>{
+                        if error.starts_with(ASR_USER_ACTION_PREFIX) { finish(&app,&usb,&session,"asr",&error).await; return; }
+                        diagnostics::record(&session.id,"desktop_receipt",json!({"stage":"playback_finished", "ok":false, "errorKind":diagnostics::error_kind(&error)}));let _=player.send(PlayerCmd::Flush);publish(&app,&session,|s|s.error=error);
+                    }
                 }
                 last_activity=Instant::now();desktop_progress.clear();
                 publish(&app,&session,|s|s.state="listening".into());
@@ -1024,14 +1256,26 @@ async fn run_session(
             reason = "idle".into();
             break;
         }
-        if let Some(events) = asr_rx.as_mut() {
-            while let Ok(event) = events.try_recv() {
+        if let Some((generation, events)) = asr_rx.as_mut() {
+            while !recognizer_terminal {
+                let event = match events.try_recv() {
+                    Ok(event) => event,
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) => {
+                        asr_error = Some(("云端 ASR 连接已关闭，未收到最终结果".into(), "worker_ended"));
+                        continue 'conversation;
+                    }
+                };
+                if !asr_generation_matches(asr_generation, *generation) { continue; }
                 match event {
                     StreamingSpeechEvent::Partial { text, .. } => { if !text.trim().is_empty() { latest_asr = text; } }
                     StreamingSpeechEvent::Final { text, .. } => {
                         if !text.trim().is_empty() { latest_asr = text; }
                         final_asr = Some(latest_asr.clone());
                         recognizer_terminal = true;
+                        // First Final owns this mailbox. Never let a queued
+                        // later Error/Partial replace it or reopen the stream.
+                        break;
                     }
                     StreamingSpeechEvent::Error(error) => {
                         asr_error=Some((error,"stream"));
@@ -1051,18 +1295,19 @@ async fn run_session(
         }
         // A terminal ASR packet closes its worker. Finalize immediately rather
         // than writing more PCM into a closed recognizer or waiting for USB input.
-        // This sentinel is control flow only: it is never sent to ASR or logged as audio.
-        let next = if recognizer_terminal && recognizer.is_some() {
-            Input::Pcm(vec![0; FRAME_BYTES], Some(false))
-        } else if let Some(item) = deferred_audio.pop_front() { item } else { match timeout(Duration::from_millis(500), rx.recv()).await {
-            Ok(Some(item)) => item,
+        // Terminal dispatch carries no PCM at all. The single empty control
+        // step below is never pushed, counted as audio, padded or sent to ASR.
+        let terminal_step = recognizer_terminal && recognizer.is_some();
+        let next = if terminal_step {
+            None
+        } else if let Some(item) = deferred_audio.pop_front() { Some(item) } else { match timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Some(item)) => Some(item),
             Ok(None) => { reason = "closed".into(); break; }
             Err(_) => continue,
         }};
-        match next {
-            Input::Pcm(pcm, speech) => {
-                for frame in pcm.chunks(FRAME_BYTES) {
-                    let step = if recognizer_terminal { vad.reset(); VadStep::End }
+        let (pcm, speech) = match next { Some(Input::Pcm(pcm, speech)) => (pcm, speech), None => (Vec::new(), None) };
+                for frame in pcm.chunks(FRAME_BYTES).chain(terminal_step.then_some(&[][..])) {
+                    let step = if terminal_step { vad.reset(); VadStep::End }
                         else { vad.step_in_context(frame, speech, VadContext::Listening) };
                     match step {
                         VadStep::Idle => {}
@@ -1077,6 +1322,7 @@ async fn run_session(
                             let (tx, rx_events) = mpsc::unbounded_channel();
                             match StreamingSpeechRecognizer::start(move |event| { let _ = tx.send(event); }) {
                                 Ok(rec) => {
+                                    asr_generation = rec.generation();
                                     capture_stats = AsrCaptureStats::default();
                                     for f in preroll {
                                         if let Err(error) = rec.push_pcm(&f) {
@@ -1086,7 +1332,7 @@ async fn run_session(
                                     }
                                     // The trigger frame is already part of preroll.
                                     recognizer = Some(rec);
-                                    asr_rx = Some(rx_events);
+                                    asr_rx = Some((asr_generation, rx_events));
                                     publish(&app, &session, |s| { s.state = "listening".into(); s.transcript.clear(); s.error.clear(); s.reason.clear(); });
                                     diagnostics::record(&session.id, "asr_started", json!({"turn": turns + 1}));
                                 }
@@ -1105,7 +1351,8 @@ async fn run_session(
                         }
                         VadStep::End => {
                             let Some(rec) = recognizer.take() else { continue };
-                            let Some(mut events) = asr_rx.take() else { continue };
+                            let Some((generation, mut events)) = asr_rx.take() else { continue };
+                            if !asr_generation_matches(asr_generation, generation) { continue; }
                             let asr_finish_at = Instant::now();
                             if !recognizer_terminal {
                                 if let Err(error) = rec.push_pcm(frame).and_then(|_| rec.finish()) {
@@ -1178,6 +1425,9 @@ async fn run_session(
                                 }
                                 Ok(None) => {}
                                 Err(error) => {
+                                    if error.starts_with(ASR_USER_ACTION_PREFIX) {
+                                        finish(&app, &usb, &session, "asr", &error).await; return;
+                                    }
                                     diagnostics::record(&session.id, "turn_failed", json!({"errorKind":diagnostics::error_kind(&error)}));
                                     crate::smart_home::clear_voice_pending(&session.id).await;
                                     let _ = player.send(PlayerCmd::Flush);
@@ -1200,8 +1450,6 @@ async fn run_session(
                         }
                     }
                 }
-            }
-        }
     }
     if let Some(rec) = recognizer.take() { rec.cancel(); }
     let _ = player.send(PlayerCmd::Flush);
@@ -1272,8 +1520,9 @@ where F: std::future::Future<Output=Result<(), String>>,
         let mut probe = match start(frames) {
             Ok(probe) => probe,
             Err(error) => {
+                if asr_failure_cause(&error) == "configuration" { return Err(asr_user_action_error(&error)); }
                 diagnostics::record(&vad.diagnostic_session,"barge_rejected",json!({"reason":"asr_start_failed","errorKind":diagnostics::error_kind(&error)}));
-                vad.reset();
+                vad.await_new_utterance();
                 continue;
             }
         };
@@ -1321,6 +1570,7 @@ where F: std::future::Future<Output=Result<(), String>>,
                         return Ok(Some(probe));
                     }
                     Some(StreamingSpeechEvent::Error(error)) => {
+                        if asr_failure_cause(&error) == "configuration" { return Err(asr_user_action_error(&error)); }
                         diagnostics::record(&vad.diagnostic_session,"barge_probe_error",json!({"errorKind":diagnostics::error_kind(&error)}));
                         rejection = "asr_error"; break;
                     }
@@ -1341,6 +1591,7 @@ where F: std::future::Future<Output=Result<(), String>>,
                         continue;
                     }
                     if let Err(error) = probe.recognizer.push_pcm(&pcm) {
+                        if asr_failure_cause(&error) == "configuration" { return Err(asr_user_action_error(&error)); }
                         diagnostics::record(&vad.diagnostic_session,"barge_probe_error",json!({"errorKind":diagnostics::error_kind(&error)}));
                         rejection = "asr_error"; break;
                     }
@@ -1350,7 +1601,10 @@ where F: std::future::Future<Output=Result<(), String>>,
                     // Keep feeding silence to streaming ASR; an empty VAD end is
                     // never itself permission to cancel the reply.
                     if matches!(vad.step_with_hint(&pcm, speech),VadStep::End) || added_frames >= BARGE_CONFIRM_MAX_FRAMES {
-                        if probe.recognizer.finish().is_err() { rejection="asr_error"; break; }
+                        if let Err(error) = probe.recognizer.finish() {
+                            if asr_failure_cause(&error) == "configuration" { return Err(asr_user_action_error(&error)); }
+                            rejection="asr_error"; break;
+                        }
                         input_finished=true;
                     }
                 }
@@ -1358,7 +1612,7 @@ where F: std::future::Future<Output=Result<(), String>>,
         }
         diagnostics::record(&vad.diagnostic_session,"barge_rejected",json!({"reason":rejection,"elapsedMs":started.elapsed().as_millis(),"frames":probe.stats.frames}));
         probe.recognizer.cancel();
-        vad.reset();
+        vad.await_new_utterance();
         if probe.reply_completed { return Ok(None); }
     }
 }
@@ -1475,12 +1729,75 @@ pub fn save_realtime_voice_volume(volume: f32) -> Result<f32, String> {
 fn recoverable_asr_error(error: &str) -> bool {
     // Authentication/configuration errors still need user action; do not loop
     // blindly or retry paid requests. Recovery only permits a NEW utterance.
-    diagnostics::error_kind(error) == "timeout"
+    matches!(asr_failure_cause(error), "timeout" | "transport" | "worker_ended")
+}
+
+const ASR_USER_ACTION_PREFIX: &str = "云端 ASR 需要用户处理：";
+
+fn asr_user_action_error(error: &str) -> String {
+    format!("{ASR_USER_ACTION_PREFIX}请检查语音识别配置、授权和额度后重新进入。{error}")
+}
+
+fn asr_generation_matches(current: u64, incoming: u64) -> bool {
+    current != 0 && current == incoming
+}
+
+fn asr_failure_cause(error: &str) -> &'static str {
+    let text = error.to_lowercase();
+    let code = |raw: &str| -> Option<u32> {
+        let end = raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len());
+        if end == 0 || end > 10 || raw[end..].chars().next()
+            .is_some_and(|c| !c.is_whitespace() && !matches!(c, ',' | ')' | '）')) { return None; }
+        raw[..end].parse().ok()
+    };
+    // Only the shared ASR formatter's explicit outer code is authoritative.
+    // A log ID or provider detail containing "401", "auth" or "quota" is not
+    // an authentication result. Keep the original error unchanged for the UI.
+    for prefix in ["语音识别服务等待音频超时，本段已结束（provider=volcengine, code=",
+        "语音识别服务返回错误（provider=volcengine, code="] {
+        if let Some(raw) = text.strip_prefix(prefix) {
+            return match code(raw) {
+                Some(45_000_081) => "timeout",
+                Some(401 | 403 | 429) => "configuration",
+                Some(502 | 503 | 504) => "transport",
+                _ => "service", // Unknown service codes stay fatal, never retry.
+            };
+        }
+    }
+    let without_trace = text.split(", logid=").next().unwrap_or(&text);
+    for prefix in ["连接火山引擎 asr 失败: http error: ", "http error: ", "http status: "] {
+        if let Some(raw) = without_trace.strip_prefix(prefix) {
+            return match code(raw) {
+                Some(401 | 403 | 429) => "configuration",
+                Some(502 | 503 | 504) => "transport",
+                _ => "service",
+            };
+        }
+    }
+    // Classify controlled local stages, not arbitrary words/numbers in nested
+    // exception bodies, provider messages, URLs, filenames or trace metadata.
+    let stage = without_trace.split([':', '：', '（', '(']).next().unwrap_or(without_trace).trim();
+    if ["未配置", "请配置", "请填写", "macos asr 本地配置", "火山引擎 asr 安全配置",
+        "火山引擎 asr 本地配置", "无法序列化火山引擎 asr 配置", "当前平台仅支持通过环境变量配置",
+        "余额不足", "额度不足", "欠费", "限流"].iter().any(|prefix| stage.starts_with(prefix)) {
+        return "configuration";
+    }
+    if stage.starts_with("云端 asr 工作任务在最终结果前结束") { return "worker_ended"; }
+    if !["语音识别", "等待语音识别", "本地等待真实麦克风 pcm", "本地真实麦克风 pcm",
+        "连接火山引擎 asr", "火山引擎 asr", "云端 asr", "asr connection",
+        "cloud speech recognition input is closed"].iter().any(|prefix| stage.starts_with(prefix)) {
+        return "service";
+    }
+    if stage.contains("timeout") || stage.contains("超时") { return "timeout"; }
+    if ["connection", "连接", "接收失败", "发送失败", "input is closed", "broken pipe",
+        "connection reset", "transport", "websocket"]
+        .iter().any(|marker| stage.contains(marker)) { return "transport"; }
+    "service"
 }
 
 fn reset_timed_out_asr(vad: &mut Vad, latest: &mut String, displayed: &mut String,
     final_text: &mut Option<String>, terminal: &mut bool, deferred: &mut VecDeque<Input>) {
-    vad.reset();
+    vad.await_new_utterance();
     latest.clear(); displayed.clear(); *final_text=None; *terminal=false;
     // Never re-feed stale audio into a new paid recognition attempt. Stop and
     // persona updates live outside this PCM queue and are left untouched.
@@ -1506,7 +1823,7 @@ async fn await_final_text_with_timeout(events: &mut mpsc::UnboundedReceiver<Stre
             }
             Ok(Some(StreamingSpeechEvent::Ready)) => {}
             Err(_) => return Err("语音识别结果超时".into()),
-            Ok(None) => return if latest.is_empty() { Err("语音识别没有返回结果，请检查服务连接".into()) } else { Ok(latest) },
+            Ok(None) => return Err("云端 ASR 连接已关闭，未收到最终结果，请重新发声".into()),
         }
     }
 }
@@ -1547,7 +1864,7 @@ async fn answer_turn(
     publish(app,session,|s| {clear_search(s); s.reply.clear(); s.error.clear();});
     let mut splitter = SentenceSplitter::default();
     let llm_cfg = llm_cfg.clone();
-    let prompt = system_prompt.to_string();
+    let prompt = format!("{}{}", system_prompt, crate::shared_location::chat_context());
     let history_snapshot = history.clone();
     let user = user_text.to_string();
     let turn_started = Instant::now();
@@ -1699,33 +2016,73 @@ async fn wait_playback(player: &Player) {
     .await;
 }
 
-async fn finish(app: &AppHandle, usb: &UsbSerialManager, session: &Arc<Session>, reason: &str, error: &str) {
-    crate::smart_home::clear_voice_pending(&session.id).await;
-    session.cancelled.store(true, Ordering::SeqCst);
-    let board = session.board_device_id.clone();
-    send_board(usb, &board, "audio/play_flush", json!({ "sessionId": session.id }));
-    send_board(usb, &board, "audio/conversation", json!({ "enabled": false, "sessionId": session.id }));
-    let name = session.status.lock().map(|s| s.display_name.clone()).unwrap_or_default();
-    let hint = match reason {
-        "tts" => "语音合成失败，请查看 PC 实时对话提示",
-        "asr" => "语音识别失败，请查看 PC 实时对话提示",
-        _ => "实时对话失败，请查看 PC 提示",
-    };
-    hud(usb, &board, &session.id, if error.is_empty() { "ended" } else { "error" }, &name, if error.is_empty() { "" } else { hint });
-    diagnostics::record(&session.id, "ended", json!({"reason": reason, "ok":error.is_empty(),"errorKind": if error.is_empty() { "none" } else { diagnostics::error_kind(error) }}));
-    // Keep the final snapshot so reconnecting/mounting UI can still retrieve the failure.
-    let reason = reason.to_string();
-    let error = error.to_string();
-    publish(app, session, |s| {
-        if s.reason == "asr_timeout" { s.error.clear(); }
-        s.active = false;
-        if s.search_state=="searching" {clear_search(s);}
-        s.state = "ended".into();
-        s.reason = reason.clone();
-        if !error.is_empty() {
-            s.error = error.clone();
+/// The closure is the same one production finish uses: two pre-reserved,
+/// once-only physical attempts. A writer Ok is NOT a device ACK or idle proof.
+fn attempt_terminal_controls(session:&Session,mut send:impl FnMut(audio_ack::Terminal,&str)->Result<(),String>)->Result<bool,String>{
+    // The same gate spans reservation and BOTH physical writes. An ordinary
+    // sender already in the gate finishes first; one waiting outside is denied
+    // by the in-gate cancelled/closing check. No await in this critical section.
+    let _egress=session.audio_egress.lock().map_err(|_|"实时音频终止发送顺序不可用")?;
+    let batch=session.audio_requests.lock().map_err(|_|"音频终止状态不可用")?.begin_terminal(&session.id)?;
+    let Some(batch)=batch else{return Ok(false);};
+    for (kind,id) in batch{
+        if send(kind,&id).is_err(){
+            if let Ok(mut requests)=session.audio_requests.lock(){requests.terminal_write_unknown(kind);}
         }
+    }
+    Ok(true)
+}
+
+async fn finish(app:&AppHandle,usb:&UsbSerialManager,session:&Arc<Session>,reason:&str,error:&str){
+    {let Ok(mut status)=session.status.lock() else{return;};
+        if !session.cancelled.swap(true,Ordering::SeqCst){
+            if status.reason=="asr_timeout"{status.error.clear();}
+            status.reason=reason.into();status.error=error.into();
+        }
+    }
+    session.capture_armed.store(false,Ordering::SeqCst);session.capture_ready.store(false,Ordering::SeqCst);
+    let already_stopped=session.audio_requests.lock().map(|r|r.stopped()).unwrap_or(false);
+    if !already_stopped{publish(app,session,|s|{s.active=true;s.state="stopping".into();s.device_stop_state="awaiting_ack".into();});}
+    // No await between reserving the batch and BOTH physical attempts. A
+    // cancelling select cannot abandon one command then let another caller retry.
+    let _=attempt_terminal_controls(session,|kind,id|{
+        let payload=match kind{
+            audio_ack::Terminal::Flush=>json!({"sessionId":session.id,"requestId":id}),
+            audio_ack::Terminal::Disable=>json!({"enabled":false,"sessionId":session.id,"requestId":id}),
+        };
+        send_bound_session_payload(usb,session,kind.topic(),&payload)
     });
+    let deadline=Instant::now()+Duration::from_secs(3);
+    loop{
+        let (stopped,failed,probe)=match session.audio_requests.lock(){
+            Ok(mut requests)=>(requests.stopped(),requests.terminal_failed(),requests.claim_probe()),
+            Err(_)=>(false,true,false),
+        };
+        if stopped||failed{break;}
+        if probe{
+            // Separate, bounded, once-only read-only observation; no ordinary
+            // ACK-window allocation, no flush/retry and no firmware gate change.
+            let result=send_bound_session_payload(usb,session,"audio/query",
+                &json!({"requestId":format!("{}-stop-observe",session.id)}));
+            if let Ok(mut requests)=session.audio_requests.lock(){requests.probe_written(result.is_ok());}
+        }
+        if Instant::now()>=deadline{break;}
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    crate::smart_home::clear_voice_pending(&session.id).await;
+    let (stopped,stop_state)=session.audio_requests.lock().map(|r|(r.stopped(),r.stop_state())).unwrap_or((false,"state_unavailable"));
+    if !stopped{
+        if let Ok(mut status)=session.status.lock(){if status.device_stop_state!="acknowledged_idle_observed"&&status.error.is_empty(){status.error="设备停止尚未确认，请只读检查设备；未自动重发终止指令".into();}}
+        publish(app,session,|s|{s.active=true;s.state="stop_unconfirmed".into();s.device_stop_state=stop_state.into();});
+        diagnostics::record(&session.id,"stop_unconfirmed",json!({"stage":stop_state,"ok":false,"terminalSlots":2}));
+        return; // Keep owner admission closed; never label an unknown device idle.
+    }
+    let (reason,error,name)=session.status.lock().map(|s|(s.reason.clone(),s.error.clone(),s.display_name.clone())).unwrap_or_default();
+    let hint=match reason.as_str(){"tts"=>"语音合成失败，请查看 PC 实时对话提示","asr"=>"语音识别失败，请查看 PC 实时对话提示",_=>"实时对话失败，请查看 PC 提示"};
+    let _=send_bound_session_payload(usb,session,"ui/conversation",&json!({"sessionId":session.id,
+        "state":if error.is_empty(){"ended"}else{"error"},"name":name,"text":if error.is_empty(){""}else{hint}}));
+    diagnostics::record(&session.id,"ended",json!({"reason":reason,"ok":error.is_empty()&&reason!="aec_unavailable","errorKind":diagnostics::termination_error_kind(&reason,&error),"deviceStopState":stop_state}));
+    publish(app,session,|s|{s.active=false;if s.search_state=="searching"{clear_search(s);}s.state="ended".into();s.device_stop_state=stop_state.into();});
 }
 
 // ---- preview -----------------------------------------------------------------------------------
@@ -1794,6 +2151,7 @@ pub async fn clear_voice_chat_secret(which: String) -> Result<voice_chat_setting
 
 #[cfg(test)]
 mod tests {
+    include!("realtime_aec_ingress_tests.rs");
     #[test]
     fn interruption_keeps_displayed_question_without_claiming_it_was_completed() {
         let mut history=Vec::new();
@@ -1828,12 +2186,166 @@ mod tests {
     fn routing_session() -> (super::Session, tokio::sync::mpsc::Receiver<super::Input>) {
         use super::*;
         let (input, rx) = mpsc::channel(8);
-        (Session { id:"rtc-new".into(), board_device_id:"board".into(),
+        (Session { id:"rtc-new".into(), board_device_id:"board".into(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new({let mut r=audio_ack::Requests::default();r.playback(Some("rtc-new-turn")).unwrap();r})),
             cancelled:AtomicBool::new(false), duplex:AtomicBool::new(true),
             capture_armed:AtomicBool::new(false), capture_ready:AtomicBool::new(false),
             stop_notify:tokio::sync::Notify::new(), input,
             status:Mutex::new(RealtimeChatStatus {active:true, ..Default::default()}),
             completed_playback:Mutex::new(String::new()), pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits()) }, rx)
+    }
+
+    #[test]
+    fn audio_egress_serializes_admitted_write_before_once_terminal_pair(){
+        use super::*;
+        let (session,_rx)=routing_session();let session=Arc::new(session);
+        let writes=Arc::new(Mutex::new(Vec::<String>::new()));
+        let (entered_tx,entered_rx)=std_mpsc::channel();let (resume_tx,resume_rx)=std_mpsc::channel();
+        let old=session.clone();let old_writes=writes.clone();
+        let ordinary=std::thread::spawn(move||with_ordinary_audio_egress(&old,||{
+            assert!(old.audio_requests.try_lock().is_ok());
+            entered_tx.send(()).unwrap();resume_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            old_writes.lock().unwrap().push("ordinary".into());Ok(())
+        }));
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(session.audio_egress.try_lock().is_err());session.cancelled.store(true,Ordering::SeqCst);
+        let terminal=session.clone();let terminal_writes=writes.clone();let (starting_tx,starting_rx)=std_mpsc::channel();
+        let finisher=std::thread::spawn(move||{
+            starting_tx.send(()).unwrap();
+            attempt_terminal_controls(&terminal,|kind,id|{
+                assert!(terminal.audio_requests.try_lock().is_ok()); // RX may acquire requests during TX.
+                terminal_writes.lock().unwrap().push(kind.topic().into());
+                route_session_audio(&terminal,"protocol/ack",&json!({"requestTopic":kind.topic(),"requestId":id,"ok":true}));
+                Ok(())
+            })
+        });
+        starting_rx.recv_timeout(Duration::from_secs(2)).unwrap();resume_tx.send(()).unwrap();
+        ordinary.join().unwrap().unwrap();assert!(finisher.join().unwrap().unwrap());
+        assert_eq!(*writes.lock().unwrap(),vec!["ordinary","audio/play_flush","audio/conversation"]);
+        assert!(session.audio_requests.lock().unwrap().terminal_acks());
+        assert!(!attempt_terminal_controls(&session,|_,_|panic!("terminal pair must stay once")).unwrap());
+    }
+    #[test]
+    fn audio_egress_rejects_pre_gate_old_sender_after_terminal_even_without_cancel_flag(){
+        use super::*;
+        for cancel in [false,true]{
+            let (session,_rx)=routing_session();let session=Arc::new(session);
+            let writes=Arc::new(Mutex::new(Vec::<String>::new()));
+            let (ready_tx,ready_rx)=std_mpsc::channel();let (resume_tx,resume_rx)=std_mpsc::channel();
+            let old=session.clone();let old_writes=writes.clone();
+            let ordinary=std::thread::spawn(move||{
+                ready_tx.send(()).unwrap();resume_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                with_ordinary_audio_egress(&old,||{old_writes.lock().unwrap().push("stale".into());Ok(())})
+            });
+            ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();session.cancelled.store(cancel,Ordering::SeqCst);
+            assert!(attempt_terminal_controls(&session,|kind,_|{writes.lock().unwrap().push(kind.topic().into());Ok(())}).unwrap());
+            resume_tx.send(()).unwrap();assert!(ordinary.join().unwrap().is_err());
+            assert_eq!(*writes.lock().unwrap(),vec!["audio/play_flush","audio/conversation"]);
+        }
+    }
+    #[test]
+    fn terminal_writes_are_once_and_independent_of_full_normal_window_and_cancelled_ack_is_consumed(){
+        use super::*;
+        let (session,_rx)=routing_session();
+        for _ in 0..audio_ack::MAX_PENDING{session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-turn").unwrap();}
+        session.cancelled.store(true,Ordering::SeqCst);session.status.lock().unwrap().error="first-cause".into();
+        let mut writes=Vec::new();
+        assert!(attempt_terminal_controls(&session,|kind,id|{
+            writes.push(kind);
+            // Real route ACK delivery interleaves before writer return, with
+            // cancellation already set and the ordinary table completely full.
+            route_session_audio(&session,"protocol/ack",&json!({"requestTopic":kind.topic(),"requestId":id,"ok":true}));Ok(())
+        }).unwrap());
+        assert_eq!(writes,vec![audio_ack::Terminal::Flush,audio_ack::Terminal::Disable]);
+        assert!(!attempt_terminal_controls(&session,|_,_|panic!("no second terminal TX")).unwrap());
+        assert!(session.audio_requests.lock().unwrap().terminal_acks());assert!(!session.audio_requests.lock().unwrap().stopped());
+        assert_eq!(session.status.lock().unwrap().error,"first-cause");
+        assert!(session.audio_requests.lock().unwrap().claim_probe());session.audio_requests.lock().unwrap().probe_written(true);
+        route_session_audio(&session,"audio/status",&json!({"active":false,"conversation":false,"playbackActive":false,"streamActive":false,"conversationSessionId":""}));
+        assert!(!session.audio_requests.lock().unwrap().stopped());
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/query","requestId":format!("{}-stop-observe",session.id),"ok":true}));
+        assert!(session.audio_requests.lock().unwrap().stopped());
+    }
+    #[test]
+    fn player_begin_and_flush_retire_old_epoch_ack_before_replacement_utterance(){
+        use super::*;
+        let (session,_rx)=routing_session();session.capture_armed.store(true,Ordering::SeqCst);
+        let (tx,_commands)=std_mpsc::channel();let player=Player{tx,epoch:Arc::new(AtomicU64::new(0)),ack_requests:session.audio_requests.clone()};
+        player.send(PlayerCmd::Begin("rtc-new-a".into())).unwrap();
+        let old=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-a").unwrap();
+        player.send(PlayerCmd::Flush).unwrap();player.send(PlayerCmd::Begin("rtc-new-b".into())).unwrap();
+        let current=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-b").unwrap();
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":old,"ok":false,"code":"audio_chunk_rejected"}));
+        assert!(!session.cancelled.load(Ordering::SeqCst));
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":current,"ok":false,"code":"audio_chunk_rejected"}));
+        assert!(session.cancelled.load(Ordering::SeqCst));assert_eq!(session.status.lock().unwrap().reason,"device_protocol_error");
+    }
+    #[test]
+    fn foreign_notes_stop_ack_cannot_cancel_new_realtime_session() {
+        use super::*;
+        let (session,_rx)=routing_session();session.capture_armed.store(true,Ordering::SeqCst);
+        let payload=json!({"requestTopic":"audio/control","requestId":"notes-old-stop","ok":false,"code":"audio_control_failed"});
+        route_session_audio(&session,"protocol/ack",&payload);
+        assert!(!session.cancelled.load(Ordering::SeqCst));
+        assert!(session.status.lock().unwrap().reason.is_empty());
+    }
+
+    #[test]
+    fn issued_malformed_optional_audio_ack_fails_closed_but_foreign_receipts_do_not_consume() {
+        use super::*;
+        for field in ["sessionId","conversationSessionId"] {
+            for invalid in [Value::Null,json!(true),json!(7),json!([]),json!({})] {
+                // Exact actual current-round request, not inferred from topic
+                // or prefix. Current ACKs may omit the fields; present bad
+                // types are not absence, for both success and failure ACKs.
+                for ok in [true,false] {
+                    let (session,_rx)=routing_session();session.capture_armed.store(true,Ordering::SeqCst);
+                    let id=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-turn").unwrap();
+                    let mut receipt=json!({"requestTopic":"audio/play_chunk","requestId":id,"ok":ok});
+                    receipt[field]=invalid.clone();
+                    assert!(route_session_audio(&session,"protocol/ack",&receipt));
+                    assert!(session.cancelled.load(Ordering::SeqCst),"current malformed {field} ok={ok}");
+                    assert_eq!(session.status.lock().unwrap().reason,"device_protocol_ack_invalid");
+                    assert_eq!(session.audio_requests.lock().unwrap().accept(&session.id,"audio/play_chunk",&id,None,None),audio_ack::Receipt::Unmatched);
+                    let saved=session.status.lock().unwrap().error.clone();
+                    route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":id,"ok":false,"code":"audio_chunk_rejected"}));
+                    assert_eq!(session.status.lock().unwrap().reason,"device_protocol_ack_invalid");
+                    assert_eq!(session.status.lock().unwrap().error,saved);
+                }
+                // A foreign ID and a mismatched issued topic with the same bad
+                // field cannot consume/kill the current round. A subsequent
+                // genuine current rejection must still take the fail-closed path.
+                let (session,_rx)=routing_session();session.capture_armed.store(true,Ordering::SeqCst);
+                let id=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-turn").unwrap();
+                for (topic,key) in [("audio/play_chunk","rtc-old-a1"),("audio/play_begin",id.as_str()),("audio/control",id.as_str())] {
+                    let mut receipt=json!({"requestTopic":topic,"requestId":key,"ok":false});receipt[field]=invalid.clone();
+                    route_session_audio(&session,"protocol/ack",&receipt);
+                    assert!(!session.cancelled.load(Ordering::SeqCst),"foreign malformed {field} topic={topic}");
+                }
+                route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":id,"ok":false,"code":"audio_chunk_rejected"}));
+                assert!(session.cancelled.load(Ordering::SeqCst));
+                assert_eq!(session.status.lock().unwrap().reason,"device_protocol_error");
+            }
+        }
+    }
+
+    #[test]
+    fn only_issued_current_audio_ack_fails_closed_and_success_cannot_be_replayed() {
+        use super::*;
+        let (session,_rx)=routing_session();session.capture_armed.store(true,Ordering::SeqCst);
+        let id=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-turn").unwrap();
+        for payload in [
+            json!({"requestTopic":"audio/play_chunk","requestId":"rtc-old-a1","ok":false}),
+            json!({"requestTopic":"audio/play_begin","requestId":id,"ok":false}),
+            json!({"requestTopic":"audio/play_chunk","requestId":id,"sessionId":"rtc-old-turn","ok":false}),
+        ] {route_session_audio(&session,"protocol/ack",&payload);assert!(!session.cancelled.load(Ordering::SeqCst));}
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":id,"ok":true}));
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":id,"ok":false}));
+        assert!(!session.cancelled.load(Ordering::SeqCst));
+        let current=session.audio_requests.lock().unwrap().issue(&session.id,"audio/play_chunk","rtc-new-turn").unwrap();
+        route_session_audio(&session,"protocol/ack",&json!({"requestTopic":"audio/play_chunk","requestId":current,"ok":false,"code":"audio_chunk_rejected"}));
+        assert!(session.cancelled.load(Ordering::SeqCst));
+        assert_eq!(session.status.lock().unwrap().reason,"device_protocol_error");
+        assert!(!session.status.lock().unwrap().error.is_empty());
     }
 
     #[test]
@@ -2265,7 +2777,7 @@ mod tests {
     #[test]
     fn playback_flush_invalidates_already_queued_pcm_and_subtitles() {
         let (tx,rx)=std_mpsc::channel();
-        let player=Player{tx,epoch:Arc::new(AtomicU64::new(0))};
+        let player=Player{tx,epoch:Arc::new(AtomicU64::new(0)),ack_requests:Arc::new(Mutex::new(Default::default()))};
         player.send(PlayerCmd::Begin("old".into())).unwrap();
         player.send(PlayerCmd::Pcm(vec![1;640])).unwrap();
         player.send(PlayerCmd::Subtitle("old".into())).unwrap();
@@ -2281,7 +2793,7 @@ mod tests {
     fn saved_persona_is_targeted_latest_wins_and_survives_audio_drain() {
         tauri::async_runtime::block_on(async {
             let (tx, mut rx) = mpsc::channel(128);
-            let session = Session { id:"rtc-test".into(), board_device_id:"board".into(), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(false),
+            let session = Session { id:"rtc-test".into(), board_device_id:"board".into(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new(Default::default())), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(false),
                 capture_armed:AtomicBool::new(false), capture_ready:AtomicBool::new(false),
                 stop_notify:tokio::sync::Notify::new(), input:tx,
                 status:Mutex::new(RealtimeChatStatus { active:true, appearance_id:"pet-a".into(), ..Default::default() }),
@@ -2314,11 +2826,11 @@ mod tests {
     }
 
     #[test]
-    fn displayed_asr_partial_is_preserved_when_final_stream_closes() {
+    fn closed_stream_requires_terminal_but_empty_final_preserves_displayed_partial() {
         tauri::async_runtime::block_on(async {
             let (tx, mut rx) = mpsc::unbounded_channel();
             drop(tx);
-            assert_eq!(await_final_text(&mut rx, "已经显示的语音".into()).await.unwrap(), "已经显示的语音");
+            assert!(await_final_text(&mut rx, "已经显示的语音".into()).await.is_err());
             let (tx, mut rx) = mpsc::unbounded_channel();
             tx.send(StreamingSpeechEvent::Partial { revision: 1, text: " ".into(), confidence: None }).unwrap();
             tx.send(StreamingSpeechEvent::Final { revision: 2, text: "".into(), confidence: None }).unwrap();
@@ -2333,7 +2845,7 @@ mod tests {
     #[test]
     fn cancellation_survives_microphone_queue_drain() {
         let (tx, mut rx) = mpsc::channel(128);
-        let session = Session { id:"rtc-test".into(), board_device_id:"test".into(), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(false),
+        let session = Session { id:"rtc-test".into(), board_device_id:"test".into(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new(Default::default())), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(false),
             capture_armed:AtomicBool::new(false), capture_ready:AtomicBool::new(false),
             stop_notify:tokio::sync::Notify::new(), input:tx, status:Mutex::new(RealtimeChatStatus::default()), completed_playback:Mutex::new(String::new()), pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits()) };
         session.input.try_send(Input::Pcm(vec![0; FRAME_BYTES], None)).unwrap();
@@ -2372,6 +2884,37 @@ mod tests {
         for error in ["401 鉴权失败", "403 授权失败", "请配置 API Key", "协议错误", "401 request timeout"] {
             assert!(!recoverable_asr_error(error),"{error}");
         }
+    }
+
+    #[test]
+    fn terminal_lifecycle_transient_rounds_recover_but_user_action_errors_do_not() {
+        for error in ["cloud speech recognition input is closed", "ASR connection reset",
+            "火山引擎 ASR 接收失败", "云端 ASR 工作任务在最终结果前结束，请重新发声"] {
+            assert!(recoverable_asr_error(error), "{error}");
+        }
+        for error in ["429 quota timeout", "403 connection closed", "余额不足", "额度不足",
+            "未配置 API Key", "resource permission timeout", "协议错误"] {
+            assert!(!recoverable_asr_error(error), "{error}");
+        }
+    }
+
+    #[test]
+    fn terminal_lifecycle_stale_generation_never_matches_active_round() {
+        assert!(asr_generation_matches(2, 2));
+        assert!(!asr_generation_matches(2, 1));
+        assert!(!asr_generation_matches(0, 0));
+    }
+
+    #[test]
+    fn terminal_lifecycle_old_error_mailbox_cannot_replace_next_final() {
+        tauri::async_runtime::block_on(async {
+            let (old_tx, old_rx) = mpsc::unbounded_channel();
+            drop(old_rx);
+            let (next_tx, mut next_rx) = mpsc::unbounded_channel();
+            assert!(old_tx.send(StreamingSpeechEvent::Error("old round".into())).is_err());
+            next_tx.send(StreamingSpeechEvent::Final {revision:1,text:"synthetic next".into(),confidence:None}).unwrap();
+            assert_eq!(await_final_text(&mut next_rx, String::new()).await.unwrap(), "synthetic next");
+        });
     }
 
     #[test]
@@ -2596,7 +3139,7 @@ mod tests {
         assert_eq!(diag["runtime"]["audioPlaybackReady"], true);
         let id = format!("rtc-hil-{}", now_ms());
         let (input, _) = mpsc::channel(128);
-        let session = Arc::new(Session { id:id.clone(), board_device_id:board.clone(), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(true),
+        let session = Arc::new(Session { id:id.clone(), board_device_id:board.clone(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new(Default::default())), cancelled:AtomicBool::new(false), duplex:AtomicBool::new(true),
             capture_armed:AtomicBool::new(true), capture_ready:AtomicBool::new(false),
             stop_notify:tokio::sync::Notify::new(), input, status:Mutex::new(RealtimeChatStatus::default()), completed_playback:Mutex::new(String::new()), pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits()) });
         let player = spawn_player(usb.clone(), board.clone(), session.clone());
@@ -2754,7 +3297,7 @@ mod tests {
         let board=std::env::var("P4_EXPECTED_BOARD_ID").unwrap();
         let id=format!("rtc-verified-hil-{}",now_ms());
         let (input,mut rx)=mpsc::channel(128);
-        let session=Arc::new(Session{id:id.clone(),board_device_id:board.clone(),cancelled:AtomicBool::new(false),
+        let session=Arc::new(Session{id:id.clone(),board_device_id:board.clone(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new(Default::default())),cancelled:AtomicBool::new(false),
             duplex:AtomicBool::new(true),capture_armed:AtomicBool::new(false),capture_ready:AtomicBool::new(false),
             stop_notify:tokio::sync::Notify::new(),input,status:Mutex::new(Default::default()),
             completed_playback:Mutex::new(String::new()),pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits())});
@@ -2854,7 +3397,7 @@ mod tests {
         impl Drop for Cleanup {fn drop(&mut self){let _=self.0.send_to_board(&self.1,"audio/play_flush",&json!({})); let _=self.0.send_to_board(&self.1,"audio/conversation",&json!({"enabled":false}));self.0.disconnect();}}
         let _cleanup=Cleanup(usb.clone(),board.clone());
         let id=format!("rtc-echo-{}",now_ms()); let (input,_)=mpsc::channel(128);
-        let session=Arc::new(Session{id:id.clone(),board_device_id:board.clone(),cancelled:AtomicBool::new(false),duplex:AtomicBool::new(true),capture_armed:AtomicBool::new(true),capture_ready:AtomicBool::new(false),stop_notify:tokio::sync::Notify::new(),input,status:Mutex::new(Default::default()),completed_playback:Mutex::new(String::new()),pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits())});
+        let session=Arc::new(Session{id:id.clone(),board_device_id:board.clone(), transport:None, capture_stream:Mutex::new(None), audio_egress:Mutex::new(()), audio_requests:Arc::new(Mutex::new(Default::default())),cancelled:AtomicBool::new(false),duplex:AtomicBool::new(true),capture_armed:AtomicBool::new(true),capture_ready:AtomicBool::new(false),stop_notify:tokio::sync::Notify::new(),input,status:Mutex::new(Default::default()),completed_playback:Mutex::new(String::new()),pending_persona:Mutex::new(None), playback_volume:AtomicU32::new(1.0f32.to_bits())});
         let player=spawn_player(usb.clone(),board.clone(),session.clone());
         let raw_calibration=std::env::var("P4_ECHO_RAW").as_deref()==Ok("1");
         if raw_calibration {

@@ -17,7 +17,7 @@ const source = readFileSync(join(here, "FirmwareUpdateNavItem.jsx"), "utf8");
 const app = readFileSync(join(here, "..", "App.jsx"), "utf8");
 
 test("firmware module sits directly below API configuration without a page route", () => {
-  assert.match(app, /title="API 配置"[\s\S]*?<FirmwareUpdateNavItem usb=\{usb\} \/>/);
+  assert.match(app, /title="设置"[\s\S]*?<FirmwareUpdateNavItem usb=\{usb\} \/>/);
   assert.doesNotMatch(app, /view === "firmware"|setView\("firmware"\)/);
 });
 

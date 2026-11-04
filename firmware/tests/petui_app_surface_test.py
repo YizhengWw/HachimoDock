@@ -45,6 +45,15 @@ int main(int argc,char **argv){(void)argc;FILE *f=fopen(argv[1],"rb");char b[819
     vendor=ROOT/'firmware/tests/vendor/cjson';exe=tmp_path/'parser'
     subprocess.run(['cc','-std=c11','-fsanitize=address,undefined','-I',str(ROOT/'firmware/main'),'-I',str(vendor),str(source),str(ROOT/'firmware/main/pet_p4_surface.c'),str(vendor/'cJSON.c'),'-lm','-o',str(exe)],check=True)
     cases=[(layout(),True),(graphics(),True),(typography(),True),(interactive(),True)]
+    bound=graphics();bound['bindings']='p4-variable-bindings-v1'
+    bound['elements'][1].pop('text');bound['elements'][1]['var_bind']='custom.temperature'
+    cases.append((bound,True))
+    meter=copy.deepcopy(bound);meter['elements'].append({'type':'meter','x':20,'y':120,'w':200,'h':12,'color':65535,'var_bind':'level'})
+    cases.append((meter,True))
+    for key,value in [('var_bind','../private'),('var_bind',''),('var_bind',3),('text','duplicate'),('bind','headline'),('key_for','go'),('type','image')]:
+        bad=copy.deepcopy(bound);bad['elements'][1][key]=value;cases.append((bad,False))
+    bad=copy.deepcopy(bound);bad.pop('bindings');cases.append((bad,False))
+    bad=copy.deepcopy(bound);bad['bindings']='unknown';cases.append((bad,False))
     hosted=graphics();hosted['elements'][1]['host_mask']=8;cases.append((hosted,True))
     for v in (0,256,True,1.5):
         bad=copy.deepcopy(hosted);bad['elements'][1]['host_mask']=v;cases.append((bad,False))
@@ -107,6 +116,21 @@ def test_icon_tables_are_one_bounded_product_owned_set():
             assert 2<=len(points)<=32
             assert all(len(p)==2 and all(0<=v<=24 for v in p) for p in points)
     subprocess.run(['node',str(ROOT/'pc/scripts/build-app-icons.mjs'),'--check'],check=True)
+
+def test_named_binding_capability_is_opt_in(tmp_path):
+    from validate_generated_widget import DEFAULT_CAPABILITIES,validate_runtime,validate_widget
+    r={'schema_version':1,'engine':'p4-bounded-runtime-v4','states':['ready'],'initial_state':'ready','vars':{'label':{'type':'string','init':'Ready'}},'tick':[],'transitions':[],
+       'dashboard':{'title':'Binding check','visualStyle':'clean','visualPalette':'ocean','visualLayout':'tool','visualSprite':'timer'},
+       'surface':{'engine':'p4-app-surface-v1','graphics':'p4-app-graphics-v1','bindings':'p4-variable-bindings-v1','background':0,'elements':[{'type':'text','x':0,'y':0,'w':200,'h':32,'color':65535,'var_bind':'label'}]}}
+    errors=[];validate_runtime(r,'tool',tmp_path,copy.deepcopy(DEFAULT_CAPABILITIES),errors);assert errors==[]
+    caps=copy.deepcopy(DEFAULT_CAPABILITIES);caps.pop('widgetVariableBindings');errors=[]
+    validate_runtime(r,'tool',tmp_path,caps,errors);assert len(errors)==1 and '通用变量绑定' in errors[0]
+    files={'component.json':{'id':'binding-check','name':'Binding check','version':'1.0.0','description':'Shows the declared label without external services.','kind':'tool'},'runtime/widget.json':r,'negative-screen.json':{'dashboard':r['dashboard']},'buttons.json':[],'share.json':{'title':'Binding check'}}
+    for name,value in files.items():
+        path=tmp_path/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(value))
+    (tmp_path/'assets').mkdir();(tmp_path/'assets/.keep').touch()
+    assert validate_widget(tmp_path)==[]
+    assert any('通用变量绑定' in e for e in validate_widget(tmp_path,{}))
 
 def test_native_punctuation_is_bounded_and_visible_at_all_font_sizes(tmp_path):
     source=tmp_path/'punctuation.c';exe=tmp_path/'punctuation'

@@ -25,20 +25,27 @@ export function localInitial(s,wall){
   s.local={phase:0,field:0,pending:-1,revealAt:0,draftDay:0,draftMinute:0};return s;
 }
 const seconds=s=>s.wall<0?-1:s.wall+Math.floor(s.clock/1000);
-const values=s=>Array.from({length:7},(_,i)=>s.vars[`local${i}`]);
-function repair(c,v){v[0]=mod(v[0],c.groups.length);c.groups.forEach((g,i)=>{if(c.kind==='countdown'){v[1+2*i]=clamp(v[1+2*i],0,civilDay(2099,12,31));v[2+2*i]=clamp(v[2+2*i],0,1439);}else{v[1+2*i]&=(1<<g.items.length)-1;v[2+2*i]=clamp(v[2+2*i],-1,g.items.length-1);}});}
+const wide=c=>c.kind==='deck'&&c.groups.some(g=>g.items.length>24);
+const maskSlot=(group,word)=>word?7+group*2+word-1:1+group*2;
+const maskStart=word=>word?24+(word-1)*20:0;
+const maskWidth=word=>word?20:24;
+const excluded=(v,group,item)=>{const word=item<24?0:item<44?1:2;return !!(v[maskSlot(group,word)]&(1<<(item-maskStart(word))));};
+const exclude=(v,group,item)=>{const word=item<24?0:item<44?1:2;v[maskSlot(group,word)]|=1<<(item-maskStart(word));};
+const clearMask=(c,v,group)=>{for(let word=0;word<(wide(c)?3:1);word++)v[maskSlot(group,word)]=0;};
+const values=(s,c)=>Array.from({length:wide(c)?13:7},(_,i)=>{const v=s.vars[`local${i}`];if(!Number.isInteger(v))throw new Error('Local deck save word unavailable');return v;});
+function repair(c,v){v[0]=mod(v[0],c.groups.length);c.groups.forEach((g,i)=>{if(c.kind==='countdown'){v[1+2*i]=clamp(v[1+2*i],0,civilDay(2099,12,31));v[2+2*i]=clamp(v[2+2*i],0,1439);}else{for(let word=0;word<(wide(c)?3:1);word++){const bits=clamp(g.items.length-maskStart(word),0,maskWidth(word));v[maskSlot(i,word)]&=(2**bits)-1;}v[2+2*i]=clamp(v[2+2*i],-1,g.items.length-1);}});}
 function assign(s,v){v.forEach((v,i)=>s.vars[`local${i}`]=v);s.state=LOCAL_STATES[s.local.phase];return s;}
 export function localAction(runtime,state,action,entropy){
   if(!localEnabled(runtime,state,action))return state;
-  const s=structuredClone(state),c=runtime.local,l=s.local,op=c.actions[action],v=values(s);repair(c,v);
+  const s=structuredClone(state),c=runtime.local,l=s.local,op=c.actions[action],v=values(s,c);repair(c,v);
   const at=v[0],a=1+at*2,b=a+1,g=c.groups[at],now=seconds(s);
   if(c.kind==='deck'){
     if(op==='previous'||op==='next'){v[0]=mod(at+(op==='next'?1:-1),c.groups.length);l.phase=0;}
     else if(op==='close'){l.phase=0;l.pending=-1;}
-    else if(op==='reset'){v[a]=0;l.phase=0;}
+    else if(op==='reset'){clearMask(c,v,at);l.phase=0;}
     else {
-      if(op==='exclude'){if(l.phase!==2||v[b]<0)return state;v[a]|=1<<v[b];l.phase=0;}
-      let candidates=g.items.map((_,i)=>i).filter(i=>!(v[a]&(1<<i)));
+      if(op==='exclude'){if(l.phase!==2||v[b]<0)return state;exclude(v,at,v[b]);l.phase=0;}
+      let candidates=g.items.map((_,i)=>i).filter(i=>!excluded(v,at,i));
       if(!candidates.length){l.phase=4;l.pending=-1;}
       else {if(candidates.length>1){const i=candidates.indexOf(v[b]);if(i>=0){candidates[i]=candidates[candidates.length-1];candidates.pop();}}
         const random=entropy??globalThis.crypto.getRandomValues(new Uint32Array(1))[0];
@@ -55,15 +62,15 @@ export function localAction(runtime,state,action,entropy){
     }
   }return assign(s,v);
 }
-export function localAdvance(runtime,s){const c=runtime.local,l=s.local,v=values(s);repair(c,v);
+export function localAdvance(runtime,s){const c=runtime.local,l=s.local,v=values(s,c);repair(c,v);
   if(c.kind==='deck'&&l.phase===1&&s.clock>=l.revealAt){v[2+2*v[0]]=l.pending;l.phase=2;l.pending=-1;}
   if(c.kind==='countdown'&&l.phase===5&&seconds(s)>=0)l.phase=0;
   assign(s,v);s.state=LOCAL_STATES[localView(runtime,s).phase];return s;
 }
-export function localView(runtime,s){const c=runtime.local,l=s.local,v=values(s),at=mod(v[0],c.groups.length),g=c.groups[at],a=1+2*at,b=a+1,now=seconds(s);
+export function localView(runtime,s){const c=runtime.local,l=s.local,v=values(s,c),at=mod(v[0],c.groups.length),g=c.groups[at],a=1+2*at,b=a+1,now=seconds(s);
   const o={phase:l.phase,eyebrow:g.title,badge:`${at+1}/${c.groups.length}`,note:c.hint,headline:'',metricValue:'',metricLabel:'',metricUnit:'',progress:0};
   if(c.kind==='deck'){
-    o.metricValue=String(g.items.filter((_,i)=>!(v[a]&(1<<i))).length);o.metricLabel='可选内容';const item=g.items[v[b]];
+    o.metricValue=String(g.items.filter((_,i)=>!excluded(v,at,i)).length);o.metricLabel='可选内容';const item=g.items[v[b]];
     o.headline=l.phase===1?c.busy:l.phase===4?'选项都排除啦':l.phase===2&&item?item.title:c.idle;
     if(l.phase===2&&item)o.note=item.note;if(l.phase===4)o.note='点击恢复选项，或切换一个分类。';
     o.progress=l.phase===1?clamp(100-Math.trunc((l.revealAt-s.clock)*100/c.reveal_ms),0,100):l.phase===2?100:0;return o;

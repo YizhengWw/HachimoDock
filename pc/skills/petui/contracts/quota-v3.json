@@ -1,0 +1,1974 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-quota-v3",
+ "notes": "Shared p4-quota-v3 vectors for the Python validator, the Rust package validator and the firmware constant parity test. v1 is the contract for packages that do not declare quota, v2 for quota p4-quota-v2 (unchanged), v3 only for packages naming p4-quota-v3 on a device that advertises widgetQuota p4-quota-v3 (widgetQuotas lists v2 and v3). Each vector is a runtime/widget.json fragment with a minimal dashboard; 'ok' says whether every validator must accept it.",
+ "limits": {
+  "v1": {
+   "vars": 8,
+   "states": 6,
+   "pages": 4,
+   "transitions": 24,
+   "legacyTransitions": 12,
+   "ticks": 8,
+   "switchChoices": 6,
+   "surfaceNodes": 32,
+   "localItems": 16,
+   "saveVars": 8,
+   "stringVarBytes": 63,
+   "widgetJsonBytes": 4095,
+   "appWidgetJsonBytes": 8191
+  },
+  "v2": {
+   "vars": 16,
+   "states": 8,
+   "pages": 6,
+   "transitions": 32,
+   "legacyTransitions": 12,
+   "ticks": 12,
+   "switchChoices": 8,
+   "surfaceNodes": 48,
+   "localItems": 24,
+   "saveVars": 16,
+   "stringVarBytes": 63,
+   "widgetJsonBytes": 8191,
+   "appWidgetJsonBytes": 8191
+  },
+  "v3": {
+   "vars": 32,
+   "states": 16,
+   "pages": 12,
+   "transitions": 48,
+   "legacyTransitions": 12,
+   "ticks": 16,
+   "switchChoices": 12,
+   "surfaceNodes": 64,
+   "localItems": 64,
+   "saveVars": 32,
+   "stringVarBytes": 127,
+   "widgetJsonBytes": 12287,
+   "appWidgetJsonBytes": 12287
+  }
+ },
+ "vectors": [
+  {
+   "name": "17 vars with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "v0": {
+      "type": "int"
+     },
+     "v1": {
+      "type": "int"
+     },
+     "v2": {
+      "type": "int"
+     },
+     "v3": {
+      "type": "int"
+     },
+     "v4": {
+      "type": "int"
+     },
+     "v5": {
+      "type": "int"
+     },
+     "v6": {
+      "type": "int"
+     },
+     "v7": {
+      "type": "int"
+     },
+     "v8": {
+      "type": "int"
+     },
+     "v9": {
+      "type": "int"
+     },
+     "v10": {
+      "type": "int"
+     },
+     "v11": {
+      "type": "int"
+     },
+     "v12": {
+      "type": "int"
+     },
+     "v13": {
+      "type": "int"
+     },
+     "v14": {
+      "type": "int"
+     },
+     "v15": {
+      "type": "int"
+     },
+     "v16": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2"
+   }
+  },
+  {
+   "name": "17 vars with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "v0": {
+      "type": "int"
+     },
+     "v1": {
+      "type": "int"
+     },
+     "v2": {
+      "type": "int"
+     },
+     "v3": {
+      "type": "int"
+     },
+     "v4": {
+      "type": "int"
+     },
+     "v5": {
+      "type": "int"
+     },
+     "v6": {
+      "type": "int"
+     },
+     "v7": {
+      "type": "int"
+     },
+     "v8": {
+      "type": "int"
+     },
+     "v9": {
+      "type": "int"
+     },
+     "v10": {
+      "type": "int"
+     },
+     "v11": {
+      "type": "int"
+     },
+     "v12": {
+      "type": "int"
+     },
+     "v13": {
+      "type": "int"
+     },
+     "v14": {
+      "type": "int"
+     },
+     "v15": {
+      "type": "int"
+     },
+     "v16": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "32 vars with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "v0": {
+      "type": "int"
+     },
+     "v1": {
+      "type": "int"
+     },
+     "v2": {
+      "type": "int"
+     },
+     "v3": {
+      "type": "int"
+     },
+     "v4": {
+      "type": "int"
+     },
+     "v5": {
+      "type": "int"
+     },
+     "v6": {
+      "type": "int"
+     },
+     "v7": {
+      "type": "int"
+     },
+     "v8": {
+      "type": "int"
+     },
+     "v9": {
+      "type": "int"
+     },
+     "v10": {
+      "type": "int"
+     },
+     "v11": {
+      "type": "int"
+     },
+     "v12": {
+      "type": "int"
+     },
+     "v13": {
+      "type": "int"
+     },
+     "v14": {
+      "type": "int"
+     },
+     "v15": {
+      "type": "int"
+     },
+     "v16": {
+      "type": "int"
+     },
+     "v17": {
+      "type": "int"
+     },
+     "v18": {
+      "type": "int"
+     },
+     "v19": {
+      "type": "int"
+     },
+     "v20": {
+      "type": "int"
+     },
+     "v21": {
+      "type": "int"
+     },
+     "v22": {
+      "type": "int"
+     },
+     "v23": {
+      "type": "int"
+     },
+     "v24": {
+      "type": "int"
+     },
+     "v25": {
+      "type": "int"
+     },
+     "v26": {
+      "type": "int"
+     },
+     "v27": {
+      "type": "int"
+     },
+     "v28": {
+      "type": "int"
+     },
+     "v29": {
+      "type": "int"
+     },
+     "v30": {
+      "type": "int"
+     },
+     "v31": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "33 vars with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "v0": {
+      "type": "int"
+     },
+     "v1": {
+      "type": "int"
+     },
+     "v2": {
+      "type": "int"
+     },
+     "v3": {
+      "type": "int"
+     },
+     "v4": {
+      "type": "int"
+     },
+     "v5": {
+      "type": "int"
+     },
+     "v6": {
+      "type": "int"
+     },
+     "v7": {
+      "type": "int"
+     },
+     "v8": {
+      "type": "int"
+     },
+     "v9": {
+      "type": "int"
+     },
+     "v10": {
+      "type": "int"
+     },
+     "v11": {
+      "type": "int"
+     },
+     "v12": {
+      "type": "int"
+     },
+     "v13": {
+      "type": "int"
+     },
+     "v14": {
+      "type": "int"
+     },
+     "v15": {
+      "type": "int"
+     },
+     "v16": {
+      "type": "int"
+     },
+     "v17": {
+      "type": "int"
+     },
+     "v18": {
+      "type": "int"
+     },
+     "v19": {
+      "type": "int"
+     },
+     "v20": {
+      "type": "int"
+     },
+     "v21": {
+      "type": "int"
+     },
+     "v22": {
+      "type": "int"
+     },
+     "v23": {
+      "type": "int"
+     },
+     "v24": {
+      "type": "int"
+     },
+     "v25": {
+      "type": "int"
+     },
+     "v26": {
+      "type": "int"
+     },
+     "v27": {
+      "type": "int"
+     },
+     "v28": {
+      "type": "int"
+     },
+     "v29": {
+      "type": "int"
+     },
+     "v30": {
+      "type": "int"
+     },
+     "v31": {
+      "type": "int"
+     },
+     "v32": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "16 states with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "s0",
+     "s1",
+     "s2",
+     "s3",
+     "s4",
+     "s5",
+     "s6",
+     "s7",
+     "s8",
+     "s9",
+     "s10",
+     "s11",
+     "s12",
+     "s13",
+     "s14",
+     "s15"
+    ],
+    "initial_state": "s0",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "17 states with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "s0",
+     "s1",
+     "s2",
+     "s3",
+     "s4",
+     "s5",
+     "s6",
+     "s7",
+     "s8",
+     "s9",
+     "s10",
+     "s11",
+     "s12",
+     "s13",
+     "s14",
+     "s15",
+     "s16"
+    ],
+    "initial_state": "s0",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "9 states with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "s0",
+     "s1",
+     "s2",
+     "s3",
+     "s4",
+     "s5",
+     "s6",
+     "s7",
+     "s8"
+    ],
+    "initial_state": "s0",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2"
+   }
+  },
+  {
+   "name": "12 pages with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3",
+    "pages": [
+     {
+      "id": "p0"
+     },
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     },
+     {
+      "id": "p4"
+     },
+     {
+      "id": "p5"
+     },
+     {
+      "id": "p6"
+     },
+     {
+      "id": "p7"
+     },
+     {
+      "id": "p8"
+     },
+     {
+      "id": "p9"
+     },
+     {
+      "id": "p10"
+     },
+     {
+      "id": "p11"
+     }
+    ],
+    "initial_page": "p0"
+   }
+  },
+  {
+   "name": "13 pages with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3",
+    "pages": [
+     {
+      "id": "p0"
+     },
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     },
+     {
+      "id": "p4"
+     },
+     {
+      "id": "p5"
+     },
+     {
+      "id": "p6"
+     },
+     {
+      "id": "p7"
+     },
+     {
+      "id": "p8"
+     },
+     {
+      "id": "p9"
+     },
+     {
+      "id": "p10"
+     },
+     {
+      "id": "p11"
+     },
+     {
+      "id": "p12"
+     }
+    ],
+    "initial_page": "p0"
+   }
+  },
+  {
+   "name": "7 pages with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2",
+    "pages": [
+     {
+      "id": "p0"
+     },
+     {
+      "id": "p1"
+     },
+     {
+      "id": "p2"
+     },
+     {
+      "id": "p3"
+     },
+     {
+      "id": "p4"
+     },
+     {
+      "id": "p5"
+     },
+     {
+      "id": "p6"
+     }
+    ],
+    "initial_page": "p0"
+   }
+  },
+  {
+   "name": "16 ticks with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     }
+    ],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "17 ticks with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     }
+    ],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "13 ticks with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     },
+     {
+      "every_ms": 1000,
+      "inc": {
+       "a": 1
+      }
+     }
+    ],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2"
+   }
+  },
+  {
+   "name": "48 input transitions with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "act0"
+     },
+     {
+      "from": "*",
+      "on": "act1"
+     },
+     {
+      "from": "*",
+      "on": "act2"
+     },
+     {
+      "from": "*",
+      "on": "act3"
+     },
+     {
+      "from": "*",
+      "on": "act4"
+     },
+     {
+      "from": "*",
+      "on": "act5"
+     },
+     {
+      "from": "*",
+      "on": "act6"
+     },
+     {
+      "from": "*",
+      "on": "act7"
+     },
+     {
+      "from": "*",
+      "on": "act8"
+     },
+     {
+      "from": "*",
+      "on": "act9"
+     },
+     {
+      "from": "*",
+      "on": "act10"
+     },
+     {
+      "from": "*",
+      "on": "act11"
+     },
+     {
+      "from": "*",
+      "on": "act12"
+     },
+     {
+      "from": "*",
+      "on": "act13"
+     },
+     {
+      "from": "*",
+      "on": "act14"
+     },
+     {
+      "from": "*",
+      "on": "act15"
+     },
+     {
+      "from": "*",
+      "on": "act16"
+     },
+     {
+      "from": "*",
+      "on": "act17"
+     },
+     {
+      "from": "*",
+      "on": "act18"
+     },
+     {
+      "from": "*",
+      "on": "act19"
+     },
+     {
+      "from": "*",
+      "on": "act20"
+     },
+     {
+      "from": "*",
+      "on": "act21"
+     },
+     {
+      "from": "*",
+      "on": "act22"
+     },
+     {
+      "from": "*",
+      "on": "act23"
+     },
+     {
+      "from": "*",
+      "on": "act24"
+     },
+     {
+      "from": "*",
+      "on": "act25"
+     },
+     {
+      "from": "*",
+      "on": "act26"
+     },
+     {
+      "from": "*",
+      "on": "act27"
+     },
+     {
+      "from": "*",
+      "on": "act28"
+     },
+     {
+      "from": "*",
+      "on": "act29"
+     },
+     {
+      "from": "*",
+      "on": "act30"
+     },
+     {
+      "from": "*",
+      "on": "act31"
+     },
+     {
+      "from": "*",
+      "on": "act32"
+     },
+     {
+      "from": "*",
+      "on": "act33"
+     },
+     {
+      "from": "*",
+      "on": "act34"
+     },
+     {
+      "from": "*",
+      "on": "act35"
+     },
+     {
+      "from": "*",
+      "on": "act36"
+     },
+     {
+      "from": "*",
+      "on": "act37"
+     },
+     {
+      "from": "*",
+      "on": "act38"
+     },
+     {
+      "from": "*",
+      "on": "act39"
+     },
+     {
+      "from": "*",
+      "on": "act40"
+     },
+     {
+      "from": "*",
+      "on": "act41"
+     },
+     {
+      "from": "*",
+      "on": "act42"
+     },
+     {
+      "from": "*",
+      "on": "act43"
+     },
+     {
+      "from": "*",
+      "on": "act44"
+     },
+     {
+      "from": "*",
+      "on": "act45"
+     },
+     {
+      "from": "*",
+      "on": "act46"
+     },
+     {
+      "from": "*",
+      "on": "act47"
+     }
+    ],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3",
+    "input": {
+     "engine": "p4-input-v1"
+    }
+   }
+  },
+  {
+   "name": "49 input transitions with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "act0"
+     },
+     {
+      "from": "*",
+      "on": "act1"
+     },
+     {
+      "from": "*",
+      "on": "act2"
+     },
+     {
+      "from": "*",
+      "on": "act3"
+     },
+     {
+      "from": "*",
+      "on": "act4"
+     },
+     {
+      "from": "*",
+      "on": "act5"
+     },
+     {
+      "from": "*",
+      "on": "act6"
+     },
+     {
+      "from": "*",
+      "on": "act7"
+     },
+     {
+      "from": "*",
+      "on": "act8"
+     },
+     {
+      "from": "*",
+      "on": "act9"
+     },
+     {
+      "from": "*",
+      "on": "act10"
+     },
+     {
+      "from": "*",
+      "on": "act11"
+     },
+     {
+      "from": "*",
+      "on": "act12"
+     },
+     {
+      "from": "*",
+      "on": "act13"
+     },
+     {
+      "from": "*",
+      "on": "act14"
+     },
+     {
+      "from": "*",
+      "on": "act15"
+     },
+     {
+      "from": "*",
+      "on": "act16"
+     },
+     {
+      "from": "*",
+      "on": "act17"
+     },
+     {
+      "from": "*",
+      "on": "act18"
+     },
+     {
+      "from": "*",
+      "on": "act19"
+     },
+     {
+      "from": "*",
+      "on": "act20"
+     },
+     {
+      "from": "*",
+      "on": "act21"
+     },
+     {
+      "from": "*",
+      "on": "act22"
+     },
+     {
+      "from": "*",
+      "on": "act23"
+     },
+     {
+      "from": "*",
+      "on": "act24"
+     },
+     {
+      "from": "*",
+      "on": "act25"
+     },
+     {
+      "from": "*",
+      "on": "act26"
+     },
+     {
+      "from": "*",
+      "on": "act27"
+     },
+     {
+      "from": "*",
+      "on": "act28"
+     },
+     {
+      "from": "*",
+      "on": "act29"
+     },
+     {
+      "from": "*",
+      "on": "act30"
+     },
+     {
+      "from": "*",
+      "on": "act31"
+     },
+     {
+      "from": "*",
+      "on": "act32"
+     },
+     {
+      "from": "*",
+      "on": "act33"
+     },
+     {
+      "from": "*",
+      "on": "act34"
+     },
+     {
+      "from": "*",
+      "on": "act35"
+     },
+     {
+      "from": "*",
+      "on": "act36"
+     },
+     {
+      "from": "*",
+      "on": "act37"
+     },
+     {
+      "from": "*",
+      "on": "act38"
+     },
+     {
+      "from": "*",
+      "on": "act39"
+     },
+     {
+      "from": "*",
+      "on": "act40"
+     },
+     {
+      "from": "*",
+      "on": "act41"
+     },
+     {
+      "from": "*",
+      "on": "act42"
+     },
+     {
+      "from": "*",
+      "on": "act43"
+     },
+     {
+      "from": "*",
+      "on": "act44"
+     },
+     {
+      "from": "*",
+      "on": "act45"
+     },
+     {
+      "from": "*",
+      "on": "act46"
+     },
+     {
+      "from": "*",
+      "on": "act47"
+     },
+     {
+      "from": "*",
+      "on": "act48"
+     }
+    ],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3",
+    "input": {
+     "engine": "p4-input-v1"
+    }
+   }
+  },
+  {
+   "name": "33 input transitions with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "act0"
+     },
+     {
+      "from": "*",
+      "on": "act1"
+     },
+     {
+      "from": "*",
+      "on": "act2"
+     },
+     {
+      "from": "*",
+      "on": "act3"
+     },
+     {
+      "from": "*",
+      "on": "act4"
+     },
+     {
+      "from": "*",
+      "on": "act5"
+     },
+     {
+      "from": "*",
+      "on": "act6"
+     },
+     {
+      "from": "*",
+      "on": "act7"
+     },
+     {
+      "from": "*",
+      "on": "act8"
+     },
+     {
+      "from": "*",
+      "on": "act9"
+     },
+     {
+      "from": "*",
+      "on": "act10"
+     },
+     {
+      "from": "*",
+      "on": "act11"
+     },
+     {
+      "from": "*",
+      "on": "act12"
+     },
+     {
+      "from": "*",
+      "on": "act13"
+     },
+     {
+      "from": "*",
+      "on": "act14"
+     },
+     {
+      "from": "*",
+      "on": "act15"
+     },
+     {
+      "from": "*",
+      "on": "act16"
+     },
+     {
+      "from": "*",
+      "on": "act17"
+     },
+     {
+      "from": "*",
+      "on": "act18"
+     },
+     {
+      "from": "*",
+      "on": "act19"
+     },
+     {
+      "from": "*",
+      "on": "act20"
+     },
+     {
+      "from": "*",
+      "on": "act21"
+     },
+     {
+      "from": "*",
+      "on": "act22"
+     },
+     {
+      "from": "*",
+      "on": "act23"
+     },
+     {
+      "from": "*",
+      "on": "act24"
+     },
+     {
+      "from": "*",
+      "on": "act25"
+     },
+     {
+      "from": "*",
+      "on": "act26"
+     },
+     {
+      "from": "*",
+      "on": "act27"
+     },
+     {
+      "from": "*",
+      "on": "act28"
+     },
+     {
+      "from": "*",
+      "on": "act29"
+     },
+     {
+      "from": "*",
+      "on": "act30"
+     },
+     {
+      "from": "*",
+      "on": "act31"
+     },
+     {
+      "from": "*",
+      "on": "act32"
+     }
+    ],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2",
+    "input": {
+     "engine": "p4-input-v1"
+    }
+   }
+  },
+  {
+   "name": "13 legacy transitions with v3 still need input v1",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "act0"
+     },
+     {
+      "from": "*",
+      "on": "act1"
+     },
+     {
+      "from": "*",
+      "on": "act2"
+     },
+     {
+      "from": "*",
+      "on": "act3"
+     },
+     {
+      "from": "*",
+      "on": "act4"
+     },
+     {
+      "from": "*",
+      "on": "act5"
+     },
+     {
+      "from": "*",
+      "on": "act6"
+     },
+     {
+      "from": "*",
+      "on": "act7"
+     },
+     {
+      "from": "*",
+      "on": "act8"
+     },
+     {
+      "from": "*",
+      "on": "act9"
+     },
+     {
+      "from": "*",
+      "on": "act10"
+     },
+     {
+      "from": "*",
+      "on": "act11"
+     },
+     {
+      "from": "*",
+      "on": "act12"
+     }
+    ],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "100-byte string init with v3",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "s": {
+      "type": "string",
+      "init": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "100-byte string init with v2",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "s": {
+      "type": "string",
+      "init": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v2"
+   }
+  },
+  {
+   "name": "128-byte string init with v3",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "s": {
+      "type": "string",
+      "init": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  },
+  {
+   "name": "unknown quota profile",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v4"
+   }
+  },
+  {
+   "name": "v3 with the legacy game preset",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3",
+    "game": {
+     "type": "snake"
+    }
+   }
+  },
+  {
+   "name": "v3 needs the bounded runtime v4",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v3",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "a": {
+      "type": "int"
+     }
+    },
+    "transitions": [],
+    "tick": [],
+    "schema_version": 1,
+    "dashboard": {
+     "title": "q",
+     "visualStyle": "clean",
+     "visualPalette": "mono",
+     "visualLayout": "tool",
+     "visualSprite": "timer"
+    },
+    "quota": "p4-quota-v3"
+   }
+  }
+ ]
+}

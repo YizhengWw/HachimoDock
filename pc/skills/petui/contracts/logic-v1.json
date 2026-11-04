@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "profile": "p4-logic-v1",
+  "notes": "Shared p4-logic-v1 vectors. cases: semantic runs executed by the C-derived JS preview, the packaged .mjs mirror and the Python model. rejections: package shapes every validator (Python, Rust, firmware parser) must refuse. Legacy tick {var,lte} keeps its pre-logic behavior without the profile.",
+  "cases": [
+    {
+      "name": "guarded transition falls through to the next matching rule when false",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle", "play", "empty"],
+        "vars": {"fish": {"type": "int", "init": 1}},
+        "transitions": [
+          {"from": "*", "on": "play", "to": "play", "when": {"var": "fish", "op": "gt", "value": 0}, "inc": {"fish": -1}},
+          {"from": "*", "on": "play", "to": "empty"}
+        ], "tick": []},
+      "events": [{"action": "play"}, {"action": "play"}],
+      "expected": {"state": "empty", "page": "", "vars": {"fish": 0}}
+    },
+    {
+      "name": "else branch runs its own bounded effects and state",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "ask", "states": ["ask", "answer", "retry"],
+        "vars": {"again": {"type": "int", "init": 0}, "left": {"type": "int", "init": 2}},
+        "transitions": [
+          {"from": "ask", "on": "grade", "to": "answer", "when": {"var": "again", "lte": 0}, "inc": {"left": -1}, "else": {"to": "retry", "inc": {"again": -1}}}
+        ], "tick": []},
+      "events": [{"action": "grade"}],
+      "expected": {"state": "answer", "page": "", "vars": {"again": 0, "left": 1}}
+    },
+    {
+      "name": "else branch is selected when the guard is false",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "ask", "states": ["ask", "answer", "retry"],
+        "vars": {"again": {"type": "int", "init": 2}, "left": {"type": "int", "init": 2}},
+        "transitions": [
+          {"from": "ask", "on": "grade", "to": "answer", "when": {"var": "again", "lte": 0}, "inc": {"left": -1}, "else": {"to": "retry", "inc": {"again": -1}}}
+        ], "tick": []},
+      "events": [{"action": "grade"}],
+      "expected": {"state": "retry", "page": "", "vars": {"again": 1, "left": 2}}
+    },
+    {
+      "name": "all combines two conditions and var-to-var comparison",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle", "win"],
+        "vars": {"score": {"type": "int", "init": 7}, "goal": {"type": "int", "init": 5}, "lives": {"type": "int", "init": 1}},
+        "transitions": [
+          {"from": "idle", "on": "check", "to": "win", "when": {"all": [{"var": "score", "op": "gte", "value": {"var": "goal"}}, {"var": "lives", "op": "gt", "value": 0}]}}
+        ], "tick": []},
+      "events": [{"action": "check"}],
+      "expected": {"state": "win", "page": "", "vars": {"score": 7, "goal": 5, "lives": 1}}
+    },
+    {
+      "name": "all with one false member does not fire",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle", "win"],
+        "vars": {"score": {"type": "int", "init": 7}, "goal": {"type": "int", "init": 5}, "lives": {"type": "int", "init": 0}},
+        "transitions": [
+          {"from": "idle", "on": "check", "to": "win", "when": {"all": [{"var": "score", "op": "gte", "value": {"var": "goal"}}, {"var": "lives", "op": "gt", "value": 0}]}}
+        ], "tick": []},
+      "events": [{"action": "check"}],
+      "expected": {"state": "idle", "page": "", "vars": {"score": 7, "goal": 5, "lives": 0}}
+    },
+    {
+      "name": "inc by var reads the pre-effect snapshot and clamps to limits",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"],
+        "vars": {"total": {"type": "int", "init": 10}, "preset": {"type": "int", "init": 25}}, "limits": {"total": [0, 30]},
+        "surface": {"engine": "p4-app-surface-v1", "elements": [{"type": "text", "x": 0, "y": 0, "w": 100, "h": 20, "color": 0, "text": "t"}]},
+        "transitions": [{"from": "*", "on": "add", "inc": {"total": {"var": "preset"}, "preset": {"var": "total"}}}], "tick": []},
+      "events": [{"action": "add"}],
+      "expected": {"state": "idle", "page": "", "vars": {"total": 30, "preset": 35}}
+    },
+    {
+      "name": "tick guard with gte op completes and then-effects apply once",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "run", "states": ["run", "done"],
+        "vars": {"count": {"type": "int", "init": 0}, "rounds": {"type": "int", "init": 0}},
+        "transitions": [], "tick": [{"every_ms": 1000, "while_state": "run", "inc": {"count": 1}, "when": {"var": "count", "op": "gte", "value": 3}, "then": {"to": "done", "inc": {"rounds": 1}}}]},
+      "events": [{"ms": 10000}],
+      "expected": {"state": "done", "page": "", "vars": {"count": 3, "rounds": 1}}
+    },
+    {
+      "name": "legacy tick lte keeps its behavior without the profile",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "initial_state": "run", "states": ["run", "done"],
+        "vars": {"left": {"type": "int", "init": 2}},
+        "transitions": [], "tick": [{"every_ms": 1000, "while_state": "run", "inc": {"left": -1}, "when": {"var": "left", "lte": 0}, "then": {"to": "done"}}]},
+      "events": [{"ms": 5000}],
+      "expected": {"state": "done", "page": "", "vars": {"left": 0}}
+    },
+    {
+      "name": "else page op moves pages without a navigation history",
+      "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "initial_page": "a", "pages": [{"id": "a"}, {"id": "b"}],
+        "vars": {"ok": {"type": "int", "init": 0}},
+        "transitions": [{"from": "*", "on": "next", "page": "b", "when": {"var": "ok", "op": "eq", "value": 1}, "else": {"page": "next"}}], "tick": []},
+      "events": [{"action": "next"}, {"action": "next"}],
+      "expected": {"state": "idle", "page": "a", "vars": {"ok": 0}}
+    }
+  ],
+  "rejections": [
+    {"name": "when on a transition without the profile", "runtime": {"engine": "p4-bounded-runtime-v4", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "x", "when": {"var": "a", "lte": 0}, "inc": {"a": 1}}], "tick": []}},
+    {"name": "tick op/value without the profile", "runtime": {"engine": "p4-bounded-runtime-v4", "initial_state": "idle", "states": ["idle", "done"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [], "tick": [{"every_ms": 1000, "inc": {"a": 1}, "when": {"var": "a", "op": "gte", "value": 2}, "then": {"to": "done"}}]}},
+    {"name": "inc by var without the profile", "runtime": {"engine": "p4-bounded-runtime-v4", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}, "b": {"type": "int", "init": 1}}, "transitions": [{"from": "*", "on": "x", "inc": {"a": {"var": "b"}}}], "tick": []}},
+    {"name": "unknown profile name", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v2", "initial_state": "idle", "states": ["idle"], "vars": {}, "transitions": [], "tick": []}},
+    {"name": "profile on the v3 runtime", "runtime": {"engine": "p4-bounded-runtime-v3", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {}, "transitions": [], "tick": []}},
+    {"name": "else without when", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle", "x"], "vars": {}, "transitions": [{"from": "*", "on": "go", "else": {"to": "x"}}], "tick": []}},
+    {"name": "else with an unknown key", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle", "x"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"var": "a", "lte": 0}, "to": "x", "else": {"to": "idle", "from_page": "p"}}], "tick": []}},
+    {"name": "main plus else effects over four", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}, "b": {"type": "int", "init": 0}, "c": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"var": "a", "lte": 0}, "inc": {"a": 1, "b": 1, "c": 1}, "else": {"inc": {"a": 1, "b": 1}}}], "tick": []}},
+    {"name": "three conditions in all", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"all": [{"var": "a", "lte": 0}, {"var": "a", "lte": 0}, {"var": "a", "lte": 0}]}, "inc": {"a": 1}}], "tick": []}},
+    {"name": "condition on a string var", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {"s": {"type": "string", "init": "x"}, "a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"var": "s", "op": "eq", "value": 0}, "inc": {"a": 1}}], "tick": []}},
+    {"name": "unsupported op name", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"var": "a", "op": "between", "value": 0}, "inc": {"a": 1}}], "tick": []}},
+    {"name": "lte mixed with op", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {"a": {"type": "int", "init": 0}}, "transitions": [{"from": "*", "on": "go", "when": {"var": "a", "lte": 0, "op": "gt", "value": 1}, "inc": {"a": 1}}], "tick": []}},
+    {"name": "logic mixed with local tools", "runtime": {"engine": "p4-bounded-runtime-v4", "logic": "p4-logic-v1", "initial_state": "idle", "states": ["idle"], "vars": {}, "transitions": [], "tick": [], "local": {"engine": "p4-local-tools-v1"}}}
+  ]
+}

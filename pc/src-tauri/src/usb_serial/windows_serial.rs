@@ -3,6 +3,7 @@
 //! Each clone owns its own manual-reset event. Pending requests are completed or
 //! cancelled AND joined before their buffers/OVERLAPPED go out of scope.
 use serialport::{COMPort, SerialPort, DataBits, FlowControl, Parity, StopBits, ClearBuffer};
+use super::windows_configuration::{contextualize,Stage};
 use std::{io::{self, Read, Write}, os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle}, time::Duration};
 use windows_sys::Win32::{
     Devices::Communication::{DCB, COMMTIMEOUTS, GetCommState, SetCommState, SetCommTimeouts},
@@ -30,19 +31,19 @@ impl WindowsSerialPort {
         // Null security attributes: neither this handle nor its event is inherited.
         let handle = unsafe { CreateFileW(wide.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0,
             std::ptr::null(), OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, std::ptr::null_mut()) };
-        if handle == INVALID_HANDLE_VALUE { return Err(io::Error::last_os_error().into()); }
+        if handle == INVALID_HANDLE_VALUE { return Err(contextualize(Stage::Open,Some(baud),io::Error::last_os_error()).into()); }
         // Transfer ownership immediately, including all error paths below.
         let control = unsafe { COMPort::from_raw_handle(handle) };
         let mut dcb: DCB = unsafe { std::mem::zeroed() };
         dcb.DCBlength = std::mem::size_of::<DCB>() as u32;
-        if unsafe { GetCommState(handle, &mut dcb) } == 0 { return Err(io::Error::last_os_error().into()); }
+        if unsafe { GetCommState(handle, &mut dcb) } == 0 { return Err(contextualize(Stage::ReadState,Some(baud),io::Error::last_os_error()).into()); }
         dcb.BaudRate = baud;
         dcb.ByteSize = 8;
         dcb.Parity = 0;
         dcb.StopBits = 0;
         // Binary 8N1, no software/hardware flow control, DTR/RTS disabled.
         dcb._bitfield = 1;
-        if unsafe { SetCommState(handle, &dcb) } == 0 { return Err(io::Error::last_os_error().into()); }
+        if unsafe { SetCommState(handle, &dcb) } == 0 { return Err(contextualize(Stage::ApplyState,Some(baud),io::Error::last_os_error()).into()); }
         let mut port = Self::wrap(control, name.to_owned(), timeout)?;
         port.set_timeout(timeout)?;
         Ok(port)
@@ -50,10 +51,10 @@ impl WindowsSerialPort {
 
     fn wrap(control: COMPort, name: String, timeout: Duration) -> serialport::Result<Self> {
         if unsafe { SetHandleInformation(control.as_raw_handle(), HANDLE_FLAG_INHERIT, 0) } == 0 {
-            return Err(io::Error::last_os_error().into());
+            return Err(contextualize(Stage::Inheritance,None,io::Error::last_os_error()).into());
         }
         let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
-        if event.is_null() { return Err(io::Error::last_os_error().into()); }
+        if event.is_null() { return Err(contextualize(Stage::Event,None,io::Error::last_os_error()).into()); }
         Ok(Self { control, event: unsafe { OwnedHandle::from_raw_handle(event) }, name, timeout })
     }
 
@@ -142,7 +143,7 @@ impl SerialPort for WindowsSerialPort {
         let ms = value.as_millis().clamp(1, u32::MAX as u128 - 1) as u32;
         let timeouts = COMMTIMEOUTS { ReadIntervalTimeout: u32::MAX, ReadTotalTimeoutMultiplier: u32::MAX,
             ReadTotalTimeoutConstant: ms, WriteTotalTimeoutMultiplier: 0, WriteTotalTimeoutConstant: ms.max(500) };
-        if unsafe { SetCommTimeouts(self.handle(), &timeouts) } == 0 { return Err(io::Error::last_os_error().into()); }
+        if unsafe { SetCommTimeouts(self.handle(), &timeouts) } == 0 { return Err(contextualize(Stage::Timeout,None,io::Error::last_os_error()).into()); }
         self.timeout = value;
         Ok(())
     }

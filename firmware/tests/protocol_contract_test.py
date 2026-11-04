@@ -19,6 +19,7 @@ indicator-free viewport, and sprite-complete built-in packages on the device.
 """
 
 from pathlib import Path
+from p4_render_trace_test import function
 
 
 import json
@@ -114,8 +115,8 @@ def test_protocol_doc_declares_usb_only_p4_runtime():
     assert '"widgetScene": "p4-grid-scene-v2"' in doc
     assert '"widgetScenes": ["p4-grid-scene-v1", "p4-grid-scene-v2"]' in doc
     assert '"widgetSprites": true' in doc
-    assert '"widgetGames": ["blocks", "snake", "flappy"]' in doc
-    assert '"widgetGamePresets": ["blocks", "snake", "flappy"]' in doc
+    assert '"widgetGames": ["blocks", "snake", "flappy", "gomoku"]' in doc
+    assert '"widgetGamePresets": ["blocks", "snake", "flappy", "gomoku"]' in doc
     assert '"voice": true' in doc
     assert '"audio": true' in doc
     assert '"codec": "ES8311"' in doc
@@ -193,7 +194,7 @@ def test_pc_p4_sync_prefers_native_usb_bulk_transport():
     assert "select_native_usb_candidate" in native_protocol
     assert "probe_identity" in usb
     assert "expected_board_device_id" in usb[
-        usb.index("pub fn sync_appearance_p4_native"):
+        usb.index("\nfn sync_appearance_p4_native<F>("):
         usb.index("fn ensure_p4_native_full_pack_supported")
     ]
     assert "handle_identity_ping" in native
@@ -228,6 +229,8 @@ def test_firmware_contract_accepts_p4_assets_and_rejects_linux_mp4_ota():
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"))' in source
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"))' in source
     assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("flappy"))' in source
+    assert 'cJSON_AddItemToArray(widget_games, cJSON_CreateString("gomoku"))' in source
+    assert 'cJSON_AddItemToArray(widget_game_presets, cJSON_CreateString("gomoku"))' in source
     assert 'cJSON_AddItemToObject(capabilities, "widgetGamePresets", widget_game_presets)' in source
     assert 'bool audio_ready = pet_p4_audio_ready()' in source
     assert 'cJSON_AddBoolToObject(capabilities, "voice", audio_ready)' in source
@@ -260,13 +263,14 @@ def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
     assert "pet_p4_game.c" in cmake
     assert "PET_P4_MINIAPP_ACTION_MAX" in header
     assert "pet_p4_miniapp_get_view" in header
-    assert "#define MINIAPP_MAX_VARS 8" in source
-    assert "#define MINIAPP_MAX_STATES 6" in source
-    assert "#define MINIAPP_MAX_PAGES 4" in source
-    assert "#define MINIAPP_MAX_TRANSITIONS 24" in source
+    # Versioned parser ceilings keep v1/v2 packages bounded when v3 storage is enabled.
+    assert "#define MINIAPP_V2_MAX_VARS 16" in source and "#define MINIAPP_V1_MAX_VARS 8" in source
+    assert "#define MINIAPP_V2_MAX_STATES 8" in source and "#define MINIAPP_V1_MAX_STATES 6" in source
+    assert "#define MINIAPP_V2_MAX_PAGES 6" in source and "#define MINIAPP_V1_MAX_PAGES 4" in source
+    assert "#define MINIAPP_V2_MAX_TRANSITIONS 32" in source and "#define MINIAPP_V1_MAX_TRANSITIONS 24" in source
     assert "parsed->transition_count>12&&!parsed->input_v1" in source
     assert '"widgetInput", "p4-input-v1"' in protocol
-    assert "#define MINIAPP_MAX_TICKS 8" in source
+    assert "#define MINIAPP_V2_MAX_TICKS 12" in source and "#define MINIAPP_V1_MAX_TICKS 8" in source
     assert "#define MINIAPP_MAX_BUTTONS 8" in source
     assert "#define MINIAPP_MAX_EFFECTS 4" in source
     assert "at most four" in read("protocol.md")
@@ -297,8 +301,24 @@ def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
     assert "miniapp_runtime_t next;" not in source
     assert "if (now_ms < tick->last_ms)" in source
     assert "for (int tick = 0; tick < g_runtime.tick_count; tick += 1) g_runtime.ticks[tick].last_ms = now_ms;" not in source
-    assert "portENTER_CRITICAL(&g_runtime_lock)" in source
-    assert "pet_p4_miniapp_get_view(&snapshot)" in protocol
+    assert "miniapp_runtime_lock();" in source
+    assert "portENTER_CRITICAL(&g_runtime_lock)" not in source
+    # The wire serializer uses one coherent observer capture, including its
+    # view, generation and digests; it must not fetch a second live view.
+    from p4_render_trace_test import function
+    state_query = function(protocol, "send_miniapp_state")
+    assert state_query.count("pet_p4_miniapp_observe(") == 1
+    assert "pet_p4_miniapp_observe(&observation,&snapshot)" in state_query
+    assert "const pet_p4_miniapp_view_t *view = available ? &snapshot : NULL;" in state_query
+    assert "pet_p4_miniapp_get_view(" not in state_query
+    observer = function(read_required("main/pet_p4_miniapp_observation.inc"), "pet_p4_miniapp_observe")
+    assert observer.count("miniapp_runtime_lock();") == 1
+    assert observer.count("miniapp_runtime_unlock();") == 1
+    assert observer.count("*view=g_runtime.view;") == 1
+    assert observer.index("miniapp_runtime_lock();") < observer.index("*view=g_runtime.view;")
+    assert observer.index("*view=g_runtime.view;") < observer.index("out->instance_generation=g_image_revision;")
+    assert observer.index("out->instance_generation=g_image_revision;") < observer.index("out->persist_digest=h;")
+    assert observer.index("out->persist_digest=h;") < observer.index("miniapp_runtime_unlock();")
     assert 'send_topic_payload(send_line, ctx, "widget-install-ack", payload)' in protocol
     assert 'send_widget_ack(send_line, ctx, transfer_id, phase, payload, ok, error)' in protocol
     assert 'cJSON_AddStringToObject(payload, "path", path)' in protocol
@@ -393,8 +413,8 @@ def test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe():
     assert "visual_literal_allowed" in source
     assert 'cJSON_AddStringToObject(payload, "visualStyle", view->visual_style)' in protocol
     assert 'cJSON_AddStringToObject(payload, "visualSprite", view->visual_sprite)' in protocol
-    assert "pet_p4_miniapp_get_view(&g_miniapp_view_snapshot)" in renderer
-    assert "static EXT_RAM_BSS_ATTR pet_p4_miniapp_view_t g_miniapp_view_snapshot;" in renderer
+    assert "pet_p4_miniapp_render_snapshot(&g_miniapp_render_snapshot,&g_surface_images,&g_surface_revision)" in renderer
+    assert "static EXT_RAM_BSS_ATTR pet_p4_miniapp_render_snapshot_t g_miniapp_render_snapshot;" in renderer
     main = read("main/pet_p4_main.c")
     assert "g_render_mutex" in main
     assert "xSemaphoreTake(g_render_mutex" in main
@@ -440,7 +460,9 @@ def test_p4_token_widget_uses_bounded_stats_instead_of_host_readers():
     activation = input_runtime[input_runtime.index("static bool apply_local_action(") :]
     activation = activation[activation.index('strcmp(binding->action, "page_enter") == 0') :]
     activation = activation[: activation.index('strcmp(binding->action, "page_back") == 0')]
-    assert "pet_p4_miniapp_catalog_activate_selected()" in activation
+    assert "pet_p4_miniapp_activation_request_selected()" in activation
+    assert "PET_MINIAPP_ACTIVATION_READY" in activation
+    assert "component_open_pending" in activation
     assert "pet_p4_miniapp_sync_stats(&state->stats)" in activation
 
 
@@ -450,10 +472,10 @@ def test_builtin_tool_widgets_declare_bounded_completion_cycles():
     token_usage = json.loads(read_workspace("pc/builtin-clawpkgs/token-usage/runtime/widget.json"))
 
     assert '"when", "then"' in miniapp
-    assert "tick->condition_var" in miniapp
+    assert "tick->when_count" in miniapp  # p4-logic-v1 generalized the legacy {var,lte} guard
     assert "tick->completion_state" in miniapp
     assert "tick->completion_effects" in miniapp
-    assert "g_runtime.vars[tick->condition_var].int_value <= tick->condition_lte" in miniapp
+    assert "conditions_hold(&g_runtime, tick->when, tick->when_count)" in miniapp
 
     focus_tick, rest_tick = tomato["tick"]
     assert focus_tick["when"] == {"var": "remaining_s", "lte": 0}
@@ -606,7 +628,12 @@ def test_p4_widget_delete_clears_persistence_and_returns_to_main():
         "MINIAPP_BUTTONS_PATH",
         "MINIAPP_BUTTONS_TMP_PATH",
     ]:
-        assert f"remove_file_if_present({path})" in miniapp
+        targets = miniapp.split("static void component_cleanup_targets(", 1)[1].split("\nstatic bool remove_component(", 1)[0]
+        assert f',"%s",{path});' in targets
+    assert 'pet_file_cleanup_prepare(&cleanup,"/spiffs",targets,first_count' in miniapp
+    assert 'if(count>PET_FILE_CLEANUP_MAX_TARGETS)count=PET_FILE_CLEANUP_MAX_TARGETS;' in miniapp
+    assert 'pet_file_cleanup_prepare(&cleanup,"/spiffs",targets+begin,count' in miniapp
+    assert "storage_work_current()&&pet_file_cleanup_remove_at(&cleanup,target)" in miniapp
     assert "memset(&g_runtime, 0, sizeof(g_runtime))" in miniapp
     assert "memset(&g_staging, 0, sizeof(g_staging))" in miniapp
     assert "if (value[0] < 'a' || value[0] > 'z') return false;" in miniapp
@@ -640,7 +667,7 @@ def test_p4_widget_inventory_is_request_matched_and_capacity_bounded():
     assert '"widget/inventory"' in protocol
     assert '"requestId"' in protocol
     assert '"supportsMultiple", true' in protocol
-    assert '"maxInstalled", PET_P4_MINIAPP_CATALOG_MAX' in protocol
+    assert '"maxInstalled", pet_p4_miniapp_catalog_capacity()' in protocol
     assert 'cJSON_AddNullToObject(item, "name")' in protocol
     assert 'cJSON_AddNullToObject(item, "kind")' in protocol
     assert 'cJSON_AddNullToObject(item, "version")' in protocol
@@ -675,8 +702,10 @@ def test_p4_component_packages_commit_through_validated_ab_catalog_snapshots():
     assert "package_generation = (uint8_t) (1 - next_catalog[catalog_index].package_generation)" in commit
     assert "next_catalog[catalog_index].widget_checksum = miniapp_checksum" in commit
     assert "next_catalog[catalog_index].buttons_checksum = miniapp_checksum" in commit
-    assert commit.index("write_file_atomic(widget_tmp_path") < commit.index("load_catalog_runtime_item(")
-    assert commit.index("load_catalog_runtime_item(") < commit.index("persist_catalog_snapshot(")
+    assert commit.index("write_spare_package_json((size_t)slot") < commit.index("load_catalog_runtime_item(")
+    assert commit.index("load_catalog_runtime_item(") < commit.index("write_catalog_snapshot_at(")
+    assert commit.index("PET_STORAGE_PREPARE") < commit.index("write_spare_package_json((size_t)slot")
+    assert commit.index("PET_STORAGE_DURABLE") < commit.index("g_catalog_sequence=commit.sequence")
     assert "MINIAPP_ID_PATH" not in commit
     assert "Keep both committed generations" in removal
     assert "remove_file_if_present(widget_path)" not in removal
@@ -716,7 +745,7 @@ def test_p4_ab_firmware_embeds_and_migrates_all_builtin_components():
     ]
     assert bundle["version"] == 1
     builtin_ids = json.loads(read("factory-config.json"))["components"]["ids"]
-    assert len(builtin_ids) == 28 and "music-player" not in builtin_ids
+    assert len(builtin_ids) == 29 and "music-player" not in builtin_ids
     assert builtin_ids[-3:] == ["decision-capsule", "answer-book", "hope-train"]
     assert [item["id"] for item in bundle["components"]] == builtin_ids
     for item in bundle["components"]:
@@ -793,8 +822,18 @@ def test_builtin_pixel_games_use_bounded_native_game_presets():
     assert 'strcmp(name, "blocks") == 0' in game
     assert 'strcmp(name, "snake") == 0' in game
     assert 'strcmp(name, "flappy") == 0' in game
+    assert 'strcmp(name, "gomoku") == 0' in game
     assert "flappy_step" in game
     assert "FLAPPY_FLAP_VELOCITY_Q8" in game
+    # gomoku: fixed 15x15 board, bounded deterministic reply, packed frame cells
+    header = read_required("main/pet_p4_game.h")
+    assert "PET_P4_GAME_GOMOKU," in header
+    assert "#define PET_P4_GAME_GOMOKU_SIZE 15" in header
+    assert "#define PET_P4_GAME_GOMOKU_AI_MAX_READS (PET_P4_GAME_GOMOKU_CELLS * 4 * 9)" in header
+    assert "PET_P4_GAME_COMMAND_PLACE" in header and "PET_P4_GAME_COMMAND_UNDO" in header
+    assert "static int gomoku_ai_choose" in game and "gomoku_step" in game
+    assert '"place", "left", "right", "up", "down", "undo",' in miniapp
+    assert "PET_P4_GAME_GOMOKU_STONE_MASK" in renderer
     assert "pet_p4_game_process(&g_runtime.game.engine, now_ms)" in miniapp
     assert "draw_miniapp_game_grid" in renderer
     assert "bool native_game = app->game.kind != PET_P4_GAME_NONE" in renderer
@@ -1229,10 +1268,10 @@ def test_p4_protocol_replies_are_routed_back_to_the_command_origin():
     source = read("main/pet_p4_main.c")
     transport = source[
         source.index("static void transport_send_line"):
-        source.index("static void send_screenshot_chunk")
+        source.index("/* Screenshot-only checked writes.")
     ]
     screenshot = source[
-        source.index("static void send_screenshot_chunk"):
+        source.index("/* Screenshot-only checked writes."):
         source.index("static bool maybe_handle_debug_line")
     ]
 
@@ -1240,8 +1279,8 @@ def test_p4_protocol_replies_are_routed_back_to_the_command_origin():
     assert "pet_p4_native_usb_send_json_line" in transport
     assert "PET_P4_TRANSPORT_USB_SERIAL_JTAG" in transport
     assert "usb_write_all(line" in transport
-    assert "uart_write_all(header" in screenshot
-    assert "usb_write_all(header" in screenshot
+    assert "screenshot_write_all(header,strlen(header),false" in screenshot
+    assert "screenshot_write_all(header,strlen(header),true" in screenshot
     assert "reply_ctx" in screenshot
 
     handler = source[
@@ -1294,7 +1333,9 @@ def test_p4_protocol_executor_and_lcd_handoff_do_not_share_mutable_render_state(
     assert "convert_h264_frame_direct_native" not in renderer
     assert "g_native_framebuffer_authoritative" not in renderer
     assert "g_draw_to_native" not in renderer
-    assert 'rotate_landscape_to_panel(), TAG, "rotate logical framebuffer"' in renderer
+    render=function(renderer,'pet_p4_renderer_render')
+    assert 'esp_err_t rotate_err=rotate_landscape_to_panel();' in render
+    assert render.index('if(rotate_err!=ESP_OK)')<render.index('return rotate_err;')
 
 
 def test_p4_normal_boot_never_auto_formats_spiffs():
@@ -1328,7 +1369,11 @@ def test_pc_uses_high_baud_for_p4_ch343_usb_uart():
     assert "P4_CH343_RAW_WRITE_GAP: Duration = Duration::from_micros(500)" in usb
     assert usb.count("write_serial_bytes_paced(") >= 4
     assert 'conn.runtime.eq_ignore_ascii_case("esp-p4")' in usb
-    assert "recover_raw_asset_stream" in usb
+    # Uncertain raw delivery now retires the connection instead of replaying it.
+    raw=usb[usb.index('    fn send_asset_raw_chunk_once('):usb.index('    fn send_asset_file_commit_checked(')]
+    assert 'physical_header_submitted&&!terminal_raw_proven' in raw
+    assert 'self.retire_uncertain_raw(&appearance)' in raw
+    assert 'if result.is_err() { self.appearance_uncertain(); }' in raw
     assert "send_asset_raw_chunk_checked" in usb
 
 
@@ -1414,8 +1459,15 @@ def test_p4_asset_commit_loads_manifest_state():
     assert "asset_revision" in header
     assert "pet_p4_load_asset_manifest" in header
     assert "pet_p4_load_asset_manifest" in source
-    assert 'strcmp(topic, "asset/commit") == 0' in source
-    assert "pet_p4_load_asset_manifest(state)" in source
+    topic = function(source, "handle_asset_topic")
+    commit = function(source, "handle_serial_asset_commit")
+    publish = function(source, "pet_p4_appearance_commit_slot")
+    assert '"asset/commit"' in topic and '"asset/patch-commit"' in topic
+    assert "handle_serial_asset_commit(state,send,route,id," in ''.join(topic.split())
+    assert "pet_p4_appearance_commit_slot(" in commit
+    assert "prepare_asset_snapshot(slot,NULL,next)" in ''.join(publish.split())
+    assert "state->asset_catalog=next->catalog" in ''.join(publish.split())
+    assert "state->asset_revision++" in publish
     assert "pet_p4_asset_catalog_parse" in source
     assert "json_parse_frame_sizes" in assets
     assert "cJSON_Parse" not in assets
@@ -1510,9 +1562,11 @@ def test_p4_behavior_rotates_native_families_without_per_frame_manifest_parsing(
     assert "cJSON_Parse" not in renderer
     assert "#define PET_P4_ASSET_CACHE_SLOTS 2U" in renderer
     assert "MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT" in renderer
-    assert "load_asset_stream_cache(asset.path, fs_path, stream_size)" in renderer
+    assert "load_asset_stream_cache(asset.path, fs_path, stream_size," in renderer
     assert "memcpy(g_jpeg_input, stream->bytes + offset, frame_size)" in renderer
-    assert "pet_p4_asset_read_all(logical_path, entry->bytes, expected_size)" in renderer
+    assert "pet_p4_raw_assets_read_range(job.source_slot, job.raw_offset" in renderer
+    assert "PET_P4_ASSET_PREPARE_CHUNK_BYTES 16384U" in renderer
+    assert "pet_p4_asset_read_all(logical_path, entry->bytes, expected_size)" not in renderer
     assert "fseek(g_asset_file" not in renderer
     assert "fread(g_jpeg_input" not in renderer
     assert "g_session_overlay_cache" in renderer
@@ -1577,7 +1631,7 @@ def test_p4_h264_uses_the_v9_single_slice_full_duration_aspect_fit_contract():
     assert "esp_h264_dec_sw_new" in renderer
     assert "ESP_H264_RAW_FMT_I420" in renderer
     assert "h264_stream_has_single_slice_access_units" in renderer
-    assert "expected one slice per access unit" in renderer
+    assert "if (!stream->single_slice_valid) return false;" in renderer
     assert "cycle_elapsed_ms = playback_elapsed_ms % playback_duration_ms" in renderer
     assert "target_frame < g_h264_decoded_frame" in renderer
     assert "strcmp(g_h264_fs_path, fs_path) != 0" in renderer
@@ -1623,9 +1677,11 @@ def test_p4_15fps_h264_assets_use_rgb565_and_ppa_render_scheduler():
     assert "CONFIG_ESP_H264_DUAL_TASK_CORE=1" in sdkconfig
     assert 'PET_P4_H264_DECODER_MODE "software-dual"' in renderer
     assert "PET_P4_H264_MAX_DECODE_FRAMES_PER_RENDER 1U" in renderer
-    assert "PET_P4_H264_PRIMARY_TASK_PRIORITY 16U" in renderer
+    assert "PET_P4_H264_PRIMARY_TASK_PRIORITY PET_P4_H264_TASK_PRIORITY" in renderer
+    assert "CONFIG_ESP_H264_DUAL_TASK_PRIORITY=17" in sdkconfig
+    assert "pet_p4_render_can_boost(uxTaskPriorityGet(NULL), ESP_TASK_MAIN_PRIO)" in renderer
     assert "vTaskPrioritySet(NULL, PET_P4_H264_PRIMARY_TASK_PRIORITY)" in renderer
-    assert "vTaskPrioritySet(NULL, original_priority)" in renderer
+    assert "vTaskPrioritySet(NULL, ESP_TASK_MAIN_PRIO)" in renderer
     assert "decoded_in_pass < PET_P4_H264_MAX_DECODE_FRAMES_PER_RENDER" in renderer
     assert "esp_driver_ppa" in cmake
     assert 'driver/ppa.h' in renderer
@@ -1673,14 +1729,15 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
     assert "rgb565(184, 97, 49)" in component_center
     assert "rgb565(31, 163, 255)" not in component_center
     assert "Pre-swap red/blue" not in renderer
-    assert 'set(PROJECT_VER "0.7.103-p4-r2")' in project
+    assert re.search(r'set\(PROJECT_VER "0\.7\.103-p4-r[0-9]+"\)',project)
 
 
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
     renderer = read("main/pet_p4_renderer.c")
 
-    assert "bool drew_asset = render_asset_pet_frame(state, view, now_ms)" in renderer
-    assert "if (!drew_asset)" in renderer
+    assert "bool drew_asset = component_media_idle&&render_asset_pet_frame(state, view, now_ms);" in renderer
+    assert "if(!component_media_idle)g_asset_cache_pending=true;" in renderer
+    assert "if (!drew_asset && !g_asset_cache_pending)" in renderer
     assert "g_asset_decode_blocked_until_ms" in renderer
     assert "PET_P4_ASSET_DECODE_BACKOFF_MS 500ULL" in renderer
     assert "g_framebuffer_initialized" in renderer
@@ -1698,7 +1755,7 @@ def test_p4_renderer_boot_diagnostic_is_visible_on_black_screen_failures():
     assert "rgb565(255, 120, 0)" in renderer
 
 
-def test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash():
+def test_p4_flash_layout_allocates_dual_3m_ota_and_17m_appearance_on_32m_flash():
     partitions = read("partitions.csv")
     platformio = read("platformio.ini")
     sdkconfig = read("sdkconfig.defaults")
@@ -1708,12 +1765,12 @@ def test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash():
     desktop = read_usb_serial_contract()
 
     assert "nvs,      data, nvs,     0x9000,   0x6000," in partitions
-    assert "ota_0,    app,  ota_0,   0x10000,  0x280000," in partitions
-    assert "ota_1,    app,  ota_1,   0x290000, 0x280000," in partitions
-    assert "otadata,  data, ota,     0x510000, 0x2000," in partitions
-    assert "storage,  data, spiffs,  0x520000, 0x6E0000," in partitions
-    assert "appearance0,data, 0x40,   0xC00000, 0xA00000," in partitions
-    assert "appearance1,data, 0x41,   0x1600000,0xA00000," in partitions
+    assert "ota_0,    app,  ota_0,   0x10000,  0x300000," in partitions
+    assert "ota_1,    app,  ota_1,   0x310000, 0x300000," in partitions
+    assert "otadata,  data, ota,     0x610000, 0x2000," in partitions
+    assert "storage,  data, spiffs,  0x620000, 0x8E0000," in partitions
+    assert "appearance0,data, 0x40,   0xF00000, 0x880000," in partitions
+    assert "appearance1,data, 0x41,   0x1780000,0x880000," in partitions
     assert "board_build.flash_size = 32MB" in platformio
     assert "board_upload.flash_size = 32MB" in platformio
     assert "CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y" in sdkconfig
@@ -1725,14 +1782,14 @@ def test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash():
     assert "factory-flash -Port $Port -FactoryReset" in migration
     assert "Get-FileHash" in migration
     assert "device already uses an A/B partition table" in migration
-    assert "P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x280000" in desktop
-    assert "| `ota_0` | `0x010000` | 2.5 MiB |" in runtime_readme
-    assert "| `ota_1` | `0x290000` | 2.5 MiB |" in runtime_readme
-    assert "| `storage` | `0x520000` | 6.875 MiB |" in runtime_readme
-    assert "| `appearance0` | `0xC00000` | 10 MiB |" in runtime_readme
-    assert "| `appearance1` | `0x1600000` | 10 MiB |" in runtime_readme
+    assert "P4_FIRMWARE_MAX_IMAGE_SIZE: usize = 0x300000" in desktop
+    assert "| `ota_0` | `0x010000` | 3 MiB |" in runtime_readme
+    assert "| `ota_1` | `0x310000` | 3 MiB |" in runtime_readme
+    assert "| `storage` | `0x620000` | 8.875 MiB |" in runtime_readme
+    assert "| `appearance0` | `0xF00000` | 8.5 MiB |" in runtime_readme
+    assert "| `appearance1` | `0x1780000` | 8.5 MiB |" in runtime_readme
     assert ".\\tools\\migrate_to_ab.ps1 -Port COM5 -FactoryReset" in runtime_readme
-    assert "inactive 2.5MiB OTA slot" in protocol_doc
+    assert "inactive 3MiB OTA slot" in protocol_doc
     assert "two 4MB OTA slots" not in runtime_readme
     assert "two 4MiB OTA slots" not in runtime_readme
     assert "16MB SPIFFS volume" not in runtime_readme
@@ -1755,7 +1812,7 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     tauri_config = read_workspace("pc/src-tauri/tauri.conf.json")
     resource_preflight = read_workspace("pc/scripts/prepare-desktop-resources.mjs")
 
-    assert 'set(PROJECT_VER "0.7.103-p4-r2")' in project
+    assert re.search(r'set\(PROJECT_VER "0\.7\.103-p4-r[0-9]+"\)',project)
     assert "esp_app_get_description()" in protocol
     assert "PET_P4_FW_VERSION" not in protocol
     assert '"pet_p4_ota.c"' in cmake
@@ -1812,7 +1869,23 @@ def test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc():
     assert "parse_esp_idf_app_descriptor" in desktop
     assert "expected_next_sequence" in desktop
     assert "wait_for_firmware_validation" in desktop
-    assert "recover_stale_firmware_transfer" in desktop
+    # Unknown is not permission to abort/restart an earlier OTA.
+    assert "fn recover_stale_firmware_transfer" not in desktop
+    assert "fn best_effort_firmware_abort" not in desktop
+    idle = desktop[desktop.index("fn ensure_firmware_transfer_idle("):
+                   desktop.index("pub(crate) fn firmware_chip_target(")]
+    assert "query_firmware_status(expected_board_device_id, expected_connection_id)?" in idle
+    assert 'status.get("active").and_then(serde_json::Value::as_bool)' in idle
+    assert "Some(false) => Ok(())" in idle
+    assert "Some(true) => Err(" in idle and "None => Err(" in idle
+    assert '"firmware/abort"' not in idle and '"firmware/begin"' not in idle
+    once = desktop[desktop.index("fn begin_firmware_transfer_once("):
+                   desktop.index("fn send_firmware_command_and_wait(")]
+    assert once.count("self.send_firmware_command_and_wait(") == 1
+    assert '"firmware/begin"' in once
+    assert "no replay or automatic abort; read-only reconciliation required" in once
+    assert not re.search(r"\b(?:for|while|loop)\b", once)
+    assert '"firmware/abort"' not in once
     assert "query_firmware_status" in desktop
     assert "expected_connection_id" in desktop
     assert "resolve_firmware_status" in desktop
@@ -1897,8 +1970,12 @@ def test_p4_runtime_shows_a_lightweight_screen_during_bulk_transfers():
     renderer_header = read("main/pet_p4_renderer.h")
 
     assert "asset_transfer_active" in header
-    assert "state->asset_transfer_active = true" in source
-    assert "state->asset_transfer_active = false" in source
+    topic = ''.join(function(source, "handle_asset_topic").split())
+    retire = ''.join(function(source, "serial_retire_locked").split())
+    assert "state->asset_transfer_active=true;" in topic
+    assert topic.index("state->asset_transfer_active=true;") < topic.index("pet_p4_appearance_phase_begin(")
+    assert "state->asset_transfer_active=false;" in retire
+    assert "pet_p4_appearance_end(" in retire
     assert "pet_p4_renderer_render_transfer_status" in renderer_header
     assert "pet_p4_renderer_render_transfer_status(firmware_transfer_active, now_ms)" in main
     assert 'const char *title = firmware_update ? "固件更新中" : "形象同步中"' in renderer
@@ -1916,7 +1993,21 @@ def test_p4_stale_appearance_transfer_aborts_on_both_transports():
 
     assert "PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS 15000ULL" in header
     assert "void pet_p4_asset_transfer_process" in protocol
-    assert "abort_serial_asset_transfer(state)" in protocol
+    latch = function(protocol, "pet_p4_asset_transfer_process")
+    worker = ''.join(function(protocol, "pet_p4_asset_transfer_cleanup_worker").split())
+    abort = ''.join(function(protocol, "abort_serial_asset_transfer").split())
+    assert "pet_p4_appearance_mutation_blocked()" in latch
+    assert "atomic_store_explicit(&g_asset_cleanup_due,true,memory_order_release)" in ''.join(latch.split())
+    assert "abort_serial_asset_transfer" not in latch  # no physical cleanup while state-locked
+    assert "pet_p4_appearance_mutation_blocked()" in worker
+    assert worker.index("pet_p4_appearance_phase_begin(") < worker.index("abort_serial_asset_transfer(NULL)") < worker.index("pet_p4_appearance_phase_end(")
+    assert "if(result==PET_APPEARANCE_COMMIT_OK)serial_retire_locked(state);" in worker
+    assert "if(g_appearance_session.recovery_blocked)returnfalse;" in abort
+    native_worker = ''.join(function(native, "native_idle_cleanup_worker").split())
+    assert "pet_p4_appearance_mutation_blocked()||!native_owned(g_transfer_id)" in native_worker
+    assert native_worker.index("pet_p4_appearance_phase_begin(") < native_worker.index("clear_slot_files(slot)") < native_worker.index("pet_p4_appearance_phase_end(")
+    assert "if(result==PET_APPEARANCE_COMMIT_OK)native_retire();elseg_native_failed=true;" in native_worker
+    assert "pet_p4_asset_transfer_cleanup_worker(&g_state)" in main
     assert "void pet_p4_native_usb_process" in native
     assert "pet_p4_asset_transfer_process(&g_state, now_ms)" in main
     assert "pet_p4_native_usb_process(now_ms)" in main
@@ -1953,10 +2044,24 @@ def test_p4_asset_chunks_keep_staged_file_open_between_acks():
     assert "close_asset_chunk_file()" in source
     assert "g_asset_chunk_file = file" in chunk_body
     assert "fclose(file)" not in chunk_body
-    assert "close_asset_chunk_file();" in source[
-        source.index("static void handle_asset_file"):
-        source.index("static void handle_asset_topic")
-    ]
+    file_body = function(source, "handle_asset_file")
+    close_body = function(source, "close_asset_chunk_file")
+    compact = ''.join(file_body.split())
+    assert 'static bool close_asset_chunk_file' in close_body
+    assert 'fclose(file) != 0' in close_body
+    assert 'g_asset_chunk_stat_valid = false;' in close_body
+    start = compact.index('if(!close_asset_chunk_file()){')
+    failure = compact[start:compact.index('}', start)]
+    assert failure.index('send_asset_ack(') < failure.index('return;')
+    assert 'reset_asset_chunk_tracking();' not in failure  # no second close after unknown physical writes
+    assert 'if(file)g_asset_phase_write_attempted=true;' in ''.join(close_body.split())
+    phase = ''.join(function(source, 'handle_asset_topic').split())
+    assert 'pet_p4_appearance_phase_end(&op,state,slot,ok,g_asset_phase_write_attempted)' in phase
+    assert '"file",path,false,' in failure
+    assert compact.index('tracked_stat=') < start < compact.index('if(tracked_stat)')
+    assert start < compact.index('send_asset_ack(send_line,ctx,transfer_id,"file",path,true,NULL)')
+    # Real successful buffered writes followed by a failing fclose must NACK:
+    # p4_phase2_transaction_test::test_real_file_close_error_never_acknowledges_success.
 
 
 def test_p4_asset_transfer_prepares_spiffs_and_raw_slot_without_rereads():
@@ -1984,9 +2089,14 @@ def test_p4_asset_transfer_prepares_spiffs_and_raw_slot_without_rereads():
     assert "missing transferred file" in file_body
     assert "run_spiffs_gc_yielding()" in source
     assert 'esp_spiffs_gc("storage", target)' in source
-    assert 'json_u64(payload, "totalBytes", 0)' in source
-    assert 'json_u64(payload, "rawBytes", total_bytes)' in source
-    assert "pet_p4_raw_assets_prepare(raw_bytes" in source
+    begin = ''.join(function(source, "handle_asset_topic").split())
+    assert 'cJSON_GetObjectItemCaseSensitive(payload,"totalBytes")' in begin
+    assert 'cJSON_GetObjectItemCaseSensitive(payload,"rawBytes")' in begin
+    assert '!cJSON_IsNumber(t)||!pet_appearance_size(t->valuedouble,&total)||!total' in begin
+    assert '!cJSON_IsNumber(r)||!pet_appearance_size(r->valuedouble,&raw_size)' in begin
+    assert 'if(!r)raw_size=total;' in begin
+    assert 'raw_size<=pet_p4_raw_assets_capacity_bytes()' in begin
+    assert 'pet_p4_raw_assets_prepare(raw_size,' in begin
     assert "esp_partition_erase_range" in raw
     assert "erase_range_yielding" in raw
     # Erase on absolute 64 KiB boundaries so full slices use block erase.
@@ -2000,7 +2110,7 @@ def test_p4_asset_transfer_prepares_spiffs_and_raw_slot_without_rereads():
     assert "raw appearance duplicate chunk does not match" in raw
     assert "PET_P4_RAW_HEADER_BYTES 4096U" in raw
     assert "pet_p4_raw_assets_commit" in source
-    assert "pet_p4_asset_read_all" in renderer
+    assert "pet_p4_raw_assets_read_range" in renderer
     assert '"pet_p4_raw_assets.c"' in cmake
     assert "ASSET_BEGIN_ACK_TIMEOUT: Duration = Duration::from_secs(120)" in desktop
     assert '"totalBytes": total_bytes' in desktop
@@ -2011,7 +2121,11 @@ def test_p4_raw_asset_chunks_bypass_base64_with_bounded_ram_and_checksum_ack():
     main = read("main/pet_p4_main.c")
 
     assert "PET_P4_RAW_ASSET_CHUNK_LIMIT (64 * 1024)" in protocol
-    assert 'strcmp(topic, "asset/raw-chunk") == 0' in protocol
+    topic = ''.join(function(protocol, "handle_asset_topic").split())
+    assert 'raw=!strcmp(topic,"asset/raw-chunk")' in topic
+    assert 'elseif(raw)(void)begin_raw_asset_chunk(NULL,payload,asset_phase_capture,&reply);' in topic
+    assert 'g_raw_asset_chunk.active&&!abort' in topic
+    assert 'pet_p4_appearance_phase_end(&op,state,slot,ok,g_asset_phase_write_attempted)' in topic
     assert "pet_p4_consume_raw_asset_bytes" in protocol
     assert "fnv1a64_bytes(g_raw_asset_chunk.data" in protocol
     assert '"raw-chunk"' in protocol
@@ -2035,11 +2149,22 @@ def test_p4_serial_asset_sync_uses_replaceable_slot_until_commit():
 
     assert "ensure_asset_transfer_slot" in source
     assert "return PET_P4_RAW_APPEARANCE_SLOT" in source
-    assert "g_asset_transfer_slot = PET_P4_RAW_APPEARANCE_SLOT" in source
-    assert "pet_p4_asset_clean_legacy_files()" in source
-    assert "clear_slot_files(g_asset_transfer_slot)" in source
+    topic = ''.join(function(source, "handle_asset_topic").split())
+    assert 'if(begin){g_asset_sender=send;g_asset_route=route;g_asset_transfer_slot=PET_P4_RAW_APPEARANCE_SLOT;' in topic
+    slot = ''.join(function(source, "ensure_asset_transfer_slot").split())
+    assert 'pet_appearance_id_valid(id)&&slot_is_valid(g_asset_transfer_slot)&&!strcmp(g_asset_transfer_id,id)' in slot
+    assert "void pet_p4_asset_clean_legacy_files(void)" in source
+    # This owned transaction clears only its pinned replaceable slot, not an
+    # unscoped legacy namespace while another outcome may be Unknown.
+    assert "pet_p4_asset_clean_legacy_files(" not in topic
+    assert topic.index('pet_p4_appearance_claim(') < topic.index('pet_p4_appearance_phase_begin(') < topic.index('ok=clear_slot_files(slot);')
+    assert "clear_slot_files(slot)" in topic
     assert "pet_p4_asset_fs_path_for_slot(g_asset_transfer_slot, path" in source
-    assert "pet_p4_asset_set_active_slot(g_asset_transfer_slot)" in source
+    commit = ''.join(function(source, 'handle_serial_asset_commit').split())
+    assert 'pet_p4_appearance_commit_slot(state,g_asset_transfer_slot,send,route,id,PET_APPEARANCE_SERIAL,patch,&io,error,sizeof(error))' in commit
+    publish = ''.join(function(source, 'pet_p4_appearance_commit_slot').split())
+    assert publish.index('write_asset_activation_marker(slot)') < publish.index('g_asset_active_slot=slot;')
+    assert 'g_appearance_session.recovery_blocked=true;' in publish
     assert "reset_asset_transfer_slot()" in source
 
 
@@ -2061,15 +2186,20 @@ def test_p4_inactive_slot_cleanup_restarts_after_each_spiffs_delete():
         assert "if (!found)" in clear
         assert "errno != ENOENT" in clear
         assert "pet_p4_raw_assets_invalidate" in clear
-    assert "if (!clear_slot_files(g_asset_transfer_slot)) return false" in serial
-    assert "if (!clear_slot_files(g_target_slot)) return false" in native
+    begin = ''.join(function(serial, "handle_asset_topic").split())
+    assert begin.index('pet_p4_appearance_phase_begin(') < begin.index('ok=clear_slot_files(slot);')
+    native_prepare = ''.join(function(native, "ensure_transfer_slot").split())
+    assert 'clear_slot_files(g_target_slot)' in native_prepare
+    native_dispatch = ''.join(function(native, "handle_complete_frame").split())
+    assert native_dispatch.index('pet_p4_appearance_claim(') < native_dispatch.index('pet_p4_appearance_phase_begin(') < native_dispatch.index('ensure_transfer_slot(g_transfer_id)')
+    assert native_dispatch.index('ensure_transfer_slot(g_transfer_id)') < native_dispatch.index('pet_p4_appearance_phase_end(')
 
 
 def test_p4_native_usb_does_not_leave_a_serial_raw_transfer_open():
     native = read("main/pet_p4_usb_native.c")
     desktop = read_usb_serial_contract()
     native_sync = desktop[
-        desktop.index("pub fn sync_appearance_p4_native"):
+        desktop.index("\nfn sync_appearance_p4_native<F>("):
         desktop.index("fn ensure_p4_native_full_pack_supported")
     ]
 
@@ -2123,11 +2253,15 @@ def test_p4_appearance_slots_can_reactivate_an_exact_cached_pack():
     assert '"customSlot", PET_P4_RAW_APPEARANCE_SLOT' in source
     assert '"builtinProtected", true' in source
     assert "return PET_P4_RAW_APPEARANCE_SLOT" in source
-    assert 'strcmp(topic, "asset/slot-query") == 0' in source
-    assert 'strcmp(topic, "asset/activate") == 0' in source
+    topic = ''.join(function(source, "handle_asset_topic").split())
+    assert 'if(!strcmp(topic,"asset/slot-query")){send_asset_slot_query_ack(state,payload,send,route,id);return;}' in topic
+    assert 'if(!strcmp(topic,"asset/activate")){handle_asset_activate(state,payload,send,route);return;}' in topic
     assert "read_slot_pack_id" in source
     assert "appearance pack is not present in requested slot" in source
-    assert "pet_p4_asset_set_active_slot(slot)" in source
+    activate = ''.join(function(source, "handle_asset_activate").split())
+    assert activate.index('prepare_asset_activation(slot,expected,next)') < activate.index('write_asset_activation_marker(slot)') < activate.index('g_asset_active_slot=slot;')
+    assert 'pet_p4_appearance_owned(send_line,ctx,id,PET_APPEARANCE_SERIAL)' in activate
+    assert 'state->asset_revision!=revision' in activate
     assert '"packId": pack_id' in desktop
     assert '"topic": "asset/slot-query"' in desktop
     assert '"topic": "asset/activate"' in desktop
@@ -2141,20 +2275,25 @@ def test_p4_appearance_slots_require_transaction_ready_markers():
     source = read("main/pet_p4_protocol.c")
     header = read("main/pet_p4_protocol.h")
     native = read("main/pet_p4_usb_native.c")
-    commit_body = source[
-        source.index('strcmp(topic, "asset/commit") == 0'):
-        source.index('strcmp(topic, "asset/patch-commit") == 0')
-    ]
+    commit_body = ''.join(function(source, "handle_serial_asset_commit").split())
 
     assert 'PET_P4_SPIFFS_PREFIX "/s%d_ready"' in source
     assert "read_ready_slot_pack_id" in source
-    assert "strcmp(marker_pack_id, manifest_pack_id)" in source
+    ready_read = ''.join(function(source, "read_ready_slot_pack_id").split())
+    assert 'if(strcmp(marker_pack_id,manifest_pack_id))returnfalse;' in ready_read
     assert "bool pet_p4_asset_mark_slot_ready(int slot)" in source
     assert "pet_p4_asset_mark_slot_ready" in header
-    assert commit_body.index("pet_p4_raw_assets_commit") < commit_body.index("pet_p4_asset_mark_slot_ready")
-    assert commit_body.index("pet_p4_asset_mark_slot_ready") < commit_body.index("pet_p4_asset_set_active_slot")
-    native_commit = native[native.index("static void handle_commit") :]
-    assert native_commit.index("pet_p4_asset_mark_slot_ready") < native_commit.index("pet_p4_asset_set_active_slot")
+    assert 'pet_p4_appearance_commit_slot(state,g_asset_transfer_slot,send,route,id,PET_APPEARANCE_SERIAL,patch,&io,error,sizeof(error))' in commit_body
+    shared=''.join(function(source,'pet_p4_appearance_commit_slot').split())
+    assert shared.index('pet_p4_raw_assets_commit_observed(') < shared.index('write_ready_pack_exact(') < shared.index('write_asset_activation_marker(') < shared.index('g_asset_active_slot=slot;')
+    ready=''.join(function(source,'write_ready_pack_exact').split())
+    assert 'read_ready_slot_pack_id(slot,actual,sizeof(actual))&&!strcmp(actual,pack)' in ready
+    assert ready.index('fclose(file)') < ready.index('read_ready_slot_pack_id(')
+    assert shared.count('commit_owner_current(') >= 3
+    assert 'result=PET_APPEARANCE_COMMIT_UNKNOWN;' in shared and 'g_appearance_session.recovery_blocked=true;' in shared
+    native_commit=''.join(function(native,'handle_commit').split())
+    assert 'pet_p4_appearance_commit_slot(g_state,g_target_slot,pet_p4_native_usb_send_json_line,NULL,id,PET_APPEARANCE_NATIVE,false,&io,error,sizeof(error))' in native_commit
+    assert native_commit.index('pet_p4_appearance_commit_slot(') < native_commit.index('if(result==PET_APPEARANCE_COMMIT_OK)native_retire();') < native_commit.index('native_commit_ack(&context,id,result==PET_APPEARANCE_COMMIT_OK,')
 
 
 def test_p4_asset_chunks_carry_decoded_size_guard():
@@ -2255,15 +2394,17 @@ def test_p4_hardware_inputs_are_debounced_persistent_and_configurable():
     assert "-(int) direction" not in input_source
     assert "pet_p4_miniapp_catalog_move(event.delta)" in input_source
     assert "pet_p4_miniapp_catalog_move(-event.delta)" not in input_source
-    assert "pet_p4_miniapp_catalog_activate_selected" in input_source
-    assert "PET_P4_MINIAPP_CATALOG_MAX 32" in read_required("main/pet_p4_miniapp.h")
+    assert "pet_p4_miniapp_activation_request_selected" in input_source
+    assert '#include "pet_p4_catalog_profile.h"' in read_required("main/pet_p4_miniapp.h")
+    assert "#define PET_P4_MINIAPP_CATALOG_MAX 32" in read_required("main/pet_p4_catalog_profile.h")
+    assert "#if PET_PRIVATE_PARENT_CAPACITY_ACCEPTANCE" in read_required("main/pet_p4_catalog_profile.h")
     assert "MINIAPP_CATALOG_PATH" in read_required("main/pet_p4_miniapp.c")
     renderer = read_required("main/pet_p4_renderer.c")
     assert 'draw_text_line("组件中心"' in renderer
     assert '"已安装 %u 个"' in renderer
     assert '"摇杆选择    确认键打开    全局键返回"' in renderer
-    assert "int count = 2;" in renderer
-    assert 'strcmp(page, "components") == 0 || strcmp(page, "app") == 0 ? 1 : 0' in renderer
+    # The page-dot overlay was intentionally removed; navigation still uses the native catalog.
+    assert 'draw_page_indicator(' not in renderer
     assert "dispatch_component_binding_event" in input_source
     assert "active_global_priority_binding" in input_source
     assert 'strcmp(binding->action, "page_back") == 0' in input_source
@@ -2399,10 +2540,9 @@ def test_p4_gt911_touch_and_local_lifecycle_are_product_integrated():
     assert '&& lifecycle_is(lifecycle, "idle")) {' in protocol
     assert "behavior->welcome_until_ms = 0" in read_required("main/pet_p4_behavior.c")
     assert "draw_touch_feedback" in renderer
-    assert "draw_page_indicator" in renderer
-    assert 'if (strcmp(page, "main") == 0) draw_page_indicator(page);' in renderer
+    assert "draw_page_indicator" not in renderer
+    assert "g_main_appearance_ready" in renderer
     assert "#define PET_P4_PAGE_INDICATOR_Y 16" in renderer
-    assert "int y = PET_P4_PAGE_INDICATOR_Y;" in renderer
     assert "PET_P4_PAGE_INDICATOR_TITLE_GAP" in renderer
     assert 'cJSON_AddBoolToObject(capabilities, "touch", touch_ready)' in protocol
     assert "pet_p4_touch_init()" in main
@@ -2631,8 +2771,8 @@ def test_p4_dsh_approval_modal_is_single_shot_and_bounded():
     )
 
     # Docs lock the wire topics, bounded state and UI/input behavior.
-    assert '"topic":"approval/request"' in doc
-    assert '"topic":"approval/decision"' in doc
+    assert '"topic":"approval/request"' in re.sub(r'\s+', '', doc)
+    assert '"topic":"approval/decision"' in re.sub(r'\s+', '', doc)
     assert "需要授权" in doc
     assert "page_enter" in doc and "page_back" in doc
     assert "approval_expired" in doc
@@ -2729,7 +2869,20 @@ def test_p4_realtime_stream_ring_is_allocated_in_psram_not_static_internal_ram()
 def test_realtime_speaker_uses_full_scale_and_reports_readback():
     audio = read("main/pet_p4_audio.c")
     assert "#define PET_P4_AUDIO_PLAYBACK_VOLUME 100" in audio
-    assert "esp_codec_dev_set_out_vol(g_speaker, PET_P4_AUDIO_PLAYBACK_VOLUME)" in audio
+    volume=read('main/pet_p4_audio_volume.c')
+    init=function(audio,'pet_p4_audio_init')
+    assert init.index('pet_audio_volume_boot_load()')<init.index('pet_audio_volume_attach(g_speaker, g_stream_lock, i2c_bus)')
+    boot=function(volume,'pet_audio_volume_boot_load')
+    assert 'uint8_t stored = 100;' in boot and 'nvs_get_u8(handle, MASTER_KEY, &stored)' in boot
+    assert 'boot_volume = durable_volume = stored;' in boot and 'stored <= 100' in boot
+    attach=function(volume,'pet_audio_volume_attach')
+    assert attach.index('apply(boot_volume)')<attach.index('atomic_store_explicit(&ready,true,memory_order_release)')
+    apply=function(volume,'apply')
+    assert 'esp_codec_dev_set_out_vol(output,(int)volume)' in apply
+    assert 'err=observe(&actual);' in apply and 'actual!=(int)volume' in apply
+    observe=function(volume,'observe')
+    assert 'read_register(0x31, &mute)' in observe and 'read_register(0x32, &level)' in observe
+    assert 'i2c_master_transmit_receive(readback, &reg, 1, value, 1, ms)' in function(volume,'read_register')
     assert "esp_codec_dev_get_out_vol(g_speaker, &output_volume)" in audio
     assert 'cJSON_AddNumberToObject(payload, "playbackVolume", output_volume)' in audio
 

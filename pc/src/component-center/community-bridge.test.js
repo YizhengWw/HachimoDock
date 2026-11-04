@@ -10,6 +10,7 @@ test('community bridge requires exact origin, source and session',()=>{
 });
 test('community bridge rejects native commands, paths, URLs, credentials and oversized inputs',()=>{
   for(const [a,f] of [['publish',{path:'/private'}],['prepare',{}],['download',{id:'sample-component',path:'/private'}],['download',{id:'../../etc'}],['detail',{id:'sample-component',url:'http://127.0.0.1'}],['comment',{id:'sample-component',text:'x'.repeat(501),requestId:'x'.repeat(16)}],['profile',{name:'x'.repeat(41)}],['browse',{offset:-1}],['like',{id:'sample-component',active:'true'}]])assert.equal(parseCommunityMessage(message(a,f),source,COMMUNITY_ORIGIN,channel),null);
+  for(const key of ['apiKey','token','provider','headers','command'])assert.equal(parseCommunityMessage(message('detail',{id:'sample-component',[key]:'fixture-only'}),source,COMMUNITY_ORIGIN,channel),null);
 });
 test('community bridge preserves only operation-specific public fields',()=>{
   assert.deepEqual(parseCommunityMessage(message('browse',{query:'电台',view:'discover',window:'7d'}),source,COMMUNITY_ORIGIN,channel).fields,{query:'电台'});
@@ -18,6 +19,8 @@ test('community bridge preserves only operation-specific public fields',()=>{
   const permission=JSON.parse(readFileSync(new URL('../../src-tauri/permissions/local-app-commands.json',import.meta.url))).permission[0];
   const rust=readFileSync(new URL('../../src-tauri/src/lib.rs',import.meta.url),'utf8');
   const commands=rust.split('tauri::generate_handler![')[1].split('])')[0].split(',').map(x=>x.trim().split('::').at(-1)).filter(Boolean);
-  assert.deepEqual(permission.commands.allow,commands,'every registered app command must require the local-only capability');
+  assert.equal(new Set(commands).size,commands.length,'registered commands must be unique');
+  assert.equal(new Set(permission.commands.allow).size,permission.commands.allow.length,'capability commands must be unique');
+  assert.deepEqual([...permission.commands.allow].sort(),[...commands].sort(),'every registered app command must require the local-only capability');
   const config=JSON.parse(readFileSync(new URL('../../src-tauri/tauri.conf.json',import.meta.url)));assert.match(config.app.security.csp,/frame-src https:\/\/115\.191\.67\.48;/);
 });

@@ -1,0 +1,15 @@
+{
+  "runtime":{"schema_version":1,"engine":"p4-bounded-runtime-v4","host":true,"host_context":"p4-host-context-v1","input":{"engine":"p4-input-v1","confirm":{"host.remove":"移除最后一条记录？"}},"vars":{"total":{"type":"int","init":0},"points":{"type":"int","init":0}},"states":["ready"],"initial_state":"ready","tick":[],"transitions":[{"from":"*","on":"host.save"},{"from":"*","on":"host.remove"}],"dashboard":{"title":"Bounded records"},"surface":{"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1","background":0,"elements":[{"type":"text","x":20,"y":20,"w":300,"h":48,"color":65535,"var_bind":"total"},{"type":"text","x":20,"y":90,"w":300,"h":48,"color":65535,"var_bind":"points"}]}},
+  "declaration":{"schemaVersion":1,"engine":"pc-app-composition-v2","service":"composition","actions":{"host.save":"flow:save","host.remove":"flow:remove"},"content":[{"sources":{"records":{"kind":"document","initial":{"rows":[]}},"growth":{"kind":"counter","initial":0,"min":0,"max":1000,"step":1},"summary":{"kind":"computed","expression":{"op":"sum","args":[{"op":"map","args":[{"op":"filter","args":[{"ref":"/sources/records/rows"}],"value":{"op":"eq","args":[{"ref":"/row/category"},"food"]}}],"value":{"ref":"/row/cents"}}]}}},"bindings":{"total":{"source":"summary","pointer":"","fallback":0},"points":{"source":"growth","pointer":"/value","fallback":0}},"workflows":{"save":[{"target":"records:append","pointer":"/rows","value":{"object":{"category":{"op":"coalesce","args":[{"ref":"/event/category"},"food"]},"cents":{"op":"coalesce","args":[{"ref":"/event/cents"},1250]}}}},{"target":"growth:increment","when":{"op":"gt","args":[{"ref":"/sources/summary"},0]}}],"remove":[{"target":"records:remove","pointer":"/rows/0"}]}}]},
+  "rejections":[
+    {"pointer":"/engine","value":"pc-app-composition-v1"},
+    {"pointer":"/content/0/sources/summary/expression","value":{"ref":"/sources/summary"}},
+    {"pointer":"/content/0/workflows/save/0/target","value":"flow:remove"},
+    {"pointer":"/content/0/workflows/save/0/pointer","value":"not-a-pointer"},
+    {"pointer":"/content/0/workflows/save/0/value","value":{"op":"execute","args":["x"]}},
+    {"pointer":"/actions/host.save","value":"records:append"},
+    {"pointer":"/content/0/workflows/save/1/unknown","value":true},
+    {"pointer":"/content/0/workflows/save/1/pointer","value":null},
+    {"pointer":"/content/0/workflows/save/0/target","value":"records:set"}
+  ]
+}

@@ -9,7 +9,7 @@ pub struct Declaration{
     pub schema_version:u8,
     pub engine:String,
     pub service:String,
-    pub actions:BTreeMap<String,String>,
+    #[serde(default)]pub actions:BTreeMap<String,String>,
     #[serde(default)]pub content:Vec<Value>,
     #[serde(default)]pub auto_read:bool,
     #[serde(default,skip_serializing_if="Option::is_none")]pub location:Option<crate::location_profile::Profile>,
@@ -27,12 +27,33 @@ pub fn operations(service:&str)->&'static [&'static str]{match service{
     "books"=>&["previous","next","random","category"],
     "news"=>&["refresh","toggle","previous","next","up","down"],
     "calendar"=>&["today","details","previous","next"],
-    "soundscape"=>&["toggle","timer","previous","next","up","down","rain","sea","fire","insects"],_=>&[]}}
+    "soundscape"=>&["toggle","timer","previous","next","up","down","rain","sea","fire","insects"],
+    "hotkeys"=>&["profile","key_1","key_2","key_3","key_4","key_5","key_6"],_=>&[]}}
 pub fn parse(bytes:&[u8],runtime:&Value)->Result<Declaration,String>{
     let error=||"PC 应用声明或动作映射无效".to_string();
+    if runtime["surface"].get("services").is_some()&&serde_json::from_slice::<Value>(bytes).ok().is_none_or(|v|v["engine"]!=crate::service_bridge::ENGINE){return Err(error());}
+    // Fetch is its own strict declaration: requested hosts are not runtime grants.
+    if bytes.len()<=16384 {
+        if let Ok(v)=serde_json::from_slice::<Value>(bytes) {
+            if v["engine"]==crate::pc_fetch::ENGINE {
+                crate::pc_fetch::parse_declaration(bytes,runtime)?;
+                return serde_json::from_value(v).map_err(|_|error());
+            }
+        }
+    }
     if bytes.len()>4*1024*1024{return Err(error());}
     let d:Declaration=serde_json::from_slice(bytes).map_err(|_|error())?;
+    if d.engine==crate::service_bridge::ENGINE {
+        if bytes.len()>65536{return Err(error());}
+        crate::service_bridge::native::parse(&d,runtime)?;return Ok(d);
+    }
+    if crate::component_composition::is_engine(&d.engine){
+        if bytes.len()>if d.engine==crate::component_composition::ENGINE{16384}else{32768}{return Err(error());}
+        crate::component_composition::validate(&d,runtime)?;return Ok(d);
+    }
+    if runtime["surface"].get("services").is_some(){return Err(error());}
     let library=d.is_library();
+    if runtime["surface"].get("collection_view").is_some(){return Err(error());}
     let books=d.engine=="pc-app-books-v1"&&d.service=="books";
     let calendar=d.engine=="pc-app-calendar-v1"&&d.service=="calendar";
     let news=d.engine=="pc-app-news-v1"&&d.service=="news";
@@ -57,6 +78,14 @@ pub fn parse(bytes:&[u8],runtime:&Value)->Result<Declaration,String>{
     if news {
         if !input_v1||operations("news").iter().any(|op|!d.actions.values().any(|v|v==op)){return Err(error());}
         crate::component_news::topics(&d.content)?;return Ok(d);
+    }
+    if d.service=="hotkeys" {
+        // Profiles are package content; every declared key_n must exist in every profile and
+        // the profile switch must be reachable. Sending itself is a per-PC opt-in, not a grant.
+        crate::hotkeys::validate_profiles(&d.content)?;
+        let keys=d.content.iter().map(|p|p["keys"].as_array().map_or(0,|k|k.len())).min().unwrap_or(0);
+        if !d.actions.values().any(|v|v=="profile")||d.actions.values().any(|v|v.strip_prefix("key_").and_then(|n|n.parse::<usize>().ok()).is_some_and(|n|n==0||n>keys)){return Err(error());}
+        return Ok(d);
     }
     if calendar {
         if !input_v1||["today","details","previous","next"].iter().any(|op|!d.actions.values().any(|v|v==op)){return Err(error());}
@@ -85,11 +114,18 @@ pub fn parse(bytes:&[u8],runtime:&Value)->Result<Declaration,String>{
     }
     Ok(d)
 }
-pub fn permissions(d:&Declaration)->Value{let service=d.service.as_str();serde_json::json!({
+pub fn permissions(d:&Declaration)->Value{
+    if d.engine==crate::service_bridge::ENGINE{return crate::service_bridge::native::permissions(d).unwrap_or_else(|_|serde_json::json!({"unavailable":true}));}
+    if d.engine==crate::pc_fetch::ENGINE {
+        let hosts:std::collections::BTreeSet<String>=d.content.iter().filter_map(|s|s["url"].as_str().and_then(|s|reqwest::Url::parse(s).ok())).filter_map(|u|u.host_str().map(str::to_owned)).collect();
+        return serde_json::json!({"storage":true,"networkHosts":hosts,"microphone":false,"speechProvider":false,"deviceAudio":false,"desktopInput":false});
+    }
+if crate::component_composition::is_engine(&d.engine){return crate::component_composition::permissions(d);}let service=d.service.as_str();serde_json::json!({
     "storage":true,"networkHosts":if service=="weather"{d.location.as_ref().unwrap_or(crate::location_profile::legacy()).hosts()}else{vec![]},
     "microphone":service=="notes","speechProvider":matches!(service,"notes"|"knowledge"|"books"|"news"),"autoRead":d.auto_read,"newsGeneration":service=="news",
     "deviceAudio":matches!(service,"knowledge"|"books"|"soundscape"|"news"),"todos":matches!(service,"notes"|"weather"|"todos"),"todoWrites":service=="todos",
-    "desktopReceipts":service=="desktop-tasks","startVoiceConversation":service=="desktop-tasks"
+    "desktopReceipts":service=="desktop-tasks","startVoiceConversation":service=="desktop-tasks",
+    "desktopInput":service=="hotkeys"
 })}
 
 #[cfg(test)]mod tests{

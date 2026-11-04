@@ -245,18 +245,22 @@ pub fn execute_tool(input: Input) -> Result<Vec<Todo>, String> {
 }
 /// Explicit note conversion with a stable ID: crash/retry cannot duplicate it.
 pub(crate) fn create_component_note_once(origin:&str,text:&str)->Result<String,String>{
+    let mut s=store().lock().map_err(|_|"待办状态不可用")?;
+    create_component_note_in(&mut s,origin,text,||{})
+}
+fn create_component_note_in(s:&mut Store,origin:&str,text:&str,before_commit:impl FnOnce())->Result<String,String>{
+    let permit=crate::component_runtime_lifecycle::storage_commit_permit()?;
     use sha2::{Digest,Sha256};
     let title=title(text)?;
     if origin.is_empty()||origin.len()>160{return Err("笔记标识无效".into());}
     let id=format!("{:x}",Sha256::digest(format!("petui-note-v1:{origin}")))[..20].to_string();
-    let mut s=store().lock().map_err(|_|"待办状态不可用")?;
     if let Some(e)=&s.error{return Err(e.clone());}
     if s.doc.items.iter().any(|i|i.id==id){return Ok(id);}
     let mut doc=s.doc.clone();doc.items.push(Todo{id:id.clone(),title,due_at:None,completed:false,revision:1,created_at:Utc::now().to_rfc3339()});validate(&doc)?;
     let dir=s.path.parent().ok_or("待办存储尚未就绪")?;std::fs::create_dir_all(dir).map_err(|_|"无法创建待办目录")?;
     let mut temp=tempfile::NamedTempFile::new_in(dir).map_err(|_|"无法准备待办存储")?;
     temp.write_all(&serde_json::to_vec(&doc).map_err(|_|"待办编码失败")?).and_then(|_|temp.as_file().sync_all()).map_err(|_|"无法写入待办")?;
-    temp.persist(&s.path).map_err(|_|"无法保存待办")?;s.doc=doc;Ok(id)
+    before_commit();permit.ensure_current()?;temp.persist(&s.path).map_err(|_|"无法保存待办")?;s.doc=doc;Ok(id)
 }
 pub fn snapshot() -> DataSnapshot {
     let result = execute(Input {
@@ -327,6 +331,20 @@ mod tests {
     use super::*;
     fn input(v: serde_json::Value) -> Input {
         serde_json::from_value(v).unwrap()
+    }
+    #[test]
+    fn phase2_component_note_commit_revocation_preserves_disk_ram_and_stable_retry(){
+        use crate::component_runtime_lifecycle::{ResourceOwner,enter_owner};
+        let dir=tempfile::tempdir().unwrap();let mut s=Store::load(dir.path().join("todos.json"));
+        create_component_note_in(&mut s,"seed","original",||{}).unwrap();
+        let before=std::fs::read(&s.path).unwrap();let memory=serde_json::to_vec(&s.doc).unwrap();
+        let owner=ResourceOwner::fresh();let scope=enter_owner(&owner);
+        assert!(create_component_note_in(&mut s,"new-note","new",||owner.cancel()).is_err());
+        assert_eq!(std::fs::read(&s.path).unwrap(),before);assert_eq!(serde_json::to_vec(&s.doc).unwrap(),memory);
+        assert!(create_component_note_in(&mut s,"new-note","new",||{}).is_err());drop(scope);
+        let id=create_component_note_in(&mut s,"new-note","new",||{}).unwrap();
+        assert_eq!(create_component_note_in(&mut s,"new-note","new",||panic!("idempotent retry must not rewrite")).unwrap(),id);
+        assert_eq!(s.doc.items.len(),2);assert_eq!(Store::load(s.path.clone()).doc.items.len(),2);
     }
     #[test]
     fn crud_conflict_reload_and_empty_persistence() {

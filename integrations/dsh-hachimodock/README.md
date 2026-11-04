@@ -21,33 +21,26 @@ installed-version contract pass**. The host requires `sessions`, `agents`, `sess
 services/slots disable the affected feature. There are no guessed APIs, global
 DOM/editor/approval selectors, synthetic keys, delayed send or anonymous fallbacks.
 
-## Private bootstrap and explicit pairing
+## Desktop input and private bridge bootstrap
 
-On startup the host binds `127.0.0.1:17892` and generates a random instance epoch
-and separate 256-bit relay, bus and voice capabilities. It atomically writes
-`~/.claw-pet/dsh-bridge/capability.json` (directory 0700, file 0600). Set
-`HACHIMODOCK_DSH_CAPABILITY_FILE` consistently in host/native/bus to use another
-private path. Symlinks, wrong owners and permissive files/directories are refused.
-No token belongs in a repository, URL, log, package or ordinary browser storage.
-The same OS user with access to this file is trusted; this does not isolate that
-user's malicious processes.
+DeepSeek Desktop voice input uses the same OS accessibility composer adapter as
+ChatGPT and WorkBuddy. Selecting DeepSeek and opening the desired conversation
+is sufficient: recording captures the current composer, final recognition appends
+only real text, and a separate explicit confirmation submits it. Voice input does
+not depend on this plugin, its HTTP endpoints, browser tokens or a pairing code.
+The managed client module inserts no pairing controls into DeepSeek.
 
-Configure `allowedOrigins` in `cordis.patch.yml` to the **actual exact** DSH web
-Origin (scheme, hostname, port). The default empty list disables browser voice.
-No guessed localhost port, `*`, `null` or reflected foreign Origin is accepted.
-For each desired session run this local control explicitly:
+The plugin remains responsible for session status and supported approval/control
+features. Its native status/voice capabilities remain in an owner-only local
+descriptor (directory 0700, file 0600; exact protected ACL on Windows). They are
+never included in application resources, browser storage, URLs or logs. Legacy
+explicit-ticket endpoints and isolated input-consumer helpers remain for older
+callers; they are not part of the Desktop voice-input workflow.
 
-```sh
-node integrations/dsh-hachimodock/pair.js https://YOUR-EXACT-DSH-ORIGIN EXACT_SESSION_ID
-```
-
-Paste its one-use, two-minute ticket into that session's HachimoDock composer
-dock. The ticket is bound to that Origin/session. Browser tokens stay in memory,
-expire after one hour and are revoked on stream disconnect/unmount. Only one
-mounted window owns a session's voice stream. Re-pair explicitly after a switch,
-unmount or lost connection; no pending action is automatically replayed.
-The browser dock currently targets the default port 17892; custom host ports
-support native/bus callers, but browser voice is unavailable there.
+The OS adapter freezes the target application/window/editor for each recording.
+An unavailable or ambiguous input, changed target, or unknown write result stops
+that operation without choosing a historical session or replaying text. Existing
+user drafts and placeholder exclusion use the shared desktop-composer behavior.
 
 Windows uses a fixed Windows PowerShell 5.1 program (`-NoProfile`,
 `-NonInteractive`, absolute executable path). It resolves the current user's SID
@@ -96,7 +89,7 @@ POST outcomes are logged generically and never automatically resent.
 At capture start, native asynchronously sends `voice/begin` for the frozen
 session/utterance without blocking the USB reader. Final insertion requires the
 mounted owner's captured InputActions span ACK (a late/missing ACK fails closed).
-ASR startup is unchanged; this is not a claim that browser capture precedes ASR.
+Native buffers the recording while awaiting the exact input capture receipt; ASR and audio forwarding start only after that acknowledgement.
 Final insertion uses
 that original draft revision. An edit, locked editor, session change or unmount
 rejects the operation without replacing text or trying a different editor.

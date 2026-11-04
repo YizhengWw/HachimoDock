@@ -13,6 +13,22 @@ import {
 
 const P4_DEVICE_SESSION_LIMIT = 8;
 
+// Keep ordering within one owner, but never execute a queued operation after
+// its Agent/USB scope has retired. A rejected operation is never replayed.
+export function enqueueP4SessionBinding(previous, isCurrent, submit) {
+  return previous.catch(() => undefined).then(() => isCurrent() ? submit() : undefined);
+}
+
+function retainNewerLifecycle(previous, incoming, merged) {
+  const before = Number(previous?.statusUpdatedAt);
+  const after = Number(incoming?.statusUpdatedAt);
+  if (!Number.isFinite(before) || !Number.isFinite(after) || before <= 0 || after <= 0 || after >= before) return;
+  for (const key of ["state", "statusUpdatedAt", "displayTitle", "displayContent", "status", "active", "activitySource", "stateDetailUnknown"]) {
+    if (Object.hasOwn(previous, key)) merged[key] = previous[key];
+    else delete merged[key];
+  }
+}
+
 function normalizeSessionText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -110,6 +126,7 @@ export function mergeP4SessionSnapshot(previousSessions, incomingSessions) {
       Number(session?.lastModified || 0),
       Number(next.statusUpdatedAt || 0),
     );
+    retainNewerLifecycle(previous, session, next);
     return next;
   });
   return buildP4RoutingSessions(merged);
@@ -131,6 +148,7 @@ export function mergeP4SessionEvent(previousSessions, incomingSession) {
       statusUpdatedAt,
     ),
   };
+  retainNewerLifecycle(previous, incomingSession, merged);
   return buildP4RoutingSessions([
     merged,
     ...(Array.isArray(previousSessions) ? previousSessions : [])
@@ -176,6 +194,7 @@ export function p4SessionActivitySignature(session) {
     Number(session?.lastModified || 0),
     Number(session?.statusUpdatedAt || 0),
     normalizeSessionText(session?.state),
+    session?.active, session?.status, session?.stateDetailUnknown,
     normalizeSessionText(session?.displayContent),
     normalizeSessionText(session?.summary),
   ]);

@@ -96,8 +96,22 @@ test("appearance USB sync can be cancelled and both device runtimes discard stag
   assert.match(usbSerialSource, /"fileCount": 0/);
   assert.match(tauriSource, /fn usb_cancel_appearance_sync\(/);
   assert.match(tauriSource, /usb_cancel_appearance_sync,\s*usb_sync_appearance/);
-  assert.match(p4ProtocolSource, /strcmp\(topic, "asset\/abort"\) == 0/);
-  assert.match(p4ProtocolSource, /state->asset_transfer_active = false/);
+  // Follow the actual dispatcher and its success-only ownership retirement;
+  // equivalent C spellings alone must not make this guarantee disappear.
+  assert.match(p4ProtocolSource, /strncmp\(topic, "asset\/", 6\) == 0[\s\S]*?handle_asset_topic\(state, topic, payload, send_line, ctx\)/);
+  const abortTopic = p4ProtocolSource.slice(
+    p4ProtocolSource.indexOf("static void handle_asset_topic("),
+    p4ProtocolSource.indexOf("void pet_p4_asset_transfer_cleanup_worker("),
+  );
+  assert.match(abortTopic, /bool abort=!strcmp\(topic,"asset\/abort"\)/);
+  assert.match(abortTopic, /else if\(abort\)\{\s*bool ok=abort_serial_asset_transfer\(NULL\);\s*send_asset_ack\(asset_phase_capture,&reply,id,"abort",NULL,ok/);
+  assert.match(abortTopic, /if\(result==PET_APPEARANCE_COMMIT_OK\)\{\s*if\(abort\)serial_retire_locked\(state\)/);
+  const retire = p4ProtocolSource.slice(
+    p4ProtocolSource.indexOf("static void serial_retire_locked("),
+    p4ProtocolSource.indexOf("static void handle_asset_topic("),
+  );
+  assert.match(retire, /pet_p4_appearance_end\([\s\S]*?PET_APPEARANCE_SERIAL/);
+  assert.match(retire, /state->asset_transfer_active\s*=\s*false/);
   assert.match(p4NativeUsbSource, /handle_asset_abort_json/);
   assert.match(p4NativeUsbSource, /g_target_slot = -1/);
 });

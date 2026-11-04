@@ -1,0 +1,1708 @@
+{
+  "schema": 1,
+  "kind": "REVIEWED_VERSION_AND_ARCHIVE_BOUND_UPSTREAM_SUPPLEMENTAL_LICENSES",
+  "entries": {
+    "cargo:accessibility-sys@0.2.0": {
+      "crateArchiveSha256": "46a6a8e90a1d8b96a48249e7c8f5b4058447bea8847280db7bfccb6dcab6b8e1",
+      "metadataLicenseExpression": "MIT / Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129"
+        },
+        "path_in_vcs": "accessibility-sys"
+      },
+      "repository": "https://github.com/eiz/accessibility",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt",
+          "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+          "bytes": 11357,
+          "upstreamURL": "https://raw.githubusercontent.com/eiz/accessibility/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "d1c601ed68df4536b2edf7b9934a2c4a205b3515411b1a4e212abe91c5cee212.txt",
+          "sha256": "d1c601ed68df4536b2edf7b9934a2c4a205b3515411b1a4e212abe91c5cee212",
+          "bytes": 1059,
+          "upstreamURL": "https://raw.githubusercontent.com/eiz/accessibility/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/eiz/accessibility",
+          "commit": "63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+          "rootTree": {
+            "url": "https://api.github.com/repos/eiz/accessibility/git/trees/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+            "finalURL": "https://api.github.com/repos/eiz/accessibility/git/trees/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+            "status": 200,
+            "sha256": "3a9fe42591ce882b01dbf6ea178c2a0bfd138cd3486f8182892cae52a5f432b6"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:accessibility@0.2.0": {
+      "crateArchiveSha256": "1ac9f33ffc1ef16eddb2451c03c983e56a5182ac760c3f2733da55ba8f48eac4",
+      "metadataLicenseExpression": "MIT / Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129"
+        },
+        "path_in_vcs": "accessibility"
+      },
+      "repository": "https://github.com/eiz/accessibility",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt",
+          "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+          "bytes": 11357,
+          "upstreamURL": "https://raw.githubusercontent.com/eiz/accessibility/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "d1c601ed68df4536b2edf7b9934a2c4a205b3515411b1a4e212abe91c5cee212.txt",
+          "sha256": "d1c601ed68df4536b2edf7b9934a2c4a205b3515411b1a4e212abe91c5cee212",
+          "bytes": 1059,
+          "upstreamURL": "https://raw.githubusercontent.com/eiz/accessibility/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/eiz/accessibility",
+          "commit": "63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+          "rootTree": {
+            "url": "https://api.github.com/repos/eiz/accessibility/git/trees/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+            "finalURL": "https://api.github.com/repos/eiz/accessibility/git/trees/63a4a9c4ecdc143bed1d65b989aa18bbc5fd8129",
+            "status": 200,
+            "sha256": "3a9fe42591ce882b01dbf6ea178c2a0bfd138cd3486f8182892cae52a5f432b6"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:alloc-stdlib@0.2.2": {
+      "crateArchiveSha256": "94fb8275041c72129eb51b7d0322c29b8387a0386127718b096429201a5d6ece",
+      "metadataLicenseExpression": "BSD-3-Clause",
+      "publishedVcs": {
+        "git": {
+          "sha1": "6032b6a9b20e03737135c55a0270ccffcc1438ef"
+        },
+        "path_in_vcs": "alloc-stdlib"
+      },
+      "repository": "https://github.com/dropbox/rust-alloc-no-stdlib",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae.txt",
+          "sha256": "c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae",
+          "bytes": 1483,
+          "upstreamURL": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/6032b6a9b20e03737135c55a0270ccffcc1438ef/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/dropbox/rust-alloc-no-stdlib",
+          "commit": "6032b6a9b20e03737135c55a0270ccffcc1438ef",
+          "rootTree": {
+            "url": "https://api.github.com/repos/dropbox/rust-alloc-no-stdlib/git/trees/6032b6a9b20e03737135c55a0270ccffcc1438ef",
+            "finalURL": "https://api.github.com/repos/dropbox/rust-alloc-no-stdlib/git/trees/6032b6a9b20e03737135c55a0270ccffcc1438ef",
+            "status": 200,
+            "sha256": "11972c5791ff17fb4707fa757e5d4f071e0a1b144817fd231c6db9ccd437721d"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:block2@0.6.2": {
+      "crateArchiveSha256": "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b4167b582b2f75f9a1be75495c41b765344fd03c"
+        },
+        "path_in_vcs": "crates/block2"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/b4167b582b2f75f9a1be75495c41b765344fd03c/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "b4167b582b2f75f9a1be75495c41b765344fd03c",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/b4167b582b2f75f9a1be75495c41b765344fd03c",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/b4167b582b2f75f9a1be75495c41b765344fd03c",
+            "status": 200,
+            "sha256": "e6449747b65666cd9c2cb7d52cf61f800ac77cd367daaa90b77fad490ae0f6dd"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:block@0.1.6": {
+      "crateArchiveSha256": "0d8c1fef690941d3e7788d328517591fecc684c084084702d6ff1641e993699a",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": null,
+      "repository": "http://github.com/SSheldon/rust-block",
+      "grantContextKind": "source-matched-upstream-explicit-license-by-reference",
+      "texts": [
+        {
+          "file": "24df2f33b48c9e756a4f864f882c1ab07a159b6c2b790f45af2e8162499b6719.txt",
+          "sha256": "24df2f33b48c9e756a4f864f882c1ab07a159b6c2b790f45af2e8162499b6719",
+          "bytes": 531,
+          "upstreamURL": "https://raw.githubusercontent.com/SSheldon/rust-block/47178790cfc9d4a8b092051d8b413b78bd31254a/Cargo.toml",
+          "upstreamPath": "Cargo.toml",
+          "role": "versioned-upstream-package-license-declaration"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "canonical-MIT-text-attached-to-source-matched-explicit-upstream-MIT-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/SSheldon/rust-block",
+          "sourceMatchedCommit": "47178790cfc9d4a8b092051d8b413b78bd31254a",
+          "releaseRef": {
+            "tag": "0.1.6",
+            "commit": "47178790cfc9d4a8b092051d8b413b78bd31254a"
+          },
+          "codeMatch": {
+            "allPublishedRustSourceMatched": true,
+            "files": [
+              {
+                "path": "src/lib.rs",
+                "sameBytes": true,
+                "localSha256": "eb31678adf63b53109d9b94eba23699fd5f9ebfdb950f6e1a57ad51bb6a146fa",
+                "remoteSha256": "eb31678adf63b53109d9b94eba23699fd5f9ebfdb950f6e1a57ad51bb6a146fa"
+              },
+              {
+                "path": "src/test_utils.rs",
+                "sameBytes": true,
+                "localSha256": "271bd579b67e2440134227cf8ee52c1b8c22854eb0c7923b46306b51810c2cf1",
+                "remoteSha256": "271bd579b67e2440134227cf8ee52c1b8c22854eb0c7923b46306b51810c2cf1"
+              }
+            ]
+          },
+          "note": "No .cargo_vcs_info exists in this old crate; release tag/full Rust source and package version correspondence used, not guessed HEAD."
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:dasp_sample@0.11.0": {
+      "crateArchiveSha256": "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f",
+      "metadataLicenseExpression": "MIT OR Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "97c3bb9b2363c0b46ac1633858bf1054fd02a980"
+        }
+      },
+      "repository": "https://github.com/rustaudio/sample.git",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512.txt",
+          "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512",
+          "bytes": 561,
+          "upstreamURL": "https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0.txt",
+          "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0",
+          "bytes": 1087,
+          "upstreamURL": "https://raw.githubusercontent.com/rustaudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/rustaudio/sample",
+          "commit": "97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+          "rootTree": {
+            "url": "https://api.github.com/repos/rustaudio/sample/git/trees/97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+            "finalURL": "https://api.github.com/repositories/30742812/git/trees/97c3bb9b2363c0b46ac1633858bf1054fd02a980",
+            "status": 200,
+            "sha256": "068ba81010e0e0dc0cc2d9b4b3e78e358da97673fa5295ae68cb06c28413384a"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:dispatch2@0.3.1": {
+      "crateArchiveSha256": "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8852b424193ca41602281b3d7540d7c8ed51e49a"
+        },
+        "path_in_vcs": "crates/dispatch2"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/8852b424193ca41602281b3d7540d7c8ed51e49a",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/8852b424193ca41602281b3d7540d7c8ed51e49a",
+            "status": 200,
+            "sha256": "1ccf988d4c993053d44d35e5264323b13f2833881018290821d13a64988e7dcb"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:fxhash@0.2.1": {
+      "crateArchiveSha256": "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c",
+      "metadataLicenseExpression": "Apache-2.0/MIT",
+      "publishedVcs": null,
+      "repository": "https://github.com/cbreeden/fxhash",
+      "grantContextKind": "source-matched-upstream-explicit-license-by-reference",
+      "texts": [
+        {
+          "file": "4fa4efc313594028ed59ca6e690ee936334dd83fc1def07cbc82a0ee1af97cd1.txt",
+          "sha256": "4fa4efc313594028ed59ca6e690ee936334dd83fc1def07cbc82a0ee1af97cd1",
+          "bytes": 465,
+          "upstreamURL": "https://raw.githubusercontent.com/cbreeden/fxhash/537570af68de22d2f4bbdd5bee5d6e07268e6f42/lib.rs",
+          "upstreamPath": "lib.rs:initial-comment",
+          "role": "exact-original-copyright-and-alternative-license-declaration"
+        },
+        {
+          "file": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab.txt",
+          "sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab",
+          "bytes": 564,
+          "upstreamURL": "https://raw.githubusercontent.com/cbreeden/fxhash/537570af68de22d2f4bbdd5bee5d6e07268e6f42/Cargo.toml",
+          "upstreamPath": "Cargo.toml",
+          "role": "versioned-upstream-package-license-declaration"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "canonical-MIT-text-attached-to-source-matched-explicit-upstream-MIT-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/cbreeden/fxhash",
+          "sourceMatchedCommit": "537570af68de22d2f4bbdd5bee5d6e07268e6f42",
+          "releaseRef": {
+            "commit": "537570af68de22d2f4bbdd5bee5d6e07268e6f42",
+            "tag": null,
+            "basis": "commit history with exact package version, followed by all published Rust-source byte checks"
+          },
+          "codeMatch": {
+            "path": "lib.rs",
+            "sha256": "885b72a1c977dc1c3ff4e0652719e62b6d8c3e713403e571afd581283f72df7b",
+            "allPublishedRustSourceMatched": true
+          },
+          "note": "No .cargo_vcs_info exists in this old crate; release tag/full Rust source and package version correspondence used, not guessed HEAD."
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:mac@0.1.1": {
+      "crateArchiveSha256": "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": null,
+      "repository": "https://github.com/reem/rust-mac.git",
+      "grantContextKind": "source-matched-upstream-explicit-license-by-reference",
+      "texts": [
+        {
+          "file": "6d465c5e5a4b3e197049e9fb7393b2f996c1c654e6ded700afce046fac2f7969.txt",
+          "sha256": "6d465c5e5a4b3e197049e9fb7393b2f996c1c654e6ded700afce046fac2f7969",
+          "bytes": 259,
+          "upstreamURL": "https://raw.githubusercontent.com/reem/rust-mac/66afc663b68a65633ea165c742b5a9c6734581c2/Cargo.toml",
+          "upstreamPath": "Cargo.toml",
+          "role": "versioned-upstream-package-license-declaration"
+        },
+        {
+          "file": "8edb7a912d295acf1e1cfeafdd19a6813a63b301c7bbfda3c67f65509bd8d8cc.txt",
+          "sha256": "8edb7a912d295acf1e1cfeafdd19a6813a63b301c7bbfda3c67f65509bd8d8cc",
+          "bytes": 484,
+          "upstreamURL": "https://raw.githubusercontent.com/reem/rust-mac/66afc663b68a65633ea165c742b5a9c6734581c2/README.md",
+          "upstreamPath": "README.md",
+          "role": "upstream-license-context"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "canonical-MIT-text-attached-to-source-matched-explicit-upstream-MIT-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/reem/rust-mac",
+          "sourceMatchedCommit": "66afc663b68a65633ea165c742b5a9c6734581c2",
+          "releaseRef": {
+            "tag": "0.1.1",
+            "commit": "66afc663b68a65633ea165c742b5a9c6734581c2"
+          },
+          "codeMatch": {
+            "allPublishedRustSourceMatched": true,
+            "files": [
+              {
+                "path": "src/cfg.rs",
+                "sameBytes": true,
+                "localSha256": "63e9c4da8b0f588c6af1e157e626044fc1fb52757348aa466d08d69795335f33",
+                "remoteSha256": "63e9c4da8b0f588c6af1e157e626044fc1fb52757348aa466d08d69795335f33"
+              },
+              {
+                "path": "src/format.rs",
+                "sameBytes": true,
+                "localSha256": "3c528949cdde598d3ddc5abea31b136ca256c7bb3932e053c5ff6e49775579a3",
+                "remoteSha256": "3c528949cdde598d3ddc5abea31b136ca256c7bb3932e053c5ff6e49775579a3"
+              },
+              {
+                "path": "src/inspect.rs",
+                "sameBytes": true,
+                "localSha256": "cf039cc721daa177b13d6b432589ceef3bdfa6078af3f71c34c28d2eca68d0c3",
+                "remoteSha256": "cf039cc721daa177b13d6b432589ceef3bdfa6078af3f71c34c28d2eca68d0c3"
+              },
+              {
+                "path": "src/lib.rs",
+                "sameBytes": true,
+                "localSha256": "f9c7705196f71dcabb4cfe1636f1b71b6362abb7eac70ddaa6e05cf9a0683dee",
+                "remoteSha256": "f9c7705196f71dcabb4cfe1636f1b71b6362abb7eac70ddaa6e05cf9a0683dee"
+              },
+              {
+                "path": "src/matches.rs",
+                "sameBytes": true,
+                "localSha256": "1ef2b80946cc5e3cd15e20a22f62b832066d2e2445881191741a83abe80e7566",
+                "remoteSha256": "1ef2b80946cc5e3cd15e20a22f62b832066d2e2445881191741a83abe80e7566"
+              },
+              {
+                "path": "src/mem.rs",
+                "sameBytes": true,
+                "localSha256": "f74d9172bb136b370c33fa524aae3543cf37815eeacf1d862b29b3c8c32a6aee",
+                "remoteSha256": "f74d9172bb136b370c33fa524aae3543cf37815eeacf1d862b29b3c8c32a6aee"
+              },
+              {
+                "path": "src/syntax_ext.rs",
+                "sameBytes": true,
+                "localSha256": "5c938b44d7aaa0f47eef495f4a42f1f91cd11fb0d1b20915786085b77e1db284",
+                "remoteSha256": "5c938b44d7aaa0f47eef495f4a42f1f91cd11fb0d1b20915786085b77e1db284"
+              },
+              {
+                "path": "src/test.rs",
+                "sameBytes": true,
+                "localSha256": "895fc0aed7f5f3863025b85de4d01c2551bed51778ca8846920be7febff837ac",
+                "remoteSha256": "895fc0aed7f5f3863025b85de4d01c2551bed51778ca8846920be7febff837ac"
+              }
+            ]
+          },
+          "note": "No .cargo_vcs_info exists in this old crate; release tag/full Rust source and package version correspondence used, not guessed HEAD."
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:malloc_buf@0.0.6": {
+      "crateArchiveSha256": "62bb907fe88d54d8d9ce32a3cceab4218ed2f6b7d35617cafe9adf84e43919cb",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": null,
+      "repository": "https://github.com/SSheldon/malloc_buf",
+      "grantContextKind": "source-matched-upstream-explicit-license-by-reference",
+      "texts": [
+        {
+          "file": "1c70c91688d9850272e43cee9b189ffe3fe667151d7caf576a36a720f8b28194.txt",
+          "sha256": "1c70c91688d9850272e43cee9b189ffe3fe667151d7caf576a36a720f8b28194",
+          "bytes": 323,
+          "upstreamURL": "https://raw.githubusercontent.com/SSheldon/malloc_buf/a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9/Cargo.toml",
+          "upstreamPath": "Cargo.toml",
+          "role": "versioned-upstream-package-license-declaration"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "canonical-MIT-text-attached-to-source-matched-explicit-upstream-MIT-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/SSheldon/malloc_buf",
+          "sourceMatchedCommit": "a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9",
+          "releaseRef": {
+            "tag": "0.0.6",
+            "commit": "a7811e5f4c6f9685dd57ad9bfe34e9bf6b0ba4f9"
+          },
+          "codeMatch": {
+            "allPublishedRustSourceMatched": true,
+            "files": [
+              {
+                "path": "src/lib.rs",
+                "sameBytes": true,
+                "localSha256": "1130dacbe045a20c1ea1e65e00976f18eb7513da492b07d538e7b1b5c64b8842",
+                "remoteSha256": "1130dacbe045a20c1ea1e65e00976f18eb7513da492b07d538e7b1b5c64b8842"
+              }
+            ]
+          },
+          "note": "No .cargo_vcs_info exists in this old crate; release tag/full Rust source and package version correspondence used, not guessed HEAD."
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:match_token@0.1.0": {
+      "crateArchiveSha256": "88a9689d8d44bf9964484516275f5cd4c9b59457a6940c1d5d0ecbb94510a36b",
+      "metadataLicenseExpression": "MIT OR Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "0e4e125b8672abad4ff14d1e0043d3be9305af6a"
+        },
+        "path_in_vcs": "match_token"
+      },
+      "repository": "https://github.com/servo/html5ever",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "c6b91503fc0a9852e688b56eef715dba9a1ab4b074e86875af2471ce0163b2e5.txt",
+          "sha256": "c6b91503fc0a9852e688b56eef715dba9a1ab4b074e86875af2471ce0163b2e5",
+          "bytes": 422,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/html5ever/0e4e125b8672abad4ff14d1e0043d3be9305af6a/COPYRIGHT",
+          "upstreamPath": "COPYRIGHT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/html5ever/0e4e125b8672abad4ff14d1e0043d3be9305af6a/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3.txt",
+          "sha256": "86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3",
+          "bytes": 1076,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/html5ever/0e4e125b8672abad4ff14d1e0043d3be9305af6a/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "02930215f07fb88b2ec9503a2a1b2345fdcbd351f525c652583fb9df6bc271b9.txt",
+          "sha256": "02930215f07fb88b2ec9503a2a1b2345fdcbd351f525c652583fb9df6bc271b9",
+          "bytes": 724,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/html5ever/0e4e125b8672abad4ff14d1e0043d3be9305af6a/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/servo/html5ever",
+          "commit": "0e4e125b8672abad4ff14d1e0043d3be9305af6a",
+          "rootTree": {
+            "url": "https://api.github.com/repos/servo/html5ever/git/trees/0e4e125b8672abad4ff14d1e0043d3be9305af6a",
+            "finalURL": "https://api.github.com/repos/servo/html5ever/git/trees/0e4e125b8672abad4ff14d1e0043d3be9305af6a",
+            "status": 200,
+            "sha256": "8e6fd4593296c96d4c86c77acaf3e3af15e71f0e45e9ae9fb97e2068ad2c73ed"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:objc2-app-kit@0.3.2": {
+      "crateArchiveSha256": "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-app-kit"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-core-foundation@0.3.2": {
+      "crateArchiveSha256": "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-core-foundation"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-core-graphics@0.3.2": {
+      "crateArchiveSha256": "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-core-graphics"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-encode@4.1.0": {
+      "crateArchiveSha256": "ef25abbcd74fb2609453eb695bd2f860d389e457f67dc17cafc8b8cbc89d0c33",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8d214f5477365ffcbcbb7de058c86ed9a518efb7"
+        },
+        "path_in_vcs": "crates/objc2-encode"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+            "status": 200,
+            "sha256": "6b582831f53cfcfdbe4da81df09d273bd4da743bb3103574bb426c2c686a0378"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-exception-helper@0.1.1": {
+      "crateArchiveSha256": "c7a1c5fbb72d7735b076bb47b578523aedc40f3c439bea6dfd595c089d79d98a",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8d214f5477365ffcbcbb7de058c86ed9a518efb7"
+        },
+        "path_in_vcs": "crates/objc2-exception-helper"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/8d214f5477365ffcbcbb7de058c86ed9a518efb7/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/8d214f5477365ffcbcbb7de058c86ed9a518efb7",
+            "status": 200,
+            "sha256": "6b582831f53cfcfdbe4da81df09d273bd4da743bb3103574bb426c2c686a0378"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-foundation@0.3.2": {
+      "crateArchiveSha256": "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-foundation"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-io-kit@0.3.2": {
+      "crateArchiveSha256": "33fafba39597d6dc1fb709123dfa8289d39406734be322956a69f0931c73bb15",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-io-kit"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-io-surface@0.3.2": {
+      "crateArchiveSha256": "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-io-surface"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2-web-kit@0.3.2": {
+      "crateArchiveSha256": "b2e5aaab980c433cf470df9d7af96a7b46a9d892d521a2cbbb2f8a4c16751e7f",
+      "metadataLicenseExpression": "Zlib OR Apache-2.0 OR MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-web-kit"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+            "status": 200,
+            "sha256": "ccb9fc3dfa8a99f2ac0972cd9a144ebabfb554a029322851ffe17e8718363bd4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:objc2@0.6.4": {
+      "crateArchiveSha256": "3a12a8ed07aefc768292f076dc3ac8c48f3781c8f2d5851dd3d98950e8c5a89f",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8852b424193ca41602281b3d7540d7c8ed51e49a"
+        },
+        "path_in_vcs": "crates/objc2"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "grantContextKind": "versioned-explicit-license-by-reference-plus-canonical-text",
+      "texts": [
+        {
+          "file": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "bytes": 1339,
+          "upstreamURL": "https://raw.githubusercontent.com/madsmtm/objc2/8852b424193ca41602281b3d7540d7c8ed51e49a/LICENSE.md",
+          "upstreamPath": "LICENSE.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "bytes": 1078,
+          "upstreamURL": "https://raw.githubusercontent.com/spdx/license-list-data/v3.27.0/text/MIT.txt",
+          "upstreamPath": "MIT.txt",
+          "role": "standard-MIT-text-explicitly-referenced-by-versioned-upstream-declaration"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/madsmtm/objc2",
+          "commit": "8852b424193ca41602281b3d7540d7c8ed51e49a",
+          "rootTree": {
+            "url": "https://api.github.com/repos/madsmtm/objc2/git/trees/8852b424193ca41602281b3d7540d7c8ed51e49a",
+            "finalURL": "https://api.github.com/repos/madsmtm/objc2/git/trees/8852b424193ca41602281b3d7540d7c8ed51e49a",
+            "status": 200,
+            "sha256": "1ccf988d4c993053d44d35e5264323b13f2833881018290821d13a64988e7dcb"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": [
+        "Upstream objc2 LICENSE.md explicitly records Apple-SDK-derived binding licensing uncertainty; preserved in original context. Text collection is not an independent clearance of Apple SDK rights."
+      ]
+    },
+    "cargo:phf@0.10.1": {
+      "crateArchiveSha256": "fabbf1ead8a5bcbc20f5f8b939ee3f5b0f6f281b6ad3468b84656b658b455259",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "bed01538ae576876f11189d541875d228acef9e8"
+        },
+        "path_in_vcs": "phf"
+      },
+      "repository": "https://github.com/sfackler/rust-phf",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46.txt",
+          "sha256": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46",
+          "bytes": 1086,
+          "upstreamURL": "https://raw.githubusercontent.com/sfackler/rust-phf/bed01538ae576876f11189d541875d228acef9e8/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/sfackler/rust-phf",
+          "commit": "bed01538ae576876f11189d541875d228acef9e8",
+          "rootTree": {
+            "url": "https://api.github.com/repos/sfackler/rust-phf/git/trees/bed01538ae576876f11189d541875d228acef9e8",
+            "finalURL": "https://api.github.com/repositories/15992970/git/trees/bed01538ae576876f11189d541875d228acef9e8",
+            "status": 200,
+            "sha256": "1509953b4e9351a1ab7dcffbbf40b1c10b0a7f458800849b18d3b3352e127a9f"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:phf@0.8.0": {
+      "crateArchiveSha256": "3dfb61232e34fcb633f43d12c58f83c1df82962dcdfa565a4e866ffc17dafe12",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "81c7cc5b48649108428671d3b8ad151f6fbdb359"
+        }
+      },
+      "repository": "https://github.com/sfackler/rust-phf",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46.txt",
+          "sha256": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46",
+          "bytes": 1086,
+          "upstreamURL": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/sfackler/rust-phf",
+          "commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+          "rootTree": {
+            "url": "https://api.github.com/repos/sfackler/rust-phf/git/trees/81c7cc5b48649108428671d3b8ad151f6fbdb359",
+            "finalURL": "https://api.github.com/repositories/15992970/git/trees/81c7cc5b48649108428671d3b8ad151f6fbdb359",
+            "status": 200,
+            "sha256": "1e7dbf7920d3e0b001391a5fe06c7b2607e69f548366da608db147a23fad30e1"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:phf_macros@0.10.0": {
+      "crateArchiveSha256": "58fdf3184dd560f160dd73922bea2d5cd6e8f064bf4b13110abd81b03697b4e0",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "3cc6f05cb07933af4cf886645d1170bdcb306b6b"
+        }
+      },
+      "repository": "https://github.com/sfackler/rust-phf",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46.txt",
+          "sha256": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46",
+          "bytes": 1086,
+          "upstreamURL": "https://raw.githubusercontent.com/sfackler/rust-phf/3cc6f05cb07933af4cf886645d1170bdcb306b6b/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/sfackler/rust-phf",
+          "commit": "3cc6f05cb07933af4cf886645d1170bdcb306b6b",
+          "rootTree": {
+            "url": "https://api.github.com/repos/sfackler/rust-phf/git/trees/3cc6f05cb07933af4cf886645d1170bdcb306b6b",
+            "finalURL": "https://api.github.com/repositories/15992970/git/trees/3cc6f05cb07933af4cf886645d1170bdcb306b6b",
+            "status": 200,
+            "sha256": "aa03b895d915c710a92b76bd031f6f67ce42d2d4b422388f12441c3b4c13589a"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:phf_shared@0.10.0": {
+      "crateArchiveSha256": "b6796ad771acdc0123d2a88dc428b5e38ef24456743ddb1744ed628f9815c096",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "3ea14b2166553ad6e7b9afe7244144f5d661b6c6"
+        }
+      },
+      "repository": "https://github.com/sfackler/rust-phf",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46.txt",
+          "sha256": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46",
+          "bytes": 1086,
+          "upstreamURL": "https://raw.githubusercontent.com/sfackler/rust-phf/3ea14b2166553ad6e7b9afe7244144f5d661b6c6/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/sfackler/rust-phf",
+          "commit": "3ea14b2166553ad6e7b9afe7244144f5d661b6c6",
+          "rootTree": {
+            "url": "https://api.github.com/repos/sfackler/rust-phf/git/trees/3ea14b2166553ad6e7b9afe7244144f5d661b6c6",
+            "finalURL": "https://api.github.com/repositories/15992970/git/trees/3ea14b2166553ad6e7b9afe7244144f5d661b6c6",
+            "status": 200,
+            "sha256": "a1abc09113db1391aac1ff9b3f150da6b734e7dce273e4da6292e79f82ffd7b3"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:phf_shared@0.8.0": {
+      "crateArchiveSha256": "c00cf8b9eafe68dde5e9eaa2cef8ee84a9336a47d566ec55ca16589633b65af7",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "81c7cc5b48649108428671d3b8ad151f6fbdb359"
+        }
+      },
+      "repository": "https://github.com/sfackler/rust-phf",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46.txt",
+          "sha256": "d8870d5e2ab20fc50915b711c5aa7588131c9abcc1bcb980da1efd7486522a46",
+          "bytes": 1086,
+          "upstreamURL": "https://raw.githubusercontent.com/sfackler/rust-phf/81c7cc5b48649108428671d3b8ad151f6fbdb359/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/sfackler/rust-phf",
+          "commit": "81c7cc5b48649108428671d3b8ad151f6fbdb359",
+          "rootTree": {
+            "url": "https://api.github.com/repos/sfackler/rust-phf/git/trees/81c7cc5b48649108428671d3b8ad151f6fbdb359",
+            "finalURL": "https://api.github.com/repositories/15992970/git/trees/81c7cc5b48649108428671d3b8ad151f6fbdb359",
+            "status": 200,
+            "sha256": "1e7dbf7920d3e0b001391a5fe06c7b2607e69f548366da608db147a23fad30e1"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:selectors@0.24.0": {
+      "crateArchiveSha256": "0c37578180969d00692904465fb7f6b3d50b9a2b952b87c23d0e2e5cb5013416",
+      "metadataLicenseExpression": "MPL-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "e82d7868d999d84f6d59719e4c397e5252aecb85"
+        },
+        "path_in_vcs": "components/selectors"
+      },
+      "repository": "https://github.com/servo/servo",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "1af2d2b02d9c86030d29ed77117ca7a1b0e4b6ff35bcf8eeb124867d0f5cb59e.txt",
+          "sha256": "1af2d2b02d9c86030d29ed77117ca7a1b0e4b6ff35bcf8eeb124867d0f5cb59e",
+          "bytes": 15649,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/servo/e82d7868d999d84f6d59719e4c397e5252aecb85/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/servo/servo",
+          "commit": "e82d7868d999d84f6d59719e4c397e5252aecb85",
+          "rootTree": {
+            "url": "https://api.github.com/repos/servo/servo/git/trees/e82d7868d999d84f6d59719e4c397e5252aecb85",
+            "finalURL": "https://api.github.com/repos/servo/servo/git/trees/e82d7868d999d84f6d59719e4c397e5252aecb85",
+            "status": 200,
+            "sha256": "593ae23f788efb64423155a8c2fe55705f72c4ef2c317bc20a52b9530ddc66f4"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:selectors@0.36.1": {
+      "crateArchiveSha256": "c5d9c0c92a92d33f08817311cf3f2c29a3538a8240e94a6a3c622ce652d7e00c",
+      "metadataLicenseExpression": "MPL-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "635e1a19d02960588a00e189bd4bd5bdb150ec3d"
+        },
+        "path_in_vcs": "selectors"
+      },
+      "repository": "https://github.com/servo/stylo",
+      "grantContextKind": "exact-source-grant-with-canonical-referenced-MPL",
+      "texts": [
+        {
+          "file": "7523df2468fda84e4df377ee0cfd844a83742f39e0425e7c7819a82e3e25f840.txt",
+          "sha256": "7523df2468fda84e4df377ee0cfd844a83742f39e0425e7c7819a82e3e25f840",
+          "bytes": 205,
+          "upstreamURL": "https://raw.githubusercontent.com/servo/stylo/635e1a19d02960588a00e189bd4bd5bdb150ec3d/selectors/lib.rs",
+          "upstreamPath": "selectors/lib.rs:initial-comment",
+          "role": "exact-original-source-MPL-notice"
+        },
+        {
+          "file": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04.txt",
+          "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+          "bytes": 16726,
+          "upstreamURL": "https://www.mozilla.org/media/MPL/2.0/index.txt",
+          "upstreamPath": "index.txt",
+          "role": "canonical-MPL-text-referenced-by-original-source-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/servo/stylo",
+          "commit": "635e1a19d02960588a00e189bd4bd5bdb150ec3d",
+          "rootTree": {
+            "url": "https://api.github.com/repos/servo/stylo/git/trees/635e1a19d02960588a00e189bd4bd5bdb150ec3d",
+            "finalURL": "https://api.github.com/repos/servo/stylo/git/trees/635e1a19d02960588a00e189bd4bd5bdb150ec3d",
+            "status": 200,
+            "sha256": "ae1e0c1ca67c0308fd71ad319f8e6a4432d4d5cda9cf3b21b47c15bfeb487eb5"
+          }
+        },
+        {
+          "commit": "635e1a19d02960588a00e189bd4bd5bdb150ec3d",
+          "sourceFileSha256": "d54c6e13e9e952dac17d209171df8657e3cae93beaddace4906150cdec8d02e9",
+          "sourceNoticeOffset": 0,
+          "sourceNoticeBytes": 205
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:unic-char-property@0.9.0": {
+      "crateArchiveSha256": "a8c57a407d9b6fa02b4795eb81c5b6652060a15a7903ea981f3d723e6c0be221",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "5878605364af97a3358368a6eaef02104af2e016"
+        }
+      },
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b.txt",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+          "bytes": 608,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "upstreamPath": "COPYRIGHT.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09.txt",
+          "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+          "bytes": 664,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/open-i18n/rust-unic",
+          "commit": "5878605364af97a3358368a6eaef02104af2e016",
+          "rootTree": {
+            "url": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "finalURL": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "status": 200,
+            "sha256": "61285135b4b19eb259dc6c5e107512ad182bd43211c34872eb574e869ccd219e"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:unic-char-range@0.9.0": {
+      "crateArchiveSha256": "0398022d5f700414f6b899e10b8348231abf9173fa93144cbc1a43b9793c1fbc",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "5878605364af97a3358368a6eaef02104af2e016"
+        }
+      },
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b.txt",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+          "bytes": 608,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "upstreamPath": "COPYRIGHT.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09.txt",
+          "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+          "bytes": 664,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/open-i18n/rust-unic",
+          "commit": "5878605364af97a3358368a6eaef02104af2e016",
+          "rootTree": {
+            "url": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "finalURL": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "status": 200,
+            "sha256": "61285135b4b19eb259dc6c5e107512ad182bd43211c34872eb574e869ccd219e"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:unic-common@0.9.0": {
+      "crateArchiveSha256": "80d7ff825a6a654ee85a63e80f92f054f904f21e7d12da4e22f9834a4aaa35bc",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "5878605364af97a3358368a6eaef02104af2e016"
+        }
+      },
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b.txt",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+          "bytes": 608,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "upstreamPath": "COPYRIGHT.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09.txt",
+          "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+          "bytes": 664,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/open-i18n/rust-unic",
+          "commit": "5878605364af97a3358368a6eaef02104af2e016",
+          "rootTree": {
+            "url": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "finalURL": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "status": 200,
+            "sha256": "61285135b4b19eb259dc6c5e107512ad182bd43211c34872eb574e869ccd219e"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:unic-ucd-ident@0.9.0": {
+      "crateArchiveSha256": "e230a37c0381caa9219d67cf063aa3a375ffed5bf541a452db16e744bdab6987",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "8a6ce83063d90b91ae2ce59eddb803edd393fca9"
+        }
+      },
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b.txt",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+          "bytes": 608,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/COPYRIGHT.md",
+          "upstreamPath": "COPYRIGHT.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09.txt",
+          "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+          "bytes": 664,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/8a6ce83063d90b91ae2ce59eddb803edd393fca9/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/open-i18n/rust-unic",
+          "commit": "8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+          "rootTree": {
+            "url": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+            "finalURL": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/8a6ce83063d90b91ae2ce59eddb803edd393fca9",
+            "status": 200,
+            "sha256": "cbfd9698f4176acca9caef5fd6ad9c3e87143956d737d26e7bc15167ed70561b"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:unic-ucd-version@0.9.0": {
+      "crateArchiveSha256": "96bd2f2237fe450fcd0a1d2f5f4e91711124f7857ba2e964247776ebeeb7b0c4",
+      "metadataLicenseExpression": "MIT/Apache-2.0",
+      "publishedVcs": {
+        "git": {
+          "sha1": "5878605364af97a3358368a6eaef02104af2e016"
+        }
+      },
+      "repository": "https://github.com/open-i18n/rust-unic/",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b.txt",
+          "sha256": "f5c342c49f3ac804f3e8e7bb62a8040a44c50d47bb36902b1abd13f66a1adf8b",
+          "bytes": 608,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/COPYRIGHT.md",
+          "upstreamPath": "COPYRIGHT.md",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "bytes": 10847,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-APACHE",
+          "upstreamPath": "LICENSE-APACHE",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "bytes": 1023,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/LICENSE-MIT",
+          "upstreamPath": "LICENSE-MIT",
+          "role": "upstream-license-or-notice"
+        },
+        {
+          "file": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09.txt",
+          "sha256": "2748c1a1fba7616917c61d455e8d715ab952671ead63f2026ad0124410596b09",
+          "bytes": 664,
+          "upstreamURL": "https://raw.githubusercontent.com/open-i18n/rust-unic/5878605364af97a3358368a6eaef02104af2e016/AUTHORS",
+          "upstreamPath": "AUTHORS",
+          "role": "referenced-copyright-authors"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/open-i18n/rust-unic",
+          "commit": "5878605364af97a3358368a6eaef02104af2e016",
+          "rootTree": {
+            "url": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "finalURL": "https://api.github.com/repos/open-i18n/rust-unic/git/trees/5878605364af97a3358368a6eaef02104af2e016",
+            "status": 200,
+            "sha256": "61285135b4b19eb259dc6c5e107512ad182bd43211c34872eb574e869ccd219e"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:webview2-com-macros@0.8.1": {
+      "crateArchiveSha256": "67a921c1b6914c367b2b823cd4cde6f96beec77d30a939c8199bb377cf9b9b54",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "dffa41a8a46d3f5565eefbff2de57d38d399f158"
+        },
+        "path_in_vcs": "crates/callback-macros"
+      },
+      "repository": "https://github.com/wravery/webview2-rs",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73.txt",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+          "bytes": 1067,
+          "upstreamURL": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/wravery/webview2-rs",
+          "commit": "dffa41a8a46d3f5565eefbff2de57d38d399f158",
+          "rootTree": {
+            "url": "https://api.github.com/repos/wravery/webview2-rs/git/trees/dffa41a8a46d3f5565eefbff2de57d38d399f158",
+            "finalURL": "https://api.github.com/repos/wravery/webview2-rs/git/trees/dffa41a8a46d3f5565eefbff2de57d38d399f158",
+            "status": 200,
+            "sha256": "925dd75f4dc5c8e31eff7b85d1b5489b716ebd1099c8b942c8fa9ef6dfde80a6"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:webview2-com-sys@0.38.2": {
+      "crateArchiveSha256": "381336cfffd772377d291702245447a5251a2ffa5bad679c99e61bc48bacbf9c",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b74dc5e2b394044bea5191052868ce7a106c202c"
+        },
+        "path_in_vcs": "crates/bindings"
+      },
+      "repository": "https://github.com/wravery/webview2-rs",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73.txt",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+          "bytes": 1067,
+          "upstreamURL": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/wravery/webview2-rs",
+          "commit": "b74dc5e2b394044bea5191052868ce7a106c202c",
+          "rootTree": {
+            "url": "https://api.github.com/repos/wravery/webview2-rs/git/trees/b74dc5e2b394044bea5191052868ce7a106c202c",
+            "finalURL": "https://api.github.com/repos/wravery/webview2-rs/git/trees/b74dc5e2b394044bea5191052868ce7a106c202c",
+            "status": 200,
+            "sha256": "4346b49fb53f1bdfa78203755a1f777fe861f566289631b1a0af2f4573340bdf"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    },
+    "cargo:webview2-com@0.38.2": {
+      "crateArchiveSha256": "7130243a7a5b33c54a444e54842e6a9e133de08b5ad7b5861cd8ed9a6a5bc96a",
+      "metadataLicenseExpression": "MIT",
+      "publishedVcs": {
+        "git": {
+          "sha1": "b74dc5e2b394044bea5191052868ce7a106c202c"
+        },
+        "path_in_vcs": "crates/webview2-com"
+      },
+      "repository": "https://github.com/wravery/webview2-rs",
+      "grantContextKind": "pinned-workspace-grant",
+      "texts": [
+        {
+          "file": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73.txt",
+          "sha256": "0dcf41516e608bbcb6cdc5229feb7b86fe4a643b85e7df251133c93408fdac73",
+          "bytes": 1067,
+          "upstreamURL": "https://raw.githubusercontent.com/wravery/webview2-rs/b74dc5e2b394044bea5191052868ce7a106c202c/LICENSE",
+          "upstreamPath": "LICENSE",
+          "role": "upstream-license-or-notice"
+        }
+      ],
+      "evidence": [
+        {
+          "repository": "https://github.com/wravery/webview2-rs",
+          "commit": "b74dc5e2b394044bea5191052868ce7a106c202c",
+          "rootTree": {
+            "url": "https://api.github.com/repos/wravery/webview2-rs/git/trees/b74dc5e2b394044bea5191052868ce7a106c202c",
+            "finalURL": "https://api.github.com/repos/wravery/webview2-rs/git/trees/b74dc5e2b394044bea5191052868ce7a106c202c",
+            "status": 200,
+            "sha256": "4346b49fb53f1bdfa78203755a1f777fe861f566289631b1a0af2f4573340bdf"
+          }
+        }
+      ],
+      "copyrightPolicy": "Upstream copyright/declarations preserved verbatim; no owner/year invented or substituted. Referenced standard text is accompanied by its exact upstream scope declaration.",
+      "rightsReviewNotes": []
+    }
+  },
+  "notGenericFallback": true,
+  "newVersionMustBeReviewed": true,
+  "standardTextExplanation": "Only explicit versioned upstream grant declarations are paired with referenced canonical standard text; standard text alone never supplies an unknown-package grant."
+}

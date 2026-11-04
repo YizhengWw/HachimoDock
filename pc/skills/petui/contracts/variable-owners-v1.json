@@ -1,0 +1,389 @@
+{
+  "engine": "p4-variable-owners-contract-v1",
+  "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "input": {
+      "engine": "p4-input-v1"
+    },
+    "vars": {
+      "count": {
+        "type": "int",
+        "init": 0
+      },
+      "step": {
+        "type": "int",
+        "init": 2
+      }
+    },
+    "limits": {
+      "count": [
+        -100,
+        100
+      ],
+      "step": [
+        1,
+        10
+      ]
+    },
+    "states": [
+      "ready"
+    ],
+    "initial_state": "ready",
+    "transitions": [
+      {
+        "from": "*",
+        "on": "add"
+      },
+      {
+        "from": "*",
+        "on": "subtract"
+      }
+    ],
+    "tick": [],
+    "dashboard": {
+      "title": "Program contract",
+      "visualStyle": "clean",
+      "visualPalette": "mint",
+      "visualLayout": "tool",
+      "visualSprite": "star"
+    },
+    "surface": {
+      "engine": "p4-app-surface-v1",
+      "graphics": "p4-app-graphics-v1",
+      "bindings": "p4-variable-bindings-v1",
+      "background": 0,
+      "elements": [
+        {
+          "type": "text",
+          "x": 20,
+          "y": 20,
+          "w": 500,
+          "h": 80,
+          "color": 65535,
+          "var_bind": "count"
+        },
+        {
+          "type": "button",
+          "x": 20,
+          "y": 120,
+          "w": 220,
+          "h": 64,
+          "color": 2016,
+          "text": "Add",
+          "action": "add"
+        },
+        {
+          "type": "button",
+          "x": 260,
+          "y": 120,
+          "w": 220,
+          "h": 64,
+          "color": 2016,
+          "text": "Subtract",
+          "action": "subtract"
+        }
+      ]
+    },
+    "program": {
+      "engine": "p4-component-program-v1",
+      "image": {
+        "engine": "p4-integer-program-v1",
+        "schema": 1,
+        "cells": 1,
+        "fuel": 64,
+        "code": [
+          [
+            "CONST",
+            0,
+            0,
+            0,
+            0
+          ],
+          [
+            "LOAD",
+            1,
+            0,
+            0,
+            0
+          ],
+          [
+            "EVENT",
+            2,
+            0,
+            0,
+            0
+          ],
+          [
+            "ADD",
+            1,
+            1,
+            2,
+            0
+          ],
+          [
+            "STORE",
+            0,
+            1,
+            0,
+            0
+          ],
+          [
+            "OUTPUT",
+            0,
+            1,
+            0,
+            0
+          ],
+          [
+            "HALT",
+            0,
+            0,
+            0,
+            0
+          ]
+        ]
+      },
+      "outputs": [
+        "count",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "actions": {
+        "add": [
+          {
+            "var": "step"
+          }
+        ],
+        "subtract": [
+          -1
+        ]
+      },
+      "timers": []
+    },
+    "host": true,
+    "host_context": "p4-host-context-v1",
+    "ownership": {
+      "engine": "p4-variable-owners-v1",
+      "host": [
+        "step"
+      ]
+    }
+  },
+  "reject": [
+    {
+      "path": "/ownership/engine",
+      "value": "unknown"
+    },
+    {
+      "path": "/ownership/host",
+      "value": []
+    },
+    {
+      "path": "/ownership/host",
+      "value": [
+        "step",
+        "step"
+      ]
+    },
+    {
+      "path": "/ownership/host",
+      "value": [
+        "missing"
+      ]
+    },
+    {
+      "path": "/ownership/host",
+      "value": [
+        "count"
+      ]
+    },
+    {
+      "path": "/ownership/host",
+      "value": [
+        true
+      ]
+    },
+    {
+      "path": "/ownership/extra",
+      "value": true
+    },
+    {
+      "path": "/ownership",
+      "value": null
+    },
+    {
+      "path": "/ownership",
+      "value": []
+    },
+    {
+      "path": "/host",
+      "value": false
+    },
+    {
+      "path": "/engine",
+      "value": "p4-bounded-runtime-v3"
+    },
+    {
+      "path": "/host_context",
+      "value": null
+    },
+    {
+      "path": "/input/engine",
+      "value": "old"
+    },
+    {
+      "path": "/surface/bindings",
+      "value": null
+    },
+    {
+      "path": "/vars/step/type",
+      "value": "float"
+    },
+    {
+      "path": "/media",
+      "value": {}
+    },
+    {
+      "path": "/game",
+      "value": {}
+    },
+    {
+      "path": "/scene",
+      "value": {}
+    },
+    {
+      "path": "/local",
+      "value": {}
+    },
+    {
+      "path": "/instrument",
+      "value": {}
+    },
+    {
+      "path": "/data",
+      "value": {}
+    },
+    {
+      "path": "/transitions/0/set",
+      "value": {
+        "step": 3
+      }
+    },
+    {
+      "path": "/transitions/0/inc",
+      "value": {
+        "step": 1
+      }
+    },
+    {
+      "path": "/transitions/0/set",
+      "value": {
+        "count": {
+          "var": "step"
+        }
+      }
+    },
+    {
+      "path": "/tick",
+      "value": [
+        {
+          "when": {
+            "var": "step",
+            "lte": 0
+          }
+        }
+      ]
+    },
+    {
+      "path": "/dashboard/metricValue",
+      "value": {
+        "var": "step"
+      }
+    },
+    {
+      "path": "/dashboard/metricValue",
+      "value": {
+        "fmt_mmss": "step"
+      }
+    },
+    {
+      "path": "/dashboard/progress",
+      "value": {
+        "pct_of": "step",
+        "of_max": "count"
+      }
+    },
+    {
+      "path": "/form",
+      "value": {
+        "focus_var": "step"
+      }
+    },
+    {
+      "path": "/form",
+      "value": {
+        "fields": [
+          {
+            "var": "step"
+          }
+        ]
+      }
+    },
+    {
+      "path": "/form",
+      "value": {
+        "keyboard": {
+          "label_var": "step"
+        }
+      }
+    },
+    {
+      "path": "/persist",
+      "value": {
+        "vars": [
+          "step"
+        ]
+      }
+    },
+    {
+      "path": "/program/outputs/0",
+      "value": "step"
+    },
+    {
+      "path": "/form",
+      "value": []
+    },
+    {
+      "path": "/persist",
+      "value": {
+        "vars": null
+      }
+    },
+    {
+      "path": "/form",
+      "value": {
+        "keyboard": null
+      }
+    },
+    {
+      "path": "/form",
+      "value": {
+        "fields": [
+          false
+        ]
+      }
+    },
+    {
+      "path": "/transitions/0/then",
+      "value": 2
+    }
+  ],
+  "hardwareVerified": false,
+  "grants": false
+}

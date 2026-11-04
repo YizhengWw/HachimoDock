@@ -115,7 +115,7 @@ fn authorized_two_video_workflow() {
                 let status=payload["status"].as_str().unwrap_or("unknown");
                 if status=="succeeded" {
                     let url=payload.pointer("/content/video_url").and_then(Value::as_str).unwrap();
-                    let bytes=crate::download_bytes(url.into()).await.unwrap();
+                    let bytes=crate::download_bytes(url.into(),None,None).await.unwrap();
                     private_bytes(&output.join(format!("{family}.mp4")),&bytes);
                     private_json(&output.join(format!("{family}-result.private.json")),&payload);
                     println!("Completed {family}: {}",json!({"seconds":started.elapsed().as_secs(),"bytes":bytes.len(),"usage":payload["usage"]}));

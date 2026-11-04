@@ -1,5 +1,20 @@
 """Bounded input policy shared by packaging and behavioral tests."""
 ENGINE = "p4-input-v1"
+def cooldown_allowed(runtime,snapshot,action):
+    policy=runtime.get('input',{})
+    if policy.get('engine')!=ENGINE:return True
+    wait=policy.get('cooldown',{}).get(action)
+    last=snapshot.get('actionTimes',{}).get(action)
+    now=snapshot.get('ms',0)
+    return not wait or last is None or now>=last and now-last>=wait
+
+def action_accepted(runtime,snapshot,action,accepted=True):
+    """Stamp accepted local admission, never refused/unknown queue outcomes."""
+    policy=runtime.get('input',{})
+    if accepted is True and policy.get('engine')==ENGINE and policy.get('cooldown',{}).get(action):
+        snapshot['actionTimes']={**snapshot.get('actionTimes',{}),action:snapshot.get('ms',0)}
+    return snapshot
+
 def input_errors(runtime, buttons=None):
     if "input" not in runtime:
         return []
@@ -33,7 +48,7 @@ def input_errors(runtime, buttons=None):
             assert set(p["press"])<=allowed
         if "hold" in p:
             a=p["hold"]
-            assert isinstance(a,str) and a in actions and runtime.get("scene",{}).get("motion",{}).get("engine")=="p4-motion-v1"
+            assert isinstance(a,str) and a in actions and (runtime.get("scene",{}).get("motion",{}).get("engine")=="p4-motion-v1" or runtime.get("scene",{}).get("engine")=="p4-side-scene-v1")
             assert all(a not in p.get(k,{}) for k in ("repeat","press","confirm","cooldown")) and "drag" not in p
         if buttons is not None:
             by_action={b["action"]:b["event"] for b in buttons}

@@ -1,17 +1,16 @@
 {
   "schemaVersion": 2,
   "product": "HachimiDock",
-  "desktopVersion": "0.1.168",
-  "firmwareVersion": "0.7.103-p4-r2",
-  "releaseTag": "v0.1.168",
-  "releaseUrl": "https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.168",
+  "desktopVersion": "0.1.197",
+  "firmwareVersion": "0.7.103-p4-r178",
+  "releaseTag": "v0.1.197",
+  "releaseUrl": "https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197",
   "sourceRef": "refs/heads/main",
-  "sourceBuildCommit": "b0381bf0a57b73e5e99842933a1a3def346498a0",
   "sourcePublished": true,
   "sourcePublication": {
-    "date": "2026-10-29",
-    "edition": "normal-public-no-keys",
-    "note": "Public maintenance release based on 0.1.167. Existing user data and settings are preserved. Unaccepted framework changes are not included."
+    "date": "2026-11-05",
+    "edition": "normal-public",
+    "note": "Desktop, firmware and component runtime updates. The main branch may contain source updates newer than the published installers."
   },
   "embeddedServiceKeys": false,
   "embeddedInternalCredentials": false,
@@ -25,117 +24,65 @@
   "firmware": [
     {
       "file": "firmware.bin",
-      "version": "0.7.103-p4-r2",
-      "identity": "0.7.103-p4-r2+555572a5f2fe",
-      "sha256": "c1a2e152b50cf646a40f9414df601336c42d917ba4995c3f0671824e15092acb",
+      "version": "0.7.103-p4-r178",
+      "sha256": "75f3dcd63207a90a0153a9d872a169df5cda0fff2277262f86be81133c683224",
       "minChipRevision": 1,
-      "maxChipRevision": 199
+      "maxChipRevision": 199,
+      "identity": "0.7.103-p4-r178+934e4c528a6e"
     },
     {
       "file": "firmware-v3.bin",
-      "version": "0.7.103-p4-r2",
-      "identity": "0.7.103-p4-r2+555572a5f2fe",
-      "sha256": "9d701b28d9203ba42132e6d0816bdc015c7108e94649548490335275522df819",
+      "version": "0.7.103-p4-r178",
+      "sha256": "62c78e1e637f7f9e0f478699a8bc4e62be2eab08ca9234629bbe933769096d3a",
       "minChipRevision": 300,
-      "maxChipRevision": 399
+      "maxChipRevision": 399,
+      "identity": "0.7.103-p4-r178+934e4c528a6e"
     }
   ],
   "releaseValidation": {
-    "tests": {
-      "frontend": {
-        "passed": 856,
-        "skipped": 1
-      },
-      "bridge": {
-        "passed": 215,
-        "skipped": 0
-      },
-      "firmware": {
-        "passed": 225,
-        "skipped": 1,
-        "subtests": 11
-      },
-      "communityWeb": {
-        "passed": 4,
-        "skipped": 0
-      }
-    },
     "installerPayloadsVerified": true,
-    "embeddedFrontendDecompressedAndScanned": true,
-    "componentCount": 28,
     "factorySegmentsAndChecksumsVerified": true,
+    "componentCount": 29,
     "physicalDeviceValidationThisPackagingRun": false,
     "windowsRuntimeValidationThisPackagingRun": false,
-    "paidGenerationRequestsThisPackagingRun": 0,
-    "macOSSigning": "local-ad-hoc-not-notarized",
-    "windowsSigning": "unsigned"
+    "scope": "Published v0.1.197 artifacts. Later source updates require rebuilding; these flags do not certify those updates."
   },
   "artifacts": [
     {
-      "file": "HachimiDock_0.1.168_macOS-arm64.dmg",
-      "role": "macos",
-      "bytes": 128398705,
-      "sha256": "61faa46f49990b8c0b36374bf0cc5b797b2e36ec0b80c22c90ef8a7a541d1d88"
-    },
-    {
-      "file": "HachimiDock_0.1.168_Windows-x64-setup.exe",
-      "role": "windows",
-      "bytes": 113759140,
-      "sha256": "8d86fde38c0db6192606ea2bd3e0cfd1d3210225342262fff4dd24f4e79f5a22"
-    },
-    {
-      "file": "HachimoDock-P4-v1_0.7.103-p4-r2_Factory-Flasher.zip",
-      "role": "factory-v1",
-      "bytes": 25747936,
-      "sha256": "faf6e98e25ae24fc559364b426f9330b25e3562c47da583352af17c7e88b78a9"
-    },
-    {
-      "file": "HachimoDock-P4-v3_0.7.103-p4-r2_Factory-Flasher.zip",
-      "role": "factory-v3",
-      "bytes": 25763611,
-      "sha256": "aef9d065612459ba123d40692555824b3ee39fffb420253ca221702214696678"
-    },
-    {
       "file": "FFmpeg-8.1.2-source.tar.xz",
-      "role": "corresponding-third-party-source",
+      "role": "ffmpeg-source",
       "bytes": 11710924,
       "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c"
     },
     {
-      "file": "LICENSE",
-      "role": "license",
-      "bytes": 7607,
-      "sha256": "f410049813a24b574b39af6dd4807c3e0a0432fe41081b768ef3fae4e0f1fd3a"
+      "file": "HachimiDock_0.1.197_macOS-arm64.dmg",
+      "role": "macos",
+      "bytes": 131622859,
+      "sha256": "a4f4621f4b975cb6340ac79a5945713d0859d119d7bd47d6c2a5f6da54fe1209"
     },
     {
-      "file": "THIRD_PARTY_NOTICES.md",
-      "role": "third-party-notices",
-      "bytes": 6856,
-      "sha256": "4e9187d896428808184a3b54fe71b4a25f5563ad995022efdb76a26b0be252a4"
+      "file": "HachimiDock_0.1.197_Windows-x64-setup.exe",
+      "role": "windows",
+      "bytes": 138806891,
+      "sha256": "2a7dc87dba21d8e2b71380f88741fee1696d44d0894f8831839a90abfbbb98f4"
     },
     {
-      "file": "Xiaomi-Miloco-LICENSE.md",
-      "role": "license",
-      "bytes": 6009,
-      "sha256": "376dd562aa127c36a75f39887b1a1cd7c47859f21f097e8a8f1b7bab0ea79a27"
+      "file": "HachimoDock-P4-v1_0.7.103-p4-r178_Factory-Flasher.zip",
+      "role": "factory-v1",
+      "bytes": 26586286,
+      "sha256": "e25963dd7a23a62e193c8cc8ca6d965a7b14cc72b3825bec5797caa8b1afc338"
     },
     {
-      "file": "Espressif-ESP-SR-LICENSE.txt",
-      "role": "license",
-      "bytes": 1188,
-      "sha256": "923e6274ea64b226c4f0cb9fc29bda915ae343fd6a8fc290ff5e0daaa85f8813"
+      "file": "HachimoDock-P4-v3_0.7.103-p4-r178_Factory-Flasher.zip",
+      "role": "factory-v3",
+      "bytes": 26605772,
+      "sha256": "84dd6b30bf0779fabd93dd8adc7bd1510245c0270ee4a3d43d940c0315fbafb2"
     },
     {
-      "file": "sysinfo-LICENSE.txt",
-      "role": "license",
-      "bytes": 1082,
-      "sha256": "666ccdb468b5fe0f408f90ebb563c95e4d453e89bd1660e93aa7463f2807ae36"
-    },
-    {
-      "file": "RELEASE-NOTES.txt",
-      "role": "release-notes",
-      "bytes": 2187,
-      "sha256": "c2bcf4affc615481b98bd17ba65f253d9b6aa9ca24db8b059252ae42f508b9e9"
+      "file": "SHA256SUMS",
+      "role": "checksums",
+      "bytes": 543,
+      "sha256": "90c020db679f824e4de7272d086b0dadc42e34c3b4be44e8dead51ece1b7d858"
     }
   ]
 }

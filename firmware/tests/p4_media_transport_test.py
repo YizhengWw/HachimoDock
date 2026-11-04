@@ -17,7 +17,7 @@ def test_real_transport_queues_logs_behind_complete_frames(tmp_path):
     bypassed them when capture was off and deterministically corrupts this test.
     """
     source = (Path(__file__).resolve().parents[1] / "main/pet_p4_main.c").read_text()
-    functions = source.split("static void usb_queue_all", 1)[1].split("static void send_screenshot_chunk", 1)[0]
+    functions = "static pet_transport_audit_t g_transport_audit;" + source.split("static pet_transport_audit_t g_transport_audit;", 1)[1].split("/* Screenshot-only checked writes.", 1)[0]
     harness = tmp_path / "transport.c"
     harness.write_text(r'''
 #include <assert.h>
@@ -27,6 +27,7 @@ def test_real_transport_queues_logs_behind_complete_frames(tmp_path):
 #include <string.h>
 #include <pthread.h>
 #include <sched.h>
+#include "pet_p4_transport_audit.h"
 #define PET_P4_UART_NUM 0
 #define portMAX_DELAY 0
 #define pdMS_TO_TICKS(ms) (ms)
@@ -57,7 +58,7 @@ static int uart_wait_tx_done(int port,int timeout) {(void)port;(void)timeout;dra
 static void pet_p4_native_usb_send_json_line(const char *line,void *ctx) {(void)line;(void)ctx;}
 static int test_vprintf(const char *fmt,va_list args) {(void)fmt;(void)args;console_writes++;return 1;}
 #define vprintf test_vprintf
-'''+"static void usb_queue_all"+functions+r'''
+'''+functions+r'''
 static int log_line(const char *fmt,...) {va_list ap;va_start(ap,fmt);int n=transport_log_vprintf(fmt,ap);va_end(ap);return n;}
 static const char *frame="{\"topic\":\"media/status\",\"payload\":{\"ok\":true}}";
 static void *frames(void *arg) {(void)arg;for(int i=0;i<500;i++)transport_send_line(frame,NULL);return NULL;}
@@ -87,5 +88,20 @@ int main(void) {
 }
 ''')
     exe = tmp_path / "transport"
-    subprocess.run(["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-pthread", str(harness), "-o", str(exe)], check=True)
+    root = Path(__file__).resolve().parents[1]
+    subprocess.run(["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror", "-fsanitize=address,undefined", "-pthread", "-I", str(root / "main"), str(harness), str(root / "main/pet_p4_transport_audit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)
+
+
+def test_long_mixed_records_with_bounded_driver_queues_and_failure_boundaries(tmp_path):
+    """Real production callbacks, not a replacement writer or physical-link test."""
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "main/pet_p4_main.c").read_text()
+    queued = '#include "pet_p4_transport_audit.h"\nstatic pet_transport_audit_t g_transport_audit;' + source.split("static pet_transport_audit_t g_transport_audit;", 1)[1].split("/* Screenshot-only checked writes.", 1)[0]
+    checked = '#include "pet_p4_screenshot_write.h"\nstatic pet_screenshot_tx_observation_t g_screenshot_tx;\n' + "static bool screenshot_write_all" + source.split("static bool screenshot_write_all", 1)[1].split("static bool send_screenshot_chunk(", 1)[0]
+    (tmp_path / "production_transport.inc").write_text(queued + checked)
+    exe = tmp_path / "transport-stress"
+    subprocess.run(["cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
+                    "-fsanitize=address,undefined", "-pthread", "-I", str(tmp_path), "-I", str(root / "main"),
+                    str(root / "tests/p4_transport_stress_test.c"), str(root / "main/pet_p4_transport_audit.c"), "-o", str(exe)], check=True)
+    subprocess.run([str(exe)], check=True, timeout=30)

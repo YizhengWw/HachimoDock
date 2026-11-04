@@ -1,0 +1,582 @@
+{
+ "engine": "pc-fetch-v1",
+ "capability": "widgetPcFetch",
+ "runtimeVars": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "host": true,
+  "vars": {
+   "price": {
+    "type": "string",
+    "init": ""
+   },
+   "change": {
+    "type": "int",
+    "init": 0
+   },
+   "name": {
+    "type": "string",
+    "init": "等待数据"
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+   {
+    "from": "*",
+    "on": "host.refresh"
+   }
+  ],
+  "tick": [],
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "dashboard": {
+   "title": "Quote",
+   "footer": "PC 轮询",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "name"
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 60,
+     "w": 300,
+     "h": 48,
+     "color": 65535,
+     "font_size": 32,
+     "line_height": 40,
+     "var_bind": "price"
+    },
+    {
+     "type": "meter",
+     "x": 20,
+     "y": 120,
+     "w": 300,
+     "h": 12,
+     "color": 65535,
+     "var_bind": "change"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 160,
+     "w": 200,
+     "h": 48,
+     "color": 65535,
+     "foreground": 0,
+     "text": "刷新",
+     "action": "host.refresh"
+    }
+   ]
+  }
+ },
+ "applicationVars": {
+  "schemaVersion": 1,
+  "engine": "pc-fetch-v1",
+  "service": "fetch",
+  "actions": {
+   "host.refresh": "quote:refresh"
+  },
+  "content": [
+   {
+    "id": "quote",
+    "url": "https://api.example.com/v1/quote?symbol=ABC",
+    "method": "GET",
+    "headers": {
+     "Accept": "application/json"
+    },
+    "interval_sec": 60,
+    "ttl_sec": 300,
+    "max_bytes": 16384,
+    "map": {
+     "vars": {
+      "price": "/data/price",
+      "change": "/data/change_pct",
+      "name": "/data/name"
+     }
+    }
+   }
+  ]
+ },
+ "runtimeRows": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+   "page": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "data": {
+   "source": "fetch.news",
+   "page_var": "page"
+  },
+  "transitions": [
+   {
+    "from": "*",
+    "on": "next",
+    "inc": {
+     "page": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "prev",
+    "inc": {
+     "page": -1
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "News",
+   "footer": "等待数据",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  }
+ },
+ "applicationRows": {
+  "schemaVersion": 1,
+  "engine": "pc-fetch-v1",
+  "service": "fetch",
+  "content": [
+   {
+    "id": "news",
+    "url": "https://feeds.example.org/top.json",
+    "interval_sec": 300,
+    "map": {
+     "rows": {
+      "items": "/items",
+      "id": "/id",
+      "label": "/title",
+      "value": "/score",
+      "detail": "/source",
+      "meta": "/summary",
+      "tone": "/trend"
+     }
+    }
+   }
+  ]
+ },
+ "invalidVars": [
+  {
+   "path": [
+    "content",
+    0,
+    "url"
+   ],
+   "value": "http://api.example.com/v1/quote"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "url"
+   ],
+   "value": "https://api.example.com/v1/quote?token=abc"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "interval_sec"
+   ],
+   "value": 30
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "max_bytes"
+   ],
+   "value": 65537
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "method"
+   ],
+   "value": "POST"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "headers"
+   ],
+   "value": {
+    "Authorization": "Bearer x"
+   }
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "map"
+   ],
+   "value": {
+    "vars": {
+     "missing": "/x"
+    }
+   }
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "map",
+    "vars",
+    "price"
+   ],
+   "value": "no-slash"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "ttl_sec"
+   ],
+   "value": 30
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "id"
+   ],
+   "value": "bad id"
+  },
+  {
+   "path": [
+    "actions"
+   ],
+   "value": {
+    "host.refresh": "other:refresh"
+   }
+  },
+  {
+   "path": [
+    "content"
+   ],
+   "value": []
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "url"
+   ],
+   "value": "https://user:pw@api.example.com/v1/quote"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "url"
+   ],
+   "value": "https://10.0.0.1/quote"
+  }
+ ],
+ "invalidRows": [
+  {
+   "path": [
+    "content",
+    0,
+    "map",
+    "rows"
+   ],
+   "value": {
+    "items": "/items",
+    "label": "/title"
+   }
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "id"
+   ],
+   "value": "other"
+  },
+  {
+   "path": [
+    "content",
+    0,
+    "map"
+   ],
+   "value": {
+    "rows": {
+     "items": "/items",
+     "id": "/id",
+     "label": "/title"
+    },
+    "vars": {
+     "page": "/n"
+    }
+   }
+  }
+ ],
+ "documentVars": {
+  "data": {
+   "price": "12.34",
+   "change_pct": -2,
+   "name": "示例"
+  }
+ },
+ "mappedVars": {
+  "price": "12.34",
+  "change": -2,
+  "name": "示例"
+ },
+ "badDocument": {
+  "data": {
+   "price": {
+    "nested": 1
+   },
+   "change_pct": "abc"
+  }
+ },
+ "bindingErrors": [
+  "change",
+  "name",
+  "price"
+ ],
+ "documentRows": {
+  "items": [
+   {
+    "id": "n1",
+    "title": "First story",
+    "score": 12,
+    "source": "Wire",
+    "summary": "S1",
+    "trend": 1
+   },
+   {
+    "id": "n2",
+    "title": "Second",
+    "score": "7",
+    "source": "Blog",
+    "summary": "",
+    "trend": -3
+   },
+   {
+    "id": "n1",
+    "title": "dup",
+    "score": 1
+   },
+   {
+    "id": "",
+    "title": "no id"
+   },
+   {
+    "id": "n3",
+    "title": "Third",
+    "score": null,
+    "trend": "0"
+   }
+  ]
+ },
+ "mappedRows": [
+  {
+   "id": "n1",
+   "label": "First story",
+   "value": "12",
+   "detail": "Wire",
+   "meta": "S1",
+   "tone": 1
+  },
+  {
+   "id": "n2",
+   "label": "Second",
+   "value": "7",
+   "detail": "Blog",
+   "meta": "",
+   "tone": -1
+  },
+  {
+   "id": "n3",
+   "label": "Third",
+   "value": "",
+   "detail": "",
+   "meta": "",
+   "tone": 0
+  }
+ ],
+ "allowlist": [
+  {
+   "url": "https://api.example.com/v1/q",
+   "allowlist": [
+    "api.example.com"
+   ],
+   "allowed": true
+  },
+  {
+   "url": "https://api.example.com/v1/q",
+   "allowlist": [
+    "example.com"
+   ],
+   "allowed": false
+  },
+  {
+   "url": "https://evil.example.com/q",
+   "allowlist": [
+    "*.example.com"
+   ],
+   "allowed": false
+  },
+  {
+   "url": "http://api.example.com/q",
+   "allowlist": [
+    "api.example.com"
+   ],
+   "allowed": false
+  },
+  {
+   "url": "https://api.example.com:8443/q",
+   "allowlist": [
+    "api.example.com"
+   ],
+   "allowed": false
+  },
+  {
+   "url": "https://10.0.0.1/q",
+   "allowlist": [
+    "10.0.0.1"
+   ],
+   "allowed": false
+  },
+  {
+   "url": "https://api.example.com/q?apikey=1",
+   "allowlist": [
+    "api.example.com"
+   ],
+   "allowed": false
+  }
+ ],
+ "snapshots": [
+  {
+   "state": {},
+   "now_ms": 1000,
+   "status": "empty",
+   "message": "等待数据"
+  },
+  {
+   "state": {
+    "rows": [
+     {
+      "id": "n1",
+      "label": "First story",
+      "value": "12",
+      "detail": "Wire",
+      "meta": "S1",
+      "tone": 1
+     },
+     {
+      "id": "n2",
+      "label": "Second",
+      "value": "7",
+      "detail": "Blog",
+      "meta": "",
+      "tone": -1
+     },
+     {
+      "id": "n3",
+      "label": "Third",
+      "value": "",
+      "detail": "",
+      "meta": "",
+      "tone": 0
+     }
+    ],
+    "fetched_ms": 1000,
+    "ttl_ms": 300000
+   },
+   "now_ms": 2000,
+   "status": "ok",
+   "message": ""
+  },
+  {
+   "state": {
+    "rows": [
+     {
+      "id": "n1",
+      "label": "First story",
+      "value": "12",
+      "detail": "Wire",
+      "meta": "S1",
+      "tone": 1
+     },
+     {
+      "id": "n2",
+      "label": "Second",
+      "value": "7",
+      "detail": "Blog",
+      "meta": "",
+      "tone": -1
+     },
+     {
+      "id": "n3",
+      "label": "Third",
+      "value": "",
+      "detail": "",
+      "meta": "",
+      "tone": 0
+     }
+    ],
+    "fetched_ms": 1000,
+    "ttl_ms": 300000
+   },
+   "now_ms": 400000,
+   "status": "error",
+   "message": "数据已过期"
+  },
+  {
+   "state": {
+    "rows": null,
+    "fetched_ms": 1000,
+    "ttl_ms": 300000,
+    "error": "HTTP 503"
+   },
+   "now_ms": 2000,
+   "status": "error",
+   "message": "上游错误：HTTP 503"
+  },
+  {
+   "state": {
+    "rows": [],
+    "fetched_ms": 1000,
+    "ttl_ms": 300000
+   },
+   "now_ms": 2000,
+   "status": "empty",
+   "message": "暂无数据"
+  }
+ ]
+}

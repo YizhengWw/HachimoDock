@@ -424,6 +424,20 @@ function normalizeSession(row) {
     session.displayContent = row.displayContent.trim();
   }
   if (typeof row.state === "string" && row.state.trim()) session.state = row.state.trim().toLowerCase();
+  const status = ['running', 'idle', 'unknown'].includes(row.status) ? row.status : 'unknown';
+  const active = status === 'running' && row.active === true ? true
+    : status === 'idle' && row.active === false ? false : null;
+  session.status = active === null ? 'unknown' : status;
+  session.active = active;
+  session.stateDetailUnknown = row.stateDetailUnknown !== false || ![
+    'working', 'thinking', 'tool_running', 'waiting_user', 'done', 'error', 'stopped',
+  ].includes(session.state);
+  session.activitySource = active !== null && row.activitySource === 'live-agent-status'
+    ? 'live-agent-status' : null;
+  session.waitKind = session.state === 'waiting_user' && ['question', 'toolapproval'].includes(row.waitKind)
+    ? row.waitKind : null;
+  if (typeof row.epoch === 'string' && /^[a-f0-9]{64}$/i.test(row.epoch)) session.epoch = row.epoch;
+
   if (Number.isFinite(Number(row.transitionRevision)) && Number(row.transitionRevision) > 0) {
     session.transitionRevision = Number(row.transitionRevision);
   }

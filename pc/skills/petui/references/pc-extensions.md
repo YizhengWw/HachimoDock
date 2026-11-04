@@ -12,7 +12,7 @@
 - 第一版仅支持无需鉴权的 HTTPS GET JSON 搜索。没有任意 JS、POST、自定义请求头、OAuth 或凭据接口。后续新增凭据服务必须由宿主保管，不能写进包；不得宣称本版已经支持。
 - 搜索和配置可不接设备；真实播放需要 PC 运行、USB 与相应能力。直播停止后恢复连接当前直播，不提供回放/快进。实时语音优先、全局停止取消所有组件的播放准备和播放；不会开机自动播放。
 - 首次打开显示搜索和设备连接就绪情况，不显示授权门槛；默认启用不等于已连接或正在播放。搜索结果可直接播放而不强制收藏。主动停用后的 status 仅返回停用信息，不触发联网；重新开启是服务开关，不是再次授权。
-- 宿主系统 DNS 失败或返回 198.18/15 代理虚拟地址时，可通过阿里公共 DNS／Cloudflare 的 HTTPS DNS 获取真实公网地址；始终验证 TLS、解析响应、公网 IP 并钉住连接地址，所有跳转和 HLS 片段重新检查。私网地址不得放行，不能关闭证书校验或直接连接虚拟 IP。数据说明披露解析服务；默认启用不绕过宿主网络策略。解析服务只接收目标域名，不发送搜索词、用户对话或凭据。
+- 宿主系统 DNS 失败或返回 198.18/15 代理虚拟地址时，可通过阿里公共 DNS 的 HTTPS DNS 获取真实公网地址；始终验证 TLS、解析响应、公网 IP 并钉住连接地址，所有跳转和 HLS 片段重新检查。私网地址不得放行，不能关闭证书校验或直接连接虚拟 IP。数据说明披露解析服务；默认启用不绕过宿主网络策略。解析服务只接收目标域名，不发送搜索词、用户对话或凭据。
 - `widgetMediaNotice=true` 的设备支持 `media/notice`，用于展示未启用、空收藏、连接失败等原因。通知仅作用于相同 source 的空闲媒体视图，不启动/刷新/终止音频会话；旧固件仍可播放，详细失败原因在 PC 显示。
 
 ## pc/extension.json
@@ -22,6 +22,7 @@
 - `schemaVersion:1`、`engine:"pc-declarative-media-v1"`。
 - `permissions:{networkHosts:[...],publicAudio:true,storage:true}`：1–4 个精确 DNS 域名，不允许通配符/IP 字面量。搜索每次跳转都检查域名、HTTPS 和解析地址；音频只允许公网 HTTP/HTTPS 80/443，拒绝凭据 URL 和本地地址。解码器只接收管道字节，不获得网络 URL。
 - `search:{endpoint,queryParam,params,itemsPath,fields}`：endpoint 是声明域名内不带查询串的 HTTPS URL；queryParam 为关键词参数名；params 为最多 12 个固定字符串参数；itemsPath 为 JSON Pointer，空串表示根数组。
+- search 可选 `catalog:"pc/catalog.json"`（包内目录）：电台表随包携带，宿主用同一套 `fields` 映射读取，不再访问远端搜索服务；此时 `endpoint` 必须为空串、`itemsPath` 必须为空串，`networkHosts` 可以为空（只在声明 `locationEndpoint` 时才需要域名）。`pc/catalog.json` 是扁平对象数组，最多 2000 条、512 KiB，每条最多 16 个字段，值只能是文本（≤2048 字节）、数字、布尔或 null；没有嵌套对象、脚本或表达式。目录文件必须与声明同时存在，不随 USB 事务下发设备，只参与内容哈希与 PC 读取。搜索在本机按标题包含关键词（或其 `aliases` 对应中文名）、`stationRegion` 等于关键词或其 `regionAliases` 对应区域进行匹配，按 popularity/votes 排序后交给同一映射器，仍最多输出 20 条。
 - search 可选 `browseQuery`（非空、最多 30 字/120 UTF-8 字节）：打开组件后用于自动加载设备电台列表，仍复用原受控搜索映射，不自动播放。缓存与收藏分离，设备队列收藏优先、按 ID 去重、最多 20 条；网络失败可在设备重新打开列表重试（15 秒限流），主动停用后不请求。
 - `fields` 必需 `id,title,url`，可选 `fallbackUrl,homepage,codec,hls,available`，均为 JSON Pointer。url 为空时使用 fallbackUrl；hls 和 available 识别 true/1。没有表达式、模板执行、正则转换。最多读取前 1000 行，输出 20 个有效且 ID 不重复的条目。
 - `panel:{title,description,searchPlaceholder,attribution,attributionUrl,sections}`。sections 为 search/library/history/volume/sleep 的非重复子集；宿主以安全 React 文本与标准控件渲染，不注入 HTML。当前使用标准面板布局，并非任意 PC 应用布局语言。
@@ -30,7 +31,9 @@
 
 ### 自动目录与进入播放（可选 discovery）
 
-包内 `discovery` 声明 `endpoints`（1–3 个受控 HTTPS 镜像）、`locationEndpoint`、`cityField/countryField` JSON Pointer、两字母 `country`、最多 80 个 `aliases`、`stationRegion/popularity/votes` 字段映射、`nationalCount`（1–100）、`localSupplement`（1–30）、`refreshSec`（3600–604800）和 `autoPlayOnEnter`。所有域名仍必须在 permissions 内；itemsPath 必须是根数组。目录使用 GET 的 limit/offset 分页、search.queryParam 和 state 过滤，固定过滤条件在 search.params 中。不执行包内代码。
+包内 `discovery` 声明 `endpoints`（1–3 个受控 HTTPS 镜像）、`locationEndpoint`、`cityField/countryField` JSON Pointer、两字母 `country`（响应匹配忽略 ASCII 大小写）、最多 80 个 `aliases`、`stationRegion/popularity/votes` 字段映射、`nationalCount`（1–100）、`localSupplement`（1–30）、`refreshSec`（3600–604800）和 `autoPlayOnEnter`。所有域名仍必须在 permissions 内；itemsPath 必须是根数组。目录使用 GET 的 limit/offset 分页、search.queryParam 和 state 过滤，固定过滤条件在 search.params 中。不执行包内代码。
+
+使用包内目录（`search.catalog`）时，`endpoints` 必须为空数组（可省略），目录行来自 `pc/catalog.json`，排序、去重、本地匹配与回退规则不变；`locationEndpoint` 可省略或为空串，表示不估算城市、只提供全国列表。可选 `regionAliases`（最多 80 组，城市→区域）：当行的 `stationRegion` 是省级名称时，所在城市也视为本地；`aliases` 仍只做英文城市名到中文的映射。包内目录不会自动刷新失效流，更新电台表需要发布新的包版本。
 
 宿主按热度/投票排序、同 URL/同名去重，匹配本地名称或城市 region；有本地台时保留全部收录台并补充全国台，否则回退全国列表。目录可用不等于每个音频源实时可播；首次自动收听遇到坏源至多尝试 4 台，此后提示失败，不无限重试。地理服务仅估算出口 IP 城市，不保存 IP；未定位、海外或未收录城市回退全国，不冒称完整广播覆盖或真实收听率。
 
@@ -62,3 +65,15 @@
 需要 widgetSurfaceImages=p4-surface-images-v1。旧设备必须阻止同步并提示升级。图片与其他节点同样计入 20 节点、4095 字节限制，不放宽 scene 的 4096 像素配额。PNG 必须实际存在、尺寸一致；不允许额外文件或脚本。允许纯 UTF-8 授权文件 LICENSE.txt、THIRD_PARTY_NOTICES.txt 及 licenses/ 下安全文件名的 .txt/.md；社区发布必须包含 LICENSE.txt。声明随 PC 资源包保留，不下发到设备的有界运行文件槽。
 
 宿主以确定性的 256 色 RGBA 调色板和 RLE 编译 P4I1，单图≤100000字节、全部图片≤128 KiB。设备分块确认、校验后原子提交；双代存储也保存压缩数据。旋转复用单张图，仅 playing 推进时间，缓冲/停止/失败冻结，切台不重置角度。PC 预览使用源 PNG，设备使用有损调色板，需额外核对压缩误差与真机画质；编译和浏览器预览不等于真机帧率验收。
+
+## 与通用服务桥本地媒体的区别（候选）
+
+需要显式 PC 文件选择、本地队列与本地封面/歌词时走
+[service-bridge.md](service-bridge.md) 的 `pc/application.json`
+`pc-service-bridge-v1` / `kind:"local-media"` 路由，不套用本页在线媒体的
+`pc/extension.json` 搜索/公网音源声明。桥界面必须显式协商
+`surface.services="p4-service-bridge-v1"`、真实设备 `widgetServiceBridge` 及依赖，
+并验证 `host_contract`（所有数值零统一 `i0;`）；最多一个音频提供器、一个 notes 提供器，删除要确认。带设备 epoch 的 import 明确拒绝，包不能提交任意本地路径，
+PC 预览不自动播放，实际播放仍需设备能力与活动视图。旧播放器全局 AVAILABLE=false
+保持，不开放旧在线歌曲、OAuth、账号或支付；桥不代替已有服务配置和权限。
+服务桥候选默认关闭且未完成 HIL，本页既有媒体能力不能替它证明可用。

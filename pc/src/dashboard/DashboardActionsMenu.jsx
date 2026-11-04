@@ -20,6 +20,8 @@ export default function DashboardActionsMenu({
   onUnbind,
   onDeviceReturnHome,
   onForceSyncAppearance,
+  onReconcileAppearance,
+  canReconcileAppearance = false,
   onUpdateFirmware,
   onDiagnostics,
 }) {
@@ -82,6 +84,13 @@ export default function DashboardActionsMenu({
             >
               <ArrowUpLeft size={14} />
               ⤴ 设备返回主屏
+            </button>
+          )}
+          {onReconcileAppearance && (
+            <button type="button" className="dashboard-actions-menu__item" role="menuitem"
+              disabled={!canReconcileAppearance} onClick={dispatch(onReconcileAppearance)}>
+              <RefreshCw size={14} />
+              核对形象状态
             </button>
           )}
           {onForceSyncAppearance && (

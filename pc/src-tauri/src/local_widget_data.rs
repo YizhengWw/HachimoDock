@@ -24,7 +24,9 @@ pub fn computer_status() -> DataSnapshot {
 pub fn local_widget_snapshot(source: String) -> Result<DataSnapshot, String> {
     match source.as_str() {
         "computer.status" => Ok(computer_status()),
+        "location.current" => Ok(crate::shared_location::snapshot()),
         "todos.upcoming" => Ok(crate::todos::snapshot()),
+        other if crate::auth_provider::is_source(other) => crate::auth_provider::snapshot(other),
         _ => Err("不支持的数据源".into()),
     }
 }
@@ -150,6 +152,7 @@ pub fn start(usb: crate::usb_serial::UsbSerialManager) {
         .name("local-widget-sampler".into())
         .spawn(move || {
             let mut sampler = Sampler::new();
+            let mut location_sent: Option<(Instant, String)> = None;
             loop {
                 std::thread::sleep(Duration::from_secs(2));
                 let sample = sampler.sample();
@@ -166,7 +169,25 @@ pub fn start(usb: crate::usb_serial::UsbSerialManager) {
                 {
                     continue;
                 }
-                for snapshot in [sample, crate::todos::snapshot()] {
+                let mut snapshots = vec![sample, crate::todos::snapshot()];
+                let location = crate::shared_location::snapshot();
+                if status.capabilities["widgetDataExpiry"] == "p4-data-expiry-v1" {
+                if let Ok(serialized) = serde_json::to_string(&location) {
+                    if location_sent.as_ref().is_none_or(|(at, old)| *old != serialized || at.elapsed() >= Duration::from_secs(20)) {
+                        if let Ok(mut payload) = serde_json::to_value(&location) {
+                            payload["clearOnExpire"]=true.into();
+                            if usb.send_widget_data(&status.board_device_id, &payload).is_ok() {
+                                location_sent = Some((Instant::now(), serialized));
+                            }
+                        }
+                    }
+                }
+                }
+                // Authorized providers only; their fetches are cached/backed off inside the provider.
+                for source in crate::auth_provider::push_sources() {
+                    if let Ok(snapshot) = crate::auth_provider::snapshot(source) { snapshots.push(snapshot); }
+                }
+                for snapshot in snapshots {
                     if let Ok(payload) = serde_json::to_value(snapshot) {
                         // send_widget_data skips busy asset transfers; next tick retries.
                         let _ = usb.send_widget_data(&status.board_device_id, &payload);

@@ -1,0 +1,582 @@
+{
+ "engine": "p4-longtext-v1",
+ "flow": [
+  {
+   "text": "Hello world 这是一段中文 text that wraps nicely.\nNew line",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "Hello world 这是一段",
+    "中文 text that",
+    "wraps nicely.",
+    "New line"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "Hello world 这是一段中文 text that wraps nicely.\nNew line",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "Hello world 这是",
+    "一段中文 text",
+    "that wraps",
+    "nicely.",
+    "New line"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "Hello world 这是一段中文 text that wraps nicely.\nNew line",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "Hello world 这是一段中文 text that wraps nicely.",
+    "New line"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "短",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "短"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "短",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "短"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "短",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "短"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "Supercalifragilisticexpialidocious word overflow test",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "Supercalifragilistic",
+    "expialidocious word",
+    "overflow test"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "Supercalifragilisticexpialidocious word overflow test",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "Supercalifragili",
+    "sticexpialidocio",
+    "us word",
+    "overflow test"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "Supercalifragilisticexpialidocious word overflow test",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "Supercalifragilisticexpialidocious word overflow test"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "A  B   C    trailing   \n\nblank line above",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "A  B   C",
+    "trailing",
+    "",
+    "blank line above"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "A  B   C    trailing   \n\nblank line above",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "A  B   C",
+    "trailing",
+    "",
+    "blank line above"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "A  B   C    trailing   \n\nblank line above",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "A  B   C    trailing",
+    "",
+    "blank line above"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "中文混排English词与标点，句号。下一句开始了吗？Yes!",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "中文混排English词与",
+    "标点，句号。下一句开",
+    "始了吗？Yes!"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "中文混排English词与标点，句号。下一句开始了吗？Yes!",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "中文混排English",
+    "词与标点，句号。",
+    "下一句开始了吗？",
+    "Yes!"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "中文混排English词与标点，句号。下一句开始了吗？Yes!",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "中文混排English词与标点，句号。下一句开始了吗？Yes!"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "  leading spaces and 中文",
+   "width": 160,
+   "font_size": 16,
+   "lines": [
+    "  leading spaces",
+    "and 中文"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "  leading spaces and 中文",
+   "width": 96,
+   "font_size": 12,
+   "lines": [
+    "  leading",
+    "spaces and 中文"
+   ],
+   "truncated": false
+  },
+  {
+   "text": "  leading spaces and 中文",
+   "width": 640,
+   "font_size": 20,
+   "lines": [
+    "  leading spaces and 中文"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-119",
+   "text": "aááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "aááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-120",
+   "text": "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-121",
+   "text": "ááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááa",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+    "a"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-160",
+   "text": "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+    "áááááááááááááááááááá"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-240",
+   "text": "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+    "áááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-narrow-three",
+   "text": "ࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀ",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "ࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀ",
+    "ࠀ"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "utf8-wide-four",
+   "text": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+    "😀"
+   ],
+   "truncated": false
+  },
+  {
+   "name": "word-break-recheck",
+   "text": "a ࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀbࠀ",
+   "width": 640,
+   "font_size": 16,
+   "lines": [
+    "a",
+    "ࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀࠀb",
+    "ࠀ"
+   ],
+   "truncated": false
+  }
+ ],
+ "paging": [
+  {
+   "lines": 0,
+   "h": 100,
+   "line_height": 20,
+   "value": 0,
+   "per_page": 5,
+   "pages": 1,
+   "page": 0
+  },
+  {
+   "lines": 7,
+   "h": 100,
+   "line_height": 20,
+   "value": 0,
+   "per_page": 5,
+   "pages": 2,
+   "page": 0
+  },
+  {
+   "lines": 7,
+   "h": 100,
+   "line_height": 20,
+   "value": 1,
+   "per_page": 5,
+   "pages": 2,
+   "page": 1
+  },
+  {
+   "lines": 7,
+   "h": 100,
+   "line_height": 20,
+   "value": -1,
+   "per_page": 5,
+   "pages": 2,
+   "page": 1
+  },
+  {
+   "lines": 7,
+   "h": 100,
+   "line_height": 20,
+   "value": 5,
+   "per_page": 5,
+   "pages": 2,
+   "page": 1
+  },
+  {
+   "lines": 23,
+   "h": 60,
+   "line_height": 20,
+   "value": -7,
+   "per_page": 3,
+   "pages": 8,
+   "page": 1
+  },
+  {
+   "lines": 1,
+   "h": 10,
+   "line_height": 20,
+   "value": 3,
+   "per_page": 1,
+   "pages": 1,
+   "page": 0
+  }
+ ],
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+   "page": {
+    "type": "int",
+    "init": 0
+   },
+   "pages": {
+    "type": "int",
+    "init": 1
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "pages": [
+   {
+    "id": "read"
+   }
+  ],
+  "initial_page": "read",
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "transitions": [
+   {
+    "from": "*",
+    "on": "next",
+    "inc": {
+     "page": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "prev",
+    "inc": {
+     "page": -1
+    }
+   }
+  ],
+  "tick": [],
+  "dashboard": {
+   "title": "Reader",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "images": [
+    {
+     "id": "cover",
+     "asset": "assets/cover.png",
+     "frame_width": 120,
+     "frame_height": 80,
+     "frames": 1,
+     "fps": 1
+    }
+   ],
+   "texts": [
+    {
+     "id": "body",
+     "text": "设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。设备会按确定性的行布局分页显示这段长文。\nLatin words wrap by spaces, CJK 逐字换行。"
+    }
+   ],
+   "elements": [
+    {
+     "type": "longtext",
+     "x": 20,
+     "y": 20,
+     "w": 600,
+     "h": 300,
+     "color": 65535,
+     "text_id": "body",
+     "page_var": "page",
+     "count_var": "pages",
+     "font_size": 16,
+     "line_height": 24
+    },
+    {
+     "type": "figure",
+     "x": 20,
+     "y": 330,
+     "w": 120,
+     "h": 110,
+     "color": 65535,
+     "image": "cover",
+     "caption": "封面",
+     "font_size": 14,
+     "line_height": 18
+    },
+    {
+     "type": "text",
+     "x": 400,
+     "y": 440,
+     "w": 200,
+     "h": 24,
+     "color": 65535,
+     "var_bind": "page"
+    }
+   ]
+  }
+ },
+ "invalid": [
+  {
+   "path": [
+    "surface",
+    "texts",
+    0,
+    "text"
+   ],
+   "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+   "path": [
+    "surface",
+    "texts",
+    0,
+    "text"
+   ],
+   "value": "bad\tcontrol"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "text_id"
+   ],
+   "value": "missing"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "w"
+   ],
+   "value": 12
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "page_var"
+   ],
+   "value": "pages"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "h"
+   ],
+   "value": 20
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "font_size"
+   ],
+   "value": 10
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    1,
+    "caption"
+   ],
+   "value": "ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    1,
+    "image"
+   ],
+   "value": "nope"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    1,
+    "h"
+   ],
+   "value": 20
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    2,
+    "text_id"
+   ],
+   "value": "body"
+  },
+  {
+   "path": [
+    "vars",
+    "page",
+    "type"
+   ],
+   "value": "string"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    0,
+    "action"
+   ],
+   "value": "next"
+  },
+  {
+   "path": [
+    "surface",
+    "texts"
+   ],
+   "value": []
+  }
+ ],
+ "notes": "Longtext rows obey both metric width and <=120 UTF-8 bytes. Prefer the last word/wide break, trim/skip spaces, then recheck the current scalar; do not truncate visible tails. C buffer remains text[121]."
+}

@@ -1,0 +1,94 @@
+
+#include <assert.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <math.h>
+#include <unistd.h>
+#include "pet_p4_protocol.h"
+#include "pet_p4_audio_patch.h"
+#define EXT_RAM_BSS_ATTR
+#define PET_P4_PACK_ID_MAX 65
+static pet_appearance_session_t g_appearance_session;
+static _Atomic int g_asset_active_slot;
+static FILE *g_asset_chunk_file;
+static struct {bool active;} g_raw_asset_chunk;
+static int g_asset_transfer_slot=-1;
+static bool held=true,route_current=true,arm_invalidation,lease_invalid;
+static unsigned storage_opens,ready_reads,acks;
+static int64_t now_us=1000000;
+static pet_resource_broker_t broker;
+static cJSON *last_ack;
+static const char pack[]="0000000000000000000000000000000000000000000000000000000000000000";
+static const uint8_t wave[46]={'R','I','F','F',38,0,0,0,'W','A','V','E','f','m','t',' ',16,0,0,0,1,0,1,0,0x80,0x3e,0,0,0,0x7d,0,0,2,0,16,0,'d','a','t','a',2,0,0,0,1,0};
+int patch_test_fsync(int fd){return fsync(fd);}
+FILE *patch_index_open(const char *p,const char *m){return fopen(p,m);}
+size_t patch_index_read(void *p,size_t s,size_t n,FILE *f){return fread(p,s,n,f);}
+int patch_index_error(FILE *f){return ferror(f);}
+int patch_index_close(FILE *f){return fclose(f);}
+int patch_remove(const char *p){return remove(p);}
+
+static int64_t esp_timer_get_time(void){return now_us;}
+const char *pet_p4_boot_identity(void){return "0123456789abcdef";}
+int pet_p4_asset_active_slot(void){return atomic_load(&g_asset_active_slot);}
+static void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
+static void pet_p4_native_usb_send_json_line(const char *line,void *ctx){(void)line;(void)ctx;}
+static bool pet_p4_native_usb_route_current(void *route){return route_current&&route==(void*)1;}
+static bool pet_p4_diagnostics_reboot_pending(void){return false;}
+static bool pet_p4_ota_transfer_active(void){return false;}
+static bool pet_p4_system_cue_family(const char *family){return !strcmp(family,"done");}
+static bool io_begin(void *ctx){(void)ctx;assert(held);held=false;return true;}
+static void io_end(void *ctx){(void)ctx;assert(!held);held=true;if(arm_invalidation){lease_invalid=true;arm_invalidation=false;}}
+static bool (*g_asset_query_io_begin)(void*)=io_begin;
+static void (*g_asset_query_io_end)(void*)=io_end;
+static void *g_asset_query_io_context;
+pet_resource_result_t pet_resources_device_owner_open(uint32_t mask,pet_resource_owner_t *o){storage_opens++;return pet_resources_owner_open(&broker,mask,o);}
+pet_resource_result_t pet_resources_device_acquire(pet_resource_owner_t o,pet_resource_kind_t k,uint32_t n,pet_resource_lease_t *l){return pet_resources_try_acquire(&broker,o,k,n,l);}
+bool pet_resources_device_current(pet_resource_lease_t l){return !lease_invalid&&pet_resources_current(&broker,l);}
+pet_resource_finish_t pet_resources_device_finish(pet_resource_lease_t l){return pet_resources_finish(&broker,l);}
+void pet_resources_device_revoke(pet_resource_owner_t o){(void)pet_resources_owner_revoke(&broker,o);}
+static bool read_ready_slot_pack_id(int slot,char *out,size_t n){assert(!held);ready_reads++;assert(n>=65);if(slot<0||slot>1)return false;memcpy(out,pack,65);return true;}
+static void send_topic_payload(pet_p4_send_line_fn send,void *route,const char *topic,cJSON *p){
+ assert(!held);assert(send==pet_p4_native_usb_send_json_line&&route==(void*)1);assert(!strcmp(topic,"asset/ack"));cJSON_Delete(last_ack);last_ack=cJSON_Duplicate(p,true);cJSON_Delete(p);assert(last_ack);acks++;
+}
+static int mbedtls_base64_decode(unsigned char *out,size_t capacity,size_t *olen,const unsigned char *in,size_t n){
+ const char *expected="UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAABAA==";if(n!=strlen(expected)||memcmp(in,expected,n)||capacity<sizeof(wave))return -1;memcpy(out,wave,sizeof(wave));*olen=sizeof(wave);return 0;
+}
+
+
+bool pet_p4_appearance_active(void){return g_appearance_session.active;}
+static bool slot_is_valid(int slot){return slot>=0&&slot<2;}
+/* PRODUCTION_PROTOCOL */
+static pet_p4_runtime_state_t state;
+static uint64_t h(const uint8_t *p,size_t n){uint64_t v=UINT64_C(14695981039346656037);while(n--){v^=*p++;v*=UINT64_C(1099511628211);}return v;}
+static cJSON *request(void){cJSON *p=cJSON_CreateObject();assert(p);cJSON_AddStringToObject(p,"transferId","audio-fixture");cJSON_AddStringToObject(p,"boardDeviceId","fixture-board");cJSON_AddStringToObject(p,"bootId",pet_p4_boot_identity());cJSON_AddNumberToObject(p,"slot",0);cJSON_AddStringToObject(p,"packId",pack);return p;}
+static void dispatch(const char *topic,cJSON *p){handle_audio_patch_topic(&state,topic,p,pet_p4_native_usb_send_json_line,(void*)1);assert(held);cJSON_Delete(p);}
+static cJSON *begin_request(void){cJSON *p=request(),*a=cJSON_CreateArray(),*f=cJSON_CreateObject();char checksum[17];snprintf(checksum,sizeof(checksum),"%016llx",(unsigned long long)h(wave,sizeof(wave)));cJSON_AddStringToObject(f,"family","done");cJSON_AddStringToObject(f,"path","p4/audio/done.wav");cJSON_AddNumberToObject(f,"size",sizeof(wave));cJSON_AddStringToObject(f,"checksum",checksum);cJSON_AddItemToArray(a,f);cJSON_AddItemToObject(p,"files",a);cJSON_AddNumberToObject(p,"totalBytes",sizeof(wave));return p;}
+int main(void){
+ strcpy(state.board_device_id,"fixture-board");state.asset_revision=7;
+ for(unsigned which=0;which<3;which++){
+  cJSON *p=begin_request();if(which==0)cJSON_ReplaceItemInObject(p,"bootId",cJSON_CreateString("otherboot"));if(which==1)cJSON_ReplaceItemInObject(p,"boardDeviceId",cJSON_CreateString("otherboard"));if(which==2)cJSON_ReplaceItemInObject(p,"slot",cJSON_CreateNumber(1));
+  unsigned before=storage_opens;dispatch("asset/audio-begin",p);assert(storage_opens==before&&!audio_patch_protocol_active()&&!g_appearance_session.active);assert(cJSON_IsFalse(cJSON_GetObjectItem(last_ack,"ok")));
+ }
+ puts("PASS actual protocol boot/board/active-slot mismatch has zero storage admission");
+ cJSON *wrong=begin_request();char other[65];memset(other,'1',64);other[64]=0;cJSON_ReplaceItemInObject(wrong,"packId",cJSON_CreateString(other));dispatch("asset/audio-begin",wrong);assert(ready_reads==1&&!audio_patch_protocol_active()&&!g_appearance_session.active);
+ assert(cJSON_IsFalse(cJSON_GetObjectItem(last_ack,"ok")));puts("PASS actual phase wrong ready pack rejects before storage module begin");
+ cJSON *empty=request();cJSON_AddItemToObject(empty,"files",cJSON_CreateArray());cJSON_AddNumberToObject(empty,"totalBytes",0);
+ dispatch("asset/audio-begin",empty);assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));
+ dispatch("asset/audio-commit",request());assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));
+ assert(cJSON_GetObjectItem(last_ack,"files")->valuedouble==0&&cJSON_GetObjectItem(last_ack,"totalBytes")->valuedouble==0);
+ assert(!audio_patch_protocol_active()&&!g_appearance_session.active&&!state.asset_transfer_active);
+ puts("PASS actual empty snapshot begin/commit ACK zero counts and retires exact owner");
+ dispatch("asset/audio-begin",begin_request());assert(audio_patch_protocol_active()&&g_appearance_session.active&&state.asset_transfer_active);assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));
+ cJSON *chunk=request();cJSON_AddStringToObject(chunk,"path","p4/audio/done.wav");cJSON_AddNumberToObject(chunk,"index",0);cJSON_AddNumberToObject(chunk,"offset",0);cJSON_AddStringToObject(chunk,"data","UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAABAA==");
+ arm_invalidation=true;dispatch("asset/audio-chunk",chunk);assert(g_appearance_session.recovery_blocked&&g_appearance_session.active&&audio_patch_protocol_active());
+ assert(cJSON_IsFalse(cJSON_GetObjectItem(last_ack,"ok")));assert(!strcmp(json_string(last_ack,"errorCode"),"audio_patch_outcome_unknown"));
+ unsigned before=storage_opens;dispatch("asset/audio-abort",request());assert(storage_opens==before&&g_appearance_session.recovery_blocked&&audio_patch_protocol_active());
+ FILE *f=fopen("spiffs/ov0_1_0.wav","rb");assert(f);assert(!fseek(f,0,SEEK_END)&&ftell(f)==(long)sizeof(wave));assert(!fclose(f));
+ now_us+=100000000;audio_patch_timeout_worker(&state);assert(storage_opens==before&&audio_patch_protocol_active());
+ puts("PASS actual phase late lease invalidation is Unknown; abort and timeout cannot remove staged WAV");
+ cJSON_Delete(last_ack);return 0;
+}

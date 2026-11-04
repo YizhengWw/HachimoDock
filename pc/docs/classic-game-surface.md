@@ -14,8 +14,9 @@
 
 `surface.game_view={engine:"p4-game-surface-v1",x,y,w,h}` 需要
 `widgetGameSurface=p4-game-surface-v1`，依赖原有 App Surface/Graphics/Images，
-字形需要 Typography。当前只支持维护已有 `game.type=snake|blocks|flappy`，
-不与 host/scene/media/data/instrument 混用，不能据此创建任意新游戏。
+字形需要 Typography。支持维护已有 `game.type=snake|blocks|flappy` 以及新建原生
+`gomoku` 预设（15×15 五子棋，固件 AI 在 tick 内回应，`widgetGamePresets` 含 `gomoku`），
+不与 host/scene/media/data/instrument 混用，不能据此创建任意其他新游戏。
 视口位于 640×480 内，宽高至少 64；实际设计需保证单格至少 8 px。
 底图和静态面板缓存一次，游戏绘制在静态层之后、文字和按钮之前；
 画面内容必须来自实时游戏帧。图形扩展仍受 8191 字节 JSON、

@@ -28,7 +28,7 @@ test('the plugin entry exports a Cordis plugin shape', () => {
   assert.equal(typeof plugin.apply, 'function')
   assert.equal(typeof plugin.name, 'string')
   assert.equal(plugin.name.length > 0, true)
-  assert.deepEqual([...plugin.inject].sort(), ['agents', 'sessionController', 'sessions'])
+  assert.deepEqual([...plugin.inject].sort(), ['sessions'])
   assert.equal(plugin.AGENT_ID, 'deepseek-harness')
 })
 
@@ -38,7 +38,7 @@ test('the plugin loads through the ESM import() path the DSH Loader uses', async
   const unwrapped = namespace.default ?? namespace
   assert.equal(typeof unwrapped.apply, 'function')
   assert.equal(unwrapped.name, 'hachimodock-dsh-bridge')
-  assert.deepEqual([...unwrapped.inject].sort(), ['agents', 'sessionController', 'sessions'])
+  assert.deepEqual([...unwrapped.inject].sort(), ['sessions'])
 })
 
 test('the bundle patch mounts the plugin row', () => {
@@ -82,4 +82,20 @@ test('test files import only Node built-ins, relative files, and each other', ()
 test('the package has no npm dependencies and no lockfile committed', () => {
   assert.equal(manifest.devDependencies, undefined)
   assert.equal(manifest.peerDependencies, undefined)
+})
+
+ test('optional services are independent live capabilities, not bridge startup requirements', () => {
+  const { serviceView, capabilities } = require('../host-contract')
+  const { createFakeCtx, createFakeSession } = require('./helpers')
+  const ctx = createFakeCtx({ sessions: [createFakeSession('optional')] })
+  const view = serviceView(ctx)
+  assert.equal(capabilities(view).sessions, true)
+  assert.equal(capabilities(view).agentSnapshot, false)
+  assert.equal(capabilities(view).backgroundPrompt, false)
+  ctx.provide('agents', { get() {} })
+  assert.equal(capabilities(view).agentSnapshot, true)
+  assert.equal(capabilities(view).backgroundPrompt, false)
+  ctx.provide('sessionController', { prompt() { throw Error('must not invoke') }, cancel() { throw Error('must not invoke') } })
+  assert.equal(capabilities(view).backgroundPrompt, true)
+  assert.equal(capabilities(view).interrupt, true)
 })

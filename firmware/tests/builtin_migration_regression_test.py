@@ -10,36 +10,22 @@ def test_pagination_is_single_equal_circle_and_retirement_can_preserve_saves():
     assert 'pages-1' in pagination
     assert 'fill_round_rect' not in pagination
     code=(ROOT/'main/pet_p4_miniapp.c').read_text()
-    assert 'if (!preserve_save) pet_app_store_forget(widget_id);' in code
+    assert 'if (!preserve_save&&!pet_app_store_forget_with_lease(widget_id,g_storage_resource_lease))' in code
     assert 'return remove_component(widget_id, error, error_size, true);' in code
     protocol=(ROOT/'main/pet_p4_protocol.c').read_text()
     assert '"widgetDeletePreserveSave", true' in protocol
     assert 'cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload,"preserveSave"))' in protocol
 
-def test_boot_preinstallation_is_independent_of_touch_but_external_install_is_not(tmp_path):
+def test_install_is_independent_of_touch_but_live_slice_input_still_requires_ready():
     code=(ROOT/'main/pet_p4_miniapp.c').read_text()
-    start=code.index('static bool component_install_touch_allowed(')
-    fn=code[start:code.index('\n}\n',start)+3]
-    harness=tmp_path/'gate.c';exe=tmp_path/'gate'
-    harness.write_text('''#include <stdbool.h>
-#include <assert.h>
-static bool ready,g_builtin_sync_in_progress;
-static bool pet_p4_touch_ready(void){return ready;}
-'''+fn+'''
-int main(void){
- assert(component_install_touch_allowed(false));
- assert(!component_install_touch_allowed(true));
- g_builtin_sync_in_progress=true;
- assert(component_install_touch_allowed(true));
- g_builtin_sync_in_progress=false;
- assert(!component_install_touch_allowed(true));
- ready=true;assert(component_install_touch_allowed(true));return 0;
-}
-''')
-    subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',str(harness),'-o',str(exe)],check=True)
-    subprocess.run([str(exe)],check=True)
     install=code.split('bool pet_p4_miniapp_install_commit(',1)[1].split('static bool commit_builtin_package(',1)[0]
-    assert 'component_install_touch_allowed(next->slicing)' in install
+    assert 'component_install_touch_allowed' not in code
+    assert 'pet_p4_touch_ready' not in install
+    assert 'continuous touch is not ready' not in install
+    live=code.split('if(g_runtime.active&&g_runtime.slicing) {',1)[1].split('if(g_runtime.active&&g_runtime.instrument)',1)[0]
+    guard='if(!pet_p4_touch_ready()){miniapp_runtime_unlock();return false;}'
+    assert guard in live
+    assert live.index(guard)<live.index('pet_fruit_start_or_resume(')
     sync=code.split('esp_err_t pet_p4_miniapp_sync_builtins(void)',1)[1].split('static bool remove_file_if_present',1)[0]
     assert sync.count('failed += 1;\n')==2
     assert sync.index('if (failed)')<sync.index('MINIAPP_BUILTIN_MARKER_TMP_PATH')
@@ -56,8 +42,8 @@ def test_actual_ordering_preserves_slots_custom_order_and_active_selection(tmp_p
 #include <string.h>
 #include "cJSON.h"
 #define PET_P4_MINIAPP_CATALOG_MAX 32
-#define portENTER_CRITICAL(x) ((void)0)
-#define portEXIT_CRITICAL(x) ((void)0)
+#define miniapp_runtime_lock() ((void)0)
+#define miniapp_runtime_unlock() ((void)0)
 typedef struct {char widget_id[48];int slot,checksum;} miniapp_catalog_item_t;
 static miniapp_catalog_item_t g_catalog[32]={{"book",5,50},{"custom-new",9,90},{"radio",2,20},{"custom-old",8,80},{"news",7,70}};
 static size_t g_catalog_count=5,g_catalog_selected;

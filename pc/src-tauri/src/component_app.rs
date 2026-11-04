@@ -1,8 +1,9 @@
 //! Validated app host. Device requests and UI operations share one serialized path.
 use crate::app_services::{self,Declaration};
+use crate::component_runtime_lifecycle::{Admission, Lease, OwnedQueue, OwnerToken, Priority};
 use serde::{Deserialize,Serialize};
 use serde_json::{json,Value};
-use std::{collections::VecDeque,path::{Path,PathBuf},sync::{Mutex,OnceLock,mpsc},io::Write};
+use std::{collections::VecDeque,path::{Path,PathBuf},sync::{Arc,Mutex,OnceLock},io::Write};
 use tauri::Emitter;
 #[derive(Clone,Default,PartialEq,Serialize,Deserialize)]
 #[serde(default)]
@@ -19,16 +20,46 @@ struct State{
 }
 #[derive(Clone,PartialEq,Serialize,Deserialize)]
 struct Trip{id:String,started:i64,arrival:i64}
-#[derive(Default)]struct DeviceEpoch{generation:u64,board:String,id:String,instance:String,visible:bool}
+#[derive(Default)]struct DeviceEpoch{owner:Option<OwnerToken>,board:String,id:String,instance:String,visible:bool,sequence:u32,retired:VecDeque<(String,String,String)>}
 impl DeviceEpoch{
-    fn observe(&mut self,board:&str,id:&str,instance:&str,visible:bool)->u64{
-        if self.board!=board||self.id!=id||self.instance!=instance||self.visible!=visible{self.generation=self.generation.wrapping_add(1);self.board=board.into();self.id=id.into();self.instance=instance.into();self.visible=visible;}
-        self.generation
+    fn observe(&mut self,board:&str,id:&str,instance:&str,visible:bool,sequence:u32)->Option<OwnerToken>{
+        let same=self.board==board&&self.id==id&&self.instance==instance;
+        // Only the active instance owns its exit. Wire sequences are scoped to
+        // an instance, not compared across component switches or device boots.
+        if sequence==0||same&&sequence<=self.sequence||!same&&!visible{return None;}
+        if !same&&self.retired.iter().any(|(b,i,s)|b==board&&i==id&&s==instance){return None;}
+        if !same{
+            if !self.instance.is_empty(){self.retired.push_back((self.board.clone(),self.id.clone(),self.instance.clone()));if self.retired.len()>32{self.retired.pop_front();}}
+            self.board=board.into();self.id=id.into();self.instance=instance.into();
+        }
+        if !same||self.visible!=visible{self.owner=Some(OwnerToken::fresh());self.visible=visible;}
+        self.sequence=sequence;self.owner
     }
-    fn accepts(&self,generation:u64)->bool{self.visible&&self.generation==generation}
+    fn accepts(&self,generation:u64)->bool{self.visible&&self.owner.is_some_and(|owner|owner.generation()==generation)}
+    fn disconnect_unless(&mut self,board:&str)->Option<OwnerToken>{
+        if self.visible&&self.board!=board{self.visible=false;self.owner.take()}else{None}
+    }
 }
-struct Host{root:PathBuf,usb:crate::usb_serial::UsbSerialManager,app:tauri::AppHandle,gate:Mutex<()>,events:mpsc::SyncSender<Value>,seen:Mutex<VecDeque<String>>,device_epoch:Mutex<DeviceEpoch>,entry_epoch:Mutex<Option<u64>>,narration:Mutex<crate::knowledge_narration::Narration>}
+struct Host{root:PathBuf,usb:crate::usb_serial::UsbSerialManager,app:tauri::AppHandle,gate:Mutex<()>,events:Arc<OwnedQueue<Value>>,desktop_admission:Admission,seen:Mutex<VecDeque<String>>,device_epoch:Mutex<DeviceEpoch>,entry_epoch:Mutex<Option<u64>>,narration:Mutex<crate::knowledge_narration::Narration>}
 static HOST:OnceLock<Host>=OnceLock::new();
+/// Both authorities survive preparation. A desktop action cannot launder an
+/// exited device view into a fresh audio job, nor bypass its own cancelled scope.
+pub(crate) struct MediaAuthority{
+    pub(crate) request:crate::component_runtime_lifecycle::ResourceOwner,
+    pub(crate) view:Option<crate::component_runtime_lifecycle::ResourceOwner>,
+}
+impl MediaAuthority{pub(crate) fn is_current(&self)->bool{self.request.is_current()&&self.view.as_ref().is_none_or(|v|v.is_current())}}
+pub(crate) fn media_authority(id:&str)->Result<MediaAuthority,String>{
+    let request=crate::component_runtime_lifecycle::capture_owner()?;
+    let view=if let Some(h)=HOST.get(){
+        let epoch=h.device_epoch.lock().map_err(|_|"设备视图暂不可用")?;
+        if !epoch.visible||epoch.id!=id{return Err("请先在设备打开此组件".into());}
+        Some(h.events.visible_resource_owner(epoch.owner.ok_or("设备视图已退出")?).ok_or("设备视图已退出")?)
+    }else{None};
+    let authority=MediaAuthority{request,view};
+    if !authority.is_current(){return Err("组件已退出，此次操作未执行".into());}
+    Ok(authority)
+}
 // Retry readiness failures, not paid generation. A successful hand-off is final
 // for this connection. Slow/cold startup must not permanently consume the edge.
 #[derive(Default)]
@@ -82,9 +113,9 @@ pub fn configure(root:PathBuf,usb:crate::usb_serial::UsbSerialManager,app:tauri:
     crate::component_news::configure_cache(root.join("component-apps"));
     crate::component_audio::configure_speech_cache(root.join("news-speech-cache"));
     crate::component_voice::configure_preparation(root.join("news-speech-cache").join("last-pet-voice.json"));
-    let (tx,rx)=mpsc::sync_channel::<Value>(24);
-    if HOST.set(Host{root:root.join("component-apps"),usb,app,gate:Mutex::new(()),events:tx,seen:Mutex::new(VecDeque::new()),device_epoch:Mutex::new(DeviceEpoch::default()),entry_epoch:Mutex::new(None),narration:Mutex::new(Default::default())}).is_err(){return;}
-    std::thread::Builder::new().name("component-app-host".into()).spawn(move||while let Ok(event)=rx.recv(){process_event(event);}).expect("component host worker");
+    let events=Arc::new(OwnedQueue::new(24));
+    if HOST.set(Host{root:root.join("component-apps"),usb,app,gate:Mutex::new(()),events:events.clone(),desktop_admission:Admission::new(8),seen:Mutex::new(VecDeque::new()),device_epoch:Mutex::new(DeviceEpoch::default()),entry_epoch:Mutex::new(None),narration:Mutex::new(Default::default())}).is_err(){return;}
+    std::thread::Builder::new().name("component-app-host".into()).spawn(move||loop{let work=events.receive();process_event(work.value,work.lease);events.finish(work.lease);}).expect("component host worker");
     // Independent from USB edges: startup, long-running PCs crossing midnight,
     // and retry/backoff all run without opening the component. Discovery is
     // bounded and infrequent; generation is asynchronous, never on the USB lane.
@@ -113,6 +144,13 @@ pub fn configure(root:PathBuf,usb:crate::usb_serial::UsbSerialManager,app:tauri:
             let h=HOST.get().expect("configured host");let board=h.usb.status();
             let now=clock.elapsed().as_secs();
             let connected=if board.connected{board.board_device_id.as_str()}else{""};
+            {
+                let mut epoch=h.device_epoch.lock().unwrap();
+                // Re-read after taking ownership lock: an old connection poll
+                // must not revoke a newer device entry received in the meantime.
+                let current=h.usb.status();let current_board=if current.connected{current.board_device_id.as_str()}else{""};
+                if let Some(owner)=epoch.disconnect_unless(current_board){h.events.cancel(owner);crate::service_bridge::native::detach_device(&epoch.id);}
+            }
             if preparation.observe(connected,now){
                 // Do not erase an entry already received by the USB worker on
                 // the first connected observation. Only a real disconnect ends it.
@@ -144,11 +182,15 @@ pub fn configure(root:PathBuf,usb:crate::usb_serial::UsbSerialManager,app:tauri:
         }
     }).expect("component connection worker");
 }
-fn atomic(path:&Path,value:&impl Serialize)->Result<(),String>{
+pub(crate) fn atomic(path:&Path,value:&impl Serialize)->Result<(),String>{
+    let permit=crate::component_runtime_lifecycle::storage_commit_permit()?;
     let parent=path.parent().ok_or("组件存储位置无效")?;std::fs::create_dir_all(parent).map_err(|_|"无法创建组件本地存储")?;
     let mut f=tempfile::NamedTempFile::new_in(parent).map_err(|_|"无法准备组件存储")?;
     let raw=serde_json::to_vec(value).map_err(|_|"组件状态无效")?;
     f.write_all(&raw).and_then(|_|f.as_file().sync_all()).map_err(|_|"无法写入组件状态")?;
+    // Cancellation before rename rejects the temporary candidate. Once rename
+    // starts/returns successfully, never relabel that commit as unexecuted.
+    permit.ensure_current()?;
     f.persist(path).map_err(|_|"无法保存组件状态")?;Ok(())
 }
 fn load(path:&Path)->Result<State,String>{
@@ -295,6 +337,7 @@ fn apply(id:&str,dir:&Path,d:&Declaration,s:&mut State,op:&str,input:&Value,boar
             values["metricUnit"]=if s.details{"隐藏内容"}else{"查看进展"}.into();
         },
         "weather"=>{
+            if !s.auto_city{s.geo=Default::default();}
             let p=d.location.as_ref().unwrap_or(crate::location_profile::legacy());
             let picker=p.text.contains_key("cityButton")&&d.actions.values().any(|v|v=="choose_city");
             let was_select=s.city_select;
@@ -308,14 +351,15 @@ fn apply(id:&str,dir:&Path,d:&Declaration,s:&mut State,op:&str,input:&Value,boar
             }
             if picker&&was_select&&op=="refresh"{
                 s.city=p.cities[s.city_candidate%p.cities.len()].clone();
-                s.auto_city=false;s.city_from_ip=false;s.city_select=false;s.collection=false;s.weather=Default::default();
+                s.auto_city=false;s.city_from_ip=false;s.geo=Default::default();s.city_select=false;s.collection=false;s.weather=Default::default();
             }
             if picker&&was_select&&op=="todo"{s.city_select=false;}
-            if op=="configure"{let city:crate::app_weather::Location=serde_json::from_value(input["city"].clone()).map_err(|_|"城市格式无效")?;if !city.valid(){return Err("城市和经纬度无效".into());}s.city=city;s.auto_city=false;s.city_from_ip=false;s.collection=false;s.city_select=false;s.weather=Default::default();}
+            if op=="configure"{let city:crate::app_weather::Location=serde_json::from_value(input["city"].clone()).map_err(|_|"城市格式无效")?;if !city.valid(){return Err("城市和经纬度无效".into());}s.city=city;s.auto_city=false;s.city_from_ip=false;s.geo=Default::default();s.collection=false;s.city_select=false;s.weather=Default::default();}
             if op=="locate"{s.auto_city=true;s.collection=false;s.city_select=false;}
             if s.auto_city||!s.city.valid(){
                 s.auto_city=true;crate::app_weather::locate_background(p,&mut s.geo,now);
-                if s.geo.location.valid(){if s.city!=s.geo.location{s.city=s.geo.location.clone();s.weather=Default::default();}s.city_from_ip=true;}
+                if s.geo.location.valid(){if s.city!=s.geo.location{s.city=s.geo.location.clone();s.weather=Default::default();}s.city_from_ip=s.geo.source!="manual";}
+                else if s.geo.key=="shared-city-v1"{s.city=Default::default();s.weather=Default::default();s.city_from_ip=false;}
             }
             if op=="todo"&&!(picker&&was_select){s.collection=!s.collection;}if op=="details"{s.details=!s.details;}
             if s.city.valid(){crate::app_weather::refresh_background(p,&s.city,&mut s.weather,now);}
@@ -348,6 +392,35 @@ fn apply(id:&str,dir:&Path,d:&Declaration,s:&mut State,op:&str,input:&Value,boar
         },
         "notes"=>merge(values,crate::component_notes::execute(id,op,input,dir,usb)?),
         "todos"=>merge(values,crate::component_todos::execute(&mut s.todos,op,input)?),
+        "hotkeys"=>{
+            let count=d.content.len().max(1);
+            if op=="profile"{s.selected=(s.selected+1)%count;}
+            if op=="configure"{
+                // PC-only opt-in; device events carry _deviceEpoch and are refused here.
+                if input.get("_deviceEpoch").is_some(){return Err("发送开关只能在 PC 组件详情修改".into());}
+                crate::hotkeys::set_send_enabled(dir,input["send"].as_bool().ok_or("缺少 send 开关")?)?;
+            }
+            let profile=&d.content[s.selected%count];
+            let keys=profile["keys"].as_array().cloned().unwrap_or_default();
+            let send_enabled=crate::hotkeys::send_enabled(dir)?;
+            let mut outcome=String::new();
+            if let Some(n)=op.strip_prefix("key_").and_then(|n|n.parse::<usize>().ok()){
+                let key=keys.get(n.wrapping_sub(1)).ok_or("当前场景没有这个键位")?;
+                let chord=crate::hotkeys::parse_value(&key["chord"])?;
+                let shown=format!("{} {}",key["label"].as_str().unwrap_or(""),crate::hotkeys::label(&chord));
+                outcome=if !send_enabled{format!("未发送 {shown}：请先在 PC 组件详情开启“允许发送快捷键”")}
+                    else if crate::realtime_chat::status().active{format!("未发送 {shown}：实时对话进行中")}
+                    else{match crate::hotkeys::send(&chord){Ok(())=>{s.visits=s.visits.wrapping_add(1);format!("已发送 {shown}")},Err(e)=>format!("未发送 {shown}：{e}")}};
+            }
+            let list:Vec<String>=keys.iter().enumerate().map(|(i,k)|format!("{}{}",['①','②','③','④','⑤','⑥'][i.min(5)],k["label"].as_str().unwrap_or(""))).collect();
+            values["eyebrow"]=format!("{} · {}/{}",profile["title"].as_str().unwrap_or(""),s.selected%count+1,count).into();
+            values["headline"]=list.join(" ").into();
+            values["metricLabel"]="发送状态".into();
+            values["metricValue"]=if send_enabled{"已允许发送"}else{"发送未开启"}.into();
+            values["metricUnit"]="切换场景".into();
+            values["badge"]=format!("{}",s.visits).into();
+            values["note"]=if outcome.is_empty(){if send_enabled{"按实体键发送对应组合键到电脑当前前台应用；实时对话期间不发送".into()}else{"默认不向电脑发送；在 PC 组件详情开启后才会真正按键".into()}}else{outcome}.into();
+        },
         "soundscape"=>{
             let was_playing=crate::component_audio::playing(id);let volume=s.sound_volume.unwrap_or(35).min(100);
             let chosen=match op{"rain"=>Some(0),"sea"=>Some(1),"fire"=>Some(2),"insects"=>Some(3),_=>None};
@@ -367,9 +440,15 @@ fn apply(id:&str,dir:&Path,d:&Declaration,s:&mut State,op:&str,input:&Value,boar
 }
 fn request(id:&str,mut input:Value)->Result<Value,String>{
     let h=HOST.get().ok_or("应用服务尚未初始化")?;let _lock=h.gate.lock().map_err(|_|"组件服务暂不可用")?;
+    let _resolution=crate::component_composition::resolution_scope();
     if input.get("_deviceEpoch").is_some()&&!input["_deviceEpoch"].as_u64().is_some_and(|e|h.device_epoch.lock().unwrap().accepts(e)){return Err("组件已退出或切换，此次操作未执行".into());}
-    let (_version,d,runtime)=resolve(id).inspect_err(|_|{crate::component_audio::stop(Some(id));crate::component_notes::cancel(Some(id));})?;let dir=h.root.join(id);
+    let (_version,d,runtime)=resolve(id).inspect_err(|_|{crate::service_bridge::native::disable(id);crate::component_composition::disable(id);crate::component_audio::stop(Some(id));crate::component_notes::cancel(Some(id));})?;let dir=h.root.join(id);
+    if input.get("versionHash").is_some()&&input["versionHash"]!=_version{return Err("组件包已更新，请刷新后操作；旧界面动作未执行".into());}
+    if input.get("_deviceEpoch").is_some()&&input.get("data").is_some()&&runtime["surface"]["services"]!=crate::service_bridge::surface::DEVICE_ENGINE{return Err("此组件未声明设备参数能力".into());}
     let generation=input["_deviceEpoch"].as_u64();
+    // Resolution may perform disk work. A queued exit/switch must still win
+    // before service execution starts; never revive it merely to return status.
+    if generation.is_some_and(|e|!h.device_epoch.lock().unwrap().accepts(e)){return Err("组件已退出或切换，此次操作未执行".into());}
     // Real device entry returns to today exactly once. PC previews and status
     // polls must not undo a date the user is browsing.
     let new_entry=generation.is_some()&&generation!=*h.entry_epoch.lock().unwrap();
@@ -379,16 +458,16 @@ fn request(id:&str,mut input:Value)->Result<Value,String>{
     let mut result=request_validated(id,&dir,&d,&runtime,input,&h.usb,&|payload|h.app.emit(crate::realtime_chat::REQUEST_EVENT,payload).map_err(|_|"无法打开实时对话".into()))?;
     if new_entry{*h.entry_epoch.lock().unwrap()=generation;}
     // Only trusted device visibility events may auto-play. Desktop previews and
-    // polling never do. Hold the epoch lock through start so an exit always
-    // cancels a job started concurrently with that exit.
+    // polling never do. Audio captures both request and physical-view authority;
+    // never hold the epoch lock across configuration IO or audio admission.
     if d.auto_read {
         if let Some(generation)=generation{
-            let epoch=h.device_epoch.lock().unwrap();
             // Initial device status may arrive before the desktop resolves its
-            // current appearance. Wait without consuming the first narration.
-            let eligible=epoch.accepts(generation)&&epoch.id==id;
+            // current appearance. Snapshot only; start rechecks the same owner.
+            let (eligible,epoch_board)={let epoch=h.device_epoch.lock().unwrap();
+                (epoch.accepts(generation)&&epoch.id==id,epoch.board.clone())};
             let desired=result["permissions"]["autoRead"]==true;
-            let voice_ready=crate::component_voice::ready(&epoch.board);
+            let voice_ready=crate::component_voice::ready(&epoch_board);
             let busy=crate::component_audio::voice_busy();
             if eligible&&desired&&(!voice_ready||busy)&&!crate::component_audio::playing(id){
                 crate::component_audio::report(id,"waiting",if busy{"等待当前录音或实时对话结束"}else{"等待当前宠物音色就绪"});
@@ -444,22 +523,38 @@ fn request(id:&str,mut input:Value)->Result<Value,String>{
     }
     Ok(result)
 }
-fn request_validated(id:&str,dir:&Path,d:&Declaration,runtime:&Value,input:Value,usb:&crate::usb_serial::UsbSerialManager,notify:&dyn Fn(Value)->Result<(),String>)->Result<Value,String>{
+fn bridge_disabled(d:&Declaration,r:&Value,values:Value)->Value{
+    let variables:serde_json::Map<String,Value>=r["vars"].as_object().into_iter().flatten().map(|(k,v)|(k.clone(),v["init"].clone())).collect();
+    json!({"enabled":false,"values":values,"variables":variables,"service":"bridge","permissions":app_services::permissions(d),"presentation":{"images":{},"timelines":{}},"ui":{"mode":7,"actions":[]}})
+}
+// Automatic location and forecast transport caches are volatile. In particular,
+// a previously shared IP city must not survive off/expiry in component storage.
+fn durable_weather_state(state:&State)->State {
+    let mut out=state.clone();out.geo=Default::default();
+    if out.auto_city {out.city=Default::default();out.weather=Default::default();out.city_from_ip=false;}
+    out
+}
+pub(crate) fn request_validated(id:&str,dir:&Path,d:&Declaration,runtime:&Value,input:Value,usb:&crate::usb_serial::UsbSerialManager,notify:&dyn Fn(Value)->Result<(),String>)->Result<Value,String>{
     let operation=input["operation"].as_str().ok_or("缺少组件操作")?;
-    if operation=="disable"{crate::component_news::disable(id);crate::component_audio::stop(Some(id));crate::component_notes::cancel(Some(id));crate::component_service_settings::set_enabled(&dir,false)?;return Ok(json!({"enabled":false}));}
+    if operation=="disable"{crate::service_bridge::native::disable(id);crate::pc_fetch::host::stop(id);crate::component_news::disable(id);crate::component_composition::disable(id);crate::component_audio::stop(Some(id));crate::component_notes::cancel(Some(id));crate::component_service_settings::set_enabled(&dir,false)?;let mut result=json!({"enabled":false});if d.engine==crate::service_bridge::ENGINE{result=bridge_disabled(d,runtime,defaults(runtime));}return Ok(result);}
     if operation=="enable"{crate::component_service_settings::set_enabled(&dir,true)?;}
     let enabled=crate::component_service_settings::enabled(&dir)?;
     let mut values=defaults(&runtime);
     if !enabled&&operation!="enable"{
+        crate::pc_fetch::host::stop(id);
         crate::component_notes::cancel(Some(id));
         crate::component_audio::stop(Some(id));
         if operation!="status"{return Err("组件服务已手动停用，可在 PC 组件详情重新开启".into());}
         values["headline"]="服务已停用".into();values["metricValue"]="".into();values["note"]="可在 PC 组件详情重新开启；本机记录保留".into();
+        if d.engine==crate::service_bridge::ENGINE{crate::service_bridge::native::disable(id);return Ok(bridge_disabled(d,runtime,values));}
         return Ok(json!({"enabled":false,"values":values,"permissions":app_services::permissions(d),"service":d.service}));
     }
+    if d.engine==crate::service_bridge::ENGINE{return crate::service_bridge::native::request(id,dir,d,runtime,&input,usb,notify);}
+    if d.engine==crate::pc_fetch::ENGINE{return crate::pc_fetch::host::request(id,dir,d,runtime,&input);}
+    if crate::component_composition::is_engine(&d.engine){return crate::component_composition::request(id,dir,d,runtime,&input);}
     let action=if let Some(action)=input["action"].as_str(){d.actions.get(action).ok_or("动作未在资源包声明")?.as_str()}else{operation};
     if (d.is_library()||matches!(d.service.as_str(),"todos"|"calendar"))&&!matches!(action,"status"|"enable")&&!d.actions.values().any(|v|v==action){return Err("动作未在资源包声明".into());}
-    if !matches!(action,"status"|"enable")&&!app_services::operations(&d.service).contains(&action)&&!(d.service=="weather"&&matches!(action,"configure"|"locate"))&&!(d.service=="notes"&&action=="edit"){return Err("不支持的组件操作".into());}
+    if !matches!(action,"status"|"enable")&&!app_services::operations(&d.service).contains(&action)&&!(d.service=="weather"&&matches!(action,"configure"|"locate"))&&!(d.service=="notes"&&action=="edit")&&!(d.service=="hotkeys"&&action=="configure"){return Err("不支持的组件操作".into());}
     if d.service=="news"{
         if !matches!(action,"status"|"enable")&&!d.actions.values().any(|v|v==action){return Err("动作未在资源包声明".into());}
         if matches!(action,"refresh"|"toggle"|"previous"|"next"){crate::component_audio::stop(Some(id));}
@@ -471,14 +566,15 @@ fn request_validated(id:&str,dir:&Path,d:&Declaration,runtime:&Value,input:Value
     let path=dir.join("state.json");let mut state=load(&path)?;let before=state.clone();
     let board=usb.status().board_device_id;
     apply(id,&dir,&d,&mut state,action,&input,&board,notify,usb,&mut values)?;
-    if state!=before{atomic(&path,&state)?;}
+    let durable=if d.service=="weather"{durable_weather_state(&state)}else{state.clone()};
+    if durable!=before{atomic(&path,&durable)?;}
     bounded(&mut values);
     let library=d.is_library();
     let knowledge=if library{crate::knowledge_library::info(&state.knowledge,&d.content)}else{Value::Null};
     // Shuffle bags stay private; never ship the thousand-card corpus on each poll.
     let mut public_state=serde_json::to_value(&state).map_err(|_|"组件状态无法序列化")?;
     if library{public_state["knowledge"].as_object_mut().unwrap().remove("bags");}
-    Ok(json!({"enabled":true,"values":values,"ui":controls(id,dir,d,&state)?,"permissions":app_services::permissions(d),"service":d.service,"state":public_state,"content":if library||d.service=="calendar"{&[][..]}else{d.content.as_slice()},"knowledge":knowledge,"locationProfile":if d.service=="weather"{serde_json::to_value(d.location.as_ref().unwrap_or(crate::location_profile::legacy())).unwrap_or(Value::Null)}else{Value::Null},"captureDiagnostics":if d.service=="notes"{crate::component_notes::diagnostics(id)}else{Value::Null},"notes":if d.service=="notes"&&input["includeNotes"]==true{crate::component_notes::list(&dir)?}else{json!([])}}))
+    Ok(json!({"enabled":true,"values":values,"ui":controls(id,dir,d,&state)?,"permissions":app_services::permissions(d),"service":d.service,"state":public_state,"content":if library||d.service=="calendar"{&[][..]}else{d.content.as_slice()},"knowledge":knowledge,"locationProfile":if d.service=="weather"{serde_json::to_value(d.location.as_ref().unwrap_or(crate::location_profile::legacy())).unwrap_or(Value::Null)}else{Value::Null},"captureDiagnostics":if d.service=="notes"{crate::component_notes::diagnostics(id)}else{Value::Null},"hotkeys":if d.service=="hotkeys"{crate::hotkeys::status(&dir)}else{Value::Null},"notes":if d.service=="notes"&&input["includeNotes"]==true{crate::component_notes::list(&dir)?}else{json!([])}}))
 }
 /// Exercise production host logic with isolated user storage; never launch a desktop app.
 #[cfg(test)]
@@ -489,44 +585,96 @@ pub(crate) fn test_request(package:&Path,root:&Path,input:Value,usb:&crate::usb_
     let d=app_services::parse(&std::fs::read(package.join("pc/application.json")).map_err(|e|e.to_string())?,&runtime)?;
     request_validated(&entry.id,&root.join(&entry.id),&d,&runtime,input,usb,&|_|Err("hardware acceptance deliberately excludes microphone and task dispatch".into()))
 }
+/// Explicit serial-bench adapter: validates each authored package and uses the
+/// production dispatcher, with temporary storage and no microphone/task consent.
+#[test]
+#[ignore="Opt-in local serial bench; requires PET_RUNTIME_ACCEPTANCE_PACKAGES and JSON lines on stdin"]
+fn runtime_acceptance_host(){
+    use std::io::{BufRead,Write};
+    let packages=PathBuf::from(std::env::var("PET_RUNTIME_ACCEPTANCE_PACKAGES").expect("supply isolated authored fixtures"));
+    let temporary=tempfile::tempdir().unwrap();
+    let persistent=packages.parent().unwrap().join("host-state");
+    let root=if std::env::var("PET_RUNTIME_ACCEPTANCE_PERSIST").as_deref()==Ok("1"){std::fs::create_dir_all(&persistent).unwrap();persistent.as_path()}else{temporary.path()};
+    let usb=crate::usb_serial::UsbSerialManager::new();
+    for line in std::io::stdin().lock().lines(){
+        let line=line.unwrap();if line=="quit"{break;}
+        let input:Value=serde_json::from_str(&line).unwrap();let id=input["id"].as_str().filter(|id|crate::component_extension::valid_id(id)).unwrap();
+        let result=test_request(&packages.join(id),root,input["input"].clone(),&usb);
+        let response=match result{Ok(value)=>json!({"ok":true,"result":value}),Err(error)=>json!({"ok":false,"error":error})};
+        println!("RUNTIME_ACCEPTANCE {}",response);std::io::stdout().flush().unwrap();
+    }
+}
 pub fn device_event(event:&Value){
     let Some(h)=HOST.get()else{return;};let board=h.usb.status();
     if !board.connected||event["boardDeviceId"]!=board.board_device_id{return;}
     let Some(id)=event["componentId"].as_str().filter(|s|crate::component_extension::valid_id(s))else{return;};
     let Some(instance)=event["instance"].as_str().filter(|s|!s.is_empty()&&s.len()<=31&&s.bytes().all(|b|b.is_ascii_hexdigit()||b==b'-'))else{return;};
-    if event["sequence"].as_u64().is_none_or(|n|n==0||n>u32::MAX as u64){return;}
+    let Some(sequence)=event["sequence"].as_u64().filter(|n|*n>0&&*n<=u32::MAX as u64)else{return;};
+    let Some(action)=event["action"].as_str().filter(|s|*s=="status"||s.starts_with("host.")&&s.len()<=47&&s.bytes().all(|c|c.is_ascii_alphanumeric()||b"._-".contains(&c)))else{return;};
+    let contract=event.get("contract");
+    if contract.is_some_and(|v|v.as_str().is_none_or(|s|s.len()!=64||!s.bytes().all(|c|c.is_ascii_hexdigit()&&!c.is_ascii_uppercase()))){return;}
+    let data=event.get("data");
+    if data.is_some_and(|v|board.capabilities["widgetServiceBridge"]!=crate::service_bridge::surface::DEVICE_ENGINE||!crate::service_bridge::surface::validate_event_data(v)){return;}
+    let context=event["context"].as_str().unwrap_or("");
+    if context.len()>64||!context.bytes().all(|c|c.is_ascii_hexdigit()){return;}
     let Some(visible)=event["visible"].as_bool()else{return;};
-    let generation=h.device_epoch.lock().unwrap().observe(&board.board_device_id,id,instance,visible);
+    let mut epoch=h.device_epoch.lock().unwrap();let previous=epoch.owner;let previous_id=epoch.id.clone();
+    let Some(owner)=epoch.observe(&board.board_device_id,id,instance,visible,sequence as u32)else{return;};
+    if visible{h.events.activate(owner);}else if let Some(previous)=previous{h.events.cancel(previous);}
+    let generation=owner.generation();
+    drop(epoch);
+    if let Some(previous)=previous{if !visible||previous.generation()!=generation{crate::service_bridge::native::detach_device(&previous_id);}if !visible||previous_id!=id{crate::pc_fetch::host::detach(&previous_id,previous.generation());}}
     // Visibility/heartbeats cannot wait behind filesystem or network work.
+    // These existing callbacks run in ordered reader dispatch; do not hold the
+    // lifecycle mutex across their service locks. Submit checks ownership again.
     crate::component_audio::heartbeat(id,visible);
     crate::component_news::observe(id,visible);
     if !visible{crate::component_notes::stop_recording(id);return;}
-    let mut queued=event.clone();queued["_deviceEpoch"]=generation.into();
-    if h.events.try_send(queued).is_err()&&event["action"]!="status"{
+    // Copy only bounded protocol fields, never caller-supplied owner metadata.
+    let mut queued=json!({"boardDeviceId":board.board_device_id,"componentId":id,"instance":instance,"sequence":sequence,"action":action,"visible":true,"context":context,"confirmed":event["confirmed"]==true,"_deviceEpoch":generation});
+    if let Some(data)=data{queued["data"]=data.clone();}
+    if let Some(contract)=contract{queued["contract"]=contract.clone();}
+    let accepted=h.events.submit(owner,if action=="status"{Priority::Status}else{Priority::Action},queued).is_ok();
+    if !accepted&&action!="status"{
         let _=h.usb.try_send_app_snapshot(&board.board_device_id,&json!({"componentId":id,"instance":instance,"sequence":event["sequence"],"ui":{"mode":7,"actions":[]},"values":{"headline":"操作未接收","metricValue":"","note":"操作队列繁忙，请稍后再按；未自动重试"}}));
     }
 }
-fn process_event(event:Value){
+fn process_event(event:Value,lease:Lease){
     let Some(h)=HOST.get()else{return;};let board=h.usb.status();
-    if !board.connected||event["boardDeviceId"]!=board.board_device_id{return;}
+    if !board.connected||event["boardDeviceId"]!=board.board_device_id||!h.events.is_current(lease){return;}
+    let Some(owner)=h.events.resource_owner(lease)else{return;};
+    let _resource_scope=crate::component_runtime_lifecycle::enter_owner(&owner);
     let Some(id)=event["componentId"].as_str().filter(|id|crate::component_extension::valid_id(id))else{return;};
     let Some(instance)=event["instance"].as_str().filter(|s|!s.is_empty()&&s.len()<=31&&s.bytes().all(|c|c.is_ascii_hexdigit()||c==b'-'))else{return;};
     let Some(sequence)=event["sequence"].as_u64().filter(|n|*n>0&&*n<=u32::MAX as u64)else{return;};
     let Some(action)=event["action"].as_str().filter(|s|s.len()<=47)else{return;};
-    if !event["_deviceEpoch"].as_u64().is_some_and(|e|h.device_epoch.lock().unwrap().accepts(e)){return;}
+    if !h.events.is_current(lease)||!event["_deviceEpoch"].as_u64().is_some_and(|e|h.device_epoch.lock().unwrap().accepts(e)){return;}
     if action!="status"{
         if event["visible"]!=true||crate::realtime_chat::status().active{return;}
         let key=format!("{}:{id}:{instance}:{sequence}",board.board_device_id);let mut seen=h.seen.lock().unwrap();if seen.contains(&key){return;}seen.push_back(key);if seen.len()>128{seen.pop_front();}
     }
-    let input=if action=="status"{json!({"operation":"status","_deviceEpoch":event["_deviceEpoch"]})}else{json!({"operation":"action","action":action,"_deviceEpoch":event["_deviceEpoch"],"confirm":event["confirmed"]==true,"context":event["context"]})};
-    let (mut values,ui)=match request(id,input){Ok(v)=>(v["values"].clone(),v.get("ui").cloned().unwrap_or(json!({"mode":7,"actions":[]}))),Err(e)=>(json!({"headline":"操作未完成","metricValue":"","note":e}),json!({"mode":7,"actions":[]}))};bounded(&mut values);
-    if !event["_deviceEpoch"].as_u64().is_some_and(|e|h.device_epoch.lock().unwrap().accepts(e)){return;}
-    let _=h.usb.send_app_snapshot(&board.board_device_id,&json!({"componentId":id,"instance":instance,"sequence":sequence,"values":values,"ui":ui}));
+    let mut input=if action=="status"{json!({"operation":"status","_deviceEpoch":event["_deviceEpoch"]})}else{json!({"operation":"action","action":action,"_deviceEpoch":event["_deviceEpoch"],"_eventId":format!("{}:{instance}:{sequence}",board.board_device_id),"confirm":event["confirmed"]==true,"context":event["context"]})};
+    if action!="status"{if let Some(data)=event.get("data"){input["data"]=data.clone();}}
+    if let Some(contract)=event.get("contract"){input["contract"]=contract.clone();}
+    let (mut values,ui,variables,collection,presentation)=match request(id,input){Ok(v)=>(v["values"].clone(),v.get("ui").cloned().unwrap_or(json!({"mode":7,"actions":[]})),v["variables"].clone(),v.get("collectionView").cloned(),v.get("presentation").cloned()),Err(e)=>(json!({"headline":"操作未完成","metricValue":"","note":e}),json!({"mode":7,"actions":[]}),Value::Null,None,None)};bounded(&mut values);
+    if !h.events.is_current(lease)||!event["_deviceEpoch"].as_u64().is_some_and(|e|h.device_epoch.lock().unwrap().accepts(e)){return;}
+    let mut snapshot=json!({"componentId":id,"instance":instance,"sequence":sequence,"values":values,"ui":ui});
+    if !variables.is_null(){snapshot["variables"]=variables;}
+    if let Some(contract)=event.get("contract"){snapshot["contract"]=contract.clone();}
+    if let Some(presentation)=presentation{snapshot["presentation"]=presentation;}
+    if let Some(collection)=collection{
+        snapshot["collectionView"]=collection;
+        snapshot=crate::app_host_collection::bounded_envelope(snapshot).unwrap_or_else(|_|json!({"componentId":id,"instance":instance,"sequence":sequence,"values":{"headline":"列表快照无效","note":"记录已保留，未重发操作"},"ui":{"mode":7,"actions":[]}}));
+    }
+    if h.usb.send_app_snapshot(&board.board_device_id,&snapshot).is_ok()&&h.events.is_current(lease){
+        let _=crate::service_bridge::assets::send(&h.usb,&board.board_device_id,id,instance,snapshot["ui"]["context"].as_str().unwrap_or(""),&snapshot["presentation"]["images"]);
+    }
 }
 #[tauri::command]
 pub async fn component_app_request(component_id:String,input:Value)->Result<Value,String>{
     if input.as_object().is_none_or(|o|o.keys().any(|k|k.starts_with('_'))){return Err("组件请求包含保留字段".into());}
-    tauri::async_runtime::spawn_blocking(move||request(&component_id,input)).await.map_err(|_|"组件请求中断")?
+    let permit=HOST.get().ok_or("应用服务尚未初始化")?.desktop_admission.acquire().ok_or("组件请求队列繁忙，请稍后重试；未自动执行")?;
+    tauri::async_runtime::spawn_blocking(move||{let _permit=permit;request(&component_id,input)}).await.map_err(|_|"组件请求中断")?
 }
 
 #[cfg(test)]mod tests{use super::*;#[test]fn journey_reward_is_idempotent_and_survives_exit(){let d=Declaration{schema_version:1,auto_read:false,engine:"pc-app-services-v1".into(),service:"journey".into(),location:None,actions:Default::default(),content:vec![json!({"id":"coast"})]};let mut s=State{trip:Some(Trip{id:"coast".into(),started:100,arrival:160}),..Default::default()};assert!(!settle_trip(&mut s,&d,159));assert!(settle_trip(&mut s,&d,161));assert!(!settle_trip(&mut s,&d,200));assert_eq!(s.visits,1);assert_eq!(s.favorites,vec!["coast"]);}
@@ -568,11 +716,39 @@ fn knowledge_package_host_persists_selection_and_keeps_poll_small(){
     atomic(&p,&State{trip:Some(Trip{id:"coast".into(),started:i64::MIN,arrival:i64::MAX}),..Default::default()}).unwrap();assert!(load(&p).is_err());
 }
 #[test]fn queued_actions_expire_on_exit_switch_and_reentry(){
-    let mut e=DeviceEpoch::default();let first=e.observe("board","notes","1234",true);assert!(e.accepts(first));
-    assert_eq!(e.observe("board","notes","1234",true),first);
-    e.observe("board","notes","1234",false);assert!(!e.accepts(first));
-    let second=e.observe("board","notes","1234",true);assert!(e.accepts(second));assert!(!e.accepts(first));
-    e.observe("board","sounds","5678",true);assert!(!e.accepts(second));
+    let mut e=DeviceEpoch::default();let first=e.observe("board","notes","1234",true,1).unwrap();assert!(e.accepts(first.generation()));
+    assert_eq!(e.observe("board","notes","1234",true,2),Some(first));
+    e.observe("board","notes","1234",false,3);assert!(!e.accepts(first.generation()));
+    let second=e.observe("board","notes","1234",true,4).unwrap();assert!(e.accepts(second.generation()));assert!(!e.accepts(first.generation()));
+    e.observe("board","sounds","5678",true,1);assert!(!e.accepts(second.generation()));
+}
+#[test]fn lifecycle_stale_wire_exit_duplicate_and_replaced_instance_cannot_cancel_current_owner(){
+    let mut e=DeviceEpoch::default();
+    let first=e.observe("board","counter","1234",true,100).unwrap();
+    assert!(e.observe("board","counter","1234",false,99).is_none());
+    assert!(e.observe("board","counter","1234",true,100).is_none());
+    assert!(e.accepts(first.generation()));
+    let second=e.observe("board","counter","5678",true,1).unwrap();
+    assert!(e.observe("board","counter","1234",false,101).is_none());
+    assert!(e.observe("board","counter","1234",true,102).is_none());
+    assert!(e.accepts(second.generation()));
+    assert_eq!(e.disconnect_unless("other-board"),Some(second));
+    assert!(!e.accepts(second.generation()));
+    let reconnect=e.observe("board","counter","5678",true,2).unwrap();
+    assert_ne!(second,reconnect);
+    assert!(e.accepts(reconnect.generation()));
+}
+#[test]fn lifecycle_actual_device_epoch_and_queue_drop_stale_work_and_deliver_new_owner(){
+    let mut epoch=DeviceEpoch::default();let queue=OwnedQueue::new(24);
+    let first=epoch.observe("board","counter","aaaa",true,1).unwrap();queue.activate(first);
+    queue.submit(first,Priority::Status,json!({"sequence":1})).unwrap();
+    let running=queue.receive();
+    queue.submit(first,Priority::Action,json!({"sequence":2})).unwrap();
+    let next=epoch.observe("board","counter","bbbb",true,1).unwrap();queue.activate(next);
+    queue.submit(next,Priority::Status,json!({"sequence":1})).unwrap();
+    assert!(!epoch.accepts(first.generation()));assert!(!queue.finish(running.lease));
+    let current=queue.receive();assert_eq!(current.value["sequence"],1);assert!(queue.is_current(current.lease));
+    assert!(!queue.cancel(first));assert!(queue.finish(current.lease));
 }
 #[test]fn manual_weather_city_survives_status_and_late_auto_result(){
     let root=tempfile::tempdir().unwrap();let usb=crate::usb_serial::UsbSerialManager::new();
@@ -584,6 +760,8 @@ fn knowledge_package_host_persists_selection_and_keeps_poll_small(){
     let call=|input|request_validated("weather-test",root.path(),&d,&json!({"dashboard":{}}),input,&usb,&|_|Err("no dispatch".into())).unwrap();
     let saved=call(json!({"operation":"configure","city":city}));
     assert_eq!(saved["state"]["city"]["city"],"北京");assert_eq!(saved["state"]["auto_city"],false);
+    assert_eq!(saved["state"]["geo"]["location"]["city"],"");
+    assert!(!String::from_utf8(std::fs::read(root.path().join("state.json")).unwrap()).unwrap().contains("上海"));
     assert!(saved["values"]["headline"].as_str().unwrap().contains("北京"));
     for _ in 0..3{let next=call(json!({"operation":"status"}));assert_eq!(next["state"]["city"]["city"],"北京");assert!(!next["values"]["headline"].as_str().unwrap().contains("先选"));}
     assert_eq!(load(&root.path().join("state.json")).unwrap().city.city,"北京");
@@ -623,6 +801,21 @@ fn knowledge_package_host_persists_selection_and_keeps_poll_small(){
     assert!(settle_trip(&mut saved,&d,arrival));assert_eq!(saved.selected,0);
     assert!(!saved.collection);assert_eq!(saved.favorites,vec!["forest"]);
     assert!(!settle_trip(&mut saved,&d,arrival+1));assert_eq!(saved.visits,1);
+}
+#[test]fn resource_scope_gates_existing_journey_storage_without_changing_its_format(){
+    use crate::component_runtime_lifecycle::{enter_owner,ResourceOwner};
+    let dir=tempfile::tempdir().unwrap();let usb=crate::usb_serial::UsbSerialManager::new();
+    let d=Declaration{schema_version:1,auto_read:false,engine:"pc-app-services-v1".into(),service:"journey".into(),location:None,actions:[("host.next".into(),"next".into())].into(),content:vec![json!({"id":"coast","title":"海岸","minutes":15}),json!({"id":"forest","title":"森林","minutes":30})]};
+    let call=||request_validated("resource-service-test",dir.path(),&d,&json!({"dashboard":{}}),json!({"operation":"action","action":"host.next"}),&usb,&|_|Err("no external dispatch".into()));
+    let old=ResourceOwner::fresh();let _old=enter_owner(&old);
+    assert_eq!(call().unwrap()["state"]["selected"],1);
+    let path=dir.path().join("state.json");let before=std::fs::read(&path).unwrap();
+    old.cancel();assert!(call().is_err());assert_eq!(std::fs::read(&path).unwrap(),before);
+    let new=ResourceOwner::fresh();
+    {let _new=enter_owner(&new);old.cancel();assert_eq!(call().unwrap()["state"]["selected"],0);}
+    let saved:Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(saved["selected"],0);assert!(saved.get("resourceOwner").is_none());assert!(saved.get("lease").is_none());
+    assert!(call().is_err(),"nested reentry scope restored the cancelled outer owner");
 }
 #[test]fn journey_default_postcards_do_not_fabricate_visits(){
     let root=tempfile::tempdir().unwrap();let usb=crate::usb_serial::UsbSerialManager::new();
@@ -731,4 +924,71 @@ fn authored_host_services_complete_local_cycles(){
     assert!(run("hachimi-weather",json!({"operation":"configure","city":{"city":"bad","lat":91,"lon":0}})).is_err());
     assert!(!crate::component_audio::playing("hachimi-sounds"));assert!(!crate::component_audio::playing("hachimi-learn"));
 }
+}
+
+/// Fetch workers publish only to the still-visible device generation.
+pub(crate) fn publish_fetch(id:&str,generation:u64,result:&Value){
+ let Some(h)=HOST.get()else{return;};
+ let epoch=h.device_epoch.lock().unwrap();
+ if epoch.id!=id||!epoch.accepts(generation){return;}
+ let board=h.usb.status();if !board.connected||board.board_device_id!=epoch.board{return;}
+ let snapshot=json!({"componentId":id,"instance":epoch.instance,"sequence":epoch.sequence,"values":result["values"],"variables":result["variables"],"ui":result["ui"]});
+ let _=h.usb.try_send_app_snapshot(&board.board_device_id,&snapshot);
+ if result["data"].is_object(){let _=h.usb.send("widget/data",&result["data"]);}
+ let _=h.app.emit("component-fetch",json!({"componentId":id,"snapshot":result}));
+}
+/// Device's read-only data.refresh request. Reader admission is bounded; file
+/// validation and USB output happen on a worker, with no retry or new URL grant.
+pub(crate) fn data_refresh_event(event:&Value){
+    let Some(h)=HOST.get()else{return;};let board=h.usb.status();
+    if !board.connected||event["boardDeviceId"]!=board.board_device_id{return;}
+    let Some(id)=event["componentId"].as_str().filter(|id|crate::component_extension::valid_id(id))else{return;};
+    let Some(source)=event["source"].as_str().filter(|s|*s=="computer.status"||*s=="todos.upcoming"||s.starts_with("fetch.")&&s.len()<=47)else{return;};
+    static LAST:OnceLock<Mutex<VecDeque<(String,std::time::Instant)>>>=OnceLock::new();
+    let key=format!("{}:{id}",board.board_device_id);let mut last=LAST.get_or_init(Default::default).lock().unwrap();
+    if last.iter().any(|(k,t)|k==&key&&t.elapsed()<std::time::Duration::from_secs(5)){return;}
+    let Some(permit)=h.desktop_admission.acquire()else{return;};
+    last.retain(|(k,_)|k!=&key);if last.len()>=8{last.pop_front();}last.push_back((key,std::time::Instant::now()));drop(last);
+    let id=id.to_owned();let source=source.to_owned();let expected=board.board_device_id;
+    tauri::async_runtime::spawn_blocking(move||{
+        let _permit=permit;
+        let Ok(home)=crate::get_home_dir()else{return;};
+        let Ok(Some(entry))=crate::component_library::latest(&home,&id)else{return;};
+        if !entry.valid{return;}
+        let Some(runtime)=entry.app_runtime else{return;};
+        if runtime["data"]["source"]!=source||runtime["data"]["refresh_action"]!="data.refresh"{return;}
+        let current=h.usb.status();if !current.connected||current.board_device_id!=expected{return;}
+        if source.starts_with("fetch."){
+            let generation={let e=h.device_epoch.lock().unwrap();if e.id!=id||!e.visible||e.board!=expected{return;}e.owner.map(|o|o.generation())};
+            if let Some(generation)=generation{let _=request(&id,json!({"operation":"status","_deviceEpoch":generation}));}
+        }else if let Ok(data)=crate::local_widget_data::local_widget_snapshot(source){
+            if let Ok(payload)=serde_json::to_value(data){let _=h.usb.send_widget_data(&expected,&payload);}
+        }
+    });
+}
+
+/// No directory scan/autostart. An already admitted fetch job revalidates its
+/// exact installed declaration/runtime before every cache commit.
+pub(crate) fn fetch_declaration_current(id:&str,signature:&str)->bool{
+    resolve(id).is_ok_and(|(_,d,r)|d.engine==crate::pc_fetch::ENGINE&&crate::pc_fetch::host::fingerprint(&d,&r)==signature)
+}
+
+/// Called only after resolving a formal bridge declaration. Publish the current
+/// native instance under the same ownership lock used by visibility revocation.
+pub(crate) fn bind_bridge_view(id:&str,generation:u64,target:&Mutex<String>)->bool{
+    let Some(h)=HOST.get()else{return false};let e=h.device_epoch.lock().unwrap();
+    if e.id!=id||!e.accepts(generation){return false;}let Ok(mut value)=target.lock()else{return false};*value=e.instance.clone();true
+}
+
+#[cfg(test)]mod shared_city_storage_tests {
+    use super::*;
+    #[test]fn automatic_city_and_forecast_are_not_durable_but_manual_override_is(){
+        let a=crate::app_weather::Location{city:"虚构甲城".into(),lat:12.34,lon:56.78};
+        let state=State{auto_city:true,city:a.clone(),city_from_ip:true,geo:crate::app_weather::GeoCache{key:"shared-city-v1".into(),location:a.clone(),next:99,..Default::default()},weather:crate::app_weather::Cache{key:"coordinate-cache".into(),..Default::default()},..Default::default()};
+        let durable=durable_weather_state(&state);assert!(!durable.city.valid());assert!(!durable.geo.location.valid());assert!(durable.weather.key.is_empty());
+        let mut later=state.clone();later.geo.next=199;assert!(durable==durable_weather_state(&later));
+        later.auto_city=false;later.city=crate::app_weather::Location{city:"虚构乙城".into(),lat:1.0,lon:2.0};
+        let manual=durable_weather_state(&later);assert_eq!(manual.city.city,"虚构乙城");assert!(!manual.geo.location.valid());
+        assert!(!serde_json::to_string(&manual).unwrap().contains("虚构甲城"));
+    }
 }

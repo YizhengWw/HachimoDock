@@ -102,6 +102,7 @@ export async function processImageForPipeline(imageBlob, options = {}) {
     signal,
     allowOriginalFallback = false,
     styleDescription = '',
+    imageResult, onImageResult,
   } = options;
 
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
@@ -111,16 +112,18 @@ export async function processImageForPipeline(imageBlob, options = {}) {
   let backgroundModel = "";
   let backgroundWarning = "";
   let masterImage = null;
-  if (cloudBackground?.apiKey) {
+  if (cloudBackground?.apiKey || imageResult) {
     onProgress?.("cloud_editing");
     try {
-      const inputBytes = new Uint8Array(await imageBlob.arrayBuffer());
+      const inputBytes = imageResult ? null : new Uint8Array(await imageBlob.arrayBuffer());
       const inputMime = imageBlob.type || "image/png";
       const edited = await editImageBackgroundWithArk({
         ...cloudBackground,
-        imageDataUrl: bytesToDataUrl(inputBytes, inputMime),
+        imageDataUrl: inputBytes ? bytesToDataUrl(inputBytes, inputMime) : undefined,
         signal,
         styleDescription,
+        resumeResult: imageResult, onResult: onImageResult,
+        onStage: (stage, detail) => onProgress?.(stage, undefined, detail),
       });
       sourceBlob = new Blob([edited.bytes], { type: edited.mime });
       masterImage = {bytes:edited.bytes,mime:edited.mime};

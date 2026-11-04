@@ -245,20 +245,20 @@ export const FAMILIES = FAMILY_DEFINITIONS.map(item => ({ ...item,
 }));
 
 const CLEAN_MOTIONS = {
-  welcome:'A small greeting lean and subject-appropriate limb or head wave, then settle naturally.',
-  'idle.playing':'Playfully crouch, make a short side hop, then settle naturally; keep any original character-associated accessory, never introduce an object.',
-  'idle.wandering':'Take two slow exploratory side steps and look around, then settle naturally.',
-  working:'Focus the gaze, lean attentively and make two small rhythmic head or own-limb movements, then settle naturally.',
-  waiting_user:'Look toward the viewer, tilt the head and beckon using the subject’s own anatomy, then settle naturally.',
-  done:'Raise the head, make one cheerful body bounce and settle back.',
-  error:'Pause, make a small surprised recoil and concerned head tilt, then settle naturally.',
-  'touch.lick':'Lean toward the viewer with a friendly facial expression and gently retreat; stay entirely in frame.',
-  'touch.what':'Make a curious forward lean and head tilt, then settle naturally; stay entirely in frame.',
-  'idle.default':'Subtle natural breathing and blinking only, with the complete body staying still.',
-  'idle.jumping':'One low crouch-hop-soft-landing cycle, entire body in frame, then settle naturally.',
+  "welcome": "Express a friendly greeting through a readable tilt, sway, bounce or movement of existing parts, then settle naturally.",
+  "idle.playing": "Express playful energy through a short whole-form side motion, bounce, rotation or material-appropriate deformation, then settle naturally.",
+  "idle.wandering": "Express relaxed exploration through slow whole-form drift or turning and a brief pause, then settle naturally.",
+  "working": "Express concentration through a collected posture and small rhythmic movements of the existing form, then settle naturally.",
+  "waiting_user": "Express a gentle request for a response through a pause and inviting tilt, sway or movement of existing parts.",
+  "done": "Express success through one cheerful lift, expansion, bounce or movement of existing parts, then settle naturally.",
+  "error": "Express mild confusion through a small recoil, hesitation or change of rhythm, then recover naturally.",
+  "touch.lick": "Express affection through a gentle approach or sway of the original form, then retreat naturally while staying entirely in frame.",
+  "touch.what": "Express curiosity through a small approach, tilt or turn of the original form, then settle naturally.",
+  "idle.default": "Express calm idle through subtle rhythmic motion of the existing form; breathing or blinking only when suitable features exist.",
+  "idle.jumping": "Express a small anticipation-lift-settle cycle using whole-form compression, bobbing or a low bounce; legs and joints are not required."
 };
 export const CUSTOM_GENERATION_FAMILIES = FAMILIES.filter(
   (item) => !CUSTOM_GENERATION_EXCLUDED_FAMILY_IDS.has(item.family),
 ).map(item=>({...item,preserve_reference_accessories:true,motion_brief:CLEAN_MOTIONS[item.family],spatial_path:'Keep the complete subject within the frame with safe margins; use state-specific starting and ending poses without a shared pose reset.',
-  pose_signature:CLEAN_MOTIONS[item.family],prop_policy:'Preserve original character-associated accessories already held or worn in the reference, such as a tennis racket, musical instrument, glasses or hat. No newly invented props, hands from other people, unrelated furniture, symbols, effects or decorations. Preserve the subject\'s own hands, arms and legs. Keep the complete subject and retained accessories within frame on pure black.',
-  variation_hint:'Vary only the subject’s own pose, gaze and rhythm. Never add objects.'}));
+  pose_signature:CLEAN_MOTIONS[item.family],prop_policy:'Preserve original character-associated accessories already held or worn in the reference, such as a tennis racket, musical instrument, glasses or hat. No newly invented props, hands from other people, unrelated furniture, symbols, effects or decorations. Preserve the subject\'s own hands, arms and legs only when actually present; missing anatomy is valid and must not be invented. Keep the complete subject and retained accessories within frame on pure black.',
+  variation_hint:'Vary only available motion, rhythm and deformation appropriate to the original form. Never add objects.'}));

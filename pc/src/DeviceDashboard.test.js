@@ -239,7 +239,7 @@ test("dashboard keeps the client button map authoritative across reconnect and f
   assert.doesNotMatch(dashboard, /saveVoiceConfigToStorage\(persistedNext\)/);
   assert.doesNotMatch(dashboard, /已从板端读取按钮配置并更新客户端缓存/);
   assert.match(dashboard, /buttonConfigHydratedFor !== p4TargetBoardDeviceId/);
-  assert.match(dashboard, /startingRevision !== buttonConfigRevisionRef\.current/);
+  assert.match(dashboard, /startingRevision === buttonConfigRevisionRef\.current/);
   assert.match(dashboard, /component_center/);
   assert.match(rust, /async fn usb_get_button_config/);
   assert.match(rust, /manager\.query_button_config/);
@@ -442,11 +442,12 @@ test("board audio enable starts local runtimes and targets the active board", ()
   assert.match(source, /ensure_device_voice_runtime/);
   assert.match(source, /isP4Runtime \? "ensure_device_voice_runtime" : "ensure_voice_runtime"/);
   assert.match(source, /boardDeviceId: targetBoardDeviceId/);
-  assert.match(source, /\[activeVoiceTriggerId, binding\.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb\.boardDeviceId\]/);
+  assert.match(source, /\[voiceTarget\.key, activeVoiceTriggerId, binding\.boardDeviceId, isP4Runtime, onlineBoardDeviceId, sendAudioBridgeSignal, usb\.boardDeviceId, usb\.connectionId\]/);
   assert.match(rust, /fn ensure_device_voice_runtime\s*\(/);
   assert.match(rust, /pc_audio::built_in_stt_status\(\)/);
   assert.match(rust, /pc_microphone_enabled = action == "start" && !p4_usb_connected/);
-  assert.match(rust, /relay\.configure\(action == "start", pcm_relay_port, !p4_usb_connected\)/);
+  assert.match(rust, /relay\.configure_scoped\(action == "start", pcm_relay_port, false,\s*&boardDeviceId, &usb_status.connection_id, &usb_status.boot_id\)/);
+  assert.match(rust, /relay\.configure\(action == "start", pcm_relay_port, true\)/);
 
   const panelSource = readSource("dashboard/VoiceAssistantPanel.jsx");
   assert.match(panelSource, /audioBlockingReason/);
@@ -579,8 +580,9 @@ test("Button-selected conversations are temporary and bound to status and input 
   assert.match(sessionSync, /const confirmedEmptyQueue = sessionsLoaded/);
   assert.match(
     sessionSync,
-    /const autoRoutingSession = selectableSessions\[0\] \|\| routingSessions\?\.\[0\] \|\| sessions\?\.\[0\]/,
+    /const autoRoutingSession = explicitDshSessionRequired \? null : selectableSessions\[0\] \|\| routingSessions\?\.\[0\] \|\| sessions\?\.\[0\]/,
   );
+  assert.match(sessionSync, /const explicitDshSessionRequired = agentId === "deepseek-harness"/);
   assert.match(sessionSync, /const autoFollow = sessionId === "auto" && Boolean\(selectedRoutingSession\)/);
   assert.match(sessionSync, /!selectedRoutingSession[\s\S]*!confirmedEmptyQueue/);
   assert.match(sessionFeed, /case "reset"/);
@@ -609,7 +611,8 @@ test("Button-selected conversations are temporary and bound to status and input 
   assert.match(rust, /fn usb_session_binding_allows/);
   assert.match(rust, /fn resolve_usb_inject_target/);
   assert.match(rust, /"sessionId": session_id/);
-  assert.match(rust, /"session\/current"/);
+  assert.match(rust, /send_session_current_for_connection/);
+  assert.match(readRepoFile("src-tauri", "src", "usb_serial.rs"), /self.send_inner\("session\/current", payload, true, Some\(board\), Some\(generation\), None\)/);
   assert.match(rust, /"sessions": device_sessions/);
   assert.match(rust, /"content": content/);
   assert.match(rust, /device_title: Option<String>/);
@@ -843,7 +846,10 @@ test("channel switching is exact-board USB-only with no Bridge MQTT fallback", (
 
   assert.match(dispatch, /if !usb_status\.connected/);
   assert.match(dispatch, /requested_board_device_id != board_device_id/);
-  assert.match(dispatch, /send_to_board\(/);
+  assert.match(dispatch, /follow_connection_generation\(/);
+  assert.match(dispatch, /send_follow_change_for_connection\(/);
+  assert.match(dispatch, /send_session_current_for_connection\(/);
+  assert.doesNotMatch(dispatch, /send_to_board\(/);
   assert.match(dispatch, /"control\/remote-cli-binding"/);
   assert.doesNotMatch(dispatch, /publish-remote-binding/);
   assert.doesNotMatch(dispatch, /mqtt_sent/);
@@ -944,15 +950,16 @@ test("voice bus polling self-heals the managed bridge after a local port failure
   assert.match(rust, /GET \/agent\/health HTTP\/1\.1/);
 });
 
-test("P4 voice polling uses the device ASR runtime instead of legacy voice-service", () => {
+test("P4 voice polling waits for identity and delegates to the target-bound poller", () => {
   const source = readSource("DeviceDashboard.jsx");
-  const runtimeStart = source.indexOf("// Poll voice-runtime.");
-  const runtimeEnd = source.indexOf("// Refetch sessions", runtimeStart);
-  const runtimeEffect = source.slice(runtimeStart, runtimeEnd);
-
-  assert.match(runtimeEffect, /isP4Runtime\s*\?\s*await invoke\("ensure_device_voice_runtime"/);
-  assert.match(runtimeEffect, /input: \{ interactive: false \}/);
-  assert.match(runtimeEffect, /:\s*await invoke\("ensure_voice_runtime"\)/);
+  const helper = readSource("dashboard/voice-runtime-target.js");
+  assert.match(source, /voiceRuntimeTarget\(usb, selectedAgentId\)/);
+  assert.match(source, /voiceTargetKeyRef\.current = voiceTarget\.key/);
+  assert.match(source, /createVoiceRuntimePoller/);
+  assert.match(source, /isCurrent:.*voiceTargetKeyRef\.current===voiceTarget\.key/);
+  assert.match(helper, /target\.kind === 'waiting'/);
+  assert.match(helper, /target\.kind === 'p4'[\s\S]*ensure_device_voice_runtime/);
+  assert.match(helper, /interactive:false/);
 });
 
 test("managed Node runtimes clear inspector options and bind the expected lifecycle", () => {
@@ -982,15 +989,13 @@ test("voice bus polling stays active in the background and skips unchanged rende
 
 test("voice runtime polling preserves cadence, avoids overlap, and deduplicates renders", () => {
   const source = readSource("DeviceDashboard.jsx");
-  const start = source.indexOf("// Poll voice-runtime.");
-  const end = source.indexOf("// Refetch sessions for the current agent.", start);
-  const effect = source.slice(start, end);
-
-  assert.match(effect, /let inFlight = false;/);
-  assert.match(effect, /if \(cancelled \|\| inFlight\) return;/);
-  assert.match(effect, /finally \{[\s\S]*inFlight = false;/);
-  assert.match(effect, /setInterval\(run, 5000\)/);
-  assert.doesNotMatch(effect, /document\.visibilityState/);
+  const helper = readSource("dashboard/voice-runtime-target.js");
+  assert.match(helper, /inFlight = false/);
+  assert.match(helper, /if \(!current\(\) \|\| inFlight\) return/);
+  assert.match(helper, /finally \{ inFlight = false/);
+  assert.match(source, /setInterval\(\(\)=>poller\.poll\(\),5000\)/);
+  assert.match(source, /poller\.cancel\(\)/);
+  assert.doesNotMatch(helper, /document\.visibilityState/);
   assert.match(source, /fingerprint === state\.voiceRuntimeFingerprint/);
 });
 
@@ -1147,4 +1152,32 @@ test("DeviceDashboard does not expose the unsupported P4 WiFi flow", () => {
   assert.doesNotMatch(source, /WifiApplyModal/);
   assert.doesNotMatch(source, /onApplyWifi/);
   assert.doesNotMatch(source, /usb_apply_wifi/);
+});
+
+
+test("actual dashboard lexical bindings have no eager render-time TDZ references", async () => {
+  const {parse} = await import("@babel/parser");
+  const traverseModule = await import("@babel/traverse");
+  const traverse = traverseModule.default.default || traverseModule.default;
+  const ast = parse(readSource("DeviceDashboard.jsx"), {sourceType:"module",plugins:["jsx"]});
+  let checked=false;
+  traverse(ast, {FunctionDeclaration(component) {
+    if(component.node.id?.name!=="DeviceDashboard")return;
+    checked=true;
+    // Babel resolves real lexical bindings from the actual JSX source. Ignore
+    // deferred inner functions; inspect references eagerly evaluated by render,
+    // including hook arguments/dependency arrays and JSX expressions.
+    const selected=component.scope.getBinding("selectedAgentId");
+    assert.ok(selected?.path.isVariableDeclarator());
+    assert.equal(selected.referencePaths.filter(ref=>ref.getFunctionParent()===component).length>0,true);
+    for(const [name,binding] of Object.entries(component.scope.bindings)) {
+      if(!["const","let"].includes(binding.kind)||!binding.path.isVariableDeclarator())continue;
+      for(const ref of binding.referencePaths) {
+        if(ref.getFunctionParent()!==component)continue;
+        assert.ok(ref.node.start>=binding.path.node.end,
+          `${name} read at line ${ref.node.loc.start.line} before initialization at line ${binding.path.node.loc.start.line}`);
+      }
+    }
+  }});
+  assert.equal(checked,true,"actual DeviceDashboard component must be inspected");
 });

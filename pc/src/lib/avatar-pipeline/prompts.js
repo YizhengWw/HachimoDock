@@ -1,3 +1,4 @@
+import {SUBJECT_MOTION_POLICY_EN} from './motion-semantics.js';
 /**
  * [Input] thinking-model JSON response and FAMILIES from this folder.
  * [Output] normalized prompt manifest plus subject-adaptive first/last-frame motion grammar used by video task submission.
@@ -129,10 +130,11 @@ function buildDryRunPrompt(family, sourceImageName) {
   const stateLabel = family.label || family.family;
   const shared = [
     KEEP_CHIBI_STYLE_EN,
+    SUBJECT_MOTION_POLICY_EN,
     `Keep the uploaded subject identity, markings, proportions, fixed camera, composition, background style, and lighting from ${sourceImageName}.`,
     "Use subject-adaptive anatomy: human or humanoid subjects use hands, arms, shoulders, gaze, and steps; cats or dogs use paws, tail, ears, crouch, and body lean; birds use wings, head, and feet; toys, plush, icons, or objects use tilt, bounce, rotation, or movable parts.",
     "Do not write paws for a human, hands for a cat, wings for a cat, or pet-only body language when the uploaded subject is not an animal.",
-    family.family === "idle.default" ? (family.preserve_reference_accessories ? "Only subtle breathing and blinking; retain original character-associated accessories, no large movement or new props." : "Only subtle breathing and blinking; no large movement or props.")
+    family.family === "idle.default" ? (family.preserve_reference_accessories ? "Only subtle motion of the original form (breathing/blinking only when suitable features exist); retain original character-associated accessories, no large movement or new props." : "Only subtle motion of the original form (breathing/blinking only when suitable features exist); no large movement or props.")
       : "Use subject-appropriate medium-to-large visible middle motion without inventing limbs; let the action begin and finish naturally in state-specific poses.",
     family.spatial_path ? `Spatial path: ${family.spatial_path}` : "",
     family.pose_signature ? `Silhouette signature: ${family.pose_signature}` : "",
@@ -164,15 +166,16 @@ function buildDryRunPrompt(family, sourceImageName) {
 export function buildUserPrompt({ families = FAMILIES, appearanceName = "", personality = "" } = {}) {
   const lines = [
     KEEP_CHIBI_STYLE_EN,
+    SUBJECT_MOTION_POLICY_EN,
     "Analyze the uploaded image first, then generate exactly one image-to-video prompt for each family below.",
     "Identify the uploaded image subject_type before writing prompts: human/humanoid, cat/dog/animal, bird, plush/toy/object, or other character.",
-    "Use subject-appropriate anatomy in every prompt: human/humanoid uses hands, arms, shoulders, gaze, and steps; cat/dog/animal uses paws, tail, ears, crouch, and body lean; bird uses wings, head, and feet; plush/toy/object uses tilt, bounce, rotation, or movable parts.",
+    "Use subject-appropriate anatomy only when actually present in every prompt: human/humanoid may use existing hands, arms, shoulders, gaze, and steps; cat/dog/animal uses paws, tail, ears, crouch, and body lean; bird uses wings, head, and feet; plush/toy/object uses tilt, bounce, rotation, or movable parts.",
     "Do not write paws for a human, hands for a cat, wings for a cat, or pet-only body language when the uploaded subject is not an animal.",
-    "Except idle.default (subtle breathing/blinking only), use subject-appropriate medium-to-large visible middle motion where helpful. Never invent limbs on a robot or object.",
+    "Except idle.default (subtle breathing/blinking only when those features exist), use subject-appropriate medium-to-large visible middle motion where helpful. Never invent limbs on a robot or object.",
     "All final video prompts must be in English.",
     "For playback=loop_state, describe continuous state-specific movement with a gentle repeat rhythm; do not require the same first/last pose or a shared reference-image reset. Idle.default stays calm.",
     "For playback=one_shot_entry, describe a readable greeting and natural relaxed finish. Different clips may start and end in different poses while retaining the same character.",
-    "Do not collapse different families into the same sitting or standing pose. Every family must use its spatial_path, pose_signature, and avoid_motion fields.",
+    "Do not collapse different families into the same sitting or standing pose. Every family must use its spatial_path, pose_signature, and avoid_motion fields as adaptable semantic guidance, not mandatory anatomy or exact angles.",
     "Custom generation should output a single working family clip. Built-in appearances may provide working.thinking, working.typing, and working.browsing for richer variation.",
     "The runtime treats both working and working.* clips as the same working state, and randomly chooses only when more than one working clip is present.",
     "Do not output thinking or tool_running families; they are legacy input states that map to working.",

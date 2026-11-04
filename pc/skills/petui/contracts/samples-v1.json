@@ -1,0 +1,328 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-samples-v1",
+ "notes": "Shared p4-samples-v1 vectors. Files: assets/<id>.wav compiled by the PC to runtime/samples/<id>.pcm (P4A1, 16 kHz mono s16le, <= 64 KiB each, 256 KiB per package). Validators check declarations here; file checks are separate.",
+ "limits": {
+  "items": 4,
+  "sampleBytes": 65536,
+  "budgetBytes": 262144,
+  "voices": 2
+ },
+ "vectors": [
+  {
+   "name": "two samples with transition and tick ops",
+   "ok": true,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {
+     "n": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "sample": "ding"
+     }
+    ],
+    "tick": [
+     {
+      "every_ms": 1000,
+      "inc": {
+       "n": 1
+      },
+      "when": {
+       "var": "n",
+       "lte": 0
+      },
+      "then": {
+       "set": {
+        "n": 3
+       },
+       "sample": "pop"
+      }
+     }
+    ],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      },
+      {
+       "id": "pop",
+       "asset": "assets/pop.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "op without the profile",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "sample": "ding"
+     }
+    ],
+    "tick": []
+   }
+  },
+  {
+   "name": "unknown sample id",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet",
+      "sample": "boom"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      },
+      {
+       "id": "pop",
+       "asset": "assets/pop.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "asset basename must equal the id",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/bell.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "non-wav asset",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.mp3"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "five items",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "s0",
+       "asset": "assets/s0.wav"
+      },
+      {
+       "id": "s1",
+       "asset": "assets/s1.wav"
+      },
+      {
+       "id": "s2",
+       "asset": "assets/s2.wav"
+      },
+      {
+       "id": "s3",
+       "asset": "assets/s3.wav"
+      },
+      {
+       "id": "s4",
+       "asset": "assets/s4.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "duplicate ids",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      },
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "volume over 100",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 101,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      },
+      {
+       "id": "pop",
+       "asset": "assets/pop.wav"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "mixed with media",
+   "ok": false,
+   "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+     {
+      "from": "*",
+      "on": "pet"
+     }
+    ],
+    "tick": [],
+    "samples": {
+     "engine": "p4-samples-v1",
+     "volume": 80,
+     "items": [
+      {
+       "id": "ding",
+       "asset": "assets/ding.wav"
+      },
+      {
+       "id": "pop",
+       "asset": "assets/pop.wav"
+      }
+     ]
+    },
+    "media": {
+     "source": "audio.player"
+    }
+   }
+  }
+ ]
+}

@@ -38,7 +38,8 @@ test("Reads Volcengine ASR readiness and delegates credential editing to API set
   assert.match(source, /load_device_asr_settings/);
   assert.doesNotMatch(source, /onCredentialReady/);
   assert.match(source, /onOpenApiSettings/);
-  assert.match(source, /type: "set_voice_runtime"/);
+  assert.doesNotMatch(source, /type: "set_voice_runtime"/);
+  assert.match(source, /Credential readiness is not a device runtime/);
   assert.match(source, /API_CONFIGURATION_UPDATED_EVENT/);
   assert.match(source, /语音识别 API/);
   assert.match(source, /前往 API 配置/);

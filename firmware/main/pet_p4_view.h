@@ -31,6 +31,9 @@ typedef struct {
   unsigned long long caption_since_ms;
   // Main-page recording feedback when there is no Session card to host it.
   bool show_voice_overlay;
+  /* Main captures this under the state mutex; rendering never reads a live
+   * activation job or takes ownership of its storage. */
+  bool component_loading;
 } pet_p4_view_model_t;
 
 void pet_p4_build_view_model(const pet_p4_runtime_state_t *state, pet_p4_view_model_t *out);

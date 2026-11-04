@@ -97,10 +97,14 @@ fn pinned_client(host: &str, addresses: &[SocketAddr]) -> Result<Client, String>
     Ok(client)
 }
 fn get_scoped(raw: &str, hosts: Option<&[String]>) -> Result<Response, String> {
+    get_scoped_policy(raw,hosts,false)
+}
+fn get_scoped_policy(raw: &str, hosts: Option<&[String]>, https_443:bool) -> Result<Response, String> {
     let mut url = valid_url(raw)?;
     for _ in 0..5 {
         let host = url.host_str().ok_or("电台缺少域名")?;
-        if hosts.is_some_and(|hosts| url.scheme() != "https" || !hosts.iter().any(|h| h == host)) {
+        if https_443&&(url.scheme()!="https"||url.port_or_known_default()!=Some(443))
+            ||hosts.is_some_and(|hosts| url.scheme() != "https" || !hosts.iter().any(|h| h == host)) {
             return Err("请求超出组件声明的域名权限".into());
         }
         let addresses = crate::media_dns::resolve(host, url.port_or_known_default().unwrap())?;
@@ -141,6 +145,13 @@ fn get_scoped(raw: &str, hosts: Option<&[String]>) -> Result<Response, String> {
 }
 pub(crate) fn scoped_json(raw: &str, hosts: &[String], max: usize) -> Result<serde_json::Value, String> {
     let response=get_scoped(raw,Some(hosts))?;
+    bounded_json(response,max)
+}
+/// Keep HTTPS/443 on every redirect without changing legacy radio policy.
+pub(crate) fn scoped_json_https(raw:&str,hosts:&[String],max:usize)->Result<serde_json::Value,String>{
+    bounded_json(get_scoped_policy(raw,Some(hosts),true)?,max)
+}
+fn bounded_json(response:Response,max:usize)->Result<serde_json::Value,String>{
     let mut data=Vec::new();
     response.take(max as u64+1).read_to_end(&mut data).map_err(|_|"目录响应中断")?;
     if data.len()>max {return Err("目录响应超过安全上限".into());}
@@ -172,6 +183,11 @@ pub fn search(
         return Err("请输入城市或电台名称（最多 30 字）".into());
     }
     extension.validate()?;
+    if extension.search.catalog.is_some() {
+        // Bundled catalog: no request leaves the machine for a search.
+        let rows = extension.catalog_search(city);
+        return Ok(extension.map_results(&serde_json::Value::Array(rows), city));
+    }
     let mut url = valid_url(&extension.search.endpoint)?;
     url.query_pairs_mut()
         .append_pair(&extension.search.query_param, city)

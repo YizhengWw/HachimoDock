@@ -50,6 +50,11 @@ impl PcmPacketizer {
             }
         }
     }
+
+    // Preserve real samples shorter than one transport frame; never pad silence.
+    fn take_tail(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.packet)
+    }
 }
 
 #[cfg(windows)]
@@ -70,6 +75,9 @@ mod platform {
         pcm: Mutex<Vec<u8>>,
         stream_error: Mutex<Option<String>>,
         relay_error: Mutex<Option<String>>,
+        packetizer: Mutex<PcmPacketizer>,
+        end_relay: Mutex<Option<(UdpSocket, u16)>>,
+        relay_bytes: AtomicU64,
     }
 
     struct ActiveCapture {
@@ -92,6 +100,7 @@ mod platform {
             response: mpsc::Sender<Value>,
         },
         Stop {
+            expected_capture_id: Option<u64>,
             response: mpsc::Sender<Option<PcAudioCaptureResult>>,
         },
         TakeCompleted {
@@ -119,6 +128,7 @@ mod platform {
                 .spawn(move || {
                     let mut runtime = CaptureRuntime::default();
                     loop {
+                        runtime.finish_if_due();
                         match receiver.recv_timeout(Duration::from_millis(250)) {
                             Ok(command) => match command {
                                 CaptureCommand::Configure {
@@ -131,23 +141,17 @@ mod platform {
                                 CaptureCommand::Start { response } => {
                                     let _ = response.send(runtime.start());
                                 }
-                                CaptureCommand::Stop { response } => {
-                                    let _ = response.send(runtime.stop_result());
+                                CaptureCommand::Stop { expected_capture_id, response } => {
+                                    let _ = response.send(runtime.stop_result_for(expected_capture_id));
                                 }
                                 CaptureCommand::TakeCompleted { response } => {
                                     let _ = response.send(runtime.completed.take());
                                 }
                             },
-                            Err(mpsc::RecvTimeoutError::Timeout) => {
-                                if runtime.active.as_ref().is_some_and(|active| {
-                                    active.started_at.elapsed().as_millis()
-                                        >= MAX_CAPTURE_DURATION_MS
-                                }) {
-                                    runtime.completed = runtime.finish_active();
-                                }
-                            }
+                            Err(mpsc::RecvTimeoutError::Timeout) => {}
                             Err(mpsc::RecvTimeoutError::Disconnected) => break,
                         }
+                        runtime.finish_if_due();
                     }
                 })
                 .expect("failed to start PC microphone control thread");
@@ -201,8 +205,17 @@ mod platform {
         }
 
         pub fn stop_with_pcm(&mut self) -> Option<PcAudioCaptureResult> {
+            self.stop_with_pcm_matching(None)
+        }
+
+        /// A delayed release from an old round cannot stop a newer microphone.
+        pub fn stop_with_pcm_for_capture(&mut self, capture_id: u64) -> Option<PcAudioCaptureResult> {
+            self.stop_with_pcm_matching(Some(capture_id))
+        }
+
+        fn stop_with_pcm_matching(&mut self, expected_capture_id: Option<u64>) -> Option<PcAudioCaptureResult> {
             let (response, receiver) = mpsc::channel();
-            self.commands.send(CaptureCommand::Stop { response }).ok()?;
+            self.commands.send(CaptureCommand::Stop { expected_capture_id, response }).ok()?;
             receiver.recv().ok().flatten()
         }
 
@@ -216,6 +229,15 @@ mod platform {
     }
 
     impl CaptureRuntime {
+        fn finish_if_due(&mut self) {
+            let due = self.active.as_ref().is_some_and(|active| {
+                active.started_at.elapsed().as_millis() >= MAX_CAPTURE_DURATION_MS
+                    || active.stats.bytes.load(Ordering::Relaxed) >= MAX_CAPTURE_BYTES as u64
+                    || active.stats.stream_error.lock().map(|v|v.is_some()).unwrap_or(true)
+            });
+            if due && self.completed.is_none() { self.completed = self.finish_active(); }
+        }
+
         fn configure(&mut self, enabled: bool, target_port: u16) -> Value {
             let stopped = self.stop_result().map(|result| result.event);
             self.enabled = enabled;
@@ -237,7 +259,9 @@ mod platform {
             if let Some(active) = self.active.as_ref() {
                 return begin_event(active, true);
             }
-            self.completed = None;
+            if self.completed.is_some() {
+                return capture_error("begin", "Previous microphone result is pending; it was not discarded or restarted");
+            }
 
             let host = cpal::default_host();
             let Some(device) = host.default_input_device() else {
@@ -288,7 +312,17 @@ mod platform {
         }
 
         fn stop_result(&mut self) -> Option<PcAudioCaptureResult> {
-            self.completed.take().or_else(|| self.finish_active())
+            self.stop_result_for(None)
+        }
+
+        fn stop_result_for(&mut self, expected: Option<u64>) -> Option<PcAudioCaptureResult> {
+            if self.completed.as_ref().is_some_and(|v| expected.is_none_or(|id|id==v.capture_id)) {
+                return self.completed.take();
+            }
+            if self.active.as_ref().is_some_and(|v|expected.is_none_or(|id|id==v.capture_id)) {
+                return self.finish_active();
+            }
+            None
         }
 
         fn finish_active(&mut self) -> Option<PcAudioCaptureResult> {
@@ -302,8 +336,19 @@ mod platform {
                 ..
             } = active;
             drop(stream);
+            // The input callback is stopped before draining its last real frame.
+            let tail = match stats.packetizer.lock() {
+                Ok(mut p) => p.take_tail(),
+                Err(_) => { set_relay_error(&stats.stream_error,"PC microphone packetizer state unavailable".into()); Vec::new() }
+            };
+            if !tail.is_empty() {
+                if let Ok(relay) = stats.end_relay.lock() {
+                    if let Some((socket, port)) = relay.as_ref() { emit_packet(&stats, socket, *port, &tail); }
+                }
+            }
             let bytes = stats.bytes.load(Ordering::Relaxed);
             let packets = stats.packets.load(Ordering::Relaxed);
+            let forwarded_bytes = stats.relay_bytes.load(Ordering::Relaxed);
             let pcm = stats
                 .pcm
                 .lock()
@@ -312,8 +357,8 @@ mod platform {
             let stream_error = stats
                 .stream_error
                 .lock()
-                .ok()
-                .and_then(|value| value.clone());
+                .map(|value| value.clone())
+                .unwrap_or_else(|_|Some("PC microphone error state unavailable".into()));
             let relay_error = stats
                 .relay_error
                 .lock()
@@ -328,7 +373,7 @@ mod platform {
                 "bytes": bytes,
                 "chunks": packets,
                 "durationMs": elapsed_ms,
-                "forwardedDurationMs": bytes * 1000 / (u64::from(TARGET_SAMPLE_RATE) * 2),
+                "forwardedDurationMs": forwarded_bytes * 1000 / (u64::from(TARGET_SAMPLE_RATE) * 2),
                 "error": stream_error,
                 "relayError": relay_error,
             });
@@ -403,15 +448,20 @@ mod platform {
     {
         let socket = UdpSocket::bind("127.0.0.1:0")
             .map_err(|error| format!("failed to open PC microphone relay socket: {error}"))?;
-        let target = ("127.0.0.1", target_port);
+        socket.set_nonblocking(true).map_err(|_|"failed to configure PC microphone relay".to_string())?;
+        *stats.end_relay.lock().map_err(|_|"PC microphone relay state unavailable")? = Some((socket.try_clone().map_err(|_|"failed to retain PC microphone relay")?, target_port));
+        *stats.packetizer.lock().map_err(|_|"PC microphone packetizer unavailable")? = PcmPacketizer::new(config.sample_rate.0);
         let channels = usize::from(config.channels.max(1));
-        let mut packetizer = PcmPacketizer::new(config.sample_rate.0);
         let callback_stats = Arc::clone(&stats);
         let error_stats = Arc::clone(&stats);
         device
             .build_input_stream(
                 config,
                 move |data: &[T], _| {
+                    let Ok(mut packetizer) = callback_stats.packetizer.lock() else {
+                        set_relay_error(&callback_stats.stream_error, "PC microphone packetizer state unavailable".into());
+                        return;
+                    };
                     for frame in data.chunks(channels) {
                         if frame.is_empty() {
                             continue;
@@ -419,29 +469,7 @@ mod platform {
                         let mono =
                             frame.iter().copied().map(&convert).sum::<f32>() / frame.len() as f32;
                         packetizer.push_mono(mono, |packet| {
-                            if let Ok(mut pcm) = callback_stats.pcm.lock() {
-                                if pcm.len() + packet.len() <= MAX_CAPTURE_BYTES {
-                                    pcm.extend_from_slice(packet);
-                                }
-                            }
-                            callback_stats
-                                .bytes
-                                .fetch_add(packet.len() as u64, Ordering::Relaxed);
-                            callback_stats.packets.fetch_add(1, Ordering::Relaxed);
-                            match socket.send_to(packet, target) {
-                                Ok(sent) if sent == packet.len() => {}
-                                Ok(sent) => set_relay_error(
-                                    &callback_stats.relay_error,
-                                    format!(
-                                        "short PC microphone UDP write: {sent}/{}",
-                                        packet.len()
-                                    ),
-                                ),
-                                Err(error) => set_relay_error(
-                                    &callback_stats.relay_error,
-                                    format!("PC microphone UDP relay failed: {error}"),
-                                ),
-                            }
+                            emit_packet(&callback_stats, &socket, target_port, packet);
                         });
                     }
                 },
@@ -454,6 +482,26 @@ mod platform {
                 None,
             )
             .map_err(|error| format!("failed to open default microphone: {error}"))
+    }
+
+    fn emit_packet(stats: &CaptureStats, socket: &UdpSocket, port: u16, packet: &[u8]) {
+        if packet.is_empty() { return; }
+        let Ok(mut pcm) = stats.pcm.lock() else {
+            set_relay_error(&stats.stream_error, "PC microphone PCM state unavailable".into());
+            return;
+        };
+        // The cap applies to both retained and relayed samples, even when the
+        // command queue is busy. Excess input is never counted or forwarded.
+        if pcm.len()+packet.len()>MAX_CAPTURE_BYTES { return; }
+        pcm.extend_from_slice(packet);
+        drop(pcm);
+        stats.bytes.fetch_add(packet.len() as u64, Ordering::Relaxed);
+        stats.packets.fetch_add(1, Ordering::Relaxed);
+        match socket.send_to(packet, ("127.0.0.1",port)) {
+            Ok(sent) if sent==packet.len() => { stats.relay_bytes.fetch_add(sent as u64,Ordering::Relaxed); }
+            Ok(_) => set_relay_error(&stats.relay_error,"short PC microphone UDP write; no replay".into()),
+            Err(_) => set_relay_error(&stats.relay_error,"PC microphone UDP relay failed; no replay".into()),
+        }
     }
 
     fn set_relay_error(target: &Mutex<Option<String>>, error: String) {
@@ -494,6 +542,10 @@ mod platform {
         }
 
         pub fn stop_with_pcm(&mut self) -> Option<PcAudioCaptureResult> {
+            None
+        }
+
+        pub fn stop_with_pcm_for_capture(&mut self, _capture_id: u64) -> Option<PcAudioCaptureResult> {
             None
         }
 
@@ -546,6 +598,37 @@ fn hidden_powershell() -> std::process::Command {
 }
 
 #[cfg(windows)]
+fn bounded_speech_output(command: &mut std::process::Command, limit: std::time::Duration) -> Result<std::process::Output,String> {
+    use std::{io::Read,process::Stdio,sync::mpsc,time::Instant};
+    let mut child=command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|_|"failed to start local Windows speech worker".to_string())?;
+    fn reader(pipe:impl Read+Send+'static)->mpsc::Receiver<Result<Vec<u8>,String>> {
+        let (tx,rx)=mpsc::sync_channel(1);
+        std::thread::spawn(move||{
+            let mut bytes=Vec::new();
+            let result=pipe.take(65537).read_to_end(&mut bytes)
+                .map_err(|_|"local speech worker output unavailable".to_string())
+                .and_then(|_|if bytes.len()>65536{Err("local speech worker output limit exceeded".into())}else{Ok(bytes)});
+            let _=tx.send(result);
+        });
+        rx
+    }
+    let stdout=reader(child.stdout.take().expect("piped speech stdout"));
+    let stderr=reader(child.stderr.take().expect("piped speech stderr"));
+    let started=Instant::now();
+    let status=loop {
+        match child.try_wait() {
+            Ok(Some(status))=>break status,
+            Ok(None) if started.elapsed()<limit=>std::thread::sleep(std::time::Duration::from_millis(20)),
+            _=>{let _=child.kill();let _=child.wait();return Err("local Windows speech worker timed out or stopped; no automatic retry".into());}
+        }
+    };
+    let output=|rx:mpsc::Receiver<Result<Vec<u8>,String>>|rx.recv_timeout(std::time::Duration::from_secs(1))
+        .map_err(|_|"local speech worker output did not close".to_string()).and_then(|v|v);
+    Ok(std::process::Output{status,stdout:output(stdout)?,stderr:output(stderr)?})
+}
+
+#[cfg(windows)]
 fn probe_built_in_stt_status() -> Result<String, String> {
     let script = r#"
 $ErrorActionPreference = 'Stop'
@@ -556,10 +639,7 @@ $recognizer = [System.Speech.Recognition.SpeechRecognitionEngine]::InstalledReco
 if ($null -eq $recognizer) { throw 'Windows zh-CN speech recognizer is not installed' }
 [Console]::Write($recognizer.Description)
 "#;
-    let output = hidden_powershell()
-        .args(["-Command", script])
-        .output()
-        .map_err(|error| format!("failed to probe Windows speech recognizer: {error}"))?;
+    let output = bounded_speech_output(hidden_powershell().args(["-Command", script]),std::time::Duration::from_secs(10))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -635,11 +715,9 @@ try {
   $recognizer.Dispose()
 }
 "#;
-    let output = hidden_powershell()
+    let output = bounded_speech_output(hidden_powershell()
         .env("PET_MANAGER_STT_WAV", wav_path.as_os_str())
-        .args(["-Command", script])
-        .output()
-        .map_err(|error| format!("failed to start Windows speech recognition: {error}"))?;
+        .args(["-Command", script]),std::time::Duration::from_secs(45))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }

@@ -114,11 +114,17 @@ function Assert-CurrentAbLayout {
 
     $hasOta0 = $Layout -match "(?m)^ota_0,app,ota_0,0x10000,(2560K|0x280000),"
     $hasOta1 = $Layout -match "(?m)^ota_1,app,ota_1,0x290000,(2560K|0x280000),"
-    $hasStorage = $Layout -match "(?m)^storage,data,spiffs,0x520000,(7040K|0x6E0000),"
-    $hasAppearance0 = $Layout -match "(?m)^appearance0,data,64,0xc00000,(10M|0xA00000),"
-    $hasAppearance1 = $Layout -match "(?m)^appearance1,data,65,0x1600000,(10M|0xA00000),"
+    $hasStorage = $Layout -match "(?m)^storage,data,spiffs,0x520000,(9088K|0x8E0000),"
+    $hasAppearance0 = $Layout -match "(?m)^appearance0,data,64,0xe00000,(9M|9216K|0x900000),"
+    $hasAppearance1 = $Layout -match "(?m)^appearance1,data,65,0x1700000,(9M|9216K|0x900000),"
+    $legacy20 = ($Layout -match "(?m)^storage,data,spiffs,0x520000,(7040K|0x6E0000),") -and
+        ($Layout -match "(?m)^appearance0,data,64,0xc00000,(10M|0xA00000),") -and
+        ($Layout -match "(?m)^appearance1,data,65,0x1600000,(10M|0xA00000),")
+    if ($hasOta0 -and $hasOta1 -and $legacy20) {
+        throw "Legacy 20MiB appearance layout detected. Refusing partition-table overwrite: back up and migrate storage/appearances with the preservation tool first. OTA does not update the partition table; do not format SPIFFS."
+    }
     if (-not ($hasOta0 -and $hasOta1 -and $hasStorage -and $hasAppearance0 -and $hasAppearance1)) {
-        throw "Device does not use the current dual-OTA + 640x480 appearance layout. Use factory-flash -FactoryReset."
+        throw "Device layout is not the current 18MiB appearance layout. Refusing preserving flash; inspect and migrate with verified backups. No automatic format or factory reset."
     }
 }
 

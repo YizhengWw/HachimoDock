@@ -77,6 +77,10 @@ const P4_SCENE_SPRITE_MIN_FPS: i64 = 1;
 const P4_SCENE_SPRITE_MAX_FPS: i64 = 20;
 const P4_SCENE_SPRITE_MAX_SOURCE_BYTES: usize = 128 * 1024;
 const P4_WIDGET_MAX_VARS: usize = 8;
+const P4_QUOTA_ENGINE: &str = "p4-quota-v2";
+/// p4-quota-v2 ceilings; every other package keeps the v1 numbers.
+fn p4_quota_v2(widget: &serde_json::Value) -> bool { widget["quota"] == P4_QUOTA_ENGINE }
+fn p4_quota_v3(widget: &serde_json::Value) -> bool { widget["quota"] == "p4-quota-v3" }
 const P4_WIDGET_VAR_NAME_MAX_BYTES: usize = 31;
 const P4_WIDGET_STRING_VAR_MAX_BYTES: usize = 63;
 const P4_WIDGET_INT_MIN: i64 = -1_000_000_000;
@@ -251,6 +255,10 @@ fn validate_component_buttons(files: &HashMap<String, Vec<u8>>, errors: &mut Vec
     }
 }
 
+#[cfg(test)]
+#[path = "../../scripts/fixtures/device-json-tests.rs"]
+mod device_json_tests;
+
 fn validate_p4_compact_json_sizes(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
     for (path, max_bytes) in [
         ("runtime/widget.json", P4_WIDGET_JSON_MAX_BYTES),
@@ -265,7 +273,7 @@ fn validate_p4_compact_json_sizes(files: &HashMap<String, Vec<u8>>, errors: &mut
         let Ok(compact) = serde_json::to_vec(&value) else {
             continue;
         };
-        let max_bytes=if path=="runtime/widget.json"&&value["surface"]["graphics"]=="p4-app-graphics-v1"{8191}else{max_bytes};
+        let max_bytes=if path=="runtime/widget.json"&&p4_quota_v3(&value){12287}else if path=="runtime/widget.json"&&(value["surface"]["graphics"]=="p4-app-graphics-v1"||p4_quota_v2(&value)){8191}else{max_bytes};
         if compact.len() > max_bytes {
             errors.push(format!(
                 "{} 压缩后为 {} 字节，超过 P4 {} 字节上限",
@@ -277,6 +285,36 @@ fn validate_p4_compact_json_sizes(files: &HashMap<String, Vec<u8>>, errors: &mut
     }
 }
 
+fn validate_p4_device_json_strings(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    // Private PC documents and binary assets are NOT C-string device inputs.
+    for path in ["component.json", "negative-screen.json", "buttons.json", "runtime/widget.json"] {
+        let Some(bytes) = files.get(path) else { continue; };
+        let value: serde_json::Value = match serde_json::from_slice(bytes) {
+            Ok(value) => value,
+            Err(_) => {
+                errors.push(format!("{} 不是有效 UTF-8 JSON，或超过解析上限", path));
+                continue;
+            }
+        };
+        if !p4_json_depth_within(&value) {
+            errors.push(format!("{} 的设备 JSON 嵌套层级超过 32", path));
+        } else if !p4_json_strings_no_nul(&value) {
+            errors.push(format!("{} 的设备字符串不能包含 NUL", path));
+        }
+    }
+}
+
+pub(crate) fn p4_json_depth_within(value: &serde_json::Value) -> bool {
+    fn visit(value: &serde_json::Value, depth: usize) -> bool {
+        match value {
+            serde_json::Value::Array(items) => depth < 32 && items.iter().all(|v| visit(v, depth + 1)),
+            serde_json::Value::Object(items) => depth < 32 && items.values().all(|v| visit(v, depth + 1)),
+            _ => true,
+        }
+    }
+    visit(value, 0)
+}
+
 fn valid_p4_var_name(name: &str) -> bool {
     let bytes = name.as_bytes();
     !bytes.is_empty()
@@ -286,16 +324,41 @@ fn valid_p4_var_name(name: &str) -> bool {
         })
 }
 
+// Values here have already passed serde_json's UTF-8/syntax/depth checks.
+// Inspect keys as well as values before any cJSON C-string boundary can lose
+// their lengths. No coercion, truncation or mutation of the original data.
+pub(crate) fn p4_json_strings_no_nul(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::String(s) => !s.contains('\0'),
+        serde_json::Value::Array(a) => a.iter().all(p4_json_strings_no_nul),
+        serde_json::Value::Object(o) => o.iter().all(|(k,v)| !k.contains('\0') && p4_json_strings_no_nul(v)),
+        _ => true,
+    }
+}
+
 pub(crate) fn validate_p4_vars_object(
     vars: &serde_json::Map<String, serde_json::Value>,
 ) -> Result<(), String> {
-    if vars.len() > P4_WIDGET_MAX_VARS {
+    validate_p4_vars_object_capped(vars, P4_WIDGET_MAX_VARS)
+}
+
+/// Explicit profile ceilings: v1/v2 use 63-byte strings; the negotiated v3
+/// ceiling of 32 variables permits 127 bytes. Callers must negotiate the profile.
+pub(crate) fn validate_p4_vars_object_capped(
+    vars: &serde_json::Map<String, serde_json::Value>,
+    max_vars: usize,
+) -> Result<(), String> {
+    let max_string_bytes=if max_vars==32 {127}else{P4_WIDGET_STRING_VAR_MAX_BYTES};
+    if vars.len() > max_vars {
         return Err(format!(
             "runtime/widget.json.vars 最多允许 {} 个变量",
-            P4_WIDGET_MAX_VARS
+            max_vars
         ));
     }
     for (name, declaration) in vars {
+        if name.contains('\0') || !p4_json_strings_no_nul(declaration) {
+            return Err("runtime/widget.json.vars 的设备字符串不能包含 NUL".into());
+        }
         let label = format!("runtime/widget.json.vars.{}", name);
         if !valid_p4_var_name(name) {
             return Err(format!("{} 的变量名无效", label));
@@ -337,11 +400,11 @@ pub(crate) fn validate_p4_vars_object(
             }
         } else if !init
             .as_str()
-            .is_some_and(|value| value.len() <= P4_WIDGET_STRING_VAR_MAX_BYTES)
+            .is_some_and(|value| value.len() <= max_string_bytes)
         {
             return Err(format!(
                 "{}.init 必须是最多 {} 个 UTF-8 字节的字符串",
-                label, P4_WIDGET_STRING_VAR_MAX_BYTES
+                label, max_string_bytes
             ));
         }
     }
@@ -364,7 +427,7 @@ fn validate_p4_widget_vars_shape(files: &HashMap<String, Vec<u8>>, errors: &mut 
         return;
     };
     if let Some(vars) = vars.as_object() {
-        if let Err(error) = validate_p4_vars_object(vars) {
+        if let Err(error) = validate_p4_vars_object_capped(vars, if p4_quota_v3(&widget) {32} else if p4_quota_v2(&widget) {16} else {P4_WIDGET_MAX_VARS}) {
             errors.push(error);
         }
         return;
@@ -377,18 +440,142 @@ fn validate_p4_widget_vars_shape(files: &HashMap<String, Vec<u8>>, errors: &mut 
     );
 }
 
+/// Mirror firmware `parse_dashboard`/`parse_value` (pet_p4_miniapp.c) so a package the
+/// device would reject at commit with "dashboard value rule is unsupported" fails on the
+/// PC first. Leaves are a literal, {var}, {fmt_mmss} or {fmt_hms} (extra keys are ignored
+/// exactly like the device); switch branches are leaves; progress takes {pct_of, of_max, label}.
+fn validate_p4_runtime_dashboard_rules(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    let Some(widget) = files
+        .get("runtime/widget.json")
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(bytes).ok())
+    else {
+        return;
+    };
+    if !widget
+        .get("engine")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|engine| engine.starts_with("p4-bounded-runtime-"))
+    {
+        return;
+    }
+    let Some(dashboard) = widget.get("dashboard").and_then(serde_json::Value::as_object) else {
+        return;
+    };
+    let vars = widget.get("vars").and_then(serde_json::Value::as_object);
+    let var_type = |name: &str| {
+        vars.and_then(|v| v.get(name))
+            .and_then(|declaration| declaration.get("type"))
+            .and_then(serde_json::Value::as_str)
+    };
+    let states: Vec<&str> = widget
+        .get("states")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| list.iter().filter_map(serde_json::Value::as_str).collect())
+        .unwrap_or_default();
+    let pages: Vec<&str> = widget
+        .get("pages")
+        .and_then(serde_json::Value::as_array)
+        .map(|list| list.iter().filter_map(|page| page.get("id").and_then(serde_json::Value::as_str)).collect())
+        .unwrap_or_default();
+    let hint = "设备只接受字符串、{var}、{fmt_mmss}、{fmt_hms}、顶层 switch_state/switch_page（分支不能再嵌套）以及 progress 专用 {pct_of,of_max,label}";
+    let leaf = |item: &serde_json::Value, location: &str, errors: &mut Vec<String>| {
+        if item.is_string() {
+            return;
+        }
+        let Some(object) = item.as_object() else {
+            errors.push(format!("{location} 必须是字符串或值规则对象；{hint}"));
+            return;
+        };
+        if let Some(index)=object.get("text_at") {
+            if object.len()!=1 {errors.push(format!("{location} text_at 不能混用其他值规则"));return;}
+            if let Err(error)=crate::component_extension::app_texts::validate_reference(index,&widget){errors.push(format!("{location}: {error}"));}
+            return;
+        }
+        let rule = ["var", "fmt_mmss", "fmt_hms"].into_iter().find_map(|key| {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .filter(|name| !name.is_empty())
+                .map(|name| (key, name))
+        });
+        let Some((key, name)) = rule else {
+            errors.push(format!(
+                "{location} 不是设备支持的值规则（设备会以 dashboard value rule is unsupported 拒绝）；{hint}"
+            ));
+            return;
+        };
+        match var_type(name) {
+            None => errors.push(format!("{location} 引用了未知变量 {name}")),
+            Some(kind) if key != "var" && kind != "int" => {
+                errors.push(format!("{location} 的 {key} 需要 int 变量，{name} 不是"))
+            }
+            _ => {}
+        }
+    };
+    for (slot, value) in dashboard {
+        let location = format!("runtime/widget.json.dashboard.{slot}");
+        if !COMPONENT_DASHBOARD_V1_SLOTS.iter().any(|(known, _)| known == slot) {
+            errors.push(format!("{location} 不是设备支持的槽位"));
+            continue;
+        }
+        if slot == "progress" && value.get("pct_of").is_some() {
+            for key in ["pct_of", "of_max"] {
+                if !matches!(
+                    value.get(key).and_then(serde_json::Value::as_str).map(var_type),
+                    Some(Some("int"))
+                ) {
+                    errors.push(format!("{location}.{key} 需要已声明的 int 变量"));
+                }
+            }
+            continue;
+        }
+        let switch = ["switch_state", "switch_page"]
+            .into_iter()
+            .find_map(|key| value.get(key).map(|map| (key, map)));
+        if let Some((key, map)) = switch {
+            let Some(choices) = map.as_object() else {
+                errors.push(format!("{location}.{key} 必须是对象"));
+                continue;
+            };
+            let max_choices: usize = if p4_quota_v3(&widget) {12} else if p4_quota_v2(&widget) {8} else {6};
+            if choices.len() > max_choices {
+                errors.push(format!("{location}.{key} 最多 {max_choices} 个分支"));
+            }
+            let (selectors, kind) = if key == "switch_state" { (&states, "state") } else { (&pages, "page") };
+            for (selector, choice) in choices {
+                if !selectors.iter().any(|known| *known == selector.as_str()) {
+                    errors.push(format!("{location}.{key} 引用了未知 {kind} {selector}"));
+                }
+                if choice.get("switch_state").is_some()
+                    || choice.get("switch_page").is_some()
+                    || choice.get("pct_of").is_some()
+                {
+                    errors.push(format!(
+                        "{location}.{key}.{selector} 不能再嵌套 switch 或 progress 规则（设备会以 dashboard value rule is unsupported 拒绝）"
+                    ));
+                    continue;
+                }
+                leaf(choice, &format!("{location}.{key}.{selector}"), errors);
+            }
+            continue;
+        }
+        leaf(value, &location, errors);
+    }
+}
+
 fn validate_widget_data(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
     let Some(widget) = files.get("runtime/widget.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok()) else { return; };
     let Some(data) = widget.get("data") else { return; };
     let source = data.get("source").and_then(|v| v.as_str()).unwrap_or("");
     let page = data.get("page_var").and_then(|v| v.as_str()).unwrap_or("");
-    if !data.as_object().is_some_and(|v| v.len() == 2 && v.keys().all(|k| ["source", "page_var"].contains(&k.as_str())))
+    if !data.as_object().is_some_and(|v| v.keys().all(|k| ["source", "page_var","select_var","filters","refresh_action"].contains(&k.as_str())))
         || source.is_empty() || source.len() > 47 || !source.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
         || widget.get("engine").and_then(|v| v.as_str()) != Some("p4-bounded-runtime-v4")
         || widget.get("scene").is_some() || widget.get("game").is_some()
         || widget.get("vars").and_then(|v| v.get(page)).and_then(|v| v.get("type")).and_then(|v| v.as_str()) != Some("int") {
         errors.push("runtime/widget.json.data 需要受控 source 和整数 page_var；仅用于 v4 列表工具，不能混用 scene/game".into());
     }
+    if let Err(error)=crate::app_data_rows::config(data,Some(&widget)).and_then(|_|crate::app_data_rows::validate(&widget)){errors.push(error);}
 }
 
 fn validate_widget_instrument(files:&HashMap<String,Vec<u8>>,errors:&mut Vec<String>) {
@@ -428,6 +615,219 @@ fn validate_widget_media(files:&HashMap<String,Vec<u8>>,errors:&mut Vec<String>)
         if generic && rule["on"]=="media.lyrics" {errors.push("直播不支持歌词或进度跳转".into());}
         if !allowed.contains(&rule["on"].as_str().unwrap_or("")) || rule["from"]!="*" || rule.as_object().is_none_or(|r|r.len()!=2) {errors.push("media transition 只能声明受控 on 动作和 from=*，不接受变量或附加效果".into());}
     }}
+}
+
+const P4_LOGIC_ENGINE: &str = "p4-logic-v1";
+const P4_CONDITION_OPS: &[&str] = &["lte", "lt", "gte", "gt", "eq", "ne"];
+
+fn p4_int_var(widget: &serde_json::Value, name: Option<&serde_json::Value>) -> bool {
+    name.and_then(serde_json::Value::as_str)
+        .is_some_and(|n| widget["vars"][n]["type"] == "int")
+}
+
+fn validate_p4_condition(widget: &serde_json::Value, when: &serde_json::Value, label: &str, legacy_only: bool, max_items: usize, errors: &mut Vec<String>) {
+    let Some(object) = when.as_object() else { errors.push(format!("{} 必须是对象", label)); return; };
+    if let Some(all) = object.get("all") {
+        let items = all.as_array();
+        if legacy_only || object.len() != 1 || !items.is_some_and(|a| (1..=max_items).contains(&a.len())) {
+            errors.push(format!("{}.all 需要 logic={} 且 1-{} 个条件", label, P4_LOGIC_ENGINE, max_items));
+            return;
+        }
+        for (i, item) in items.unwrap().iter().enumerate() {
+            validate_p4_condition(widget, item, &format!("{}.all[{}]", label, i), true, 1, errors);
+        }
+        return;
+    }
+    if !object_has_only_keys(object, &["var", "lte", "op", "value"]) || !p4_int_var(widget, object.get("var")) {
+        errors.push(format!("{} 条件需要 int var 与 lte 或 op/value", label));
+        return;
+    }
+    if let Some(lte) = object.get("lte") {
+        if object.contains_key("op") || object.contains_key("value") || !json_int_between(Some(lte), -1_000_000_000, 1_000_000_000) {
+            errors.push(format!("{}.lte 必须是单独的有界整数阈值", label));
+        }
+        return;
+    }
+    if legacy_only && max_items != 1 {
+        errors.push(format!("{} 使用 op/value 需要声明 logic={}", label, P4_LOGIC_ENGINE));
+        return;
+    }
+    if !object.get("op").and_then(serde_json::Value::as_str).is_some_and(|op| P4_CONDITION_OPS.contains(&op)) {
+        errors.push(format!("{}.op 只接受 lte/lt/gte/gt/eq/ne", label));
+    }
+    match object.get("value") {
+        Some(serde_json::Value::Object(source)) => {
+            if source.len() != 1 || !p4_int_var(widget, source.get("var")) {
+                errors.push(format!("{}.value 的 {{var}} 必须引用 int 变量", label));
+            }
+        }
+        other => {
+            if !json_int_between(other, -1_000_000_000, 1_000_000_000) {
+                errors.push(format!("{}.value 必须是有界整数或 {{var}}", label));
+            }
+        }
+    }
+}
+
+/// p4-logic-v1: guards, else branches and {var} increments are accepted only when the
+/// package names the profile; the installer separately checks the device capability.
+fn validate_p4_widget_logic(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    let Some(widget) = files.get("runtime/widget.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok()) else { return; };
+    let declared = widget.get("logic").is_some();
+    let active = widget["logic"] == P4_LOGIC_ENGINE;
+    if declared {
+        if !active || widget["engine"] != P4_RUNTIME_ENGINE_V4 {
+            errors.push(format!("runtime/widget.json.logic 只接受 {} 且需要 {}", P4_LOGIC_ENGINE, P4_RUNTIME_ENGINE_V4));
+        }
+        // Native game presets may carry logic: their var mirror is inert, guards and tick conditions work.
+        if ["local", "media", "instrument", "host", "program"].iter().any(|k| widget.get(*k).is_some()) {
+            errors.push("logic 不与 local/media/instrument/host/program 混用".into());
+        }
+    }
+    let app = widget["surface"]["engine"] == "p4-app-surface-v1";
+    let check_sources = |rule: &serde_json::Value, label: &str, errors: &mut Vec<String>| {
+        for op in ["set", "inc"] {
+            if let Some(map) = rule.get(op).and_then(serde_json::Value::as_object) {
+                for (name, value) in map {
+                    if let Some(source) = value.as_object() {
+                        if op == "inc" && !active {
+                            errors.push(format!("{}.inc.{} 使用 {{var}} 需要声明 logic={}", label, name, P4_LOGIC_ENGINE));
+                        } else if op == "set" && !active && !app {
+                            errors.push(format!("{}.set.{} 使用 {{var}} 需要应用界面或 logic={}", label, name, P4_LOGIC_ENGINE));
+                        } else if source.len() != 1 || !p4_int_var(&widget, source.get("var")) || widget["vars"][name]["type"] != "int" {
+                            errors.push(format!("{}.{}.{} 的 {{var}} 必须在整数变量之间复制", label, op, name));
+                        }
+                    }
+                }
+            }
+        }
+    };
+    let states: Vec<&str> = widget["states"].as_array().map(|a| a.iter().filter_map(serde_json::Value::as_str).collect()).unwrap_or_default();
+    let pages: Vec<&str> = widget["pages"].as_array().map(|a| a.iter().filter_map(|p| p["id"].as_str()).collect()).unwrap_or_default();
+    for (index, transition) in widget["transitions"].as_array().into_iter().flatten().enumerate() {
+        let label = format!("transitions[{}]", index);
+        check_sources(transition, &label, errors);
+        let guarded = transition.get("when").is_some() || transition.get("else").is_some();
+        if guarded && !active {
+            errors.push(format!("{} 的 when/else 需要声明 logic={}", label, P4_LOGIC_ENGINE));
+            continue;
+        }
+        if let Some(when) = transition.get("when") {
+            validate_p4_condition(&widget, when, &format!("{}.when", label), false, 2, errors);
+        }
+        if let Some(otherwise) = transition.get("else") {
+            let Some(object) = otherwise.as_object() else { errors.push(format!("{}.else 必须是对象", label)); continue; };
+            if transition.get("when").is_none() || !object_has_only_keys(object, &["to", "page", "set", "inc"]) {
+                errors.push(format!("{}.else 需要 when，且只接受 to/page/set/inc", label));
+                continue;
+            }
+            if object.get("to").is_some_and(|t| !t.as_str().is_some_and(|t| states.contains(&t))) {
+                errors.push(format!("{}.else.to 引用了未知 state", label));
+            }
+            if object.get("page").is_some_and(|p| !p.as_str().is_some_and(|p| p == "next" || p == "prev" || pages.contains(&p))) {
+                errors.push(format!("{}.else.page 引用了未知 page", label));
+            }
+            if object.get("to").is_none() && object.get("page").is_none() && p4_widget_effect_count(otherwise) == 0 {
+                errors.push(format!("{}.else 必须改变状态、页面或变量", label));
+            }
+            check_sources(otherwise, &format!("{}.else", label), errors);
+            if p4_widget_effect_count(transition) + p4_widget_effect_count(otherwise) > P4_WIDGET_MAX_EFFECTS {
+                errors.push(format!("{} 主分支与 else 的 set+inc 合计超过 {} 项", label, P4_WIDGET_MAX_EFFECTS));
+            }
+        }
+    }
+    for (index, tick) in widget["tick"].as_array().into_iter().flatten().enumerate() {
+        let label = format!("tick[{}]", index);
+        check_sources(tick, &label, errors);
+        if let Some(then) = tick.get("then") { check_sources(then, &format!("{}.then", label), errors); }
+        if let Some(when) = tick.get("when") {
+            validate_p4_condition(&widget, when, &format!("{}.when", label), !active, 2, errors);
+        }
+    }
+    for (index, rule) in widget["scene"]["rules"].as_array().into_iter().flatten().enumerate() {
+        let label = format!("scene.rules[{}]", index);
+        if let Some(when) = rule.get("when") {
+            if !active { errors.push(format!("{}.when 需要声明 logic={}", label, P4_LOGIC_ENGINE)); }
+            else {
+                validate_p4_condition(&widget, when, &format!("{}.when", label), false, 1, errors);
+                // Scene mirrors use declaration slots, including string slots;
+                // negotiated app quotas do not expand this separate eight-slot ABI.
+                let conditions = when["all"].as_array().map(|a| a.as_slice()).unwrap_or_else(|| std::slice::from_ref(when));
+                for condition in conditions {
+                    for name in [condition.get("var"), condition["value"].get("var")].into_iter().flatten() {
+                        let index_ok = widget["vars"].as_object().and_then(|v| v.keys().position(|k| Some(k.as_str()) == name.as_str())).is_some_and(|i| i < 8);
+                        if !index_ok { errors.push(format!("{}.when 必须引用前 8 个声明里的 int 变量", label)); }
+                    }
+                }
+            }
+        }
+        for (i, op) in rule["do"].as_array().into_iter().flatten().enumerate() {
+            if op["op"] == "var" {
+                let index_ok = widget["vars"].as_object().and_then(|v| v.keys().position(|k| Some(k.as_str()) == op["name"].as_str())).is_some_and(|i| i < 8);
+                if !active { errors.push(format!("{}.do[{}] var 需要声明 logic={}", label, i, P4_LOGIC_ENGINE)); }
+                else if !p4_int_var(&widget, op.get("name")) || !index_ok { errors.push(format!("{}.do[{}] var 必须引用前 8 个声明里的 int 变量", label, i)); }
+            }
+        }
+    }
+}
+
+/// Negotiated quota v2/v3: array ceilings are negotiated per package; v1 packages keep every original number.
+fn validate_p4_widget_quota(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    let Some(widget) = files.get("runtime/widget.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok()) else { return; };
+    let declared = widget.get("quota").is_some();
+    let v2 = p4_quota_v2(&widget);
+    let v3 = p4_quota_v3(&widget);
+    if declared && (!(v2||v3) || widget["engine"] != P4_RUNTIME_ENGINE_V4 || widget.get("game").is_some()) {
+        errors.push(format!("runtime/widget.json.quota 只接受 {} / p4-quota-v3 且需要 {}，不与旧版 game 混用", P4_QUOTA_ENGINE, P4_RUNTIME_ENGINE_V4));
+    }
+    let cap = |v1: usize, v2cap: usize, v3cap: usize| if v3 {v3cap} else if v2 {v2cap} else {v1};
+    let count = |key: &str| widget[key].as_array().map_or(0, |a| a.len());
+    if count("states") > cap(6, 8, 16) { errors.push(format!("runtime/widget.json.states 最多 {} 个", cap(6, 8, 16))); }
+    if count("pages") > cap(4, 6, 12) { errors.push(format!("runtime/widget.json.pages 最多 {} 个", cap(4, 6, 12))); }
+    let input_v1 = widget["input"]["engine"] == "p4-input-v1";
+    let transitions_cap = if input_v1 { cap(24, 32, 48) } else { 12 };
+    if count("transitions") > transitions_cap { errors.push(format!("runtime/widget.json.transitions 最多 {} 条", transitions_cap)); }
+    if count("tick") > cap(8, 12, 16) { errors.push(format!("runtime/widget.json.tick 最多 {} 条", cap(8, 12, 16))); }
+    let nodes = widget["surface"]["elements"].as_array().map_or(0, |a| a.len());
+    if nodes > cap(32, 48, 64) { errors.push(format!("surface.elements 最多 {} 个节点", cap(32, 48, 64))); }
+    let saved = widget["persist"]["vars"].as_array().map_or(0, |a| a.len());
+    if saved > cap(8, 16, 32) { errors.push(format!("persist.vars 最多 {} 个", cap(8, 16, 32))); }
+    for group in widget["local"]["groups"].as_array().into_iter().flatten() {
+        if group["items"].as_array().map_or(0, |a| a.len()) > cap(16, 24, 64) { errors.push(format!("local 内容池每组最多 {} 项", cap(16, 24, 64))); }
+    }
+}
+
+const P4_SFX_ENGINE: &str = "p4-sfx-v1";
+const P4_SFX_PRESETS: &[&str] = &["tap", "beep", "chirp", "low", "water", "page"];
+fn p4_sfx_cues(widget: &serde_json::Value) -> Vec<String> {
+    if widget["sfx"]["engine"] != P4_SFX_ENGINE { return vec![]; }
+    widget["sfx"]["cues"].as_array().into_iter().flatten().filter_map(|c| c["id"].as_str().map(str::to_string)).collect()
+}
+/// p4-sfx-v1: fixed presets, 1-8 named cues, references only to declared cues.
+fn validate_p4_widget_sfx(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<String>) {
+    let Some(widget) = files.get("runtime/widget.json").and_then(|b| serde_json::from_slice::<serde_json::Value>(b).ok()) else { return; };
+    let cues = p4_sfx_cues(&widget);
+    if let Some(sfx) = widget.get("sfx") {
+        let valid = sfx.as_object().is_some_and(|o| object_has_only_keys(o, &["engine", "volume", "cues"]))
+            && sfx["engine"] == P4_SFX_ENGINE && widget["engine"] == P4_RUNTIME_ENGINE_V4
+            && json_int_between(sfx.get("volume"), 0, 100)
+            && sfx["cues"].as_array().is_some_and(|c| (1..=8).contains(&c.len()) && c.iter().all(|cue| cue.as_object().is_some_and(|o| object_has_only_keys(o, &["id", "preset"]))
+                && cue["id"].as_str().is_some_and(|id| valid_scene_id(id, 15)) && cue["preset"].as_str().is_some_and(|p| P4_SFX_PRESETS.contains(&p))))
+            && cues.iter().collect::<std::collections::HashSet<_>>().len() == cues.len();
+        if !valid { errors.push("runtime/widget.json.sfx 需要 engine=p4-sfx-v1、volume 0-100 与 1-8 个唯一 cue（预设 tap/beep/chirp/low/water/page）".into()); }
+        if ["instrument", "media", "local", "program"].iter().any(|k| widget.get(*k).is_some()) { errors.push("sfx 不与 instrument/media/local/program 混用".into()); }
+    }
+    for (i, t) in widget["transitions"].as_array().into_iter().flatten().enumerate() {
+        if t.get("sfx").is_some() && !t["sfx"].as_str().is_some_and(|c| cues.iter().any(|k| k == c)) { errors.push(format!("transitions[{}].sfx 需要声明 sfx 并引用已声明 cue", i)); }
+    }
+    for (i, t) in widget["tick"].as_array().into_iter().flatten().enumerate() {
+        if t["then"].get("sfx").is_some() && !t["then"]["sfx"].as_str().is_some_and(|c| cues.iter().any(|k| k == c)) { errors.push(format!("tick[{}].then.sfx 需要声明 sfx 并引用已声明 cue", i)); }
+    }
+    for (i, rule) in widget["scene"]["rules"].as_array().into_iter().flatten().enumerate() {
+        for (j, op) in rule["do"].as_array().into_iter().flatten().enumerate() {
+            if op["op"] == "sfx" && !op["cue"].as_str().is_some_and(|c| cues.iter().any(|k| k == c)) { errors.push(format!("scene.rules[{}].do[{}] sfx 需要声明 sfx 并引用已声明 cue", i, j)); }
+        }
+    }
 }
 
 fn p4_widget_effect_count(rule: &serde_json::Value) -> usize {
@@ -552,6 +952,13 @@ fn validate_scene_op(
         .unwrap_or("");
     let entity_known = scene_entity_known(operation, "entity", entity_ids);
     match name {
+        "impulse" => {
+            if operation.len()!=4 || !object_has_only_keys(operation,&["op","entity","dx","dy"]) || !entity_known
+                || !json_int_between(operation.get("dx"),-64,64) || !json_int_between(operation.get("dy"),-64,64)
+                || (operation.get("dx").and_then(|v|v.as_i64())==Some(0)&&operation.get("dy").and_then(|v|v.as_i64())==Some(0)) {
+                errors.push(format!("{} impulse 刚体引用或向量无效",label));
+            }
+        }
         "move" => {
             if !object_has_only_keys(operation, &["op", "entity", "dx", "dy"])
                 || !entity_known
@@ -642,6 +1049,24 @@ fn validate_scene_op(
                 errors.push(format!("{} tone 需要实体及 1..4 色阶", label));
             }
         }
+        "sfx" => {
+            if !object_has_only_keys(operation, &["op", "cue"]) || operation.get("cue").and_then(serde_json::Value::as_str).is_none() {
+                errors.push(format!("{} sfx 需要 cue", label));
+            }
+        }
+        "var" => {
+            // p4-logic-v1 scene var write; the logic profile itself is checked in validate_p4_widget_logic.
+            let has_set = operation.contains_key("set");
+            let has_inc = operation.contains_key("inc");
+            let value = if has_set { operation.get("set") } else { operation.get("inc") };
+            if !object_has_only_keys(operation, &["op", "name", "set", "inc"])
+                || has_set == has_inc
+                || !json_int_between(value, -10000, 10000)
+                || operation.get("name").and_then(serde_json::Value::as_str).is_none()
+            {
+                errors.push(format!("{} var 需要 name 与一个 -10000..10000 的 set/inc", label));
+            }
+        }
         _ => errors.push(format!("{}.op 不支持 {}", label, name)),
     }
 }
@@ -665,6 +1090,14 @@ fn validate_component_scene(
         errors.push("runtime/widget.json scene 必须是对象".to_string());
         return;
     };
+    if scene.get("engine").and_then(|v|v.as_str())==Some(crate::side_scene::ENGINE){
+        if let Err(e)=crate::side_scene::validate_runtime(widget){errors.push(e);}
+        match files.get("buttons.json").and_then(|bytes|serde_json::from_slice::<serde_json::Value>(bytes).ok()){
+            Some(buttons)=>if let Err(e)=crate::side_scene::validate_buttons(widget,&buttons){errors.push(e);},
+            None=>errors.push("横版场景缺少按键声明".into()),
+        }
+        return;
+    }
     let slicing = scene.get("engine").and_then(|v|v.as_str()) == Some("p4-touch-slice-v1");
     if !object_has_only_keys(
         scene,
@@ -678,7 +1111,7 @@ fn validate_component_scene(
             "sprites",
             "entities",
             "rules",
-            "motion",
+            "motion", "bodies", "gravity",
         ][..] },
     ) {
         errors.push("runtime/widget.json scene 含未知字段".to_string());
@@ -687,12 +1120,14 @@ fn validate_component_scene(
     let sprites = scene.get("sprites").and_then(|value| value.as_array());
     let mut sprite_ids = HashSet::new();
     let mut sprite_pixels = 0_i64;
+    // p4-graphics-v2 raises the sheet/pixel ceilings only for packages naming the profile.
+    let sprite_limits = crate::app_graphics::limits(Some(widget));
     if scene.contains_key("sprites")
-        && !sprites.is_some_and(|items| items.len() <= P4_SCENE_MAX_SPRITES)
+        && !sprites.is_some_and(|items| items.len() <= sprite_limits.scene_sprites)
     {
         errors.push(format!(
             "runtime/widget.json scene.sprites 最多允许 {} 项",
-            P4_SCENE_MAX_SPRITES
+            sprite_limits.scene_sprites
         ));
     }
     if sprites.is_some_and(|items| !items.is_empty()) && runtime_engine != P4_RUNTIME_ENGINE_V4 {
@@ -785,10 +1220,10 @@ fn validate_component_scene(
             None => errors.push(format!("{} 引用的素材不存在: {}", label, asset)),
         }
     }
-    if sprite_pixels > P4_SCENE_MAX_SPRITE_PIXELS {
+    if sprite_pixels > sprite_limits.sprite_pixels {
         errors.push(format!(
             "runtime/widget.json scene.sprites 总像素超过 {}",
-            P4_SCENE_MAX_SPRITE_PIXELS
+            sprite_limits.sprite_pixels
         ));
     }
     if slicing {
@@ -809,7 +1244,7 @@ fn validate_component_scene(
         if !valid || !game_kind {errors.push("触控切果需要 v4 game、四张精灵、受限参数及开始/暂停动作".into());}
         return;
     }
-    if !json_int_between(scene.get("tick_ms"), if scene.contains_key("motion"){16}else{100}, if scene.contains_key("motion"){40}else{2000}) {
+    if !json_int_between(scene.get("tick_ms"), if scene.contains_key("bodies"){20}else if scene.contains_key("motion"){16}else{100}, if scene.contains_key("bodies"){200}else if scene.contains_key("motion"){40}else{2000}) {
         errors.push("runtime/widget.json scene.tick_ms 必须在 100-2000".to_string());
     }
     let state_ids: HashSet<&str> = widget
@@ -1042,7 +1477,7 @@ fn validate_component_scene(
             errors.push(format!("{} 必须是对象", label));
             continue;
         };
-        if !object_has_only_keys(rule, &["on", "entity", "with", "edge", "do"]) {
+        if !object_has_only_keys(rule, &["on", "entity", "with", "edge", "do", "when"]) {
             errors.push(format!("{} 含未知字段", label));
         }
         let trigger = rule
@@ -1139,7 +1574,7 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         .get("type")
         .and_then(|value| value.as_str())
         .unwrap_or("");
-    if !matches!(game_type, "blocks" | "snake" | "flappy") {
+    if !matches!(game_type, "blocks" | "snake" | "flappy" | "gomoku") {
         errors.push(format!(
             "runtime/widget.json game.type 不支持 {}",
             game_type
@@ -1227,6 +1662,9 @@ fn validate_component_game(files: &HashMap<String, Vec<u8>>, errors: &mut Vec<St
         vec!["start", "left", "right", "rotate", "drop"]
     } else if game_type == "snake" {
         vec!["start", "left", "right"]
+    } else if game_type == "gomoku" {
+        // place doubles as start/restart; the cursor needs all four directions.
+        vec!["place", "left", "right", "up", "down", "undo"]
     } else {
         vec!["flap"]
     };
@@ -1309,10 +1747,8 @@ pub fn validate_clawpkg_bytes(bytes: &[u8]) -> Result<ValidateClawpkgResult, Str
         if entry.size() > CLAWPKG_MAX_ENTRY_BYTES {
             return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
         }
-        expanded_bytes = expanded_bytes
-            .checked_add(entry.size())
-            .ok_or_else(|| "clawpkg 解压大小溢出".to_string())?;
-        if expanded_bytes > CLAWPKG_MAX_EXPANDED_BYTES {
+        let remaining = CLAWPKG_MAX_EXPANDED_BYTES - expanded_bytes;
+        if entry.size() > remaining {
             return Err("clawpkg 解压后总大小超过上限".to_string());
         }
         for d in REQUIRED_DIRS {
@@ -1321,13 +1757,20 @@ pub fn validate_clawpkg_bytes(bytes: &[u8]) -> Result<ValidateClawpkgResult, Str
             }
         }
         if entry.is_file() {
+            let declared = entry.size();
             let mut buf = Vec::new();
             entry
-                .take(CLAWPKG_MAX_ENTRY_BYTES + 1)
+                .take(CLAWPKG_MAX_ENTRY_BYTES.min(remaining) + 1)
                 .read_to_end(&mut buf)
                 .map_err(|e| e.to_string())?;
             if buf.len() as u64 > CLAWPKG_MAX_ENTRY_BYTES {
                 return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
+            }
+            expanded_bytes = expanded_bytes.checked_add(buf.len() as u64)
+                .filter(|n| *n <= CLAWPKG_MAX_EXPANDED_BYTES)
+                .ok_or("clawpkg 解压后总大小超过上限")?;
+            if buf.len() as u64 != declared {
+                return Err(format!("clawpkg 文件 {} 声明长度与实际解压长度不一致", name));
             }
             if files.contains_key(&name) {
                 return Err(format!("clawpkg 含重复路径: {}", name));
@@ -1359,6 +1802,7 @@ fn build_manifest_preview(
     let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
     let kind = v.get("kind").and_then(|x| x.as_str());
     let had_errors_before = errors.len();
+    validate_p4_device_json_strings(files, errors);
     if id.is_empty() || name.is_empty() || version.is_empty() {
         errors.push("component.json 必须含 id、name、version".to_string());
     }
@@ -1374,10 +1818,19 @@ fn build_manifest_preview(
     validate_component_buttons(files, errors);
     validate_p4_compact_json_sizes(files, errors);
     validate_p4_widget_vars_shape(files, errors);
+    validate_p4_runtime_dashboard_rules(files, errors);
     validate_widget_data(files, errors);
     validate_widget_media(files, errors);
     if let Some(runtime)=files.get("runtime/widget.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()){
+        // Track C extensions (sequence/samples/clip/big_images/events) are validated by their own
+        // module; the unchanged validators see the base declaration.
+        let source_runtime = runtime;
+        let runtime=crate::component_capability_ext::strip(&source_runtime);
         if let Err(e)=crate::component_extension::validate_app_runtime(&runtime){errors.push(e);}
+        if runtime.get("form").is_some(){
+            let buttons=files.get("buttons.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()).unwrap_or_default();
+            if let Err(e)=crate::component_extension::app_form::validate_bindings(&runtime,&buttons){errors.push(e);}
+        }
         if let Some(hold)=runtime["input"]["hold"].as_str(){
             let b=files.get("buttons.json").and_then(|v|serde_json::from_slice::<serde_json::Value>(v).ok());
             if !b.as_ref().and_then(|v|v.as_array()).is_some_and(|a|a.iter().any(|b|b["action"]==hold&&b["event"]=="button.sw1.short_press")){errors.push("蓄力动作必须绑定 SW1 短按以捕获按住和松开".into());}
@@ -1386,24 +1839,30 @@ fn build_manifest_preview(
             match files.get("pc/application.json").ok_or("缺少 PC 应用声明".to_string()).and_then(|b|crate::app_services::parse(b,&runtime)){
                 Ok(_)=>{},Err(e)=>errors.push(e)
             }
-            let images:HashSet<_>=runtime["surface"]["images"].as_array().into_iter().flatten().filter_map(|v|v["asset"].as_str()).collect();
+            let mut images:HashSet<String>=runtime["surface"]["images"].as_array().into_iter().flatten().filter_map(|v|v["asset"].as_str().map(str::to_owned)).collect();
+            if let (Some((frames,_)),Some(asset))=(crate::app_graphics::keyframes(&runtime["surface"]),runtime["surface"]["images"][0]["asset"].as_str()){for k in 2..=frames{images.insert(crate::app_graphics::keyframe_asset(asset,k));}}
             for path in files.keys(){
                 let notice=path=="LICENSE.txt"||path=="THIRD_PARTY_NOTICES.txt"||path.starts_with("licenses/");
-                if !REQUIRED_FILES.contains(&path.as_str())&&path!="pc/application.json"&&path!="assets/.keep"&&!images.contains(path.as_str())&&!notice{errors.push("PC 应用包含额外文件".into());}
+                let media=crate::component_capability_ext::media_assets(&source_runtime).iter().any(|(p,_)|p==path);
+                if !REQUIRED_FILES.contains(&path.as_str())&&path!="pc/application.json"&&path!="assets/.keep"&&!images.contains(path.as_str())&&!media&&!notice{errors.push("PC 应用包含额外文件".into());}
             }
         }
         if runtime.get("surface").is_some()&&runtime.get("media").is_none(){
             let game_surface=runtime["surface"].get("game_view").is_some();
             let data_surface=runtime["surface"].get("data_view").is_some();
             let scene_surface=runtime["surface"].get("scene_view").is_some();
-            if runtime["engine"]!="p4-bounded-runtime-v4"||(game_surface&&kind!=Some("game"))||(data_surface&&kind!=Some("tool"))||(!game_surface&&!data_surface&&!scene_surface&&(kind!=Some("tool")||["scene","game","instrument","data"].iter().any(|k|runtime.get(*k).is_some()))){
+            let side_surface=runtime["scene"]["engine"]==crate::side_scene::ENGINE;
+            if runtime["engine"]!="p4-bounded-runtime-v4"||((game_surface||side_surface)&&kind!=Some("game"))||(data_surface&&kind!=Some("tool"))||(!game_surface&&!data_surface&&!scene_surface&&!side_surface&&(kind!=Some("tool")||["scene","game","instrument","data"].iter().any(|k|runtime.get(*k).is_some()))){
                 errors.push("通用应用布局仅支持 v4 tool，不能混用原生场景".into());
             }
             if let Err(e)=crate::component_extension::validate_app_surface(&runtime["surface"],Some(&runtime)){errors.push(e);}
-            for im in runtime["surface"]["images"].as_array().into_iter().flatten(){
-                match im["asset"].as_str().and_then(|p|files.get(p)){
-                    Some(bytes)=>{if let Err(e)=crate::component_extension::decode_surface_image(im,bytes){errors.push(e);}},
-                    None=>errors.push("通用应用图片缺失".into())
+            for (index,im) in runtime["surface"]["images"].as_array().into_iter().flatten().enumerate(){
+                let frames=if index==0{crate::app_graphics::keyframes(&runtime["surface"]).map_or(1,|(f,_)|f)}else{1};
+                for frame in 1..=frames{
+                    match im["asset"].as_str().map(|p|crate::app_graphics::keyframe_asset(p,frame)).and_then(|p|files.get(&p)){
+                        Some(bytes)=>{if let Err(e)=crate::component_extension::decode_surface_image(im,bytes){errors.push(e);}},
+                        None=>errors.push("通用应用图片缺失".into())
+                    }
                 }
             }
         }
@@ -1427,10 +1886,23 @@ fn build_manifest_preview(
         // excludes them. Match the server/PetUI gate without allowing scripts
         // or general-purpose files under the licenses directory.
         let license_path=regex::Regex::new(r"^licenses/[A-Za-z0-9_.-]+\.(?:txt|md)$").expect("static license path");
-        if files.keys().any(|p|!REQUIRED_FILES.contains(&p.as_str())&&p!="pc/extension.json"&&p!="assets/.keep"&&p!="LICENSE.txt"&&p!="THIRD_PARTY_NOTICES.txt"&&!license_path.is_match(p)&&!allowed.contains(p.as_str())){errors.push("声明式媒体包不能携带用户数据、凭据或额外文件".into());}
+        let catalog_path=crate::component_extension::CATALOG_PATH;
+        if files.keys().any(|p|!REQUIRED_FILES.contains(&p.as_str())&&p!="pc/extension.json"&&p!=catalog_path&&p!="assets/.keep"&&p!="LICENSE.txt"&&p!="THIRD_PARTY_NOTICES.txt"&&!license_path.is_match(p)&&!allowed.contains(p.as_str())){errors.push("声明式媒体包不能携带用户数据、凭据或额外文件".into());}
+        // A bundled catalog must be declared, present, and bounded; never one without the other.
+        let declared=files.get("pc/extension.json").and_then(|b|serde_json::from_slice::<serde_json::Value>(b).ok()).and_then(|v|v["search"]["catalog"].as_str().map(str::to_owned));
+        match (declared.as_deref(),files.get(catalog_path)) {
+            (Some(path),Some(bytes)) if path==catalog_path => { if let Err(e)=crate::component_extension::Extension::validate_catalog_bytes(bytes){errors.push(e);} }
+            (Some(_),_) => errors.push("PC 扩展声明了包内电台目录，但缺少 pc/catalog.json".into()),
+            (None,Some(_)) => errors.push("pc/catalog.json 必须由 pc/extension.json 的 search.catalog 声明".into()),
+            (None,None) => {}
+        }
     }
     validate_widget_instrument(files, errors);
     validate_p4_widget_effect_bounds(files, errors);
+    validate_p4_widget_logic(files, errors);
+    validate_p4_widget_quota(files, errors);
+    validate_p4_widget_sfx(files, errors);
+    crate::component_capability_ext::validate(files, errors);
     validate_component_game(files, errors);
     /* Read dashboard. Most slots are flat strings; `progress` may be an object
     {value, label} which we flatten to "<value>:<label>" so it serializes as
@@ -1533,22 +2005,15 @@ fn collect_clawpkg_directory_files(
             if size > CLAWPKG_MAX_ENTRY_BYTES {
                 return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
             }
-            expanded_bytes = expanded_bytes
-                .checked_add(size)
-                .ok_or_else(|| "clawpkg 解压大小溢出".to_string())?;
-            if expanded_bytes > CLAWPKG_MAX_EXPANDED_BYTES {
+            let remaining = CLAWPKG_MAX_EXPANDED_BYTES - expanded_bytes;
+            if size > remaining {
                 return Err("clawpkg 解压后总大小超过上限".to_string());
             }
 
-            let mut bytes = Vec::new();
-            std::fs::File::open(&path)
-                .map_err(|error| format!("read {}: {}", path.display(), error))?
-                .take(CLAWPKG_MAX_ENTRY_BYTES + 1)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("read {}: {}", path.display(), error))?;
-            if bytes.len() as u64 > CLAWPKG_MAX_ENTRY_BYTES {
-                return Err(format!("clawpkg 文件 {} 超过单文件大小上限", name));
-            }
+            let bytes = read_clawpkg_source_file(&path, CLAWPKG_MAX_ENTRY_BYTES.min(remaining))?;
+            expanded_bytes = expanded_bytes.checked_add(bytes.len() as u64)
+                .filter(|n| *n <= CLAWPKG_MAX_EXPANDED_BYTES)
+                .ok_or("clawpkg 解压后总大小超过上限")?;
             if files.insert(name.clone(), bytes).is_some() {
                 return Err(format!("clawpkg 含重复路径: {}", name));
             }
@@ -1556,6 +2021,53 @@ fn collect_clawpkg_directory_files(
     }
 
     Ok(files)
+}
+
+/// Read an explicit local source, never a FIFO/device or a followed final symlink.
+/// Bound actual bytes and recheck the opened descriptor, not only path metadata.
+pub(crate) fn read_clawpkg_source_file(path: &std::path::Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let before = std::fs::symlink_metadata(path).map_err(|_| "clawpkg 源文件不可读")?;
+    if !before.file_type().is_file() || before.len() > max_bytes {
+        return Err("clawpkg 源必须为大小受限的普通文件".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)] {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)] {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000).share_mode(1);
+    }
+    let mut file = options.open(path).map_err(|_| "clawpkg 源文件不可读")?;
+    let opened = file.metadata().map_err(|_| "clawpkg 源文件不可读")?;
+    if !opened.is_file() || opened.len() > max_bytes {
+        return Err("clawpkg 源必须为大小受限的普通文件".into());
+    }
+    #[cfg(unix)] {
+        use std::os::unix::fs::MetadataExt;
+        if before.dev() != opened.dev() || before.ino() != opened.ino() {
+            return Err("clawpkg 源文件已变化".into());
+        }
+    }
+    #[cfg(windows)] {
+        use std::os::windows::fs::MetadataExt;
+        if opened.file_attributes() & 0x400 != 0 {
+            return Err("clawpkg 源不允许重解析点".into());
+        }
+    }
+    let limit = max_bytes.checked_add(1).ok_or("clawpkg 读取限额无效")?;
+    let mut bytes = Vec::new();
+    (&mut file).take(limit).read_to_end(&mut bytes).map_err(|_| "clawpkg 源文件读取失败")?;
+    if bytes.len() as u64 > max_bytes {
+        return Err("clawpkg 源文件超过大小上限".into());
+    }
+    if bytes.len() as u64 != opened.len()
+        || file.metadata().map_err(|_| "clawpkg 源文件不可读")?.len() != opened.len() {
+        return Err("clawpkg 源文件读取期间变化".into());
+    }
+    Ok(bytes)
 }
 
 pub fn validate_clawpkg_at_path(path: &std::path::Path) -> Result<ValidateClawpkgResult, String> {
@@ -1577,7 +2089,7 @@ pub fn validate_clawpkg_at_path(path: &std::path::Path) -> Result<ValidateClawpk
                 CLAWPKG_MAX_ARCHIVE_BYTES
             ));
         }
-        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+        let bytes = read_clawpkg_source_file(path, CLAWPKG_MAX_ARCHIVE_BYTES as u64)?;
         validate_clawpkg_bytes(&bytes)
     }
 }
@@ -1627,6 +2139,98 @@ pub fn render_component_dashboard_payload(dashboard: &HashMap<String, String>) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scene_guards_respect_first_eight_declared_slots() {
+        let suite: serde_json::Value = serde_json::from_str(include_str!("../../skills/petui/contracts/pc-contract-regressions-v1.json")).unwrap();
+        for case in suite["sceneGuards"].as_array().unwrap() {
+            let runtime = &case["runtime"];
+            let names = runtime["vars"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>();
+            assert_eq!(&names[..3], &["zulu", "alpha", "caption"]);
+            assert_eq!(&names[7..], &["eighth", "ninth"]);
+            let mut files = std::collections::HashMap::new();
+            files.insert("runtime/widget.json".to_string(), serde_json::to_vec(runtime).unwrap());
+            let mut errors = Vec::new();
+            super::validate_p4_widget_logic(&files, &mut errors);
+            assert_eq!(errors.is_empty(), case["expectedOk"] == true, "{}: {:?}", case["name"], errors);
+        }
+    }
+    #[test]
+    fn logic_profile_vectors_are_accepted_and_rejections_refused() {
+        // Shared p4-logic-v1 vectors: every semantic case must validate, every rejection must not.
+        let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/petui/contracts/logic-v1.json");
+        let suite:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(suite["profile"],"p4-logic-v1");
+        for item in suite["cases"].as_array().unwrap(){
+            let mut files=std::collections::HashMap::new();
+            files.insert("runtime/widget.json".to_string(),serde_json::to_vec(&item["runtime"]).unwrap());
+            let mut errors=Vec::new();super::validate_p4_widget_logic(&files,&mut errors);
+            assert!(errors.is_empty(),"{}: {:?}",item["name"],errors);
+        }
+        for item in suite["rejections"].as_array().unwrap(){
+            let mut files=std::collections::HashMap::new();
+            files.insert("runtime/widget.json".to_string(),serde_json::to_vec(&item["runtime"]).unwrap());
+            let mut errors=Vec::new();super::validate_p4_widget_logic(&files,&mut errors);
+            assert!(!errors.is_empty(),"{} must be refused",item["name"]);
+        }
+    }
+    #[test]
+    fn quota_profile_vectors_match_shared_contract() {
+        let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/petui/contracts/quota-v2.json");
+        let suite:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(suite["profile"],"p4-quota-v2");
+        for item in suite["vectors"].as_array().unwrap(){
+            let runtime=&item["runtime"];
+            let mut files=std::collections::HashMap::new();
+            files.insert("runtime/widget.json".to_string(),serde_json::to_vec(runtime).unwrap());
+            let mut errors=Vec::new();
+            super::validate_p4_widget_quota(&files,&mut errors);
+            if let Some(vars)=runtime["vars"].as_object(){
+                if let Err(e)=super::validate_p4_vars_object_capped(vars,if super::p4_quota_v2(runtime){16}else{super::P4_WIDGET_MAX_VARS}){errors.push(e);}
+            }
+            assert_eq!(errors.is_empty(),item["ok"]==true,"{}: {:?}",item["name"],errors);
+        }
+    }
+    #[test]
+    fn quota_v3_vectors_pass_through_the_complete_package_import() {
+        let suite:serde_json::Value=serde_json::from_str(include_str!("../../skills/petui/contracts/quota-v3.json")).unwrap();
+        for case in suite["vectors"].as_array().unwrap(){
+            let mut owned=valid_files();
+            owned.retain(|(name,_)|*name!="runtime/widget.json");
+            owned.push(("runtime/widget.json",serde_json::to_vec(&case["runtime"]).unwrap()));
+            let files=owned.iter().map(|(n,b)|(*n,b.as_slice())).collect::<Vec<_>>();
+            let result=super::validate_clawpkg_bytes(&make_zip(&files)).unwrap();
+            assert_eq!(result.ok,case["ok"]==true,"{}: {:?}",case["name"],result.errors);
+        }
+    }
+    #[test]
+    fn quota_v3_compact_size_is_negotiated_without_raising_legacy_limits() {
+        for (profile,limit) in [("p4-quota-v3",12287usize),("p4-quota-v2",8191)] {
+            let mut runtime=serde_json::json!({"engine":"p4-bounded-runtime-v4","quota":profile,"padding":""});
+            let base=serde_json::to_vec(&runtime).unwrap().len();
+            runtime["padding"]=serde_json::Value::String("x".repeat(limit-base));
+            let mut files=std::collections::HashMap::new();
+            files.insert("runtime/widget.json".into(),serde_json::to_vec(&runtime).unwrap());
+            let mut errors=vec![];super::validate_p4_compact_json_sizes(&files,&mut errors);assert!(errors.is_empty());
+            runtime["padding"]=serde_json::Value::String("x".repeat(limit-base+1));
+            files.insert("runtime/widget.json".into(),serde_json::to_vec(&runtime).unwrap());
+            super::validate_p4_compact_json_sizes(&files,&mut errors);assert_eq!(errors.len(),1);
+        }
+    }
+    #[test]
+    fn sfx_profile_vectors_match_shared_contract() {
+        // p4-sfx-v1: cue declarations and references validate exactly like the Python mirror.
+        let path=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills/petui/contracts/sfx-v1.json");
+        let suite:serde_json::Value=serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(suite["profile"],"p4-sfx-v1");
+        assert_eq!(suite["presets"].as_array().unwrap().iter().map(|p|p.as_str().unwrap()).collect::<Vec<_>>(),super::P4_SFX_PRESETS);
+        for item in suite["vectors"].as_array().unwrap(){
+            let mut files=std::collections::HashMap::new();
+            files.insert("runtime/widget.json".to_string(),serde_json::to_vec(&item["runtime"]).unwrap());
+            let mut errors=Vec::new();
+            super::validate_p4_widget_sfx(&files,&mut errors);
+            assert_eq!(errors.is_empty(),item["ok"]==true,"{}: {:?}",item["name"],errors);
+        }
+    }
     #[test]
     fn authored_touch_package_and_strict_scene_boundary() {
         let root=std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs/fresh-fruit-slice");
@@ -1691,6 +2295,79 @@ mod tests {
         assert!(result.ok, "expected valid; errors={:?}", result.errors);
         assert_eq!(result.manifest.as_ref().unwrap().id, "x");
         assert_eq!(result.manifest.as_ref().unwrap().kind, None);
+    }
+
+    #[test]
+    fn runtime_dashboard_rules_match_firmware_parse_value() {
+        use serde_json::json;
+        let validate = |dashboard: serde_json::Value| {
+            let runtime = json!({"schema_version":1,"engine":"p4-bounded-runtime-v4","states":["idle","run"],
+                "initial_state":"idle","pages":[{"id":"home"},{"id":"garden"}],"initial_page":"home",
+                "vars":{"n":{"type":"int","init":3},"s":{"type":"string","init":"x"}},"transitions":[],"tick":[],
+                "dashboard":dashboard});
+            let mut files_owned = valid_files();
+            files_owned.retain(|(name, _)| *name != "runtime/widget.json");
+            files_owned.push(("runtime/widget.json", serde_json::to_vec(&runtime).unwrap()));
+            let files: Vec<(&str, &[u8])> = files_owned.iter().map(|(n, d)| (*n, d.as_slice())).collect();
+            let result = validate_clawpkg_bytes(&make_zip(&files)).unwrap();
+            result.errors.into_iter().filter(|e| e.contains("runtime/widget.json.dashboard")).collect::<Vec<_>>()
+        };
+        // Accepted by the device: literal, var/fmt leaves, flat switch, pct_of progress.
+        assert!(validate(json!({"title":"T","metricValue":{"var":"n"},"note":{"fmt_mmss":"n"},
+            "headline":{"switch_page":{"home":"A","garden":{"var":"n"}}},
+            "badge":{"switch_state":{"idle":{"fmt_hms":"n"},"run":"B"}},
+            "progress":{"pct_of":"n","of_max":"n","label":"p"}})).is_empty());
+        // Extra keys are ignored by the device parser; the PC install gate stays as lenient.
+        assert!(validate(json!({"metricValue":{"var":"n","suffix":"个"}})).is_empty());
+        // Rejected by the device with "dashboard value rule is unsupported".
+        for bad in [
+            json!({"headline":{"switch_page":{"home":{"switch_state":{"idle":"A"}}}}}),
+            json!({"metricValue":{"text":"x"}}),
+            json!({"note":{}}),
+            json!({"progress":{"value":0,"label":"p"}}),
+            json!({"metricValue":{"var":""}}),
+        ] {
+            let errors = validate(bad.clone());
+            assert!(errors.iter().any(|e| e.contains("dashboard value rule is unsupported")), "{bad} -> {errors:?}");
+        }
+        assert!(validate(json!({"metricValue":{"var":"missing"}})).iter().any(|e| e.contains("未知变量")));
+        assert!(validate(json!({"metricValue":{"fmt_mmss":"s"}})).iter().any(|e| e.contains("需要 int 变量")));
+        assert!(validate(json!({"progress":{"pct_of":"s","of_max":"n"}})).iter().any(|e| e.contains("需要已声明的 int 变量")));
+        assert!(validate(json!({"note":{"switch_state":{"nope":"A"}}})).iter().any(|e| e.contains("未知 state")));
+        assert!(validate(json!({"headline":{"switch_page":{"nope":"A"}}})).iter().any(|e| e.contains("未知 page")));
+        assert!(validate(json!({"mood":"x"})).iter().any(|e| e.contains("不是设备支持的槽位")));
+    }
+
+    #[test]
+    fn app_form_package_import_checks_fields_and_physical_paths_with_or_without_png() {
+        use serde_json::json;
+        for with_png in [false,true] {
+            let (mut runtime,buttons)=crate::component_extension::app_form::fixture();
+            let mut files=valid_files();
+            if with_png {
+                runtime["surface"]["images"]=json!([{"id":"tiny","asset":"assets/tiny.png","frame_width":8,"frame_height":8,"frames":1,"fps":1}]);
+                runtime["surface"]["elements"].as_array_mut().unwrap().push(json!({"type":"image","x":250,"y":20,"w":8,"h":8,"color":65535,"image":"tiny"}));
+                let image=image::RgbaImage::from_pixel(8,8,image::Rgba([20,40,60,255]));
+                let mut bytes=std::io::Cursor::new(Vec::new());
+                image::DynamicImage::ImageRgba8(image).write_to(&mut bytes,image::ImageFormat::Png).unwrap();
+                files.push(("assets/tiny.png",bytes.into_inner()));
+            }
+            for (path,bytes) in &mut files {
+                *bytes=match *path {
+                    "component.json"=>serde_json::to_vec(&json!({"id":"x","name":"Form","version":"1.0.0","kind":"tool","description":"Edit bounded local values"})).unwrap(),
+                    "runtime/widget.json"=>serde_json::to_vec(&runtime).unwrap(),
+                    "buttons.json"=>serde_json::to_vec(&buttons).unwrap(),
+                    _=>continue,
+                };
+            }
+            let refs=files.iter().map(|(path,bytes)|(*path,bytes.as_slice())).collect::<Vec<_>>();
+            let report=validate_clawpkg_bytes(&make_zip(&refs)).unwrap();
+            assert!(report.ok,"{with_png}: {:?}",report.errors);
+            let mut bad_buttons=buttons.clone();bad_buttons.as_array_mut().unwrap().pop();
+            *files.iter_mut().find(|(path,_)|*path=="buttons.json").unwrap()=("buttons.json",serde_json::to_vec(&bad_buttons).unwrap());
+            let refs=files.iter().map(|(path,bytes)|(*path,bytes.as_slice())).collect::<Vec<_>>();
+            assert!(!validate_clawpkg_bytes(&make_zip(&refs)).unwrap().ok);
+        }
     }
 
     #[test]
@@ -2534,3 +3211,38 @@ mod tests {
         assert!(result.ok, "generic scene errors: {:?}", result.errors);
     }
 }
+
+#[cfg(test)]
+mod dir_probe {
+    /// The "first 8 declared variables" rule (scene `var` ops, logic mirror) follows the
+    /// package's declaration order, and the bytes sent to the device keep that order too:
+    /// serde_json must preserve key order (feature `preserve_order`), never sort keys.
+    #[test]
+    fn widget_json_object_keys_keep_declaration_order() {
+        let raw = r#"{"vars":{"fx":{"type":"int","init":0},"bgm":{"type":"int","init":0},"t0":{"type":"int","init":0},"cur":{"type":"int","init":0}}}"#;
+        let value: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let keys: Vec<&str> = value["vars"].as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["fx", "bgm", "t0", "cur"]);
+        assert_eq!(serde_json::to_string(&value).unwrap(), raw);
+    }
+
+    /// Developer aid: run the production package validator on a component directory.
+    /// `PET_VALIDATE_CLAWPKG_DIR=<dir> cargo test --lib dir_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn validate_component_dir_from_env() {
+        let Ok(dir) = std::env::var("PET_VALIDATE_CLAWPKG_DIR") else { return };
+        for entry in dir.split(':').filter(|d| !d.is_empty()) {
+            let result = super::validate_clawpkg_at_path(std::path::Path::new(entry));
+            println!("PET_VALIDATE_RESULT {} {}", entry, serde_json::to_string(&result.map(|r| serde_json::to_value(r).unwrap_or_default())).unwrap_or_default());
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "clawpkg_phase2_tests.rs"]
+mod phase2_contract_tests;
+
+#[cfg(test)]
+#[path = "clawpkg_safety_tests.rs"]
+mod safety_boundary_tests;

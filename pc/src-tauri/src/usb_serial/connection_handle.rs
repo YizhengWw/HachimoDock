@@ -7,17 +7,25 @@
 
 use super::SerialMessage;
 use serde_json::Value;
-use std::io::Write;
+use std::io::{BufReader, Read, Write};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-pub(super) struct ProbedSerialPort {
-    pub(super) writer: Box<dyn serialport::SerialPort>,
-    pub(super) reader: Box<dyn serialport::SerialPort>,
+pub(super) struct ProbedSerialPort<W = Box<dyn serialport::SerialPort>, R = Box<dyn serialport::SerialPort>> {
+    pub(super) writer: W,
+    pub(super) reader: BufReader<R>,
     pub(super) baud: u32,
     pub(super) hello: SerialMessage,
+}
+
+impl<W, R: Read> ProbedSerialPort<W, R> {
+    // Move the SAME reader across the verified handshake boundary. into_inner
+    // would discard bytes already read from the driver after the hello line.
+    pub(super) fn from_verified_reader(writer: W, reader: BufReader<R>, baud: u32, hello: SerialMessage) -> Self {
+        Self { writer, reader, baud, hello }
+    }
 }
 
 type SerialPortHandle = Box<dyn serialport::SerialPort>;
@@ -94,10 +102,14 @@ fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
 
 #[cfg(not(windows))]
 fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
-    let port = serialport::new(port_name, baud)
+    let mut port = serialport::new(port_name, baud)
         .timeout(SERIAL_IO_TIMEOUT)
+        .dtr_on_open(false)
         .open()
         .map_err(|error| error.to_string())?;
+    // Runtime discovery is not a flashing/reset operation. Best effort keeps
+    // CDC drivers without modem-line ioctls compatible; do this before clone.
+    let _ = port.write_request_to_send(false);
     let reader = port.try_clone().map_err(|error| error.to_string())?;
     Ok((port, reader))
 }

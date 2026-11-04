@@ -1,0 +1,10 @@
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+import fs from 'node:fs';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const target=path.join(root,'pc/src/component-center/side-core.wasm');
+const result=spawnSync(process.env.CLANG||'clang',['--target=wasm32','-O2','-ffreestanding','-fno-builtin','-nostdlib','-Wl,--no-entry','-Wl,--export-all','-Wl,--initial-memory=262144','-Wl,--max-memory=262144','-Wl,--strip-all','-I'+path.join(root,'pc/scripts/game-wasm'),'-I'+path.join(root,'firmware/main'),path.join(root,'firmware/main/pet_p4_side_scene.c'),path.join(root,'pc/scripts/game-wasm/side_bridge.c'),'-o',target],{stdio:'inherit'});
+if(result.status!==0)process.exit(result.status??1);
+fs.copyFileSync(target,path.join(root,'pc/skills/petui/scripts/side-core.wasm'));
+fs.copyFileSync(path.join(root,'pc/src/component-center/side-core.js'),path.join(root,'pc/skills/petui/scripts/side-core.mjs'));

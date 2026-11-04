@@ -4,6 +4,7 @@ Import("env")
 
 import re
 import importlib.util
+import json
 from pathlib import Path
 
 
@@ -19,18 +20,13 @@ def bound_chip_image(source, target, env):
     output = Path(str(target[0]))
     elf = output.with_suffix(".elf")
     if output.name == "firmware.bin":
-        report = output.parent / "main" / "pet_p4_renderer.c.su"
-        # These are nested in the main-task component/media path. Optimized-away
-        # (inlined) functions are accounted for in their emitted caller's frame.
-        frames = {}
-        for line in report.read_text(encoding="utf-8").splitlines():
-            fields = line.split("\t")
-            if len(fields) >= 3:
-                name = fields[0].rsplit(":", 1)[-1].split(".", 1)[0]
-                frames[name] = max(frames.get(name, 0), int(fields[1]))
-        chain = ["pet_p4_renderer_render", "render_miniapp_page", "render_media_page", "render_package_media"]
-        if "pet_p4_renderer_render" not in frames or sum(frames.get(name, 0) for name in chain) > 4096:
-            raise RuntimeError(f"Component/media render stack exceeds 4096-byte budget: {frames}")
+        spec = importlib.util.spec_from_file_location("renderer_stack_budget", project / "tools/renderer_stack_budget.py")
+        stack = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(stack)
+        # Cross-module snapshots/forms are real nested paths, not covered by
+        # the old media-only chain. This does not certify all runtime call edges.
+        stack_report = stack.check_build(output.parent, elf)
+        output.with_suffix(".stack-budget.json").write_text(json.dumps(stack_report, sort_keys=True) + "\n", encoding="utf-8")
     # PlatformIO's default ElfToBin omits revision bounds. Regenerate through
     # esptool (including its checksum/hash), never patch an already signed image.
     app_flags = " --elf-sha256-offset 0xb0" if output.name == "firmware.bin" else ""
@@ -64,5 +60,11 @@ def bound_chip_image(source, target, env):
             raise RuntimeError("Failed to merge revision-bounded P4 convenience image")
 
 
+project_inputs = Path(env.subst("$PROJECT_DIR"))
+env.Depends("$BUILD_DIR/${PROGNAME}.bin", [
+    str(project_inputs / "scripts/platformio_chip_images.py"),
+    str(project_inputs / "tools/renderer_stack_budget.py"),
+    str(project_inputs / "tools/firmware_budget.py"),
+])
 env.AddPostAction("$BUILD_DIR/bootloader.bin", bound_chip_image)
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", bound_chip_image)

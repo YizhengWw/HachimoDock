@@ -10,7 +10,7 @@ mod speech_cache;
 pub use speech_queue::SpeechItem;
 pub(crate) fn configure_speech_cache(root:std::path::PathBuf){speech_cache::configure(root);}
 pub(crate) fn prepare_news_voice(id:&str,board:&str,cfg:crate::doubao_tts::DoubaoTtsConfig,items:Vec<SpeechItem>){speech_cache::prepare(id,board,cfg,items);}
-struct Job{id:String,board:String,session:String,cancel:AtomicBool,volume:AtomicU32,phase:Mutex<String>,error:Mutex<String>,heartbeat:Mutex<Instant>,sound_total:AtomicU32,sound_offset:AtomicU32,speech_key:String,speech_item:Mutex<String>,speech_offset:AtomicU32,speech_gap_ms:AtomicU32}
+struct Job{owner:crate::component_app::MediaAuthority,id:String,board:String,session:String,cancel:AtomicBool,volume:AtomicU32,phase:Mutex<String>,error:Mutex<String>,heartbeat:Mutex<Instant>,sound_total:AtomicU32,sound_offset:AtomicU32,speech_key:String,speech_item:Mutex<String>,speech_offset:AtomicU32,speech_gap_ms:AtomicU32}
 static JOB:OnceLock<Mutex<Option<Arc<Job>>>>=OnceLock::new();
 pub(crate) fn active_for_exit()->bool {
     JOB.get().is_some_and(|jobs| jobs.try_lock().map(|job| job.as_ref().is_some_and(|j|
@@ -49,19 +49,27 @@ pub(crate) fn voice_busy()->bool{
     crate::realtime_chat::status().active||crate::active_device_voice_context().lock().map(|v|v.as_ref().is_some_and(|c|
         capture_busy(c.final_requested.load(Ordering::SeqCst),c.final_handled.load(Ordering::SeqCst),c.cancelled.load(Ordering::SeqCst)))).unwrap_or(true)
 }
+fn prepare_authorized<T>(owner:&crate::component_app::MediaAuthority,prepare:impl FnOnce()->Result<T,String>)->Result<T,String>{
+    if !owner.is_current(){return Err("组件已退出，未准备音频".into());}
+    let prepared=prepare()?;
+    if !owner.is_current(){return Err("组件已退出，未启动音频".into());}
+    Ok(prepared)
+}
 pub fn start(id:&str,usb:&UsbSerialManager,source:Source,volume:u32)->Result<(),String>{
+    let owner=crate::component_app::media_authority(id)?;
     let board=usb.status();if !board.connected{return Err("请先连接设备，并在设备打开这个组件".into());}
     if voice_busy(){return Err("语音正在使用，请结束后再播放".into());}
-    let cfg=if matches!(source,Source::Speech(_)|Source::SpeechQueue{..}){Some(crate::component_voice::config(&board.board_device_id)?)}else{None};
+    let cfg=prepare_authorized(&owner,||if matches!(source,Source::Speech(_)|Source::SpeechQueue{..}){crate::component_voice::config(&board.board_device_id).map(Some)}else{Ok(None)})?;
     if let Source::SpeechQueue{key,items}=&source{speech_queue::validate(key,items)?;}
+    if !owner.is_current(){return Err("组件已退出，未启动音频".into());}
     stop(None);crate::component_media::stop_all();
     let total=match &source{Source::Sound{minutes,..}=>(*minutes).clamp(1,60)*60*48000,_=>0};
     let speech_key=if let Source::SpeechQueue{key,..}=&source{key.clone()}else{String::new()};
-    let j=Arc::new(Job{id:id.into(),board:board.board_device_id,session:format!("music-app-{}",uuid::Uuid::new_v4().simple()),cancel:AtomicBool::new(false),volume:AtomicU32::new(volume.min(100)),phase:Mutex::new("preparing".into()),error:Mutex::new(String::new()),heartbeat:Mutex::new(Instant::now()),sound_total:AtomicU32::new(total),sound_offset:AtomicU32::new(0),speech_key,speech_item:Mutex::new(String::new()),speech_offset:AtomicU32::new(0),speech_gap_ms:AtomicU32::new(0)});
-    *jobs().lock().unwrap()=Some(j.clone());let usb=usb.clone();
+    let j=Arc::new(Job{owner,id:id.into(),board:board.board_device_id,session:format!("music-app-{}",uuid::Uuid::new_v4().simple()),cancel:AtomicBool::new(false),volume:AtomicU32::new(volume.min(100)),phase:Mutex::new("preparing".into()),error:Mutex::new(String::new()),heartbeat:Mutex::new(Instant::now()),sound_total:AtomicU32::new(total),sound_offset:AtomicU32::new(0),speech_key,speech_item:Mutex::new(String::new()),speech_offset:AtomicU32::new(0),speech_gap_ms:AtomicU32::new(0)});
+    {let mut slot=jobs().lock().unwrap();if !j.owner.is_current(){return Err("组件已退出，未启动音频".into());}*slot=Some(j.clone());}let usb=usb.clone();
     report(id,"preparing","");
     std::thread::Builder::new().name("component-audio".into()).spawn(move||{
-        let _gate=RUN.lock().unwrap();if j.cancel.load(Ordering::Acquire){*j.phase.lock().unwrap()="idle".into();return;}
+        let _gate=RUN.lock().unwrap();if stopped(&j,&usb){*j.phase.lock().unwrap()="idle".into();return;}
         #[cfg(target_os="macos")]
         let _activity=crate::realtime_audio_macos::AudioActivity::begin_on_player_thread();
         let result=(||{
@@ -115,7 +123,7 @@ pub fn start(id:&str,usb:&UsbSerialManager,source:Source,volume:u32)->Result<(),
         if j.speech_key.starts_with("news-"){let error=j.error.lock().unwrap().clone();let phase=j.phase.lock().unwrap().clone();crate::realtime_chat_log::record("","news_playback",json!({"stage":"audio_end","state":phase,"errorKind":if error.is_empty(){"none"}else{crate::realtime_chat_log::error_kind(&error)}}));crate::component_news::playback_ended(&j.id,&j.speech_key,&phase,&error);}
     }).map_err(|_|"无法启动组件音频")?;Ok(())
 }
-fn stopped(j:&Job,usb:&UsbSerialManager)->bool{j.cancel.load(Ordering::Acquire)||!usb.status().connected||usb.status().board_device_id!=j.board||crate::realtime_chat::status().active||j.heartbeat.lock().unwrap().elapsed()>Duration::from_secs(8)}
+fn stopped(j:&Job,usb:&UsbSerialManager)->bool{!j.owner.is_current()||j.cancel.load(Ordering::Acquire)||!usb.status().connected||usb.status().board_device_id!=j.board||crate::realtime_chat::status().active||j.heartbeat.lock().unwrap().elapsed()>Duration::from_secs(8)}
 fn resample(bytes:&[u8])->Vec<u8>{let s:Vec<i16>=bytes.chunks_exact(2).map(|b|i16::from_le_bytes([b[0],b[1]])).collect();let mut out=Vec::with_capacity(s.len()*6);for(i,a)in s.iter().enumerate(){let b=s.get(i+1).unwrap_or(a);for part in 0..3{let v=(*a as i32+(i32::from(*b)-i32::from(*a))*part/3)as i16;out.extend_from_slice(&v.to_le_bytes());}}out}
 struct Synth{kind:usize,rng:u32,low:f64,click:f64,at:u64}
 impl Synth{
@@ -138,3 +146,23 @@ impl Synth{
     assert!(!capture_busy(true,true,false));assert!(!capture_busy(false,false,true));
 }
 #[test]fn sounds_have_continuous_state_and_safe_peak(){for kind in 0..4{let mut a=Synth::new(kind);let mut b=Synth::new(kind);let joined=a.block(7680,0,100000);let mut split=b.block(3840,0,100000);split.extend(b.block(3840,3840,100000));assert_eq!(joined,split);assert!(joined.chunks_exact(2).all(|s|i16::from_le_bytes([s[0],s[1]]).unsigned_abs()<=22938));}}}
+
+#[cfg(test)]mod phase2_tests{
+    use crate::{component_app::MediaAuthority,component_runtime_lifecycle::{capture_owner,enter_owner,ResourceOwner}};
+    #[test]fn phase2_audio_preparation_retains_both_request_and_physical_view_authority(){
+        for cancel_view in [false,true]{
+            let request=ResourceOwner::fresh();let view=ResourceOwner::fresh();
+            let authority={let _scope=enter_owner(&request);MediaAuthority{request:capture_owner().unwrap(),view:Some(view.clone())}};
+            assert!(authority.is_current());
+            // Exercise the same boundary used around voice configuration in start.
+            assert!(super::prepare_authorized(&authority,||{
+                if cancel_view{view.cancel();}else{request.cancel();}
+                Ok("fake configuration, no provider access")
+            }).is_err());
+            assert!(!authority.is_current());
+            assert!(super::prepare_authorized::<()>(&authority,||panic!("revoked preparation must not execute")).is_err());
+            let _scope=enter_owner(&request);
+            if !cancel_view{assert!(capture_owner().is_err(),"must not mint fresh authorization");}
+        }
+    }
+}

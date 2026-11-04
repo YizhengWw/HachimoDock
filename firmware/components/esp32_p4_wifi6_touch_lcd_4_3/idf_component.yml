@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Local BSP adaptation: dependency/build settings differ from the published component.
+# See this component LICENSE and licenses/DEPENDENCY-LICENSE-NOTICE.md.
 dependencies:
   esp_codec_dev:
     public: true

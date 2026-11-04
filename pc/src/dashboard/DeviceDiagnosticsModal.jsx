@@ -129,6 +129,8 @@ export default function DeviceDiagnosticsModal({
 
   if (!open) return null;
   const runtime = report?.runtime || {};
+  const touchHealth = runtime.touchHealth || {};
+  const touchReady = runtime.touchReady === true ? "已就绪" : runtime.touchReady === false ? "未就绪" : "未提供状态";
   const memory = report?.memory || {};
   const storage = report?.storage || {};
   const desktopBuild = report?.desktopBuild || {};
@@ -179,6 +181,9 @@ export default function DeviceDiagnosticsModal({
               <Metric label="协议 Schema（设备 / PC）" value={`${runtime.protocolSchema || "?"} / ${desktopBuild.protocolSchema || "?"}`} />
               <Metric label="启动 / 故障复位" value={`${report.bootCount || 0} / ${report.faultResetCount || 0}`} tone={report.lastResetWasFault ? "warning" : ""} />
               <Metric label="页面 / Agent" value={`${runtime.screenPage || "未知"} / ${runtime.agentState || "idle"}`} />
+              <Metric label="触屏状态" value={touchReady} tone={runtime.touchReady === false ? "warning" : ""} />
+              <Metric label="触控控制器 / 初始化" value={`${touchHealth.controller || "未识别"} / ${touchHealth.stage || "未知"}`} />
+              <Metric label="触屏读取错误（连续 / 累计）" value={`${touchHealth.consecutiveErrors ?? "?"} / ${touchHealth.pollErrors ?? "?"}`} />
               <Metric label="堆内存（当前 / 最低）" value={`${formatBytes(memory.freeHeapBytes)} / ${formatBytes(memory.minimumFreeHeapBytes)}`} />
               <Metric label="PSRAM（当前 / 最低）" value={`${formatBytes(memory.freePsramBytes)} / ${formatBytes(memory.minimumFreePsramBytes)}`} />
               <Metric label="形象存储 / 槽位" value={`${storageUsage} / ${storage.activeAppearanceSlot ?? "?"}`} />

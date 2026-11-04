@@ -32,7 +32,17 @@ test("CH343 live audio retains 64-byte bursts and never drains or pauses RX", ()
   assert.match(source, /write_serial_live_frame\(conn.writer.as_mut\(\), bytes,\s*paced_slice_bytes.unwrap_or\(bytes.len\(\)\), P4_CH343_SERIAL_WRITE_GAP\)/);
   const live = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]\nmod tests")[0];
   assert.doesNotMatch(live, /writer\.flush\(/);
-  assert.match(source, /\(!live_frame\).then\(\|\| SerialReaderPause/);
+  assert.match(source, /let audio_frame = topic.starts_with\("audio\/"\) \|\| topic.starts_with\("media\/"\) \|\| topic == "ui\/conversation";/);
+  assert.match(source, /let live_frame = audio_frame \|\| topic == "widget\/data" \|\| topic == "app\/snapshot" \|\| topic == "ui\/text-pixels"\s*\|\| \(!bulk_frame && conn.capture_active.load\(Ordering::Acquire\)\);/);
+  assert.match(source, /let bounded_frame = serial_frame_is_bounded\(topic, live_frame\);/);
+  const classify=source.split("fn serial_frame_is_bounded(")[1].split("fn flush_serial_writer")[0];
+  assert.match(classify, /live_frame \|\| matches!\(topic, "system\/heartbeat" \| "diagnostics\/query"\)/);
+  const write=source.split("let write_result = {")[1].split("if let Err(error) = write_result")[0];
+  assert.match(write, /let _pause = \(!bounded_frame\).then\(\|\| SerialReaderPause::new\(&self.serial_body_write_active\)\);/);
+  assert.equal((write.match(/SerialReaderPause/g)||[]).length,1);
+  const bounded=write.split("if bounded_frame {")[1].split("if let Some(write_slice_bytes)")[0];
+  assert.doesNotMatch(bounded, /flush_serial_writer|\.flush\(|SerialReaderPause|serial_body_write_active/);
+  assert.match(bounded, /return result.map\(\|_\|\(\)\).map_err/);
   assert.doesNotMatch(source, /live_write_plan/);
   assert.match(live,/writer.write\(&chunk\[offset\.\.\]\)/);
   assert.doesNotMatch(live,/writer.write_all\(/);
@@ -52,8 +62,11 @@ test("device rejection logs allowlisted topic and reason without provider payloa
 test("failed audio writes stop playback and do not advance the sent-byte counter", () => {
   const source = rust("realtime_chat.rs");
   const chunk = source.slice(source.indexOf("let flush_chunk ="), source.indexOf("while let Ok((expected, cmd))"));
-  assert.match(chunk, /let result = usb.send_to_board/);
+  assert.match(chunk, /let result = send_session_board\(\s*usb, &session,/);
   assert.match(chunk, /"playback_tx"/);
-  assert.match(chunk, /if let Err\(error\) = result \{[\s\S]*?request_stop\(&session, "playback_write_failed"\);\s+return;/);
+  assert.match(chunk, /if let Err\(error\) = result \{[\s\S]*?request_failure\(&session, "playback_write_failed", Some\("[^"\n]+"\)\);\s+return;/);
+  const failure = source.slice(source.indexOf("fn request_failure("), source.indexOf("fn start_guard("));
+  assert.match(failure, /session\.cancelled\.swap\(true, Ordering::SeqCst\)/);
+  assert.match(failure, /session\.stop_notify\.notify_one\(\)/);
   assert.ok(chunk.indexOf("if let Err(error) = result") < chunk.indexOf("*sent_bytes +="));
 });

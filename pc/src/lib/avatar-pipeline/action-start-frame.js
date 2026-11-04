@@ -1,25 +1,26 @@
+import {SUBJECT_MOTION_POLICY_ZH} from './motion-semantics.js';
 import {editImageBackgroundWithArk} from './providers/volcano-image.js';
 import {processImageForPipeline} from './image-processing.js';
 import {bytesToDataUrl,uint8ToBase64} from './image.js';
 import {checkpointedReview} from './quality.js';
 
 export const ACTION_START_POSES=Object.freeze({
- welcome:'面向观众，身体略向左转，一只空闲手或对应肢体已经抬到肩部准备招手，露出欢迎笑容',
- 'idle.playing':'身体朝左侧倾斜，微微蹲低，双脚前后错开，空闲肢体展开，呈即将侧跳玩耍的姿势',
- 'idle.wandering':'身体转向画面右侧约四十五度，一只脚向前迈出，头向右侧张望，呈开始散步的姿势',
- working:'身体略向前倾，视线向左下方集中，空闲肢体靠近自身身体，呈认真思考的姿势，不添加桌子或工具',
- waiting_user:'头向右歪，面向观众，空闲手掌或对应肢体朝上摊开，表情期待，呈等待用户回答的姿势',
- done:'身体挺起、重心偏向一侧，空闲手臂或对应肢体举高庆祝，露出开心笑容',
- error:'肩部稍缩、头向左下低垂，身体略向后仰，空闲肢体低位摊开，露出轻微困惑表情',
- 'touch.lick':'身体稍向前倾但保持全身可见，面带亲近温柔笑容，空闲肢体放在身体后侧',
- 'touch.what':'头向左侧明显歪斜、眉毛抬起，身体向右倾，空闲肢体靠近脸侧，呈好奇观察姿势',
- 'idle.default':'身体轻松站立，双肩自然下沉，空闲肢体垂在身侧，重心落在一侧，平静柔和表情',
- 'idle.jumping':'双膝明显弯曲、身体蹲低，空闲肢体收起准备起跳，头保持抬起，全身和原有配饰均可见',
+ "welcome": "清晰友善的迎接起势，可轻微倾斜、舒展、摆动或起伏，让人读出欢迎和关注",
+ "idle.playing": "活泼轻快的玩耍准备姿态，可整体倾斜、压缩、旋转或准备一次小幅弹动",
+ "idle.wandering": "悠闲探索的起势，可整体缓慢转向或轻微游移，让人读出观察和漫游",
+ "working": "注意力集中的准备状态，以收敛的姿态或有规律的小幅自身运动表达专注",
+ "waiting_user": "温和停顿并期待回应的姿态，以节奏、倾斜或自身可动部分表达询问和等待",
+ "done": "轻快舒展或上扬的完成姿态，以整体变化或已有部件表达认可和庆祝",
+ "error": "短暂迟疑或轻微回缩的姿态，以动作节奏和自身变化表达困惑或抱歉",
+ "touch.lick": "温柔亲近的回应姿态，可整体略向观众靠近或轻轻摆动，保持原有完整外形",
+ "touch.what": "好奇探寻的回应姿态，可整体轻倾、轻转或适度形变，让人读出观察和疑问",
+ "idle.default": "安静松弛的自然起势，以原有外形的轻微节奏变化表达待机，不要求眼睛或呼吸器官",
+ "idle.jumping": "小幅弹起前的蓄势，可整体压缩或降低位置，不要求膝盖、脚或任何关节"
 });
 
 export function buildActionStartPrompt(family){
  const pose=ACTION_START_POSES[family];if(!pose)throw Error('动作缺少独立首帧设计：'+family);
- return '根据参考图绘制同一个角色的一张全新动作起始关键帧，不是视频或多格拼图。当前动作：'+family+'。起始姿势：'+pose+'。必须让身体轮廓、朝向、肢体位置和表情明显符合该动作，不能简单复制参考图的站姿。角色身份、脸部特征、发型、肤色、头身比例、画风、材质、服装和原有随身物件严格不变；只改变姿势和表情。动物或没有手脚的角色请用其实际拥有的爪、翼、耳、尾或机械部件表达同等姿态，禁止凭空添加肢体。原有球拍、乐器等物件必须保持，动作使用空闲肢体，不添加任何新物件、文字、第二角色或特效。完整全身和配饰居中并留足安全边距，固定镜头和尺度，纯黑背景。只输出单张图片。';
+ return '根据参考图绘制同一个角色的一张动作起始关键帧，不是视频或多格拼图。当前动作：'+family+'。动作语义与起势建议：'+pose+'。'+SUBJECT_MOTION_POLICY_ZH+' 起势应有可辨认的状态含义，不能简单复制参考图的站姿，但不要求复刻特定人体动作或朝向。角色身份、原有外形特征、画风、材质、服装和原有随身物件保持一致，允许符合角色结构的姿态和自然形变。原有物件随主体或实际存在的部件一起运动，不要求有空闲手脚。不得新增文字、第二角色或特效。完整主体和配饰居中并留足安全边距，固定镜头，纯黑背景。只输出单张图片。';
 }
 
 export async function ensureActionStartFrame({owner,actions,family,reference,cloudBackground,maxDimension,thinking,signal,commit,retryReview=false,generate=editImageBackgroundWithArk,normalize}){
@@ -27,10 +28,10 @@ export async function ensureActionStartFrame({owner,actions,family,reference,clo
  if(owner.startFrameApproved&&owner.startFrame?.bytes?.byteLength)return owner.startFrame;
  if(!owner.startFrame){
   if(!owner.startFrameRaw){
-   if(owner.startFrameIntent)throw Error('该动作首帧上次提交结果未知，已停止自动重试以避免重复收费；已有动画已保留。');
-   if(!cloudBackground?.apiKey)throw Error('生成独立动作首帧需要已配置的图片处理服务');
-   owner.startFrameIntent=true;await commit({});
-   const result=await generate({...cloudBackground,imageDataUrl:identityUrl,prompt:buildActionStartPrompt(family)+' 优先核对并保留参考图中实际持有的物件：持球拍的手继续明确握住完整球拍，持乐器的手继续持有乐器。让物件随身体自然改变朝向，禁止把手持物隐藏、丢弃或变为空手。只有空闲肢体用于新动作。',signal});
+   if(owner.startFrameIntent&&!owner.startFrameResult)throw Error('该动作首帧上次提交结果未知，已停止自动重试以避免重复收费；已有动画已保留。');
+   if(!cloudBackground?.apiKey&&!owner.startFrameResult)throw Error('生成独立动作首帧需要已配置的图片处理服务');
+   if(!owner.startFrameResult){owner.startFrameIntent=true;await commit({});}
+   const result=await generate({...cloudBackground,imageDataUrl:identityUrl,prompt:buildActionStartPrompt(family)+' 保留参考图中已有物件及其原有连接或携带关系；有手持关系时继续持握，无手臂时沿用原有支撑或连接结构，不新增手脚。物件可以随主体整体运动，禁止把原有物件隐藏或丢弃。',signal,resumeResult:owner.startFrameResult,onResult:async result=>{owner.startFrameResult=result;await commit({});}});
    owner.startFrameRaw={bytes:result.bytes,mime:result.mime};await commit({});
   }
   const raw=owner.startFrameRaw;

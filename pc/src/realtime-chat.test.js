@@ -41,7 +41,7 @@ test("reply audio is cancelled only after ASR verifies two characters or explici
   assert.match(verified, /barge_rejected/);
   assert.match(verified, /barge_confirmed/);
   assert.match(rtc, /\(Some\('停'\), None\)/);
-  assert.match(rtc, /recognizer = Some\(speech.recognizer\); asr_rx = Some\(speech.events\)/);
+  assert.match(rtc, /asr_generation = speech\.recognizer\.generation\(\);\s+recognizer = Some\(speech\.recognizer\); asr_rx = Some\(\(asr_generation, speech\.events\)\)/);
   assert.match(rtc, /if !speech.reply_completed \{/);
   assert.match(rtc, /recognizer_terminal = speech.terminal/);
   assert.match(rtc, /if !recognizer_terminal \{/);

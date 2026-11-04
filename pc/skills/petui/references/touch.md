@@ -35,6 +35,11 @@
 分别检查真实动作后的变化、重复点击、边界/重叠、拖动取消、切页取消、
 按键与触屏结果一致，以及保存后退出重进。PC 模拟不能替代设备方向、偏移、
 手感与快速输入验证。录音、播放、派发任务只由相应明确操作触发，默认授权不自动执行。
+
+设备报告 `touch=false` / `touchInput.controller="unavailable"` 时，不要改组件去"适配"：先抓一条
+`diagnostics/query` → `diagnostics/status`，用 `firmware/tools/touch_diagnose.py <capture> --json`
+把 `touchHealth` 的 `stage/error/probe*` 归类为显示未起、I2C 总线、触控硬件缺席、驱动识别、内存或
+运行时轮询问题，再决定是硬件还是固件立项。该工具离线运行，不开串口。
 # Media and instrument touch (firmware 0.7.91)
 
 A media surface may declare `input: "p4-media-touch-v1"` only when the device

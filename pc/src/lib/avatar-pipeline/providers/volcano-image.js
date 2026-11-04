@@ -1,12 +1,14 @@
+import {SUBJECT_MOTION_POLICY_ZH} from '../motion-semantics.js';
 /**
  * [Input] source image data URL + Volcengine Ark API-key/base-url/model config.
- * [Output] Seedream-edited image bytes, or stage-specific errors naming the actual submitted model without retrying or substituting models.
+ * [Output] Seedream-edited image bytes, or stage-specific errors; only confirmed retryable rate rejections are retried, without model substitution.
  * [Pos] image-edit provider node in pc/src/lib/avatar-pipeline/providers
  * [Sync] If this file changes, update image-processing.js, run.js, provider-config.js, and pc/src/.folder.md.
  */
 
-import { downloadBinary, pipelineFetch, readJsonOrThrow, withRetry } from "../http.js";
+import { pipelineFetch, readJsonOrThrow } from "../http.js";
 import { safeRequestId } from "../diagnostics.js";
+import { imageResultReceipt, recoverableImageEdit } from "../image-recovery.js";
 import { HUMAN_CHIBI_STYLE_ZH } from '../character-style.js';
 
 export function getArkImageEditPolicyRejection(error) {
@@ -37,13 +39,14 @@ export const VOLCANO_IMAGE_MODEL_FALLBACKS = Object.freeze([
 export const BLACK_BACKGROUND_EDIT_PROMPT = [
   "任务：依据输入图的实际主体制作唯一、完整的黑底桌面角色。主体可以是真人、人物、动物、玩偶、机器人或其他角色；桌面宠物是产品名称，不代表主体必须是动物。先判断实际主体类别，禁止把人物替换成猫狗或新增动物。",
   "原图主体是真人或卡通人物时，将同一个人物转成清晰的卡通动画角色。" + HUMAN_CHIBI_STYLE_ZH + "不变成另一个人或动物。原图是动物、玩偶、机器人或其他非人物角色时，保留原主体和原画风，不套用人物的白皮肤或头身比例。",
-  "先区分主体自身肢体与外来物体：人物主体自己的真人手、手指、手臂、袖口和腿脚必须保留并随人物卡通化；只有属于旁人的抚摸、抱持或指向主体的手臂，以及背景路人才应移除。不能一概删除真人或人的肢体。",
+  "先区分主体自身肢体与外来物体：仅在原图实际存在时，人物主体自己的真人手、手指、手臂、袖口和腿脚必须保留并随人物卡通化；只有属于旁人的抚摸、抱持或指向主体的手臂，以及背景路人才应移除。不能一概删除真人或人的肢体。",
   "严格保留输入图片中的主体身份、毛色或服装和朝向，保持原镜头视角；人物的肤色、脸型和比例按上述 Q 版风格重塑，非人物保持原外形、纹理和比例。保留角色本身的爪子、手臂、翅膀、尾巴和机械部件，不要误删拟人角色自己的肢体。",
   "保留原图中与主体身份、动作或造型直接相关的已有随身物件，例如运动员手中的球拍、演奏者的乐器、人物佩戴的眼镜和帽子；这些属于角色整体，不是需要清除的杂物，不得凭空新增、替换或复制。主体自己的服饰、身体底座或一体化部件也必须保留。",
   "只移除无关的桌面、外部支撑物、电线、杯子、键盘、家具、文字、水印、边框、背景阴影和场景杂物；依据物件与主体的关系判断，不能把主体正持有或佩戴的身份物件一概删除。",
   "若外来手或杂物遮挡角色，仅对移除后缺失的轮廓和表面做最小必要补全，延续角色材质与形状；人物按上述 Q 版风格统一处理脸和身体，其他主体不得重新设计，不添加额外肢体。",
-  "画面只保留一个完整原角色及其相关随身物件，全身居中，头顶、脚底及两侧均留出约10%的安全空间；宁可缩小主体也不要裁切耳朵、头部、脚、尾巴、球拍等相关物件或一体化底座，不输出头像或半身特写；整个背景替换为均匀、无纹理、无渐变、无反光的纯黑色 #000000。",
+  "画面只保留一个完整原角色及其相关随身物件，全身居中，头顶、脚底及两侧均留出约10%的安全空间；宁可缩小主体也不要裁切耳朵、头部、脚、尾巴、球拍等相关物件或一体化底座，原图设计本就是头像、无身体物体或抽象角色时，保留该完整设计，不补造躯干四肢；整个背景替换为均匀、无纹理、无渐变、无反光的纯黑色 #000000。",
   "输出前检查：人物仍是原人物的卡通形象，动物仍是原动物；没有旁人的外来肢体、背景人物、杂物或第二个角色；主体身份和自身肢体完整。只输出处理后的图片。",
+  SUBJECT_MOTION_POLICY_ZH + '以上人物风格和构图中的人体部位示例仅在原图实际存在时适用；任意形态规则优先，不补造缺失器官。',
 ].join("");
 
 export function buildReferenceEditPrompt(styleDescription = '') {
@@ -75,7 +78,7 @@ export function buildVolcanoImageEditPayload({
     prompt,
     image: [imageDataUrl],
     size: "2K",
-    response_format: "b64_json",
+    response_format: "url",
     watermark: false,
   };
   // Flash/Pro single-image requests omit the older sequential-generation option.
@@ -84,14 +87,6 @@ export function buildVolcanoImageEditPayload({
   }
   if (isSeedreamFive(model)) payload.output_format = "png";
   return payload;
-}
-
-function shouldRetryArkImageHttp(error) {
-  const message = String(error?.message || error || "");
-  const match = /HTTP\s+(\d{3})/.exec(message);
-  if (!match) return false; // Unknown POST outcome: never duplicate a paid image request.
-  const status = Number(match[1]);
-  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
 }
 
 function isUnavailableModelError(error) {
@@ -128,42 +123,22 @@ export function extractVolcanoImageResult(json) {
   return { base64, url };
 }
 
-async function requestImageEdit({ apiKey, baseUrl, model, imageDataUrl, signal, styleDescription, prompt }) {
-  const apiUrl = joinUrl(baseUrl, VOLCANO_IMAGE_GENERATION_PATH);
-  const payload = buildVolcanoImageEditPayload({ model, imageDataUrl, prompt:prompt || buildReferenceEditPrompt(styleDescription) });
-  const json = await withRetry(
-    async () => {
-      const response = await pipelineFetch(apiUrl, {
-        diagnosticStage: "image_edit",
-        method: "POST",
-        signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      return readJsonOrThrow(response, `Ark image edit (${payload.model})`);
-    },
-    { retries: 0, signal, shouldRetry: shouldRetryArkImageHttp },
-  );
-
-  const result = extractVolcanoImageResult(json);
-  let bytes;
-  if (result.base64) bytes = base64ToBytes(result.base64);
-  else if (result.url) bytes = await downloadBinary(result.url, signal);
-  else throw new Error(`Ark image edit (${model}) returned no image data`);
-
-  return {
-    bytes,
-    mime: inferMime(bytes),
-    model: json?.model || model,
-    raw: json,
-  };
+async function requestImageEdit({ apiKey, baseUrl, model, imageDataUrl, signal, styleDescription, prompt, resumeResult, onResult, onStage }) {
+  const result = await recoverableImageEdit({resumeResult,signal,onResult,onStage,submit:async(timeoutMs)=>{
+    const apiUrl=joinUrl(baseUrl,VOLCANO_IMAGE_GENERATION_PATH);
+    const payload=buildVolcanoImageEditPayload({model,imageDataUrl,prompt:prompt || buildReferenceEditPrompt(styleDescription)});
+    const response=await pipelineFetch(apiUrl,{diagnosticStage:'image_edit',method:'POST',signal,timeoutMs,
+      headers:{'Content-Type':'application/json',Authorization:`Bearer ${apiKey}`},body:JSON.stringify(payload)});
+    const json=await readJsonOrThrow(response,`Ark image edit (${payload.model})`);
+    return imageResultReceipt(extractVolcanoImageResult(json),json?.model || model);
+  }});
+  const bytes=result.bytes || base64ToBytes(result.base64);
+  return {bytes,mime:inferMime(bytes),model:result.receipt.model || model,raw:result.receipt};
 }
 
 /**
- * Edit one image through Ark with no automatic retry or model substitution.
+ * Edit one image through Ark. Only complete allowlisted rate rejections may retry;
+ * unknown paid requests never retry and known results recover through GET only.
  * Any failure is visible before downstream video generation can proceed.
  */
 export async function editImageBackgroundWithArk({
@@ -174,8 +149,9 @@ export async function editImageBackgroundWithArk({
   signal,
   styleDescription = '',
   prompt,
+  resumeResult, onResult, onStage,
 }) {
-  if (!apiKey) throw new Error("Ark API key is required for cloud background editing");
+  if (!apiKey && !resumeResult) throw new Error("Ark API key is required for cloud background editing");
   const candidates = [model].filter(
     (candidate, index, list) => candidate && list.indexOf(candidate) === index,
   );
@@ -190,6 +166,7 @@ export async function editImageBackgroundWithArk({
         signal,
         styleDescription,
         prompt,
+        resumeResult, onResult, onStage,
       });
     } catch (error) {
       if (!isUnavailableModelError(error)) throw error;

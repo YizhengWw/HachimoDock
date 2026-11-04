@@ -1,0 +1,30 @@
+{
+  "runtime":{
+    "schema_version":1,"engine":"p4-bounded-runtime-v4","input":{"engine":"p4-input-v1"},
+    "vars":{"count":{"type":"int","init":0},"step":{"type":"int","init":2}},
+    "limits":{"count":[-100,100],"step":[1,10]},"states":["ready"],"initial_state":"ready",
+    "transitions":[{"from":"*","on":"add"},{"from":"*","on":"subtract"}],"tick":[],
+    "dashboard":{"title":"Program contract","visualStyle":"clean","visualPalette":"mint","visualLayout":"tool","visualSprite":"star"},
+    "surface":{"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1","background":0,"elements":[
+      {"type":"text","x":20,"y":20,"w":500,"h":80,"color":65535,"var_bind":"count"},
+      {"type":"button","x":20,"y":120,"w":220,"h":64,"color":2016,"text":"Add","action":"add"},
+      {"type":"button","x":260,"y":120,"w":220,"h":64,"color":2016,"text":"Subtract","action":"subtract"}]},
+    "program":{"engine":"p4-component-program-v1","image":{"engine":"p4-integer-program-v1","schema":1,"cells":1,"fuel":64,
+      "code":[["CONST",0,0,0,0],["LOAD",1,0,0,0],["EVENT",2,0,0,0],["ADD",1,1,2,0],["STORE",0,1,0,0],["OUTPUT",0,1,0,0],["HALT",0,0,0,0]]},
+      "outputs":["count",null,null,null,null,null,null,null],"actions":{"add":[{"var":"step"}],"subtract":[-1]},"timers":[]}
+  },
+  "buttons":[{"action":"add","event":"button.sw1.short_press","control":"SW1","label":"Add"},{"action":"subtract","event":"button.sw2.short_press","control":"SW2","label":"Subtract"}],
+  "reject":[
+    {"path":"/program/engine","value":"other"},{"path":"/program/image/engine","value":"other"},
+    {"path":"/program/image/schema","value":0},{"path":"/program/image/cells","value":65},
+    {"path":"/program/image/fuel","value":4097},{"path":"/program/image/fuel","value":true},
+    {"path":"/program/image/code/0/0","value":"INTENT"},{"path":"/program/image/code/0/1","value":16},
+    {"path":"/program/image/code/6/4","value":1},{"path":"/program/outputs/1","value":"count"},
+    {"path":"/program/outputs/0","value":"missing"},{"path":"/program/outputs","value":["count"]},
+    {"path":"/program/actions/add","value":[{"var":"missing"}]},{"path":"/program/actions/add","value":[true]},
+    {"path":"/program/actions/add","value":[1,2,3,4,5]},{"path":"/program/actions/undeclared","value":[1]},
+    {"path":"/transitions/0/inc","value":{"count":1}},{"path":"/tick","value":[{"every_ms":100,"inc":{"count":1}}]},
+    {"path":"/program/timers","value":[{"id":1,"delayMs":0,"intervalMs":99,"words":[1]}]},
+    {"path":"/program/extra","value":"not allowed"}
+  ]
+}

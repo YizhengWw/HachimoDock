@@ -47,7 +47,11 @@ test("cancelled native exit never stops background runtimes", () => {
   const native=read("../src-tauri/src/lib.rs");
   const exit=native.slice(native.indexOf("app.run(|app_handle, event|"),native.indexOf("#[cfg(all(target_os",native.indexOf("app.run(|app_handle, event|")));
   assert.match(exit,/RunEvent::ExitRequested[\s\S]*?request_exit\(app_handle\)\{api.prevent_exit\(\);\}/);
-  assert.match(exit,/RunEvent::Exit => stop_background_runtimes_on_exit\(\)/);
+  const cancelled=exit.split("match event {")[1].split("RunEvent::Exit =>")[0];
+  assert.doesNotMatch(cancelled,/stop_background_runtimes_on_exit|Supervisor>\(\).close\(\)/);
+  const committed=exit.split("RunEvent::Exit =>")[1].split("_ =>")[0];
+  assert.match(committed,/^\s*\{\s*app_handle.state::<startup_supervision::Supervisor>\(\).close\(\);\s*stop_background_runtimes_on_exit\(\);\s*\},/);
+  assert.match(exit,/if cfg!\(feature = "composer-diagnostic"\) \{ return; \}/);
   assert.equal(exit.match(/stop_background_runtimes_on_exit/g).length,1);
 });
 

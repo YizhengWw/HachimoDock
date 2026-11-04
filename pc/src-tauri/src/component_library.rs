@@ -144,7 +144,8 @@ pub fn restore(home: &Path, recovery_id: &str) -> Result<(), String> {
     if source.parent().and_then(|p|p.parent())!=Some(root.as_path()){return Err("恢复路径无效".into());}
     let target=library_root(home).join(&record.component_id);
     if target.exists(){return Err("本机已存在同 ID 组件。为避免覆盖，请先将当前本地副本移入回收站，再恢复所选版本。".into());}
-    fs::rename(source,target).map_err(|e|format!("恢复未完成，备份仍保留：{e}"))
+    crate::program_autostart::native::component_changed(&record.component_id,false);
+    crate::component_composition::library_mutation(&record.component_id,||fs::rename(source,target).map_err(|e|format!("恢复未完成，备份仍保留：{e}")))
 }
 
 fn now_ms() -> u64 {
@@ -218,9 +219,8 @@ fn copy_dir_recursive_safe(source: &Path, destination: &Path) -> Result<(), Stri
 
 fn extract_zip_safe(source: &Path, destination: &Path) -> Result<(), String> {
     fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-    let file = fs::File::open(source)
-        .map_err(|error| format!("打开组件 zip 失败 {}: {}", source.display(), error))?;
-    let mut archive = zip::ZipArchive::new(file)
+    let bytes = crate::clawpkg::read_clawpkg_source_file(source, crate::clawpkg::CLAWPKG_MAX_ARCHIVE_BYTES as u64)?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|error| format!("读取组件 zip 失败 {}: {}", source.display(), error))?;
     if archive.len() > COMPONENT_IMPORT_MAX_FILES {
         return Err("组件 zip 文件数量超过导入限制".to_string());
@@ -379,29 +379,134 @@ fn scene_sprite_previews(
     path: &Path,
     runtime: Option<&serde_json::Value>,
 ) -> Vec<ComponentSceneSpritePreview> {
-    runtime
-        .and_then(|value| value.get("scene").or_else(||value.get("surface")))
-        .and_then(|value| value.get("sprites").or_else(||value.get("images")))
-        .and_then(|value| value.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|sprite| {
-            let id = sprite.get("id")?.as_str()?.to_string();
-            let asset = sprite.get("asset")?.as_str()?;
-            let bytes = fs::read(path.join(asset)).ok()?;
-            Some(ComponentSceneSpritePreview {
-                id,
-                data_url: format!(
-                    "data:image/png;base64,{}",
-                    base64::engine::general_purpose::STANDARD.encode(bytes)
-                ),
-                frame_width: u32::try_from(sprite.get("frame_width")?.as_u64()?).ok()?,
-                frame_height: u32::try_from(sprite.get("frame_height")?.as_u64()?).ok()?,
-                frames: u32::try_from(sprite.get("frames")?.as_u64()?).ok()?,
-                fps: u32::try_from(sprite.get("fps")?.as_u64()?).ok()?,
-            })
+    // Only bounded, package-owned regular files may become inline preview data.
+    // Charge every completed read, even when decoding or a later check fails.
+    fn read_preview_asset(root: &Path, asset: &str, suffix: &str, limit: u64, remaining: &mut u64) -> Option<Vec<u8>> {
+        if !asset.ends_with(suffix) || asset.contains(['\\', ':'])
+            || asset.chars().any(char::is_control)
+            || asset.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+        {
+            return None;
+        }
+        let mut source = root.to_path_buf();
+        for part in Path::new(asset).components() {
+            let std::path::Component::Normal(part) = part else { return None; };
+            source.push(part);
+            if fs::symlink_metadata(&source).ok()?.file_type().is_symlink() { return None; }
+        }
+        let source = source.canonicalize().ok()?;
+        if !source.starts_with(root) || !fs::metadata(&source).ok()?.is_file() { return None; }
+        let mut file = fs::File::open(source).ok()?;
+        let metadata = file.metadata().ok()?;
+        let cap = limit.min(*remaining);
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > cap { return None; }
+        let mut bytes = Vec::new();
+        let result = (&mut file).take(cap).read_to_end(&mut bytes);
+        *remaining -= bytes.len() as u64;
+        if result.is_err() || file.metadata().ok()?.len() != bytes.len() as u64 { return None; }
+        Some(bytes)
+    }
+    fn read_image(root: &Path, asset: &str, limit: u64) -> Option<Vec<u8>> {
+        let mut remaining = limit;
+        read_preview_asset(root, asset, ".png", limit, &mut remaining)
+    }
+    fn append_keyframes(root: &Path, runtime: &serde_json::Value, images: &[serde_json::Value], previews: &mut Vec<ComponentSceneSpritePreview>) {
+        let surface = &runtime["surface"];
+        if surface["engine"] != "p4-app-surface-v1" || surface["graphics"] != "p4-app-graphics-v1"
+            || crate::app_graphics::validate_keyframes(surface, Some(runtime)).is_err() { return; }
+        let Some((frames, _)) = crate::app_graphics::keyframes(surface) else { return; };
+        let Some(background) = images.first() else { return; };
+        let (Some(id), Some(asset)) = (background["id"].as_str(), background["asset"].as_str()) else { return; };
+        if !previews.iter().any(|image| image.id == id) { return; }
+        // Match device compilation: original IDs first, then bg.2 ... bg.N.
+        for frame in 2..=frames {
+            let asset = crate::app_graphics::keyframe_asset(asset, frame);
+            let Some(bytes) = read_image(root, &asset, 1024 * 1024) else { continue; };
+            if crate::component_extension::decode_surface_image(background, &bytes).is_err() { continue; }
+            previews.push(ComponentSceneSpritePreview {
+                id: crate::app_graphics::keyframe_id(id, frame),
+                data_url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+                frame_width: 640, frame_height: 480, frames: 1, fps: 1,
+            });
+        }
+    }
+    fn media_asset_name(asset: &str, suffix: &str) -> bool {
+        asset.strip_prefix("assets/").and_then(|name| name.strip_suffix(suffix))
+            .is_some_and(|name| !name.is_empty() && name.len() <= 15
+                && name.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c)))
+    }
+
+    let Some(runtime) = runtime else { return Vec::new(); };
+    let Ok(root) = path.canonicalize() else { return Vec::new(); };
+    let scene = runtime.get("scene").and_then(|scene| scene.get("sprites"));
+    // Preserve the legacy precedence, including an explicitly empty sprite array.
+    // A media-only surface need not declare ordinary images at all.
+    let images = scene.or_else(|| runtime.get("surface").and_then(|s| s.get("images")))
+        .and_then(|value| value.as_array()).map(Vec::as_slice).unwrap_or(&[]);
+    let mut previews: Vec<ComponentSceneSpritePreview> = images.iter().filter_map(|sprite| {
+        let id = sprite.get("id")?.as_str()?.to_string();
+        let asset = sprite.get("asset")?.as_str()?;
+        let limit = if sprite["encoding"] == "jpeg" { 1024 * 1024 } else { 128 * 1024 };
+        let bytes = read_image(&root, asset, limit)?;
+        Some(ComponentSceneSpritePreview {
+            id,
+            data_url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+            frame_width: u32::try_from(sprite.get("frame_width")?.as_u64()?).ok()?,
+            frame_height: u32::try_from(sprite.get("frame_height")?.as_u64()?).ok()?,
+            frames: u32::try_from(sprite.get("frames")?.as_u64()?).ok()?,
+            fps: u32::try_from(sprite.get("fps")?.as_u64()?).ok()?,
         })
-        .collect()
+    }).collect();
+    if scene.is_none() { append_keyframes(&root, runtime, images, &mut previews); }
+
+    let surface = &runtime["surface"];
+    let bigs = surface["big_images"].as_array();
+    let nodes = surface["elements"].as_array();
+    let has_media = bigs.is_some_and(|items| !items.is_empty())
+        || nodes.is_some_and(|items| items.iter().any(|node| node["type"] == "clip"));
+    if !has_media || surface["engine"] != "p4-app-surface-v1"
+        || surface["graphics"] != "p4-app-graphics-v1" || surface["bindings"] != "p4-variable-bindings-v1" {
+        return previews;
+    }
+    let mut errors = Vec::new();
+    crate::component_capability_ext::validate_runtime(runtime, &mut errors);
+    if !errors.is_empty() { return previews; }
+
+    // Independent media IDs never replace/reorder image, font or sprite entries.
+    // This shared budget includes bytes read for invalid PNGs and rejected clips.
+    let mut remaining = COMPONENT_IMPORT_MAX_BYTES;
+    for big in bigs.into_iter().flatten() {
+        let (Some(id), Some(asset), Some(width), Some(height)) =
+            (big["id"].as_str(), big["asset"].as_str(), big["width"].as_u64(), big["height"].as_u64()) else { continue; };
+        if !(241..=1280).contains(&width) || !(1..=960).contains(&height) || !media_asset_name(asset, ".png") { continue; }
+        let Some(bytes) = read_preview_asset(&root, asset, ".png", COMPONENT_IMPORT_MAX_BYTES, &mut remaining) else { continue; };
+        use image::ImageDecoder;
+        let Ok(mut decoder) = image::codecs::png::PngDecoder::new(std::io::Cursor::new(&bytes)) else { continue; };
+        let (actual_width, actual_height) = decoder.dimensions();
+        // Reject mismatched/oversized headers before allocating decoded pixels.
+        if actual_width > 1280 || actual_height > 960
+            || (u64::from(actual_width), u64::from(actual_height)) != (width, height) { continue; }
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(1280); limits.max_image_height = Some(960); limits.max_alloc = Some(COMPONENT_IMPORT_MAX_BYTES);
+        if decoder.set_limits(limits).is_err() || image::DynamicImage::from_decoder(decoder).is_err() { continue; }
+        previews.push(ComponentSceneSpritePreview {
+            id: format!("big:{id}"),
+            data_url: format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+            frame_width: width as u32, frame_height: height as u32, frames: 1, fps: 1,
+        });
+    }
+    for node in nodes.into_iter().flatten().filter(|node| node["type"] == "clip") {
+        let (Some(asset), Some(width), Some(height)) = (node["asset"].as_str(), node["w"].as_u64(), node["h"].as_u64()) else { continue; };
+        if !media_asset_name(asset, ".mp4") || !matches!((width, height), (160, 120) | (320, 240)) { continue; }
+        let Some(bytes) = read_preview_asset(&root, asset, ".mp4", COMPONENT_IMPORT_MAX_BYTES, &mut remaining) else { continue; };
+        previews.push(ComponentSceneSpritePreview {
+            id: format!("clip:{asset}"),
+            data_url: format!("data:video/mp4;base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)),
+            frame_width: width as u32, frame_height: height as u32,
+            frames: crate::component_capability_ext::CLIP_MAX_FRAMES, fps: crate::component_capability_ext::CLIP_FPS,
+        });
+    }
+    previews
 }
 
 fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
@@ -467,6 +572,7 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
         .filter(|value| value.get("scene").is_some())
         .map(|value| {
             if value["scene"]["engine"]=="p4-touch-slice-v1" {"p4-touch-slice-v1".to_string()}
+            else if value["scene"]["engine"]==crate::side_scene::ENGINE {crate::side_scene::ENGINE.to_string()}
             else if runtime_engine.as_deref() == Some("p4-bounded-runtime-v4") {
                 "p4-grid-scene-v2".to_string()
             } else {
@@ -532,6 +638,33 @@ fn entry_from_directory(path: &Path) -> Result<ComponentLibraryEntry, String> {
 }
 
 pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibraryEntry, String> {
+    publish_source_with_stager(home, source, stage_source_package)
+}
+fn publish_source_with_stager(
+    home: &Path, source: &Path,
+    stage: impl FnOnce(&Path, &Path) -> Result<(), String>,
+) -> Result<ComponentLibraryEntry, String> {
+    let _guard=LIBRARY_MUTATION.lock().map_err(|_|"组件库繁忙")?;
+    publish_source_locked_with_stager(home, source, stage)
+}
+fn stage_source_package(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_dir() {
+        copy_dir_recursive_safe(source, destination)
+    } else if source.is_file() {
+        extract_zip_safe(source, destination)
+    } else {
+        Err(format!("组件源不存在: {}", source.display()))
+    }
+}
+fn publish_source_locked(home: &Path, source: &Path) -> Result<ComponentLibraryEntry, String> {
+    publish_source_locked_with_stager(home, source, stage_source_package)
+}
+// A per-call staging seam allows deterministic source-replacement tests. No
+// global hook exists; production always uses the real copy/extract stager.
+fn publish_source_locked_with_stager(
+    home: &Path, source: &Path,
+    stage: impl FnOnce(&Path, &Path) -> Result<(), String>,
+) -> Result<ComponentLibraryEntry, String> {
     ensure_layout(home)?;
     let validation = crate::clawpkg::validate_clawpkg_at_path(source)?;
     if !validation.ok {
@@ -542,13 +675,7 @@ pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibr
         .ok_or_else(|| "组件包缺少可发布 manifest".to_string())?;
     let job_root = staging_root(home).join(format!("desktop-import-{}", uuid::Uuid::new_v4()));
     let staged_package = job_root.join("package");
-    let staged_result = if source.is_dir() {
-        copy_dir_recursive_safe(source, &staged_package)
-    } else if source.is_file() {
-        extract_zip_safe(source, &staged_package)
-    } else {
-        Err(format!("组件源不存在: {}", source.display()))
-    };
+    let staged_result = stage(source, &staged_package);
     if let Err(error) = staged_result {
         let _ = fs::remove_dir_all(&job_root);
         return Err(error);
@@ -562,10 +689,14 @@ pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibr
                 staged_validation.errors.join("; ")
             ));
         }
+        let staged_manifest = staged_validation.manifest.as_ref()
+            .ok_or_else(|| "暂存组件缺少可发布 manifest".to_string())?;
+        if staged_manifest.id != manifest.id {
+            return Err("组件来源在导入期间发生变化，请重新选择后导入".to_string());
+        }
         let version_hash = package_content_hash(&staged_package)?;
         let component_root = library_root(home).join(&manifest.id);
         let destination = component_root.join(&version_hash);
-        fs::create_dir_all(&component_root).map_err(|error| error.to_string())?;
         if destination.exists() {
             let existing_hash = package_content_hash(&destination)?;
             if existing_hash != version_hash {
@@ -573,7 +704,9 @@ pub(crate) fn publish_source(home: &Path, source: &Path) -> Result<ComponentLibr
             }
             return entry_from_directory(&destination);
         }
-        if let Err(error) = fs::rename(&staged_package, &destination) {
+        crate::program_autostart::native::component_changed(&manifest.id,false);
+        fs::create_dir_all(&component_root).map_err(|error| error.to_string())?;
+        if let Err(error) = crate::component_composition::library_mutation(&manifest.id,||fs::rename(&staged_package, &destination).map_err(|e|e.to_string())) {
             if destination.exists() {
                 let existing_hash = package_content_hash(&destination)?;
                 if existing_hash == version_hash {
@@ -607,7 +740,7 @@ pub(crate) fn ensure_bundled(home: &Path, root: &Path) -> Result<(), String> {
         BUNDLED_CONTENT.get_or_init(Default::default).lock().unwrap().insert((id.to_owned(),hash.clone()));
         let destination=library_root(home).join(id).join(&hash);
         if destination.is_dir() && package_content_hash(&destination)?==hash {continue;}
-        publish_source(home,&source)?;
+        publish_source_locked(home,&source)?;
     }
     Ok(())
 }
@@ -870,6 +1003,31 @@ pub(crate) fn latest(home:&Path,id:&str)->Result<Option<ComponentLibraryEntry>,S
     versions.sort_by(compare_component_versions);Ok(versions.into_iter().next())
 }
 
+/// No lazy import/publication while the policy mutex is held. try_lock avoids
+/// library->policy / policy->library deadlock; all managed mutations share it.
+pub(crate) fn with_autostart_component<T>(home:&Path,id:&str,work:impl FnOnce(&Path)->Result<T,crate::program_autostart::CheckFailure>)->Result<T,crate::program_autostart::CheckFailure>{
+    use crate::program_autostart::CheckFailure as F;
+    let _guard=LIBRARY_MUTATION.try_lock().map_err(|_|F::Unavailable)?;
+    if !crate::component_extension::valid_id(id){return Err(F::Unavailable);}
+    let root=library_root(home).join(id);
+    match fs::symlink_metadata(&root){
+        Err(e) if e.kind()==std::io::ErrorKind::NotFound=>return Err(F::ComponentDeleted),
+        Ok(m) if m.is_dir()&&!m.file_type().is_symlink()=>{},
+        _=>return Err(F::Unavailable),
+    }
+    let mut versions=Vec::new();let mut count=0;
+    for entry in fs::read_dir(&root).map_err(|_|F::Unavailable)?{
+        count+=1;if count>32{return Err(F::Unavailable);}
+        let entry=entry.map_err(|_|F::Unavailable)?;
+        if !entry.file_type().map_err(|_|F::Unavailable)?.is_dir(){return Err(F::Unavailable);}
+        let value=host_entry(&entry.path()).map_err(|_|F::Unavailable)?;
+        if value.id!=id{return Err(F::Unavailable);}versions.push(value);
+    }
+    versions.sort_by(compare_component_versions);
+    let current=versions.first().ok_or(F::ComponentDeleted)?;
+    if !current.valid{return Err(F::ContentChanged);}
+    work(Path::new(&current.path))
+}
 pub fn inspect(path: &Path) -> Result<ComponentLibraryEntry, String> {
     if path.is_dir() {
         return entry_from_directory(path);
@@ -913,11 +1071,12 @@ pub fn delete(
         .ok_or_else(|| "正式组件 ID 无效".to_string())?
         .to_string();
     let recovery_id=uuid::Uuid::new_v4().to_string();
+    crate::program_autostart::native::component_changed(&component_id,true);
     let backup=trash_root(home).join(&recovery_id);
     fs::create_dir_all(&backup).map_err(|e|e.to_string())?;
     let record=RemovedComponent{recovery_id:recovery_id.clone(),component_id:component_id.clone(),name:read_json_from_dir(&target,"component.json").and_then(|m|m["name"].as_str().map(str::to_owned)).unwrap_or_else(||component_id.clone()),deleted_at_ms:now_ms()};
     fs::write(backup.join("record.json"),serde_json::to_vec(&record).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-    fs::rename(component_root,backup.join(&component_id)).map_err(|e|format!("移入回收站失败，原组件保留：{e}"))?;
+    crate::component_composition::library_mutation(&component_id,||fs::rename(component_root,backup.join(&component_id)).map_err(|e|format!("移入回收站失败，原组件保留：{e}")))?;
     Ok(DeleteLibraryComponentResult {
         ok: true,
         deleted_component_id: component_id,
@@ -986,9 +1145,22 @@ mod tests {
     fn bundled_catalog_is_complete_idempotent_and_keeps_user_revisions() {
         let home=tempfile::tempdir().unwrap();
         let root=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../builtin-clawpkgs");
+        let config:serde_json::Value=serde_json::from_slice(
+            &fs::read(root.join("../../firmware/factory-config.json")).unwrap()
+        ).unwrap();
+        let ids=config["components"]["ids"].as_array().unwrap();
+        assert_eq!(ids.len(),29,"factory catalog must retain all 29 components");
+        let expected:HashMap<String,String>=ids.iter().map(|id| {
+            let id=id.as_str().unwrap();
+            let source=root.join(id);
+            assert_eq!(read_json_from_dir(&source,"component.json").unwrap()["id"],id);
+            (id.to_owned(),package_content_hash(&source).unwrap())
+        }).collect();
+        assert_eq!(expected.len(),ids.len(),"factory IDs must be unique");
         ensure_bundled(home.path(),&root).unwrap();
         let first=scan_latest_versions(home.path()).unwrap();
-        assert_eq!(first.len(),28);
+        assert_eq!(first.len(),expected.len());
+        assert!(first.iter().all(|c|c.valid),"{:?}",first.iter().filter(|c|!c.valid).map(|c|(&c.id,&c.validation_errors)).collect::<Vec<_>>());
         assert!(first.iter().all(|c|c.is_bundled_copy));
         for id in ["cloud-hop","daily-almanac","book-pocket","daily-news","decision-capsule","answer-book","hope-train"] {
             assert!(first.iter().any(|c|c.id==id&&c.valid));
@@ -998,9 +1170,34 @@ mod tests {
         assert_eq!(learn.name,"每日新知");assert!(learn.pc_application.is_some());
         assert_eq!(first.iter().find(|c|c.id=="two-key-pong").unwrap().author,"弹珠汽水");
         let before:HashMap<_,_>=first.iter().map(|c|(c.id.clone(),c.version_hash.clone())).collect();
+        assert_eq!(before,expected,"published IDs and bytes must match the factory sources");
         ensure_bundled(home.path(),&root).unwrap();
         let after:HashMap<_,_>=scan_latest_versions(home.path()).unwrap().iter().map(|c|(c.id.clone(),c.version_hash.clone())).collect();
         assert_eq!(before,after);
+        // A real same-ID user revision must survive reseeding unchanged and stay selected.
+        let user_source=tempfile::tempdir().unwrap();
+        copy_dir_recursive_safe(&root.join("hachimi-weather"),user_source.path()).unwrap();
+        let manifest_path=user_source.path().join("component.json");
+        let mut manifest:serde_json::Value=serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        manifest["version"]=serde_json::json!("999.0.0");
+        fs::write(&manifest_path,serde_json::to_vec(&manifest).unwrap()).unwrap();
+        let user_hash=package_content_hash(user_source.path()).unwrap();
+        let user=publish_source(home.path(),user_source.path()).unwrap();
+        assert!(user.valid&&!user.is_bundled_copy);
+        assert_eq!(user.version_hash,user_hash);
+        for _ in 0..2 {
+            ensure_bundled(home.path(),&root).unwrap();
+            assert_eq!(package_content_hash(Path::new(&user.path)).unwrap(),user_hash);
+            let selected=scan_latest_versions(home.path()).unwrap();
+            assert_eq!(selected.len(),expected.len());
+            let selected=selected.iter().find(|c|c.id=="hachimi-weather").unwrap();
+            assert_eq!(selected.version,"999.0.0");
+            assert_eq!(selected.version_hash,user_hash);
+            assert!(!selected.is_bundled_copy);
+            for (id,hash) in &expected {
+                assert_eq!(&package_content_hash(&library_root(home.path()).join(id).join(hash)).unwrap(),hash);
+            }
+        }
         // Importing resources must not create host recordings, todos or API settings.
         assert!(!home.path().join(".claw-pet/component-apps").exists());
     }
@@ -1042,6 +1239,98 @@ mod tests {
         fs::write(path.join("runtime/widget.json"), br#"{"schema_version":1}"#).unwrap();
         fs::write(path.join("share.json"), br#"{"title":"Timer"}"#).unwrap();
         fs::write(path.join("assets/.keep"), b"").unwrap();
+    }
+
+    fn archive_fixture(source: &Path, archive: &Path) {
+        let mut paths = Vec::new();
+        collect_package_files(source, source, &mut paths).unwrap();
+        paths.sort();
+        let mut zip = zip::ZipWriter::new(fs::File::create(archive).unwrap());
+        for path in paths {
+            let name = path.strip_prefix(source).unwrap().to_string_lossy().replace('\\', "/");
+            zip.start_file(name, zip::write::FileOptions::default()).unwrap();
+            zip.write_all(&fs::read(path).unwrap()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    fn source_fingerprint(path: &Path) -> String {
+        if path.is_dir() { return package_content_hash(path).unwrap(); }
+        let mut hash = Sha256::new(); hash.update(fs::read(path).unwrap());
+        hash.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    fn directory_members(path: &Path) -> Vec<PathBuf> {
+        let mut items = if path.exists() { fs::read_dir(path).unwrap().map(|e| e.unwrap().path()).collect() } else { Vec::new() };
+        items.sort(); items
+    }
+
+    fn assert_interleaved_publication(archive: bool, drift_id: bool, preserve_old: bool) {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let original = temp.path().join("original");
+        let replacement = temp.path().join("replacement");
+        let kind = if archive { "archive" } else { "directory" };
+        let id = format!("guard-{kind}-{}", if preserve_old { "existing" } else { "empty" });
+        let replacement_id = if drift_id { format!("other-{kind}") } else { id.clone() };
+        write_package(&original, &id);
+        let old = preserve_old.then(|| publish_source(&home, &original).unwrap());
+        let old_hash = old.as_ref().map(|e| package_content_hash(Path::new(&e.path)).unwrap());
+        let old_members = directory_members(&library_root(&home).join(&id));
+        write_package(&replacement, &replacement_id);
+        let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(replacement.join("component.json")).unwrap()).unwrap();
+        manifest["version"] = "2.0.0".into();
+        fs::write(replacement.join("component.json"), serde_json::to_vec(&manifest).unwrap()).unwrap();
+        fs::write(replacement.join("share.json"), br#"{"title":"Updated content"}"#).unwrap();
+        let (source, next) = if archive {
+            let source = temp.path().join("input.clawpkg");
+            let next = temp.path().join("next.clawpkg");
+            archive_fixture(&original, &source); archive_fixture(&replacement, &next);
+            (source, next)
+        } else { (original.clone(), replacement) };
+        let original_hash = source_fingerprint(&source);
+        let replacement_hash = source_fingerprint(&next);
+        let saved = temp.path().join("source-before-replacement");
+        let calls = std::cell::Cell::new(0);
+        let result = publish_source_with_stager(&home, &source, |source, destination| {
+            calls.set(calls.get() + 1);
+            // This runs after real source validation and before real staging.
+            fs::rename(source, &saved).map_err(|e| e.to_string())?;
+            fs::rename(&next, source).map_err(|e| e.to_string())?;
+            stage_source_package(source, destination)
+        });
+        assert_eq!(calls.get(), 1);
+        assert_eq!(source_fingerprint(&source), replacement_hash, "current source must remain untouched");
+        assert_eq!(source_fingerprint(&saved), original_hash, "replaced source must remain recoverable");
+        if let Some(old) = old.as_ref() {
+            assert_eq!(package_content_hash(Path::new(&old.path)).unwrap(), old_hash.unwrap(), "old publication must remain byte-identical");
+        }
+        assert!(directory_members(&staging_root(&home)).is_empty(), "only owned staging is cleaned");
+        if drift_id {
+            assert!(result.unwrap_err().contains("组件来源在导入期间发生变化"));
+            assert_eq!(directory_members(&library_root(&home).join(&id)), old_members, "no new namespace/version may publish");
+            assert!(!library_root(&home).join(&replacement_id).exists());
+            if !preserve_old { assert!(directory_members(&library_root(&home)).is_empty()); }
+        } else {
+            let published = result.unwrap();
+            assert_eq!(published.id, id);
+            assert_eq!(published.version, "2.0.0");
+            assert!(published.valid);
+            assert_eq!(directory_members(&library_root(&home).join(&id)).len(), old_members.len() + 1);
+        }
+    }
+
+    #[test]
+    fn publication_rejects_directory_id_drift_before_commit() {
+        for preserve_old in [false, true] { assert_interleaved_publication(false, true, preserve_old); }
+    }
+    #[test]
+    fn publication_rejects_zip_id_drift_before_commit() {
+        for preserve_old in [false, true] { assert_interleaved_publication(true, true, preserve_old); }
+    }
+    #[test]
+    fn publication_allows_same_id_version_and_content_updates() {
+        for archive in [false, true] { assert_interleaved_publication(archive, false, true); }
     }
 
     #[test]
@@ -1130,6 +1419,14 @@ mod tests {
         assert!(compare_component_versions(&newer, &older).is_gt(), "equal release uses publication dates");
         newer.version = "legacy-new".into(); older.version = "legacy-old".into();
         assert!(compare_component_versions(&newer, &older).is_gt());
+    }
+
+    #[test]
+    fn side_scene_without_legacy_sprites_uses_surface_atlas_preview(){
+        let dir=tempfile::tempdir().unwrap();fs::write(dir.path().join("world.png"),b"bounded preview test").unwrap();
+        let runtime=serde_json::json!({"scene":{"engine":"p4-side-scene-v1"},"surface":{"images":[{"id":"world","asset":"world.png","frame_width":256,"frame_height":64,"frames":1,"fps":1}]}});
+        let images=scene_sprite_previews(dir.path(),Some(&runtime));assert_eq!(images.len(),1);assert_eq!(images[0].id,"world");
+        assert!(images[0].data_url.starts_with("data:image/png;base64,"));
     }
 
     #[test]

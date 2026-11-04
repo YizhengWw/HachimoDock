@@ -1,9 +1,13 @@
 #pragma once
 #include <stdint.h>
+#include "pet_p4_instrument_tone_config.h"
 /* Generated A modal strike, 16 kHz, 55 ms contact delay; 512 ms bounded tail.
  * Coefficients and xorshift seed match pet_p4_instrument_core.c tone 0.
  * Read-only flash, no allocation, no per-strike transcendentals. */
 #define PET_INSTRUMENT_TONE_SAMPLES 8192u
+#if PET_INSTRUMENT_TONE_PACKED
+extern int16_t pet_instrument_tone_pcm[PET_INSTRUMENT_TONE_SAMPLES];
+#else
 static const int16_t pet_instrument_tone_pcm[PET_INSTRUMENT_TONE_SAMPLES]={
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -348,3 +352,5 @@ static const int16_t pet_instrument_tone_pcm[PET_INSTRUMENT_TONE_SAMPLES]={
   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
   0,0,0,0,0,0,0,0,
 };
+
+#endif

@@ -207,7 +207,7 @@ export default function ChannelMatrixCard() {
       push({
         tone,
         title: cancelled ? "形象传输已中断" : "更换形象失败",
-        message: cancelled ? "设备继续保留原形象。" : msg,
+        message: cancelled ? "已停止本次操作。" : msg,
       });
     }
   }, [activeAgentId, agentOptions, applyDesktopPet, closePicker, push, saveAgentAppearance]);
@@ -227,7 +227,7 @@ export default function ChannelMatrixCard() {
       const { notice } = await applyDesktopPet(agentId, appearance, {
         initialProgress: followOnly
           ? {
-            text: `沿用「${appearance.name}」，正在把设备跟随切换到 ${channelLabelForId(agentOptions, agentId)}…`,
+            text: "正在确认…",
             followOnly: true,
           }
           : {
@@ -249,7 +249,7 @@ export default function ChannelMatrixCard() {
       push({
         tone,
         title: cancelled ? "形象传输已中断" : "切换跟随失败",
-        message: cancelled ? "设备继续保留原形象和跟随主体。" : msg,
+        message: cancelled ? "本次未切换。" : msg,
       });
     }
   }, [agentOptions, applyDesktopPet, currentDisplay.appearance?.id, pendingFollow, push]);
@@ -548,7 +548,7 @@ function FollowAgentConfirmModal({
         <div className="modal-body channel-switch-confirm-modal__body">
           <div className="message-banner message-banner--muted channel-switch-confirm-modal__message">
             {reusesCurrentAppearance
-              ? <>将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，沿用设备当前的「{appearanceName}」，无需重新传输素材。</>
+              ? <>将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，继续使用「{appearanceName}」。</>
               : <>将设备端跟随的 Agent 从 {currentLabel || "当前 Agent"} 切换为 {nextLabel || "目标 Agent"}，并同步「{appearanceName}」到设备端展示。</>}
           </div>
         </div>

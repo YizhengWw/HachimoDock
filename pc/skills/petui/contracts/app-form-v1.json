@@ -1,0 +1,69 @@
+{
+  "runtime": {
+    "schema_version":1,"engine":"p4-bounded-runtime-v4","navigation":"p4-app-navigation-v1",
+    "vars":{"choice":{"type":"int","init":10},"choiceDraft":{"type":"int","init":10},"amount":{"type":"int","init":2},"amountDraft":{"type":"int","init":2},"focus":{"type":"int","init":0},"editing":{"type":"int","init":0}},
+    "states":["ready"],"initial_state":"ready","pages":[{"id":"edit"},{"id":"home"}],"initial_page":"edit",
+    "input":{"engine":"p4-input-v1","repeat":["field.prev","field.next","value.down","value.up"]},
+    "form":{"engine":"p4-app-form-v1","page":"edit","focus_var":"focus","active_var":"editing","fields":[
+      {"id":"mode","var":"choice","draft_var":"choiceDraft","kind":"choice","options":[{"value":10,"label":"Quiet"},{"value":20,"label":"Balanced"},{"value":30,"label":"Bright"}]},
+      {"id":"level","var":"amount","draft_var":"amountDraft","kind":"integer","min":0,"max":6,"step":2}
+    ],"actions":{"previous":"field.prev","next":"field.next","decrease":"value.down","increase":"value.up","accept":"form.accept","cancel":"form.cancel"}},
+    "transitions":[{"from":"*","on":"field.prev"},{"from":"*","on":"field.next"},{"from":"*","on":"value.down"},{"from":"*","on":"value.up"},{"from":"*","on":"form.accept"},{"from":"*","on":"form.cancel"},{"from":"*","on":"back","page":{"back":true}},{"from":"*","on":"leave","page":{"push":"home"}}],
+    "tick":[],"dashboard":{"title":"Form","metricValue":{"var":"amount"},"visualStyle":"clean","visualPalette":"mono","visualLayout":"tool","visualSprite":"gauge"},
+    "persist":{"version":1,"vars":["choice","amount"],"states":{"ready":"ready"},"page":true},
+    "surface":{"engine":"p4-app-surface-v1","graphics":"p4-app-graphics-v1","bindings":"p4-variable-bindings-v1","background":0,"elements":[
+      {"type":"text","x":20,"y":20,"w":300,"h":32,"color":65535,"field_bind":"mode"},
+      {"type":"text","x":20,"y":60,"w":300,"h":32,"color":65535,"field_bind":"level"},
+      {"type":"text","x":20,"y":100,"w":300,"h":32,"color":65535,"var_bind":"focus"},
+      {"type":"text","x":20,"y":140,"w":300,"h":32,"color":65535,"var_bind":"editing"}
+    ]}
+  },
+  "buttons":[
+    {"event":"joystick.up","action":"field.prev","control":"joystick","label":"Previous"},
+    {"event":"joystick.down","action":"field.next","control":"joystick","label":"Next"},
+    {"event":"knob.rotate_ccw","action":"value.down","control":"joystick","label":"Decrease"},
+    {"event":"knob.rotate_cw","action":"value.up","control":"joystick","label":"Increase"},
+    {"event":"button.sw1.short_press","action":"form.accept","control":"sw1","label":"Edit / accept"},
+    {"event":"button.sw2.short_press","action":"form.cancel","control":"sw2","label":"Cancel"},
+    {"event":"button.encoder.short_press","action":"back","control":"encoder","label":"Back"},
+    {"event":"button.encoder.long_press","action":"leave","control":"encoder","label":"Leave"}
+  ],
+  "cases":[
+    {"name":"closed adjustment disabled","actions":["value.up"],"vars":[10,10,2,2,0,0],"page":"edit","text":["Quiet","2"]},
+    {"name":"draft only","actions":["form.accept","value.up"],"vars":[10,20,2,2,0,1],"page":"edit","text":["Balanced","2"]},
+    {"name":"cancel keeps committed","actions":["form.accept","value.up","form.cancel"],"vars":[10,10,2,2,0,0],"page":"edit","text":["Quiet","2"]},
+    {"name":"atomic two-field accept","actions":["form.accept","value.up","field.next","value.up","form.accept"],"vars":[20,20,4,4,1,0],"page":"edit","text":["Balanced","4"]},
+    {"name":"choice and focus clamp","actions":["field.prev","form.accept","value.up","value.up","value.up","field.next","field.next","value.down","value.down","form.accept"],"vars":[30,30,0,0,1,0],"page":"edit","text":["Bright","0"]},
+    {"name":"unavailable root back retains draft","actions":["form.accept","value.up","back"],"vars":[10,20,2,2,0,1],"page":"edit","text":["Balanced","2"]},
+    {"name":"leave cancels draft and disables editing","actions":["form.accept","value.up","leave","form.accept","value.up"],"vars":[10,10,2,2,0,0],"page":"home","text":["Quiet","2"]},
+    {"name":"hide cancels draft","actions":["form.accept","value.up","@hide"],"vars":[10,10,2,2,0,0],"page":"edit","text":["Quiet","2"]},
+    {"name":"restore discards transient fields","restore":{"choice":30,"choiceDraft":20,"amount":6,"amountDraft":0,"focus":1,"editing":1},"actions":[],"vars":[30,30,6,6,0,0],"page":"edit","text":["Bright","6"]},
+    {"name":"unknown old committed value retained","restore":{"choice":99,"amount":3},"actions":[],"vars":[99,99,3,3,0,0],"page":"edit","text":["—","3"]},
+    {"name":"invalid restored values normalized only in draft","restore":{"choice":99,"amount":3},"actions":["form.accept"],"vars":[99,10,3,0,0,1],"page":"edit","text":["Quiet","0"]},
+    {"name":"explicit accept replaces invalid old values","restore":{"choice":99,"amount":3},"actions":["form.accept","form.accept"],"vars":[10,10,0,0,0,0],"page":"edit","text":["Quiet","0"]}
+  ],
+  "invalid":[
+    {"name":"unknown form key","path":["form","extra"],"value":1},
+    {"name":"wrong engine","path":["form","engine"],"value":"p4-app-form-v2"},
+    {"name":"host profile","path":["host"],"value":false},
+    {"name":"unknown page","path":["form","page"],"value":"missing"},
+    {"name":"aliased draft","path":["form","fields",0,"draft_var"],"value":"choice"},
+    {"name":"aliased focus","path":["form","focus_var"],"value":"choice"},
+    {"name":"duplicate option","path":["form","fields",0,"options",1,"value"],"value":10},
+    {"name":"label control","path":["form","fields",0,"options",0,"label"],"value":"a\nb"},
+    {"name":"label too long","path":["form","fields",0,"options",0,"label"],"value":"1234567890123456789012345678901234567890123456789012345678901234"},
+    {"name":"invalid integer lattice","path":["form","fields",1,"step"],"value":4},
+    {"name":"invalid draft initial","path":["vars","choiceDraft","init"],"value":20},
+    {"name":"initial active","path":["vars","editing","init"],"value":1},
+    {"name":"limits truncate field","path":["limits"],"value":{"amount":[0,4]}},
+    {"name":"transient save","path":["persist","vars"],"value":["choiceDraft"]},
+    {"name":"accept effects forbidden","path":["transitions",4,"inc"],"value":{"amount":2}},
+    {"name":"external draft writes forbidden","path":["transitions",7,"set"],"value":{"choiceDraft":20}},
+    {"name":"tick committed writes forbidden","path":["tick"],"value":[{"every_ms":1000,"inc":{"amount":2}}]},
+    {"name":"confirmation conflict","path":["input","confirm"],"value":{"form.accept":"Confirm?"}},
+    {"name":"accept repeat forbidden","path":["input","repeat"],"value":["form.accept"]},
+    {"name":"field binding content conflict","path":["surface","elements",0,"text"],"value":"bad"},
+    {"name":"unknown field binding","path":["surface","elements",0,"field_bind"],"value":"missing"},
+    {"name":"field binding meter forbidden","path":["surface","elements",0,"type"],"value":"meter"}
+  ]
+}

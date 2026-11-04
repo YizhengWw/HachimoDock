@@ -2,6 +2,16 @@
 use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
+// Short media blocks on macOS leave a wider gap between physical USB slices.
+// Other topics and platforms retain their existing pacing and ACK deadlines.
+pub(super) fn serial_frame_gap(topic: &str, ordinary_gap: Duration) -> Duration {
+    if cfg!(target_os = "macos") && topic == "media/chunk" {
+        ordinary_gap.max(Duration::from_micros(400))
+    } else {
+        ordinary_gap
+    }
+}
+
 const MAX_RECOVERY_RETRIES: usize = 3;
 const RECOVERY_DEADLINE: Duration = Duration::from_millis(350);
 const RETRY_BACKOFF: Duration = Duration::from_millis(2);

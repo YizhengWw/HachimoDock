@@ -6,9 +6,16 @@
 
 ## 1. 目标设备
 
+通用横版跑跳、tile地图和图集能力单独见 [side-scene.md](side-scene.md)，
+必须协商 `widgetSideScene=p4-side-scene-v1`；不改变旧grid-scene配额与语义。
+
 应用级界面与原生 640×480 背景、图标、按钮和精细排版参见
 [app-surface.md](app-surface.md)。只有显式声明 `p4-app-graphics-v1` 且设备支持的
 应用包使用 32 节点/8191 字节配额；旧包、媒体、游戏配额不变。
+
+本地整数/枚举表单参见 [app-form.md](app-form.md)，额外协商
+`widgetAppForm=p4-app-form-v1`。最多3字段、每字段2–8选项或整数步进，
+提交/草稿分离且六动作均需实体输入；不是任意文本键盘或动态列表。
 
 - 逻辑画布：`640x480` 横向。
 - 新组件统一运行时：`p4-bounded-runtime-v4`。`game` 与 `tool` 共用变量、状态、计时、Dashboard、输入解释器和受控精灵资源；v3 继续兼容历史包。
@@ -17,6 +24,8 @@
 - 连续轨道可在 motion 中声明 `track.engine="p4-platform-track-v1"`，需额外 `widgetPlatformTrack`；固定平台池复用、可配置间距/宽度/色阶与跟随镜头。不是每次落台复位主角，也不支持任意地形脚本。
 - 可选受控触屏切果场景：`scene.engine="p4-touch-slice-v1"`，需要 `widgetPointer="p4-pointer-v1"` 与 `touchInput.ready=true`。配置、玩法、素材和实测边界见 [touch-slice.md](touch-slice.md)；它不使用通用网格场景的 entities/rules 字段。
 - `blocks`、`snake`、`flappy` 仅是历史原生预设，供旧包兼容，不是新组件可选的三种引擎。
+- `gomoku` 是唯一允许新建的原生预设：用户要求五子棋 / 五子对弈时使用 `game.type="gomoku"`
+  （见第 6 节末），需设备 `widgetGamePresets` 含 `gomoku`；其他棋类或自定玩法仍走通用 `scene`。
 - 默认不假设触控可用。只有能力文件明确给出 `touchInput.ready=true` 时才允许触屏事件。
 - 第三方组件不能执行任意代码，也不能自行访问网络或本地文件。
 
@@ -33,14 +42,29 @@
   "widgetMedia": "p4-media-v1",
   "widgetInstrument": "p4-instrument-v1",
   "widgetLyrics": "p4-lrc-v1",
-  "widgetGamePresets": ["blocks", "snake", "flappy"],
+  "widgetGamePresets": ["blocks", "snake", "flappy", "gomoku"],
   "touchInput": { "ready": false }
 }
 ```
 
-没有提供能力文件时，校验器使用上面的当前 P4 产品能力。
+上方是基础能力示例，不是完整能力表。未提供能力文件时，仅使用校验器内置的
+离线创作基线；这不能证明实体设备支持。实际同步始终使用 USB 报告的能力，
+显式传入空能力表不会获得扩展能力。
 
 ## 2. 包结构
+
+设备侧 JSON 文件（component.json、negative-screen.json、buttons.json、
+runtime/widget.json）的字符串和键不能包含解码后的 NUL（U+0000）。
+它不能由设备 C 字符串无损表示，校验失败时拒绝包，不截断、不自动修复。
+普通换行与字面量反斜杠后接 u0000 不受影响；私有 PC JSON 和二进制
+图片资源不是该限制的目标。设备 JSON 原文还必须为有效 UTF-8；字符串转义中的
+UTF-16 代理项必须正确配对，不能用替换字符静默修复。Python/JS 对已解析值同样
+拒绝孤立代理项，正常中文、合法 emoji 和普通转义文字保留。原生文本前置检查
+不是完整 JSON 语法或重复键校验，后续解析和 schema 检查仍须执行。
+设备入口另在递归解析前限制对象/数组容器路径最多 **32 层**，字符串中的括号和
+标量叶子不增加层数。Python/JS 预览和 Rust 包校验使用相同边界；超出时拒绝，
+不自动裁剪、清空或覆盖存档。私有 PC JSON 与二进制资源不套用设备容器界限。
+这是输入上限，不代表完整栈调用图、实机高水位或时延已经通过。
 
 ### 原生本地音效工具
 
@@ -88,7 +112,7 @@
 | `badge` | 12 | 右上短计数 |
 | `note` | 156 | 必要的补充事实 |
 | `footer` | 156 | 当前可执行的 1-3 个动作 |
-| `progress` | 64 | `{value,label}` 或 runtime `pct_of` |
+| `progress` | 64 | negative-screen 初始预览用 `{value,label}`；runtime 只能用 `{pct_of,of_max,label}`、字符串或 `{var}` |
 | `visualStyle` | 16 | 新包默认 `clean`；用户明确要求复古/像素/街机时才用 `pixel`；`classic` 仅兼容旧包 |
 | `visualPalette` | 16 | `candy|sunset|mint|arcade|ocean|forest|ember|mono` |
 | `visualLayout` | 16 | `arcade|scoreboard|tool` |
@@ -110,14 +134,14 @@ blocks snake flappy mole-ready mole-left mole-center mole-right
 - CJK 通常每字 3 字节，emoji 通常 4 字节；所有上限按 UTF-8 字节计算。
 - 动态值必须绑定 runtime var/formatter，不得把看似实时的数字硬编码进初始画面。
 
-Runtime dashboard 只允许：
+Runtime dashboard 的每个槽位只允许下面几种写法，这是固件 `parse_dashboard` 的原样文法，PC 校验器、预览和安装前校验按同一文法拒绝，其他任何形态到设备都会以 `dashboard value rule is unsupported` 失败：
 
 - 字面量字符串。
-- `switch_state`。
-- `switch_page`。
-- `fmt_mmss` / `fmt_hms`。
-- `var`。
-- progress 专用 `pct_of`、`of_max`、`label`。
+- 值规则对象，且只含一个键：`{"var": "名"}`、`{"fmt_mmss": "int变量"}`、`{"fmt_hms": "int变量"}`。变量必须在 `vars` 中声明，formatter 需要 `int` 变量。
+- `{"switch_state": {"state": 分支}}` / `{"switch_page": {"page": 分支}}`：只能出现在槽位顶层，键名必须是已声明的 state/page，最多 6 个分支；**每个分支只能是字符串或上面的单键值规则，不能再嵌套 switch、progress 或任何其他对象。** 需要同时按页和按状态变化时，用 `var_bind`/`switch_page` 搭配 transition 写入变量，不要嵌套。
+- 仅 `progress` 槽位：`{"pct_of": "int变量", "of_max": "int变量", "label": "可选字符串"}`，不接受其他键。runtime 里不能写 `{value,label}`，那只属于 `negative-screen.json` 的初始预览。
+
+不接受的例子：`{"switch_page": {"home": {"switch_state": {...}}}}`、`{"text": "..."}`、`{"var": "n", "suffix": "个"}`、`{}`、runtime 里的 `{"value": 0, "label": "..."}`。
 
 Dashboard 没有通用 if/else、字符串拼接、任意算术或 CSS。需要局面网格时使用第 6 节受限 `scene`，不得把逐帧像素数据塞进 Dashboard。
 
@@ -183,14 +207,29 @@ screen.region.long_press
 - `schema_version` 固定为 `1`。
 - 新组件 `engine` 固定为 `p4-bounded-runtime-v4`；工具和游戏都必须声明，不按 `kind` 切换底层引擎。v3 仅用于读取或修复历史包。
 - `vars` 必须始终是对象；无变量时写 `{}`，不得省略、写成数组或 `null`。
-- 最多 8 个变量；变量名为 1-31 个 ASCII 字母、数字、`_`、`-`、`.`。
+- 最多 8 个变量；变量名为 1-31 个 ASCII 字母、数字、`_`、`-`、`.`。声明 `quota: "p4-quota-v2"`
+  （需设备 `widgetQuota`）后变量 16、状态 8、页面 6、transition 32、tick 12、switch 分支 8、
+  surface 节点 48、deck 每组 24 项、`persist.vars` 16、无 graphics 的 runtime 也放宽到 8191 字节；
+  详见 [quota.md](quota.md)。未声明时全部沿用本节的 v1 数字。
 - 每个变量声明必须且只能含 `type` 与可选 `init`。禁止 `min`、`max`、`default`、`label` 或其他描述字段。
 - `type` 只能是 `int|string`。`int.init` 必须是 `-1000000000..1000000000` 的整数；`string.init` 最多 63 个 UTF-8 字节。
 - `states` 为 1-6 个唯一字符串，`initial_state` 必须存在于其中。
 - `pages` 可省略；存在时为 1-4 个对象，每个对象必须且只能含 `id`，ID 为 1-23 个 ASCII 字母、数字、`_`、`-`、`.`。
 - `initial_page` 必须引用已声明 page。
 - `transitions` 最多 12 条，`tick` 最多 8 条。
+- 启用 `p4-input-v1` 的包允许最多 24 条 transition。能力中的 `maxTransitions`
+  保留旧包上限 12；新工具应读取 `maxInputTransitions`，不能把条件上限用于旧包。
+- tick 的 `while_state` 省略时在所有状态运行；填写时必须引用已声明状态，
+  不接受字面量 `"*"`。状态改变会重置 tick 时间基准，不补演之前的非活动时间。
+  一次推进最多补演 10 步。PC 预览与技能模型使用同一语义用例集。
 - 每条 transition/tick 顶层 `set+inc` 最多 4 项；每个 `tick.then` 独立最多 4 项。
+- 声明 `logic: "p4-logic-v1"`（需设备 `widgetLogic`）后，transition 可带 `when` 条件与 `else` 分支，
+  tick 的 `when` 可用 `op/value/all`，`inc` 可写 `{var}`，scene 规则可带 `when` 与 `var` 操作；
+  主分支与 `else` 的 `set+inc` 合计仍不超过 4 项。详见 [logic.md](logic.md)。未声明时保持原契约。
+- 声明 `sfx: {"engine": "p4-sfx-v1", "volume": 0-100, "cues": [...]}`（需设备 `widgetSfx`）后，transition、
+  `tick[].then` 可带 `sfx: "<cue id>"`，scene 规则可用 `{"op": "sfx", "cue": ...}`。1-8 个 cue，每个只能选
+  固定预设 `tap|beep|chirp|low|water|page`，不能带采样、文件或自定义波形；不与 `instrument`/`media`/`local`/
+  `program` 混用。详见 [sfx.md](sfx.md)。
 - `runtime/widget.json` 紧凑 JSON 不超过 4095 字节。
 - `buttons.json` 紧凑 JSON 不超过 2047 字节。
 - P4 第三方组件不声明任意 `fetchers` 或 `readers`。实时数据只能使用产品已经提供的 bridge 变量。
@@ -291,6 +330,8 @@ PC 文件不下发设备，收藏和凭据不能随包分发；不接受歌词�
 | `edge` | `entity`,可选 `edge` | 实体越过 `left/right/top/bottom`；`edge` 省略或 `any` 表示任意边 |
 | `blocked` | `entity` | 实体移动被 `solid_tones` 阻挡 |
 
+规则可选 `when`（仅 `logic=p4-logic-v1`，一条 int 条件）：条件为假时整条规则跳过。
+
 ### 受控操作
 
 | `op` | 字段 | 作用 |
@@ -304,6 +345,8 @@ PC 文件不下发设备，收藏和凭据不能随包分发；不接受歌词�
 | `run` / `stop` / `restart` | 无 | 开始、结束或重置并开始 scene |
 | `bounce` | `entity,axis` | 按 `x|y|both` 反转速度 |
 | `tone` | `entity,tone` | 切换实体 1-4 色阶 |
+| `var` | `name` 加 `set` 或 `inc` | 仅 `logic=p4-logic-v1`：写一个 int 变量，-10000..10000 |
+| `sfx` | `cue` | 仅 `sfx=p4-sfx-v1`：排队一个已声明的 cue，不改变画面，不算可见反馈 |
 
 一个可交付小游戏必须形成“目标出现、玩家输入、即时反馈、局面变化、回合结算、重开”的完整闭环。优先组合通用状态机和 `scene`，不得从 Flappy、贪吃蛇、方块中挑一个冒充用户要求的玩法。
 
@@ -322,6 +365,16 @@ python <skill-dir>/scripts/smoke_test_widget_game.py <component-dir>
 文案与 runtime 必须一致：声称移动/飞行时要有实体速度或移动操作；声称碰撞时要有 collision rule；射击/战机玩法还必须有持续运动的子弹与敌人实体、子弹命中敌人的 collision rule，以及由玩家 action 驱动的水平移动。Dashboard、分享文案和组件描述不得宣传 runtime 中不存在的机制。
 
 旧包中的 `game.type=blocks|snake|flappy` 仍由固件兼容，但新生成组件禁止声明旧版 `game` 对象。维护旧包时，其 `tick_ms`、状态、分数变量和固定 action 表仍按旧契约校验。
+
+### 原生五子棋预设 `game.type="gomoku"`
+
+用户要求五子棋（五子对弈、连珠）时，不用 `scene` 拼凑，而是声明原生预设；校验器要求目标能力 `widgetGamePresets` 含 `gomoku`，旧固件在传输前被拒绝。
+
+- `game`：`{type:"gomoku", tick_ms:100-2000, playing_state, result_state, score_var, actions}`；`actions` 必须且只能包含 `place|left|right|up|down|undo` 六项，每项都要出现在 `transitions` 与 `buttons.json`。推荐映射：`place`→SW1，`undo`→SW2，`left/right`→旋钮逆/顺时针，`up/down`→摇杆上/下；SW3 为全局退出，不得绑定。
+- 玩法：15×15 棋盘，玩家执黑先行，设备执白在下一个 tick 回应（确定性有界 AI，不接受自定义棋力参数）。`place` 在 `ready/result` 开始或重开，进行中落子；光标边界截停；`undo` 只撤回最近一回合。任一方 ≥5 连即结束，棋盘满为和棋。
+- `score_var` 契约：进行中为盘面手数（黑白总数，奇数=白方待回应，偶数=轮到黑方）；结束后为 `结果×1000+手数`（1 黑胜 / 2 白胜 / 3 和棋）。可与 `logic:"p4-logic-v1"`、`sfx:"p4-sfx-v1"` 并用：transition 的 `sfx` 做落子/悔棋音，`tick[].then.sfx` 做节奏循环、回应音（`score gte {var}` 的偶数步）与结算音；固件 tick 与 sfx 在原生预设进行中照常运行。HUD 用 `state_mask` 区分 ready/playing/result，用 `show:{var:score,min,max}` 在 result 状态显示对应结果文案；不要宣传不存在的计时、段位或联网对弈。
+- 画面：必须声明 `surface.game_view`（见 app-surface.md「原生五子棋画面」），棋盘线画在 640×480 JPEG 背景里并与视口格子对齐；游戏层只画棋子、光标、最近落子点与五连高亮。
+- 自测：`smoke_test_widget_game.py` 通过同源 WASM 走开始 → 光标移动 → 落子 → 设备回应 → 悔棋 → 结算 → 重开。
 
 ## 7. Tool 路由
 

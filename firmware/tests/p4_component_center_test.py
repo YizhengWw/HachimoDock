@@ -21,8 +21,8 @@ HARNESS = r'''
 typedef struct {char widget_id[64],title[128];bool active;} pet_p4_miniapp_catalog_entry_t;
 static size_t count,selected,reads;
 static bool preview;
-static const char *ids[]={"cloud-hop","stock-watchlist","wooden-fish","daily-news"};
-static const char *titles[]={"云端跳一跳","自选股行情","静心木鱼","每日新鲜事"};
+static const char *ids[]={"city-radio","cloud-hop","stock-watchlist","wooden-fish"};
+static const char *titles[]={"城市电台","云端跳一跳","自选股行情","静心木鱼"};
 static size_t pet_p4_miniapp_catalog_count(void){return count;}
 static size_t pet_p4_miniapp_catalog_selected(void){return selected;}
 static bool pet_p4_miniapp_catalog_get(size_t i,pet_p4_miniapp_catalog_entry_t *out){
@@ -70,12 +70,12 @@ int main(int argc,char **argv){
  (void)argv;
  for(count=0;count<=32;++count){
    for(selected=0;selected<(count?count:1);++selected){
-     reads=0;render_component_center_page();
+     reads=0;render_component_center_page(false);
      size_t remaining=count-selected/4*4;assert(reads==(remaining<4?remaining:4));
    }
  }
- count=0;selected=99;render_component_center_page();
- if(argc>1){preview=true;count=12;selected=0;render_component_center_page();}
+ count=0;selected=99;render_component_center_page(true);
+ if(argc>1){preview=true;count=12;selected=0;render_component_center_page(false);}
  return 0;
 }
 '''

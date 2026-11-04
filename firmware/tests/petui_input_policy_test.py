@@ -9,38 +9,53 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/"pc/skills/petui/scripts"))
 from input_policy import input_errors
 
-def test_input_policy_real_c_and_python(tmp_path):
-    code=(ROOT/"firmware/main/pet_p4_miniapp.c").read_text()
-    start=code.index("static bool runtime_has_transition_action(")
-    end=code.index("static bool json_int_range(",start)
-    harness=r'''
+
+def guard_support(code):
+    start=code.index("static bool conditions_hold(")
+    end=code.index("static int find_sfx_cue(",start)
+    game=(ROOT/"firmware/main/pet_p4_game.c").read_text()
+    a=game.index("bool pet_p4_game_compare(")
+    b=game.index("\n}\n",a)+3
+    header=(ROOT/"firmware/main/pet_p4_game.h").read_text()
+    a_enum=header.index("typedef enum {",header.index("PET_P4_GAME_CMP_LTE")-30)
+    b_enum=header.index("} pet_p4_game_cmp_t;",a_enum)+len("} pet_p4_game_cmp_t;")
+    return header[a_enum:b_enum]+"\n"+game[a:b]+code[start:end]
+
+def policy_harness_prefix():
+    return r'''
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include "cJSON.h"
 #include "pet_p4_local_tools.h"
+#include "pet_p4_app_navigation.h"
+#include "pet_p4_app_form.h"
+#define MINIAPP_VAR_INT 0
+static uint32_t g_viewport_epoch;
+static int g_pressed_node;
 enum {MINIAPP_EFFECT_SET,MINIAPP_EFFECT_INC};
 typedef struct {int var_index,source_var,op,int_value;} miniapp_effect_t;
-typedef struct {int from_state,to_state,page_op,effect_count;char action[48];miniapp_effect_t effects[4];} transition_t;
+typedef struct {int var,value_var,value,op;} miniapp_condition_t;
+typedef struct {int from_state,to_state,page_op,effect_count,when_count,else_to_state,else_page_op,else_effect_count;bool has_else;miniapp_condition_t when[2];pet_nav_rule_t navigation_rule;char action[48];miniapp_effect_t effects[4];} transition_t;
 typedef transition_t miniapp_transition_t;
 typedef struct {char event[48],action[48];} button_t;
 typedef struct {
- bool input_v1;uint8_t repeat_mask,press_mask;char swipe_actions[4][48];
+ bool input_v1,navigation;uint8_t repeat_mask,press_mask;char swipe_actions[4][48];
  char drag_entity[16];uint8_t drag_axis;char hold_action[48];
  char confirm_actions[3][48],confirm_prompts[3][121];
  char cooldown_actions[3][48];uint16_t cooldown_ms[3];uint64_t cooldown_at[3];uint8_t cooldown_used;
- int transition_count,button_count,current_state;
- char data_source[48];int data_page_var;struct {int int_value;}vars[8];
+ int transition_count,button_count,current_state,current_page;pet_nav_history_t navigation_history;
+ char data_source[48];int data_page_var,var_count;struct {int int_value,type;}vars[8];pet_form_t form;
  transition_t transitions[24];button_t buttons[8];
  pet_local_config_t local;pet_local_state_t local_state;
 } miniapp_runtime_t;
-typedef struct {int pages,page;}pet_p4_data_view_t;
+typedef struct {int pages,page;}pet_p4_data_paging_t;
 static int data_pages=1;
 static uint64_t mock_now;
 static uint64_t esp_timer_get_time(void){return mock_now*1000;}
-static void pet_p4_widget_data_view(const char *source,int page,uint64_t now,pet_p4_data_view_t *v){
- (void)source;(void)now;v->pages=data_pages;v->page=((page%data_pages)+data_pages)%data_pages;
+static pet_p4_data_paging_t pet_p4_widget_data_paging(const char *source,int page){
+ (void)source;return(pet_p4_data_paging_t){.pages=data_pages,.page=((page%data_pages)+data_pages)%data_pages};
 }
 static const char *json_string(const cJSON *j,const char *k){const cJSON *v=cJSON_GetObjectItemCaseSensitive(j,k);return cJSON_IsString(v)?v->valuestring:"";}
 static void copy_utf8(char *out,size_t size,const char *v){snprintf(out,size,"%s",v);}
@@ -48,13 +63,20 @@ static bool object_keys_allowed(const cJSON *o,const char *const *keys,size_t n)
  if(!cJSON_IsObject(o))return false;const cJSON *v;
  cJSON_ArrayForEach(v,o){bool ok=false;for(size_t i=0;i<n;i++)if(!strcmp(v->string,keys[i]))ok=true;if(!ok)return false;}return true;
 }
-'''+code[start:end]+r'''
+'''
+
+def test_input_policy_real_c_and_python(tmp_path):
+    code=(ROOT/"firmware/main/pet_p4_miniapp.c").read_text()
+    start=code.index("static bool runtime_has_transition_action(")
+    end=code.index("static bool json_int_range(",start)
+    harness=policy_harness_prefix()+guard_support(code)+code[start:end]+r'''
 int main(int argc,char **argv){
  (void)argc;char buf[8192];FILE *f=fopen(argv[1],"rb");size_t n=fread(buf,1,sizeof(buf)-1,f);buf[n]=0;fclose(f);
  cJSON *root=cJSON_Parse(buf);miniapp_runtime_t r={.transition_count=3,.button_count=3};
  const char *actions[]={"go","flap","reset"},*events[]={"knob.rotate_cw","button.sw1.short_press","button.sw2.short_press"};
  for(int i=0;i<3;i++){strcpy(r.transitions[i].action,actions[i]);r.transitions[i].from_state=i==0?0:-1;strcpy(r.buttons[i].action,actions[i]);strcpy(r.buttons[i].event,events[i]);}
  bool ok=parse_input_policy(&r,root);
+ if(ok){r.current_page=-1;if(!runtime_action_enabled(&r,"go"))return 42;r.current_page=0;}
  if(ok){r.current_state=1;if(runtime_action_enabled(&r,"go"))return 2;if(!runtime_action_enabled(&r,"flap"))return 3;}
  if(ok){
    strcpy(r.data_source,"todos.upcoming");r.current_state=0;

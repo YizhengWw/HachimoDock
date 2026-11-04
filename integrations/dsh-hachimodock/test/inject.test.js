@@ -43,6 +43,38 @@ test('same requestId is never re-admitted by this bridge', async t => {
   const b = body(), sse = await openSse(url + '/inject', opts(b)); await sse.next(); sse.close()
   assert.equal((await postJson(url + '/inject', b)).status, 409); assert.equal(calls, 1)
 })
+test('invalid inject text cannot consume or evict request receipts', async t => {
+  let calls = 0
+  const { server, url } = await startTestServer(t, { listSessions: () => [{ id: 's1' }], inject: async ({ emit }) => { calls++; emit({ type: 'done', sessionId: 's1' }) } })
+  const req = body(), sse = await openSse(url + '/inject', opts(req)); await sse.next(); sse.close()
+  for (let i = 0; i < 256; i++) assert.equal((await postJson(url + '/inject', body({ text: '' }))).status, 400)
+  assert.equal(server.injecting.size, 1)
+  assert.equal((await postJson(url + '/inject', req)).status, 409)
+  assert.equal(calls, 1)
+})
+test('bounded receipt eviction preserves an in-flight inject request', async t => {
+  const active = body(); let activeCalls = 0, release
+  const pending = new Promise(resolve => { release = resolve })
+  const { server, url } = await startTestServer(t, { listSessions: () => [{ id: 's1' }], inject: async ({ requestId, emit }) => {
+    if (requestId === active.requestId) { activeCalls++; await pending }
+    emit({ type: 'done', sessionId: 's1' })
+  } })
+  t.after(() => release())
+  const first = await openSse(url + '/inject', opts(active)); t.after(() => first.close())
+  try {
+    for (let i = 0; i < 257; i++) {
+      const sse = await openSse(url + '/inject', opts(body())); await sse.next(); sse.close()
+    }
+    assert.ok(server.injecting.size <= 256)
+    assert.ok(server.injecting.has(active.requestId), 'in-flight receipt must survive completed-receipt churn')
+    assert.equal((await postJson(url + '/inject', active)).status, 409)
+    assert.equal(activeCalls, 1)
+    release(); await first.next()
+    assert.equal((await postJson(url + '/inject', active)).status, 409)
+  } finally {
+    release(); first.close()
+  }
+})
 test('DSH prompt uses exact official SessionController queue request and reports only admission', async t => {
   const a = createFakeSession('s1'), b = createFakeSession('s2'); let received
   const ctx = createFakeCtx({ sessions: [a, b] })

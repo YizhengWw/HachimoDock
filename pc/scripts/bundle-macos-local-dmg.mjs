@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {desktopBuildPaths,macAppIdentity,verifyBuildReceipt,readBuildReceipt,receiptArgument} from './desktop-build-artifact.mjs';
 
 if (process.platform !== "darwin") {
   console.error("bundle-macos-local-dmg only supports macOS");
@@ -46,14 +47,9 @@ if (dmgFlavor && !/^[0-9A-Za-z][0-9A-Za-z.-]*$/.test(dmgFlavor)) {
   console.error(`invalid PET_MANAGER_DMG_FLAVOR: ${dmgFlavor}`);
   process.exit(1);
 }
-const bundleRoot = resolve(
-  repositoryRoot,
-  "pc",
-  "src-tauri",
-  "target",
-  "release",
-  "bundle",
-);
+const bundleRoot=desktopBuildPaths({repositoryRoot,target:'macos'}).bundleRoot;
+const receiptPath=receiptArgument(process.argv.slice(2));
+const receipt=receiptPath?readBuildReceipt(receiptPath):null;
 const appBundleName = `${productName}.app`;
 const appPath = join(bundleRoot, "macos", appBundleName);
 const dmgDirectory = join(bundleRoot, "dmg");
@@ -79,8 +75,10 @@ function run(command, args, label) {
   }
 }
 
-function verifyStableApp(path) {
-  run(process.execPath, [signer, "--verify-only", path], "stable app signature verification");
+function verifyStableApp(path,relocated=false) {
+  const identity=macAppIdentity(path,appVersion);
+  if(receipt)verifyBuildReceipt(identity,receipt,{relocated});
+  run(process.execPath,[signer,'--verify-only',path,...(receiptPath?['--receipt',receiptPath]:[]),...(relocated?['--relocated']:[])],'stable app signature verification');
 }
 
 verifyStableApp(appPath);
@@ -93,7 +91,7 @@ let mounted = false;
 
 try {
   run("/usr/bin/ditto", [appPath, stagedAppPath], "staging stable app");
-  verifyStableApp(stagedAppPath);
+  verifyStableApp(stagedAppPath,true);
 
   rmSync(dmgPath, { force: true });
   run(
@@ -129,7 +127,7 @@ try {
     "mounting final local DMG",
   );
   mounted = true;
-  verifyStableApp(join(mountRoot, appBundleName));
+  verifyStableApp(join(mountRoot, appBundleName),true);
 } finally {
   if (mounted) {
     spawnSync("/usr/bin/hdiutil", ["detach", mountRoot], { stdio: "inherit" });

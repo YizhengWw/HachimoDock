@@ -1,0 +1,959 @@
+{
+ "schemaVersion": 1,
+ "profile": "p4-cells-v1",
+ "notes": "Shared p4-cells-v1 vectors. runtime: a complete valid package every validator (Python, Rust, firmware parser, JS preview) accepts. reject: JSON-pointer patches every validator must refuse. cases: semantic runs executed by the JS preview, the packaged mirror and the Python model (expected cells are row strings of hex digits). core: pure grid vectors for the C core (pet_p4_cells.c) and its JS/Python mirrors. Ordering: to/page, then set/inc (sources read the pre-effect snapshot), limits, then cells ops in order reading the current variables; count/run outputs are clamped by limits. Out-of-range reads are -1, out-of-range writes are no-ops, stored values clamp to 0..2^bits-1.",
+ "limits": {
+  "maxSide": 16,
+  "maxCells": 256,
+  "bits": [
+   2,
+   4
+  ],
+  "maxOpsPerBranch": 4,
+  "outOfRangeRead": -1
+ },
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "logic": "p4-logic-v1",
+  "input": {
+   "engine": "p4-input-v1"
+  },
+  "cells": {
+   "engine": "p4-cells-v1",
+   "cols": 3,
+   "rows": 3,
+   "bits": 2,
+   "init": [
+    "000",
+    "000",
+    "000"
+   ]
+  },
+  "vars": {
+   "cx": {
+    "type": "int",
+    "init": 1
+   },
+   "cy": {
+    "type": "int",
+    "init": 1
+   },
+   "turn": {
+    "type": "int",
+    "init": 1
+   },
+   "next": {
+    "type": "int",
+    "init": 2
+   },
+   "empty": {
+    "type": "int",
+    "init": 9
+   },
+   "run": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "limits": {
+   "cx": [
+    0,
+    2
+   ],
+   "cy": [
+    0,
+    2
+   ],
+   "turn": [
+    1,
+    2
+   ],
+   "next": [
+    1,
+    2
+   ],
+   "empty": [
+    0,
+    9
+   ],
+   "run": [
+    0,
+    3
+   ]
+  },
+  "states": [
+   "play",
+   "won",
+   "draw"
+  ],
+  "initial_state": "play",
+  "transitions": [
+   {
+    "from": "play",
+    "on": "move.left",
+    "inc": {
+     "cx": -1
+    }
+   },
+   {
+    "from": "play",
+    "on": "move.right",
+    "inc": {
+     "cx": 1
+    }
+   },
+   {
+    "from": "play",
+    "on": "move.up",
+    "inc": {
+     "cy": -1
+    }
+   },
+   {
+    "from": "play",
+    "on": "move.down",
+    "inc": {
+     "cy": 1
+    }
+   },
+   {
+    "from": "play",
+    "on": "place",
+    "when": {
+     "cell": {
+      "x": {
+       "var": "cx"
+      },
+      "y": {
+       "var": "cy"
+      }
+     },
+     "op": "eq",
+     "value": 0
+    },
+    "set": {
+     "turn": {
+      "var": "next"
+     },
+     "next": {
+      "var": "turn"
+     }
+    },
+    "cells": [
+     {
+      "op": "cell",
+      "x": {
+       "var": "cx"
+      },
+      "y": {
+       "var": "cy"
+      },
+      "set": {
+       "var": "next"
+      }
+     },
+     {
+      "op": "cellrun",
+      "x": {
+       "var": "cx"
+      },
+      "y": {
+       "var": "cy"
+      },
+      "value": {
+       "var": "next"
+      },
+      "var": "run"
+     },
+     {
+      "op": "cellcount",
+      "value": 0,
+      "var": "empty"
+     }
+    ]
+   },
+   {
+    "from": "*",
+    "on": "reset",
+    "to": "play",
+    "set": {
+     "turn": 1,
+     "next": 2,
+     "cx": 1,
+     "cy": 1
+    },
+    "cells": [
+     {
+      "op": "cellfill",
+      "set": 0
+     },
+     {
+      "op": "cellcount",
+      "value": 0,
+      "var": "empty"
+     },
+     {
+      "op": "cellrun",
+      "x": 1,
+      "y": 1,
+      "value": 1,
+      "var": "run"
+     }
+    ]
+   },
+   {
+    "from": "play",
+    "on": "corner",
+    "when": {
+     "cell": {
+      "x": 0,
+      "y": 0
+     },
+     "op": "ne",
+     "value": 0
+    },
+    "set": {
+     "run": 3
+    },
+    "else": {
+     "cells": [
+      {
+       "op": "cell",
+       "x": 0,
+       "y": 0,
+       "set": 3
+      }
+     ]
+    }
+   }
+  ],
+  "tick": [
+   {
+    "every_ms": 100,
+    "while_state": "play",
+    "when": {
+     "var": "run",
+     "op": "gte",
+     "value": 3
+    },
+    "then": {
+     "to": "won"
+    }
+   },
+   {
+    "every_ms": 100,
+    "while_state": "play",
+    "when": {
+     "all": [
+      {
+       "var": "empty",
+       "op": "eq",
+       "value": 0
+      },
+      {
+       "var": "run",
+       "op": "lt",
+       "value": 3
+      }
+     ]
+    },
+    "then": {
+     "to": "draw"
+    }
+   }
+  ],
+  "dashboard": {
+   "title": "Cells contract",
+   "visualStyle": "clean",
+   "visualPalette": "mint",
+   "visualLayout": "tool",
+   "visualSprite": "star"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "images": [
+    {
+     "id": "stones",
+     "asset": "assets/stones.png",
+     "frame_width": 96,
+     "frame_height": 32,
+     "frames": 1,
+     "fps": 1
+    }
+   ],
+   "elements": [
+    {
+     "type": "cells",
+     "x": 200,
+     "y": 120,
+     "w": 240,
+     "h": 240,
+     "color": 65535,
+     "foreground": 63488,
+     "stroke": 2016,
+     "image": "stones",
+     "columns": 3,
+     "cursor": {
+      "x_var": "cx",
+      "y_var": "cy",
+      "color": 65504
+     }
+    },
+    {
+     "type": "cells",
+     "x": 20,
+     "y": 120,
+     "w": 96,
+     "h": 96,
+     "color": 65535,
+     "foreground": 63488,
+     "stroke": 2016
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 600,
+     "h": 40,
+     "color": 65535,
+     "var_bind": "run"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 400,
+     "w": 200,
+     "h": 64,
+     "color": 2016,
+     "text": "Place",
+     "action": "place"
+    },
+    {
+     "type": "button",
+     "x": 240,
+     "y": 400,
+     "w": 200,
+     "h": 64,
+     "color": 2016,
+     "text": "Reset",
+     "action": "reset"
+    }
+   ]
+  }
+ },
+ "reject": [
+  {
+   "name": "engine must be p4-cells-v1",
+   "path": "/cells/engine",
+   "value": "p4-cells-v2"
+  },
+  {
+   "name": "cols above 16",
+   "path": "/cells/cols",
+   "value": 17
+  },
+  {
+   "name": "rows below 1",
+   "path": "/cells/rows",
+   "value": 0
+  },
+  {
+   "name": "bits must be 2 or 4",
+   "path": "/cells/bits",
+   "value": 3
+  },
+  {
+   "name": "init row count must match rows",
+   "path": "/cells/init",
+   "value": [
+    "000",
+    "000"
+   ]
+  },
+  {
+   "name": "init row length must match cols",
+   "path": "/cells/init",
+   "value": [
+    "0000",
+    "000",
+    "000"
+   ]
+  },
+  {
+   "name": "init digit above 2^bits-1",
+   "path": "/cells/init",
+   "value": [
+    "004",
+    "000",
+    "000"
+   ]
+  },
+  {
+   "name": "init digits are hex only",
+   "path": "/cells/init",
+   "value": [
+    "00g",
+    "000",
+    "000"
+   ]
+  },
+  {
+   "name": "unknown cells key",
+   "path": "/cells/extra",
+   "value": 1
+  },
+  {
+   "name": "cell op x literal out of range",
+   "path": "/transitions/6/else/cells/0/x",
+   "value": 3
+  },
+  {
+   "name": "cell op set above 2^bits-1",
+   "path": "/transitions/6/else/cells/0/set",
+   "value": 4
+  },
+  {
+   "name": "cell op var must be an int var",
+   "path": "/transitions/4/cells/0/set",
+   "value": {
+    "var": "missing"
+   }
+  },
+  {
+   "name": "cellcount needs an int output var",
+   "path": "/transitions/4/cells/2/var",
+   "value": "missing"
+  },
+  {
+   "name": "unknown cells op",
+   "path": "/transitions/4/cells/0/op",
+   "value": "cellswap"
+  },
+  {
+   "name": "more than four cells ops",
+   "path": "/transitions/4/cells",
+   "value": [
+    {
+     "op": "cellfill",
+     "set": 0
+    },
+    {
+     "op": "cellfill",
+     "set": 0
+    },
+    {
+     "op": "cellfill",
+     "set": 0
+    },
+    {
+     "op": "cellfill",
+     "set": 0
+    },
+    {
+     "op": "cellfill",
+     "set": 0
+    }
+   ]
+  },
+  {
+   "name": "cell condition x out of range",
+   "path": "/transitions/6/when",
+   "value": {
+    "cell": {
+     "x": 3,
+     "y": 0
+    },
+    "op": "ne",
+    "value": 0
+   }
+  },
+  {
+   "name": "cell condition cannot also name var",
+   "path": "/transitions/6/when",
+   "value": {
+    "cell": {
+     "x": 0,
+     "y": 0
+    },
+    "var": "run",
+    "op": "ne",
+    "value": 0
+   }
+  },
+  {
+   "name": "cell condition needs op/value",
+   "path": "/transitions/6/when",
+   "value": {
+    "cell": {
+     "x": 0,
+     "y": 0
+    },
+    "lte": 0
+   }
+  },
+  {
+   "name": "cells node needs w divisible by cols",
+   "path": "/surface/elements/0/w",
+   "value": 250
+  },
+  {
+   "name": "cells node atlas columns must divide the image width",
+   "path": "/surface/elements/0/columns",
+   "value": 5
+  },
+  {
+   "name": "cells node columns without an image",
+   "path": "/surface/elements/1/columns",
+   "value": 3
+  },
+  {
+   "name": "cells cursor vars must be ints",
+   "path": "/surface/elements/0/cursor/x_var",
+   "value": "missing"
+  },
+  {
+   "name": "cells cursor keys are exact",
+   "path": "/surface/elements/0/cursor",
+   "value": {
+    "x_var": "cx",
+    "y_var": "cy"
+   }
+  },
+  {
+   "name": "cells needs the bounded runtime v4",
+   "path": "/engine",
+   "value": "p4-bounded-runtime-v3"
+  },
+  {
+   "name": "cells excludes local tools",
+   "path": "/local",
+   "value": {
+    "engine": "p4-local-tools-v1"
+   }
+  }
+ ],
+ "cases": [
+  {
+   "name": "place writes the mover's stone, swaps turn and counts empties",
+   "events": [
+    {
+     "action": "place"
+    }
+   ],
+   "expected": {
+    "state": "play",
+    "vars": {
+     "cx": 1,
+     "cy": 1,
+     "turn": 2,
+     "next": 1,
+     "empty": 8,
+     "run": 1
+    },
+    "cells": [
+     "000",
+     "010",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "occupied cell guard falls through so nothing changes",
+   "events": [
+    {
+     "action": "place"
+    },
+    {
+     "action": "place"
+    }
+   ],
+   "expected": {
+    "state": "play",
+    "vars": {
+     "cx": 1,
+     "cy": 1,
+     "turn": 2,
+     "next": 1,
+     "empty": 8,
+     "run": 1
+    },
+    "cells": [
+     "000",
+     "010",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "three in a row through the last stone reaches run 3 and the tick wins",
+   "events": [
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.up"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.down"
+    },
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.up"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.down"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "ms": 100
+    }
+   ],
+   "expected": {
+    "state": "won",
+    "vars": {
+     "cx": 2,
+     "cy": 1,
+     "turn": 2,
+     "next": 1,
+     "empty": 4,
+     "run": 3
+    },
+    "cells": [
+     "220",
+     "111",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "cursor limits clamp at the border and out-of-range never writes",
+   "events": [
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "move.up"
+    },
+    {
+     "action": "move.up"
+    },
+    {
+     "action": "place"
+    }
+   ],
+   "expected": {
+    "state": "play",
+    "vars": {
+     "cx": 0,
+     "cy": 0,
+     "turn": 2,
+     "next": 1,
+     "empty": 8,
+     "run": 1
+    },
+    "cells": [
+     "100",
+     "000",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "else branch writes a literal cell; the guard then reads it as non-zero",
+   "events": [
+    {
+     "action": "corner"
+    },
+    {
+     "action": "corner"
+    }
+   ],
+   "expected": {
+    "state": "play",
+    "vars": {
+     "cx": 1,
+     "cy": 1,
+     "turn": 1,
+     "next": 2,
+     "empty": 9,
+     "run": 3
+    },
+    "cells": [
+     "300",
+     "000",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "reset fills the grid and restores variables",
+   "events": [
+    {
+     "action": "place"
+    },
+    {
+     "action": "corner"
+    },
+    {
+     "action": "reset"
+    }
+   ],
+   "expected": {
+    "state": "play",
+    "vars": {
+     "cx": 1,
+     "cy": 1,
+     "turn": 1,
+     "next": 2,
+     "empty": 9,
+     "run": 0
+    },
+    "cells": [
+     "000",
+     "000",
+     "000"
+    ]
+   }
+  },
+  {
+   "name": "draw when every cell is filled without a run of three",
+   "events": [
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.up"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.left"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.down"
+    },
+    {
+     "action": "move.down"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "action": "move.right"
+    },
+    {
+     "action": "place"
+    },
+    {
+     "ms": 100
+    }
+   ],
+   "expected": {
+    "state": "draw",
+    "vars": {
+     "cx": 2,
+     "cy": 2,
+     "turn": 2,
+     "next": 1,
+     "empty": 0,
+     "run": 2
+    },
+    "cells": [
+     "212",
+     "211",
+     "121"
+    ]
+   }
+  }
+ ],
+ "core": [
+  {
+   "grid": {
+    "cols": 5,
+    "rows": 5,
+    "bits": 2,
+    "init": [
+     "10000",
+     "01000",
+     "00100",
+     "00010",
+     "00001"
+    ]
+   },
+   "x": 2,
+   "y": 2,
+   "value": 1,
+   "run": 5,
+   "count": 5
+  },
+  {
+   "grid": {
+    "cols": 5,
+    "rows": 5,
+    "bits": 2,
+    "init": [
+     "10000",
+     "01000",
+     "00100",
+     "00010",
+     "00001"
+    ]
+   },
+   "x": 2,
+   "y": 2,
+   "value": 2,
+   "run": 0,
+   "count": 0
+  },
+  {
+   "grid": {
+    "cols": 4,
+    "rows": 3,
+    "bits": 4,
+    "init": [
+     "f0f0",
+     "0f0f",
+     "ffff"
+    ]
+   },
+   "x": 0,
+   "y": 2,
+   "value": 15,
+   "run": 4,
+   "count": 8
+  },
+  {
+   "grid": {
+    "cols": 4,
+    "rows": 3,
+    "bits": 4,
+    "init": [
+     "f0f0",
+     "0f0f",
+     "ffff"
+    ]
+   },
+   "x": 2,
+   "y": 0,
+   "value": 15,
+   "run": 3,
+   "count": 8
+  },
+  {
+   "grid": {
+    "cols": 3,
+    "rows": 3,
+    "bits": 2,
+    "init": [
+     "333",
+     "030",
+     "333"
+    ]
+   },
+   "x": 1,
+   "y": 1,
+   "value": 3,
+   "run": 3,
+   "count": 7
+  },
+  {
+   "grid": {
+    "cols": 3,
+    "rows": 3,
+    "bits": 2,
+    "init": [
+     "000",
+     "000",
+     "000"
+    ]
+   },
+   "x": 5,
+   "y": 0,
+   "value": 0,
+   "run": 0,
+   "count": 9
+  },
+  {
+   "grid": {
+    "cols": 16,
+    "rows": 16,
+    "bits": 2
+   },
+   "fill": 1,
+   "x": 0,
+   "y": 0,
+   "value": 1,
+   "run": 16,
+   "count": 256
+  },
+  {
+   "grid": {
+    "cols": 1,
+    "rows": 1,
+    "bits": 2
+   },
+   "x": 0,
+   "y": 0,
+   "value": 0,
+   "run": 1,
+   "count": 1
+  }
+ ]
+}

@@ -1,4 +1,11 @@
 /*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Locally modified adaptation of Waveshare's ESP32-P4-WIFI6-Touch-LCD-4.3 BSP.
+ * See this component's LICENSE and the repository's
+ * licenses/DEPENDENCY-LICENSE-NOTICE.md for upstream provenance and notices.
+ */
+/*
  * Local 480x640 desk-pet display BSP adaptations.
  * The MIPI command return path is treated as write-only during panel startup.
  */
@@ -599,7 +606,7 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
         .reset_gpio_num = BSP_LCD_RST,
         .vendor_config = &vendor_config,
     };
-    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7701(io, &lcd_dev_config, &panel_handle), err, TAG, "New LCD panel Waveshare failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7701_mipi_only(io, &lcd_dev_config, &panel_handle), err, TAG, "New LCD panel Waveshare failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(panel_handle), err, TAG, "LCD panel reset failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(panel_handle), err, TAG, "LCD panel init failed");
 

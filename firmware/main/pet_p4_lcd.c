@@ -6,6 +6,10 @@
  */
 
 #include "pet_p4_lcd.h"
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+#include "esp_timer.h"
+#include <string.h>
+#endif
 
 #include <stdio.h>
 #include <stdint.h>
@@ -212,7 +216,12 @@ esp_err_t pet_p4_lcd_show_software_test_pattern(uint32_t phase) {
   return ESP_OK;
 }
 
-esp_err_t pet_p4_lcd_draw_rgb565(int x, int y, int width, int height, const uint16_t *pixels) {
+static esp_err_t lcd_draw_core(int x,int y,int width,int height,const uint16_t *pixels,pet_lcd_observation_t *out) {
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  if(out)memset(out,0,sizeof(*out));
+#else
+  (void)out;
+#endif
   if (!g_panel_handle) return ESP_ERR_INVALID_STATE;
   if (!pixels || width <= 0 || height <= 0) return ESP_ERR_INVALID_ARG;
 
@@ -220,14 +229,34 @@ esp_err_t pet_p4_lcd_draw_rgb565(int x, int y, int width, int height, const uint
     while (xSemaphoreTake(g_refresh_done_sem, 0) == pdTRUE) {
     }
   }
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  int64_t submit_begin=out?esp_timer_get_time():0;
+#endif
   esp_err_t draw_err = esp_lcd_panel_draw_bitmap(g_panel_handle, x, y, x + width, y + height, pixels);
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  int64_t submit_end=out?esp_timer_get_time():0;
+  if(out){out->valid=true;out->submit_us=pet_lcd_elapsed(submit_begin,submit_end,&out->valid);out->submitted=draw_err==ESP_OK;}
+#endif
   if (draw_err != ESP_OK) return draw_err;
-  if (g_refresh_done_sem && xSemaphoreTake(g_refresh_done_sem, LCD_REFRESH_WAIT_TICKS) != pdTRUE) {
+  bool timed_out=g_refresh_done_sem&&xSemaphoreTake(g_refresh_done_sem,LCD_REFRESH_WAIT_TICKS)!=pdTRUE;
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  if(out&&g_refresh_done_sem){out->refresh_waited=true;out->wait_us=pet_lcd_elapsed(submit_end,esp_timer_get_time(),&out->valid);}
+#endif
+  if (timed_out) {
     ESP_LOGW(TAG, "LCD refresh wait timed out");
     return ESP_ERR_TIMEOUT;
   }
   return ESP_OK;
 }
+
+esp_err_t pet_p4_lcd_draw_rgb565(int x,int y,int width,int height,const uint16_t *pixels){
+  return lcd_draw_core(x,y,width,height,pixels,NULL);
+}
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+esp_err_t pet_p4_lcd_draw_rgb565_observed(int x,int y,int width,int height,const uint16_t *pixels,pet_lcd_observation_t *out){
+  return lcd_draw_core(x,y,width,height,pixels,out);
+}
+#endif
 
 int pet_p4_lcd_scan_i2c(char *buffer, size_t buffer_size) {
   if (!buffer || buffer_size == 0) return 0;

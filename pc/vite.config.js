@@ -13,6 +13,6 @@ export default defineConfig({
   build: process.env.PET_MANAGER_COMPOSER_DIAGNOSTIC === "1" ? {
     rollupOptions: { input: { diagnostic: "composer-diagnostic.html" } },
   } : {},
-  server: {proxy: {'/community/':'http://127.0.0.1:4300'}},
+  server: {host: "127.0.0.1", proxy: {'/community/':'http://127.0.0.1:4300'}},
   plugins: [componentUiMetadataPlugin(), react()],
 });

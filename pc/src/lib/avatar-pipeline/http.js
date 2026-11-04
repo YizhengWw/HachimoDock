@@ -6,6 +6,7 @@
  */
 
 import { recordDiagnostic, parseNativeDiagnostic, formatDiagnostic, transportHint, safeRequestId } from "./diagnostics.js";
+import { generationRequestTimeoutMs, waitForNativeGeneration } from "./request-policy.js";
 
 let cachedTauriFetch; // undefined = not probed yet; null = probed, unavailable
 let cachedTauriInvoke; // undefined = not probed; null = unavailable
@@ -114,20 +115,24 @@ export async function pipelineFetch(input, init = {}) {
 
   if (invoke) {
     try {
-      const result = await invoke("http_request_text", {
+      const result = await waitForNativeGeneration(() => invoke("http_request_text", {
         url,
         method,
         headersJson: JSON.stringify(normalizeHeaders(init.headers)),
         body: normalizeBody(init.body),
-        timeoutMs: typeof init?.timeoutMs === "number" ? init.timeoutMs : undefined,
+        timeoutMs: generationRequestTimeoutMs(init),
         diagnosticStage: init.diagnosticStage,
-      });
+      }), init.signal);
+      if (init.signal?.aborted) throw new DOMException("aborted", "AbortError");
       const response = new Response(result?.body ?? "", {
         status: Number(result?.status) || 200,
       });
       response.generationDiagnostic = recordDiagnostic(result.diagnostic || fallbackDiagnostic("complete", response.ok ? "success" : "http_error", response));
       return response;
     } catch (err) {
+      if (err?.name === "AbortError" || init.signal?.aborted) {
+        throw new DOMException("aborted", "AbortError");
+      }
       if (!isMissingTauriCommand(err)) {
         const safeError = buildTransportError(err, { url, method, label: "tauri-invoke" });
         console.error("[pipelineFetch/tauri-invoke]", safeError.message);
@@ -217,12 +222,15 @@ export function sleep(ms, signal) {
  * @param {AbortSignal} [signal]
  * @returns {Promise<Uint8Array>}
  */
-export async function downloadBinary(url, signal) {
+export async function downloadBinary(url, signal, options = {}) {
   if (signal?.aborted) throw new DOMException("aborted", "AbortError");
   const invoke = await getTauriInvoke();
   if (invoke) {
     try {
-      const bytes = await invoke("download_bytes", { url });
+      const bytes = await waitForNativeGeneration(() => invoke("download_bytes", { url,
+        ...(options.timeoutMs !== undefined ? {timeoutMs:options.timeoutMs} : {}),
+        ...(options.maxBytes !== undefined ? {maxBytes:options.maxBytes} : {}),
+      }), signal);
       if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     } catch (err) {
@@ -232,12 +240,36 @@ export async function downloadBinary(url, signal) {
       throw safeError;
     }
   }
-  const response = await pipelineFetch(url, { method: "GET", signal, diagnosticStage: "download" });
-  if (!response.ok) {
-    throw new Error(`素材下载失败（HTTP ${response.status}）`);
-  }
-  const buf = await response.arrayBuffer();
-  return new Uint8Array(buf);
+  // Keep the same bounded contract in web development; legacy video callers
+  // without image options retain their existing download path.
+  const bounded = options.timeoutMs !== undefined || options.maxBytes !== undefined;
+  const controller = bounded ? new AbortController() : null;
+  const relay = () => controller?.abort();
+  signal?.addEventListener("abort", relay, {once:true});
+  let expired = false;
+  const timer = bounded ? setTimeout(() => {expired=true;controller.abort();}, Math.min(120000,Math.max(1,options.timeoutMs ?? 120000))) : null;
+  try {
+    const response = await pipelineFetch(url, { method: "GET", signal:controller?.signal || signal, diagnosticStage: "download" });
+    if (!response.ok) {
+      const error=new Error(`素材下载失败（HTTP ${response.status}）`);error.status=response.status;throw error;
+    }
+    if (!bounded) return new Uint8Array(await response.arrayBuffer());
+    const limit=Math.min(64*1024*1024,Math.max(1,options.maxBytes ?? 64*1024*1024));
+    const tooLarge=()=>Object.assign(new Error('图片下载超过安全字节上限'),{diagnostic:{outcome:'invalid_output'}});
+    if(Number(response.headers.get('content-length'))>limit)throw tooLarge();
+    if(!response.body) return new Uint8Array();
+    const reader=response.body.getReader();const chunks=[];let count=0;
+    try {
+      while(true){const {done,value}=await reader.read();if(done)break;
+        if(value.byteLength>limit-count)throw tooLarge();count+=value.byteLength;chunks.push(value);
+      }
+    } finally {await reader.cancel().catch(()=>{});reader.releaseLock();}
+    const bytes=new Uint8Array(count);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
+  } catch(error) {
+    if(signal?.aborted)throw new DOMException('aborted','AbortError');
+    if(expired)throw Object.assign(new Error('已知图片下载超时，结果链接已保留'),{diagnostic:{outcome:'timeout'}});
+    throw error;
+  } finally {if(timer!==null)clearTimeout(timer);signal?.removeEventListener('abort',relay);}
 }
 
 /** Treat non-2xx as throw-with-body for clearer error reporting. */
@@ -247,6 +279,14 @@ export async function readJsonOrThrow(response, label) {
     const trimmed = text.length > 500 ? `${text.slice(0, 500)}...` : text;
     const error = new Error(`${label} HTTP ${response.status}: ${trimmed}${response.status === 404 && label.startsWith("thinking model") ? "；模型不存在或账号无权访问，请在模型下拉框重新选择，不会自动改用其他模型。" : ""}`);
     error.status = response.status;
+    try {
+      const parsed = JSON.parse(text);
+      const code = parsed?.error?.code;
+      if (typeof code === "string" && /^[A-Za-z0-9_.-]{1,128}$/.test(code)) {
+        error.providerCode = code;
+        error.completeProviderResponse = true;
+      }
+    } catch { /* incomplete/unstructured errors never authorize image POST retry */ }
     error.diagnostic = response.generationDiagnostic;
     throw error;
   }

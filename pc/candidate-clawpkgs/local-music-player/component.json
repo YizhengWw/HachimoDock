@@ -1,0 +1,1 @@
+{"id":"local-music-player","name":"本地随身听","version":"1.0.0","kind":"tool","description":"显式导入电脑本地音频，选择曲目后通过设备播放，支持暂停、进度和曲库管理。需已验收并声明服务桥能力的候选固件。"}

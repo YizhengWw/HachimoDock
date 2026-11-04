@@ -1,0 +1,2496 @@
+{
+  "runtime": {
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+      "idle"
+    ],
+    "initial_state": "idle",
+    "vars": {},
+    "transitions": [
+      {
+        "on": "start",
+        "from": "*"
+      },
+      {
+        "on": "kick",
+        "from": "*"
+      }
+    ],
+    "tick": [],
+    "scene": {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "valid": [
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 200,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": -64,
+      "entities": [
+        {
+          "id": "a",
+          "x": 0,
+          "y": 5
+        },
+        {
+          "id": "b",
+          "x": 2,
+          "y": 5
+        },
+        {
+          "id": "c",
+          "x": 4,
+          "y": 5
+        },
+        {
+          "id": "d",
+          "x": 6,
+          "y": 5
+        },
+        {
+          "id": "e",
+          "x": 8,
+          "y": 5
+        },
+        {
+          "id": "f",
+          "x": 10,
+          "y": 5
+        },
+        {
+          "id": "g",
+          "x": 12,
+          "y": 5
+        },
+        {
+          "id": "h",
+          "x": 14,
+          "y": 5
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "b",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "c",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "d",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "e",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "f",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "g",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "h",
+          "mass": 64,
+          "restitution": 0
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "invalid": [
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 65,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": true,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 19,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 201,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ],
+      "motion": {}
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12,
+        "rows": []
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "mass": 0
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "mass": 65
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "mass": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "restitution": 101
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "static": 1
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": null
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "extra": 1
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "missing",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        },
+        {
+          "entity": "a",
+          "rolling": true
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "static": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 65,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "move",
+              "entity": "a",
+              "dx": 1,
+              "dy": 0
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "mass": null
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true,
+          "restitution": null
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": 0,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "heart"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 20,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": null,
+      "entities": [
+        {
+          "id": "a",
+          "x": 2,
+          "y": 2,
+          "vx": 4,
+          "shape": "triangle"
+        },
+        {
+          "id": "b",
+          "x": 4,
+          "y": 2,
+          "vx": -4
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "rolling": true
+        },
+        {
+          "entity": "b"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tick_ms": 200,
+      "active_state": "idle",
+      "auto_start": true,
+      "grid": {
+        "width": 16,
+        "height": 12
+      },
+      "gravity": -64,
+      "entities": [
+        {
+          "id": "a",
+          "x": 0,
+          "y": 5
+        },
+        {
+          "id": "b",
+          "x": 2,
+          "y": 5
+        },
+        {
+          "id": "c",
+          "x": 4,
+          "y": 5
+        },
+        {
+          "id": "d",
+          "x": 6,
+          "y": 5
+        },
+        {
+          "id": "e",
+          "x": 8,
+          "y": 5
+        },
+        {
+          "id": "f",
+          "x": 10,
+          "y": 5
+        },
+        {
+          "id": "g",
+          "x": 12,
+          "y": 5
+        },
+        {
+          "id": "h",
+          "x": 14,
+          "y": 5
+        },
+        {
+          "id": "i",
+          "x": 0,
+          "y": 7
+        }
+      ],
+      "bodies": [
+        {
+          "entity": "a",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "b",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "c",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "d",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "e",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "f",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "g",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "h",
+          "mass": 64,
+          "restitution": 0
+        },
+        {
+          "entity": "i"
+        }
+      ],
+      "rules": [
+        {
+          "on": "start",
+          "do": [
+            {
+              "op": "restart"
+            }
+          ]
+        },
+        {
+          "on": "kick",
+          "do": [
+            {
+              "op": "impulse",
+              "entity": "a",
+              "dx": 8,
+              "dy": -4
+            }
+          ]
+        },
+        {
+          "on": "collision",
+          "entity": "a",
+          "with": "b",
+          "do": [
+            {
+              "op": "score",
+              "add": 1
+            }
+          ]
+        },
+        {
+          "on": "edge",
+          "entity": "a",
+          "edge": "any",
+          "do": [
+            {
+              "op": "score",
+              "add": 10
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "tick": 1
+    },
+    {
+      "tick": 21
+    },
+    {
+      "tick": 41
+    },
+    {
+      "tick": 61
+    },
+    {
+      "tick": 81
+    },
+    {
+      "tick": 101
+    },
+    {
+      "tick": 121
+    },
+    {
+      "tick": 141
+    },
+    {
+      "tick": 161
+    },
+    {
+      "tick": 181
+    },
+    {
+      "tick": 201
+    },
+    {
+      "tick": 221
+    },
+    {
+      "tick": 241
+    },
+    {
+      "tick": 261
+    },
+    {
+      "tick": 281
+    },
+    {
+      "tick": 301
+    },
+    {
+      "tick": 321
+    },
+    {
+      "tick": 341
+    },
+    {
+      "tick": 361
+    },
+    {
+      "tick": 381
+    },
+    {
+      "tick": 401
+    },
+    {
+      "tick": 421
+    },
+    {
+      "tick": 441
+    },
+    {
+      "tick": 461
+    },
+    {
+      "tick": 481
+    },
+    {
+      "tick": 501
+    },
+    {
+      "tick": 521
+    },
+    {
+      "tick": 541
+    },
+    {
+      "tick": 561
+    },
+    {
+      "tick": 581
+    },
+    {
+      "tick": 601
+    },
+    {
+      "action": "kick",
+      "now": 602
+    },
+    {
+      "tick": 20000
+    },
+    {
+      "tick": 20001
+    },
+    {
+      "tick": 2
+    },
+    {
+      "action": "start",
+      "now": 100
+    },
+    {
+      "tick": 120
+    }
+  ]
+}

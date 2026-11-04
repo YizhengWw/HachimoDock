@@ -8,7 +8,7 @@
  */
 
 use super::UsbConnectionStatus;
-use crate::clawpkg::validate_p4_vars_object;
+use crate::clawpkg::validate_p4_vars_object_capped;
 use serde_json::Value;
 use std::path::Path;
 use std::time::Duration;
@@ -31,6 +31,27 @@ const P4_SCENE_MAX_SPRITE_SOURCE_BYTES: usize = 128 * 1024;
 const P4_SCENE_SPRITE_MAGIC: &[u8; 4] = b"P4S1";
 const WIDGET_DELETE_CAPABILITY: &str = "widgetDelete";
 const WIDGET_INVENTORY_CAPABILITY: &str = "widgetInventory";
+
+pub(super) fn build_widget_begin_payload(transfer_id:&str,widget_id:&str,repair:bool,caps:&Value)->Value{
+    let mut payload=serde_json::json!({"transferId":transfer_id,"widgetId":widget_id,"repairResources":repair});
+    if !repair&&caps["widgetPreserveUnchanged"]=="p4-preserve-unchanged-v1"{
+        payload["preserveUnchanged"]=serde_json::json!(true);
+    }
+    payload
+}
+
+#[test]
+fn unchanged_install_begin_requires_exact_negotiation_and_never_changes_repairs(){
+    let legacy=serde_json::json!({"transferId":"transfer","widgetId":"owned","repairResources":false});
+    for caps in [Value::Null,serde_json::json!({}),serde_json::json!({"widgetPreserveUnchanged":true}),serde_json::json!({"widgetPreserveUnchanged":"other-engine"})]{
+        assert_eq!(build_widget_begin_payload("transfer","owned",false,&caps),legacy);
+    }
+    let caps=serde_json::json!({"widgetPreserveUnchanged":"p4-preserve-unchanged-v1"});
+    let mut opted=legacy.clone();opted["preserveUnchanged"]=serde_json::json!(true);
+    assert_eq!(build_widget_begin_payload("transfer","owned",false,&caps),opted);
+    let mut repair=legacy;repair["repairResources"]=serde_json::json!(true);
+    assert_eq!(build_widget_begin_payload("transfer","owned",true,&caps),repair);
+}
 
 pub(super) fn build_widget_chunk_payload(
     transfer_id: &str,
@@ -128,15 +149,35 @@ pub(super) fn prepare_p4_widget_sprite_files(
     let widget: Value = serde_json::from_slice(widget_bytes)
         .map_err(|error| format!("runtime/widget.json is invalid JSON: {error}"))?;
     if let Some(images)=widget["surface"]["images"].as_array() {
-        crate::component_extension::validate_surface(&widget["surface"])?;
-        let mut compiled=Vec::new();let mut total=0;
+        if widget["surface"]["engine"]=="p4-app-surface-v1" {
+            let base=crate::component_capability_ext::strip(&widget);
+            crate::component_extension::validate_app_surface(&base["surface"],Some(&base))?;
+        } else {
+            crate::component_extension::validate_surface(&widget["surface"])?;
+        }
+        let limits=crate::app_graphics::limits(Some(&widget));
+        let mut compiled=Vec::new();let mut total=0;let mut frames_total=0;
         for im in images {
             let id=im["id"].as_str().ok_or("image id")?;
             let bytes=std::fs::read(widget_root.join(im["asset"].as_str().ok_or("image asset")?)).map_err(|e|e.to_string())?;
             let image=crate::component_extension::decode_surface_image(im,&bytes)?;
             let encoded=if im["encoding"]=="jpeg" {crate::surface_image::encode_background(&image)?}else{crate::surface_image::encode(&image)};
-            total+=encoded.len();if encoded.len()>100000||total>128*1024{return Err("组件图片超过 128 KiB 设备存储预算".into());}
+            total+=encoded.len();frames_total+=if im["encoding"]=="jpeg"{encoded.len()}else{0};
+            if encoded.len()>100000||total>limits.image_bytes{return Err(format!("组件图片超过 {} KiB 设备存储预算",limits.image_bytes/1024));}
             compiled.push((format!("runtime/images/{id}.p4i"),encoded));
+        }
+        // p4-keyframe-bg-v1: frames 2..N of the JPEG background follow the declared images as "<id>.k".
+        if let Some((frames,_))=crate::app_graphics::keyframes(&widget["surface"]){
+            let im=&images[0];let id=im["id"].as_str().ok_or("image id")?;let asset=im["asset"].as_str().ok_or("image asset")?;
+            for k in 2..=frames{
+                let source=crate::app_graphics::keyframe_asset(asset,k);
+                let bytes=std::fs::read(widget_root.join(&source)).map_err(|e|format!("{source}: {e}"))?;
+                let image=crate::component_extension::decode_surface_image(im,&bytes)?;
+                let encoded=crate::surface_image::encode_background(&image)?;
+                frames_total+=encoded.len();
+                if encoded.len()>crate::app_graphics::KEYFRAME_BYTES||frames_total>crate::app_graphics::KEYFRAME_SET_BYTES{return Err("关键帧背景超过每帧 100 KB / 整组 400 KB 的传输预算".into());}
+                compiled.push((format!("runtime/images/{}.p4i",crate::app_graphics::keyframe_id(id,k)),encoded));
+            }
         }
         return Ok(compiled);
     }
@@ -147,10 +188,11 @@ pub(super) fn prepare_p4_widget_sprite_files(
     else {
         return Ok(Vec::new());
     };
-    if sprites.len() > P4_SCENE_MAX_SPRITES {
+    let sprite_limits=crate::app_graphics::limits(Some(&widget));
+    if sprites.len() > sprite_limits.scene_sprites {
         return Err(format!(
             "runtime/widget.json scene.sprites exceeds {} entries",
-            P4_SCENE_MAX_SPRITES
+            sprite_limits.scene_sprites
         ));
     }
     let mut total_pixels = 0usize;
@@ -209,10 +251,10 @@ pub(super) fn prepare_p4_widget_sprite_files(
         total_pixels = total_pixels
             .checked_add(pixels)
             .ok_or_else(|| "scene sprite pixel count overflow".to_string())?;
-        if total_pixels > P4_SCENE_MAX_SPRITE_PIXELS {
+        if total_pixels > sprite_limits.sprite_pixels as usize {
             return Err(format!(
                 "scene sprites exceed {} decoded pixels",
-                P4_SCENE_MAX_SPRITE_PIXELS
+                sprite_limits.sprite_pixels
             ));
         }
         let mut encoded = Vec::with_capacity(8 + pixels * 3);
@@ -253,7 +295,14 @@ pub(super) fn prepare_p4_widget_file(
     };
     let mut value: Value = serde_json::from_slice(bytes)
         .map_err(|error| format!("{} is invalid JSON: {}", path, error))?;
-    let max_bytes=if path=="runtime/widget.json"&&value["surface"]["graphics"]=="p4-app-graphics-v1"{8191}else{max_bytes};
+    let max_bytes=if path=="runtime/widget.json" {
+        match value["quota"].as_str() {
+            Some("p4-quota-v3") => 12287,
+            Some("p4-quota-v2") => 8191,
+            _ if value["surface"]["graphics"]=="p4-app-graphics-v1" => 8191,
+            _ => max_bytes,
+        }
+    } else { max_bytes };
 
     if path == "runtime/widget.json" {
         let object = value
@@ -274,11 +323,28 @@ pub(super) fn prepare_p4_widget_file(
                     .to_string(),
             );
         }
-        validate_p4_vars_object(
-            object
-                .get("vars")
-                .and_then(Value::as_object)
-                .expect("vars was normalized and checked as an object"),
+        let quota_v3 = object.get("quota").is_some_and(|q| q == "p4-quota-v3");
+        let quota_v2 = object.get("quota").is_some_and(|q| q == "p4-quota-v2");
+        let vars=object.get("vars").and_then(Value::as_object).expect("normalized vars");
+        // Reuse the shared structural validator without imposing its historical
+        // 63-byte string limit on explicit v3. Only the validation copy changes;
+        // the exact user strings remain in the outgoing payload.
+        let mut checked=vars.clone();
+        if quota_v3 {
+            for (name, declaration) in &mut checked {
+                if declaration["type"]=="string" {
+                    if let Some(init)=declaration.get("init") {
+                        let text=init.as_str().filter(|s|s.len()<=127&&!s.contains('\0'))
+                            .ok_or_else(||format!("runtime/widget.json.vars.{name}.init 必须是最多 127 个 UTF-8 字节的字符串"))?;
+                        let _=text;
+                        declaration["init"]=Value::String(String::new());
+                    }
+                }
+            }
+        }
+        validate_p4_vars_object_capped(
+            &checked,
+            if quota_v3 { 32 } else if quota_v2 { 16 } else { 8 },
         )?;
 
         if let Some(pages) = value.get_mut("pages").and_then(Value::as_array_mut) {
@@ -327,4 +393,26 @@ pub(super) fn prepare_p4_widget_file(
         ));
     }
     Ok(compact)
+}
+
+#[test]
+fn quota_v3_transaction_keeps_32_vars_127_utf8_bytes_and_exact_json_ceiling(){
+    let mut vars=serde_json::Map::new();
+    for i in 0..32{vars.insert(format!("v{i}"),serde_json::json!({"type":"string","init":"a".repeat(127)}));}
+    let mut w=serde_json::json!({"engine":"p4-bounded-runtime-v4","quota":"p4-quota-v3","vars":vars});
+    let send=|w:&Value|prepare_p4_widget_file("quota-probe","runtime/widget.json",&serde_json::to_vec(w).unwrap());
+    let got:Value=serde_json::from_slice(&send(&w).unwrap()).unwrap();
+    assert_eq!(got["vars"],w["vars"]);
+    w["vars"]["v0"]["init"]=Value::String("界".repeat(42)+"a");assert!(send(&w).is_ok());
+    w["vars"]["v0"]["init"]=Value::String("界".repeat(42)+"ab");assert!(send(&w).is_err());
+    w["vars"]["v0"]["init"]=Value::String("a".repeat(127));
+    w["vars"]["extra"]=serde_json::json!({"type":"int"});assert!(send(&w).is_err());
+    w["vars"].as_object_mut().unwrap().remove("extra");
+    w["quota"]="p4-quota-v2".into();assert!(send(&w).is_err());
+    w["quota"]="p4-quota-v3".into();w["padding"]="".into();
+    let base=serde_json::to_vec(&w).unwrap().len();w["padding"]=Value::String("x".repeat(12287-base));
+    assert_eq!(send(&w).unwrap().len(),12287);
+    w["padding"].as_str().map(str::to_owned).map(|s|w["padding"]=Value::String(s+"x"));
+    assert!(send(&w).is_err());
+    assert!(prepare_p4_widget_file("quota-probe","buttons.json",&serde_json::to_vec(&vec!["x".repeat(2048)]).unwrap()).is_err());
 }

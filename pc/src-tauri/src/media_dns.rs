@@ -9,8 +9,9 @@ use std::{
 };
 
 type Answers = Result<Vec<IpAddr>, String>;
-type Job = (String, mpsc::SyncSender<Answers>);
-static SYSTEM: OnceLock<mpsc::SyncSender<Job>> = OnceLock::new();
+struct Job { host:String, reply:mpsc::SyncSender<Answers>, deadline:Instant }
+struct SystemResolver { sender:mpsc::SyncSender<Job> }
+static SYSTEM: OnceLock<Result<SystemResolver,String>> = OnceLock::new();
 static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Vec<IpAddr>)>>> = OnceLock::new();
 
 fn fake_ip(ip: IpAddr) -> bool {
@@ -40,29 +41,44 @@ pub(crate) fn public_name(host: &str) -> bool {
                 && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
         })
 }
-fn system(host: &str) -> Answers {
-    // One bounded worker, not one detached DNS thread per stream/segment. A stuck
-    // OS resolver cannot create unbounded workers or block cancellation forever.
-    let sender = SYSTEM.get_or_init(|| {
-        let (tx, rx) = mpsc::sync_channel::<Job>(8);
-        std::thread::spawn(move || {
-            for (host, reply) in rx {
-                let result = (host.as_str(), 443)
-                    .to_socket_addrs()
-                    .map(|a| a.map(|s| s.ip()).collect())
-                    .map_err(|_| "系统域名解析失败".into());
-                let _ = reply.try_send(result);
+impl SystemResolver {
+    fn new(resolve:impl Fn(&str)->Answers+Send+'static)->Result<Self,String>{
+        let (sender,rx)=mpsc::sync_channel::<Job>(8);
+        // Exactly one resolver worker, even if the OS resolver never returns.
+        // Callers time out and release their own service permits independently.
+        std::thread::Builder::new().name("media-system-dns".into()).spawn(move||{
+            for job in rx {
+                // Do not perform stale DNS work after its caller timed out.
+                if Instant::now()>=job.deadline {continue;}
+                let result=resolve(&job.host);
+                if Instant::now()<job.deadline {let _=job.reply.try_send(result);}
             }
-        });
-        tx
-    });
-    let (tx, rx) = mpsc::sync_channel(1);
-    sender
-        .try_send((host.into(), tx))
-        .map_err(|_| "系统域名解析繁忙")?;
-    rx.recv_timeout(Duration::from_secs(3))
-        .map_err(|_| "系统域名解析超时")?
+        }).map_err(|_|"系统域名解析工作线程不可用".to_string())?;
+        Ok(Self{sender})
+    }
+    fn request(&self,host:&str,timeout:Duration)->Answers{
+        let (reply,rx)=mpsc::sync_channel(1);
+        self.sender.try_send(Job{host:host.into(),reply,deadline:Instant::now()+timeout})
+            .map_err(|_|"系统域名解析繁忙".to_string())?;
+        rx.recv_timeout(timeout).map_err(|_|"系统域名解析超时".to_string())?
+    }
 }
+fn system(host: &str) -> Answers {
+    let resolver=SYSTEM.get_or_init(||SystemResolver::new(|host|{
+        let answers:Vec<_>=(host,443).to_socket_addrs().map_err(|_|"系统域名解析失败".to_string())?
+            .take(33).map(|a|a.ip()).collect();
+        if answers.len()>32{return Err("系统域名解析地址数量超限".into());}
+        Ok(answers)
+    })).as_ref().map_err(Clone::clone)?;
+    resolver.request(host,Duration::from_secs(3))
+}
+/// Bounded system DNS only. This does not add DoH fallback, host permissions,
+/// proxy use or implicit address acceptance to pc-fetch. Its caller must check
+/// every answer against its existing public-IP policy before pinning it.
+pub(crate) fn system_addresses(host:&str,port:u16)->Result<Vec<SocketAddr>,String>{
+    system(host).map(|ips|ips.into_iter().map(|ip|SocketAddr::new(ip,port)).collect())
+}
+
 fn decode(host: &str, body: &[u8]) -> Result<(Vec<IpAddr>, u64), String> {
     let value: serde_json::Value =
         serde_json::from_slice(body).map_err(|_| "安全域名解析响应无效")?;
@@ -109,7 +125,6 @@ fn secure(host: &str) -> Result<(Vec<IpAddr>, u64), String> {
     // A private answer is a hard rejection, never a reason to try another server.
     for (resolver, ip, path) in [
         ("dns.alidns.com", [223, 5, 5, 5], "/resolve"),
-        ("cloudflare-dns.com", [1, 1, 1, 1], "/dns-query"),
     ] {
         if let Ok(body) = secure_body(host, resolver, ip, path) {
             return decode(host, &body);
@@ -197,6 +212,31 @@ pub fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn timed_out_system_dns_keeps_one_worker_and_skips_expired_queued_requests(){
+        use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+        let calls=Arc::new(AtomicUsize::new(0));let count=calls.clone();
+        let (entered_tx,entered_rx)=mpsc::channel();let (release_tx,release_rx)=mpsc::channel();
+        let resolver=SystemResolver::new(move|host|{
+            count.fetch_add(1,Ordering::SeqCst);
+            if host=="blocked.example"{entered_tx.send(()).unwrap();release_rx.recv().unwrap();}
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        }).unwrap();
+        assert!(resolver.request("blocked.example",Duration::from_secs(1)).is_err());
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        // Timeouts do not spawn replacements. At most eight pending DNS jobs,
+        // with further attempts failing closed instead of growing a queue.
+        for _ in 0..12 {assert!(resolver.request("expired.example",Duration::from_millis(2)).is_err());}
+        assert_eq!(calls.load(Ordering::SeqCst),1);
+        release_tx.send(()).unwrap();
+        let deadline=Instant::now()+Duration::from_secs(2);
+        loop {
+            if resolver.request("fresh.example",Duration::from_millis(50)).is_ok(){break;}
+            assert!(Instant::now()<deadline,"bounded resolver did not recover");
+            std::thread::yield_now();
+        }
+        assert_eq!(calls.load(Ordering::SeqCst),2); // stale queue never resolves
+    }
     #[test]
     fn private_literal_and_local_names_never_resolve() {
         for h in [

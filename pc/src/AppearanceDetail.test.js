@@ -160,9 +160,9 @@ test("appearance detail persists audio OTA reminders and exposes the sound downl
     /invoke\("usb_sync_appearance", \{[\s\S]*appearanceId: record\.id,[\s\S]*boardDeviceId/,
   );
   assert.match(source, /下发音效/);
-  assert.match(source, /板端音效 OTA 通道/);
-  assert.match(source, /已更新 \$\{activeFamily\} 的提示音，请通过音效通道下发到设备。/);
-  assert.match(source, /已移除 \$\{activeFamily\} 的提示音，请通过音效通道下发到设备。/);
+  assert.match(source, /下方的“下发音效”/);
+  assert.match(source, /已更新 \$\{activeFamily\} 的提示音，点击下方的“下发音效”同步到设备。/);
+  assert.match(source, /已移除 \$\{activeFamily\} 的提示音，点击下方的“下发音效”同步到设备。/);
   assert.match(source, /detail-audio-sync-btn/);
   assert.match(source, /detail-audio-sync-message/);
   assert.match(css, /\.detail-audio-sync-btn\s*\{/);

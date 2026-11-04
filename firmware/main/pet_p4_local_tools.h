@@ -5,16 +5,22 @@
 
 /* Bounded offline primitives. No component IDs, network, scripts or file access. */
 #define PET_LOCAL_ENGINE "p4-local-tools-v1"
-#define PET_LOCAL_VARS 7
+#define PET_LOCAL_LEGACY_VARS 7
+#define PET_LOCAL_VARS 13 /* v3 decks >24: legacy low24 + two high20 words per group */
 #define PET_LOCAL_GROUPS 3
-#define PET_LOCAL_ITEMS 16
+#include "pet_p4_component_features.h"
+#if PET_P4_QUOTA_V3
+#define PET_LOCAL_ITEMS 64 /* p4-quota-v3 ceiling; v1/v2 packages stay at 16/24 (checked by the runtime parser) */
+#else
+#define PET_LOCAL_ITEMS 24 /* p4-quota-v2 ceiling; v1 packages stay at 16 (checked by the runtime parser) */
+#endif
 typedef struct { char title[61], note[145]; } pet_local_item_t;
 typedef struct {
   char title[31]; uint8_t count, kind;
   pet_local_item_t items[PET_LOCAL_ITEMS];
 } pet_local_group_t;
 typedef struct {
-  bool enabled, countdown;
+  bool enabled, countdown, wide_masks;
   uint8_t count, action_count;
   uint16_t reveal_ms;
   char actions[8][48]; uint8_t operations[8];
@@ -33,15 +39,18 @@ typedef struct {
   char primary[40],secondary[40];
   int progress;
 } pet_local_view_t;
+/* Callers provide 7 values for legacy/countdown, 13 for wide_masks decks.
+ * Wide decks require quota-v3 and explicit persist version2/local0..local12.
+ * Low24 remains local1/3/5; high20 pairs are local7/8,9/10,11/12. */
 enum { PET_LOCAL_DRAW=1, PET_LOCAL_EXCLUDE, PET_LOCAL_RESET, PET_LOCAL_CLOSE,
        PET_LOCAL_PREVIOUS, PET_LOCAL_NEXT, PET_LOCAL_EDIT, PET_LOCAL_CANCEL,
        PET_LOCAL_UP, PET_LOCAL_DOWN };
 bool pet_local_parse(const cJSON *json, pet_local_config_t *out);
 void pet_local_init(pet_local_state_t *s);
 bool pet_local_enabled(const pet_local_config_t *c,const pet_local_state_t *s,const char *action);
-bool pet_local_action(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[7],const char *action,uint64_t ms,int64_t local_seconds,uint32_t random);
-bool pet_local_tick(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[7],uint64_t ms,int64_t local_seconds);
-void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const int32_t v[7],uint64_t ms,int64_t local_seconds,pet_local_view_t *out);
+bool pet_local_action(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[],const char *action,uint64_t ms,int64_t local_seconds,uint32_t random);
+bool pet_local_tick(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[],uint64_t ms,int64_t local_seconds);
+void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const int32_t v[],uint64_t ms,int64_t local_seconds,pet_local_view_t *out);
 int32_t pet_local_day(int y,int m,int d);
 void pet_local_date(int32_t day,int *y,int *m,int *d);
 int64_t pet_local_target(uint8_t kind,int32_t day,int minute,int64_t local_seconds);

@@ -1,0 +1,93 @@
+{
+  "format": "delta16-mod65536-order6-zigzag-low-high-zlib-v1",
+  "rawWavBytes": 305302,
+  "pcmBytes": 304960,
+  "packedBytes": 63218,
+  "descriptorBytes32bit": 168,
+  "cues": [
+    {
+      "name": "permission_request",
+      "wavBytes": 14124,
+      "pcmBytes": 14080,
+      "packedBytes": 3439,
+      "packedOffset": 0,
+      "pcmOffset": 0,
+      "planesAdler32": 4228072509,
+      "pcmFnv32": 2787043773,
+      "wavSha256": "5b134610ca35693c5e2ed8a51947792b0f0ed36e21fb1d97d3e0890b1836f4a5",
+      "pcmSha256": "966df0b88c22b9ec8437bce73ba5123b36be5839e410b38b63696a068f6bfdd2"
+    },
+    {
+      "name": "permission_approved",
+      "wavBytes": 9804,
+      "pcmBytes": 9760,
+      "packedBytes": 2196,
+      "packedOffset": 3439,
+      "pcmOffset": 14080,
+      "planesAdler32": 2921995488,
+      "pcmFnv32": 709230690,
+      "wavSha256": "b2e5e8a7d0f4ff72724792842eac19589cc274d66ccce4a3ca133221f16c6699",
+      "pcmSha256": "543f4e133c49f8c87428ac0e30716bd8bfa9d1d0fd4fc1fa1c4db94f29dc7612"
+    },
+    {
+      "name": "permission_denied",
+      "wavBytes": 10284,
+      "pcmBytes": 10240,
+      "packedBytes": 3128,
+      "packedOffset": 5635,
+      "pcmOffset": 23840,
+      "planesAdler32": 3389559252,
+      "pcmFnv32": 2146233357,
+      "wavSha256": "31d49fbbffbba0edaa29b9ac7a845e6d05aa0a22e4f38224838458cf4bf94e8d",
+      "pcmSha256": "7cceff5b426547e3fa1eeb3bd585367df6bc612f2ff4adb466dcc029f20101bd"
+    },
+    {
+      "name": "permission_expired",
+      "wavBytes": 6124,
+      "pcmBytes": 6080,
+      "packedBytes": 726,
+      "packedOffset": 8763,
+      "pcmOffset": 34080,
+      "planesAdler32": 2408560371,
+      "pcmFnv32": 3584359881,
+      "wavSha256": "510f0b88e132778adc7f64349667ab7dee61ca087bcdd92ab6f5c3a781c50970",
+      "pcmSha256": "71a733ca2764e017e05f7ceee0ece8b59663d73e882b247c2161b2d4f37d3162"
+    },
+    {
+      "name": "session_terminated",
+      "wavBytes": 24204,
+      "pcmBytes": 24160,
+      "packedBytes": 3908,
+      "packedOffset": 9489,
+      "pcmOffset": 40160,
+      "planesAdler32": 1812490261,
+      "pcmFnv32": 184141121,
+      "wavSha256": "bcedfd0a69f306dfc85d4588bbf962839be45918477da293e4f58b85fef98ecb",
+      "pcmSha256": "cf2a912f56211107a7a91edd9cb041f345d3c5b03164a1284d86e9f58944b3f6"
+    },
+    {
+      "name": "done",
+      "wavBytes": 121644,
+      "pcmBytes": 121600,
+      "packedBytes": 796,
+      "packedOffset": 13397,
+      "pcmOffset": 64320,
+      "planesAdler32": 896631036,
+      "pcmFnv32": 150194693,
+      "wavSha256": "2b8309f8f44ea7b3cd005a977491c6175f200a461a592a4fbe41963b5999874f",
+      "pcmSha256": "4455ff7e52e403b34bf6a112d4d8ddb8664034ad84054f5e151bb655e1c273f8"
+    },
+    {
+      "name": "error",
+      "wavBytes": 119118,
+      "pcmBytes": 119040,
+      "packedBytes": 49025,
+      "packedOffset": 14193,
+      "pcmOffset": 185920,
+      "planesAdler32": 3660396263,
+      "pcmFnv32": 788287619,
+      "wavSha256": "5386a8ae2132b52ec3e4431078408828f8e701a2cc77a014a8e7de7fd7f8dd12",
+      "pcmSha256": "f197ca531f46afba40af0df2e464d22c50b88ccfacf653300d068d2e5581f751"
+    }
+  ]
+}

@@ -55,7 +55,8 @@ export function mergeComponentCatalog(publishedItems, builtins) {
 
 // A withdrawal also applies to packages cached by earlier releases. Match the
 // exact package identity, not shared media capabilities or user-authored names.
-const withdrawnComponentIds = new Set(["city-radio"]);
+// Coordinate explicit withdrawals with the packaged factory catalog.
+const withdrawnComponentIds = new Set();
 export function isWithdrawnComponent(component) {
   return withdrawnComponentIds.has(component?.id ?? component?.componentId);
 }

@@ -7,11 +7,14 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync as readPresentationSource } from "node:fs";
 import {
   DEVICE_VOICE_ROUTER_INITIAL_STATE,
+  createDeviceAudioActivityGate,
   deviceVoiceRouterReducer,
   transcriptMessage,
   voiceFlowMessage,
+  voiceFlowTone,
 } from "./useDeviceVoiceRouter.js";
 
 test("Failed visible composer delivery keeps the actual cause beside its summary", () => {
@@ -194,4 +197,128 @@ test("foreground-current route may resolve to the exact device session after gua
 
   assert.equal(fallback.flow.agentId, "codex");
   assert.equal(fallback.flow.sessionId, "session-from-device");
+});
+
+
+test("DeepSeek dictation identifies its actual final-only composer without promising live writes", () => {
+  for (const phase of ["listening", "partial", "draft_ready", "submitting", "submitted"]) {
+    const message = transcriptMessage({ agentId: "deepseek-harness" }, phase, "visible");
+    assert.match(message, /DeepSeek Harness/);
+    assert.doesNotMatch(message, /ChatGPT|WorkBuddy|实时同步|实时识别并同步/);
+  }
+  assert.match(transcriptMessage({ agentId: "deepseek-harness" }, "partial", "visible"), /松开后一次写入/);
+});
+
+
+test("uncertain submit is terminal unknown, never sent or a known rejection", () => {
+  const ready = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    utteranceId: "presentation-a", phase: "draft_ready", revision: 2,
+    text: "synthetic draft", composerMode: "visible", composerError: "",
+  });
+  const unknown = deviceVoiceRouterReducer(ready, {
+    type: "delivery", utteranceId: "presentation-a", ok: false,
+    code: "VISIBLE_COMPOSER_UNCONFIRMED", composerMode: "visible",
+    message: "synthetic result unknown", composerError: "synthetic readback changed",
+  });
+  assert.equal(unknown.flow.phase, "submit_unknown");
+  assert.equal(unknown.flow.ok, false);
+  assert.equal(unknown.flow.text, "synthetic draft");
+  assert.equal(unknown.deliveryHandled, true);
+  assert.strictEqual(deviceVoiceRouterReducer(unknown, {
+    type: "delivery", utteranceId: "presentation-a", ok: true,
+    composerMode: "visible", message: "late success without new proof",
+  }), unknown);
+  assert.strictEqual(transcript(unknown, {
+    utteranceId: "presentation-a", phase: "submitted", revision: 3,
+  }), unknown);
+  const next = transcript(unknown, {
+    utteranceId: "presentation-b", phase: "listening", revision: 0,
+  });
+  assert.equal(next.flow.phase, "listening");
+  assert.equal(next.flow.composerError, "");
+  assert.match(transcriptMessage({}, "submit_unknown", "visible"), /结果未确认/);
+});
+
+test("unknown transcript cannot be changed into success by its later result event", () => {
+  const unknown = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    utteranceId: "presentation-c", phase: "submit_unknown", revision: 3,
+    isFinal: true, ok: false, composerError: "synthetic unknown",
+  });
+  assert.equal(unknown.flow.phase, "submit_unknown");
+  assert.strictEqual(deviceVoiceRouterReducer(unknown, {
+    type: "delivery", utteranceId: "presentation-c", ok: true, composerMode: "visible",
+  }), unknown);
+});
+
+test("explicit healthy empty composer diagnostic clears stale text; absent field preserves it", () => {
+  const partial = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    utteranceId: "presentation-d", phase: "partial", revision: 1,
+    composerError: "synthetic stale diagnostic",
+  });
+  const absent = transcript(partial, {
+    utteranceId: "presentation-d", phase: "draft_ready", revision: 2,
+  });
+  assert.equal(absent.flow.composerError, "synthetic stale diagnostic");
+  const submitted = transcript(absent, {
+    utteranceId: "presentation-d", phase: "submitted", revision: 3,
+    composerMode: "visible", composerError: "",
+  });
+  assert.equal(submitted.flow.composerError, "");
+  const done = deviceVoiceRouterReducer(submitted, {
+    type: "delivery", utteranceId: "presentation-d", ok: true,
+    composerMode: "agent-bus", composerError: "",
+  });
+  assert.equal(done.flow.phase, "done");
+  assert.equal(done.flow.composerError, "");
+});
+
+
+test("typed unknown dominates contradictory ok and never becomes known delivery", () => {
+  const delivery = deviceVoiceRouterReducer(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    type: "delivery", utteranceId: "presentation-e", ok: true,
+    code: "VISIBLE_COMPOSER_UNCONFIRMED", composerMode: "visible",
+  });
+  assert.equal(delivery.flow.phase, "submit_unknown");
+  assert.equal(delivery.flow.ok, false);
+  const notice = transcript(DEVICE_VOICE_ROUTER_INITIAL_STATE, {
+    utteranceId: "presentation-f", phase: "submit_unknown", ok: true,
+  });
+  assert.equal(notice.flow.ok, false);
+});
+
+
+test("delivery-domain cleanup never labels a completed capture as failed microphone audio", () => {
+  const gate = createDeviceAudioActivityGate();
+  const scope = { captureId: "presentation-capture", utteranceId: "presentation-g", sessionId: "presentation-g",
+    boardDeviceId: "synthetic-board", connectionId: "synthetic-connection", bootId: "synthetic-boot" };
+  assert.ok(gate({ ...scope, phase: "begin", ok: true }));
+  assert.ok(gate({ ...scope, phase: "end", ok: true, durationMs: 1000 }));
+  assert.equal(gate({ ...scope, phase: "error", ok: false, failureDomain: "delivery", error: "synthetic submit unknown" }), null);
+  // Real ASR/audio failures are still admitted as the actual first audio cause.
+  const audioFailure = gate({ ...scope, phase: "error", ok: false, error: "synthetic recognition failure" });
+  assert.ok(audioFailure);
+  assert.equal(audioFailure.ok, false);
+});
+
+
+test("unknown remains amber despite false ok and diagnostics; render uses that exact helper", () => {
+  assert.equal(voiceFlowTone({ phase: "submit_unknown", ok: false, composerError: "synthetic readback uncertainty" }), "warning");
+  assert.equal(voiceFlowTone({ phase: "error", ok: false }), "error");
+  assert.equal(voiceFlowTone({ phase: "done", ok: true, composerError: "old diagnostic" }), "success");
+  assert.equal(voiceFlowTone({ phase: "listening" }), "muted");
+  const panel = readPresentationSource(new URL("./VoiceAssistantPanel.jsx", import.meta.url), "utf8");
+  assert.ok(panel.includes('message-banner--${voiceFlowTone(state.deviceVoiceFlow)}'));
+  const css = readPresentationSource(new URL("../styles.css", import.meta.url), "utf8");
+  const warning = css.split(".message-banner--warning {")[1].split("}")[0];
+  assert.match(warning, /background: var\(--warning-soft\)/);
+  assert.match(warning, /color: var\(--warning\)/);
+  assert.doesNotMatch(warning, /danger/);
+});
+
+test("native classifier accepts generic typed unknown and keeps CODEX compatibility", () => {
+  const native = readPresentationSource(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  const classifier = native.split("fn classify_visible_composer_submit(")[1].split("fn pc_audio_board_binding")[0];
+  assert.ok(classifier.includes('error.starts_with("COMPOSER_SUBMIT_UNCONFIRMED:")'));
+  assert.ok(classifier.includes('error.starts_with("CODEX_SUBMIT_UNCONFIRMED:")'));
+  assert.ok(classifier.includes('VisibleComposerSubmitOutcome::Unconfirmed(error)'));
 });

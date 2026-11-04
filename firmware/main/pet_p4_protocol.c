@@ -16,18 +16,32 @@
  */
 
 #include "pet_p4_protocol.h"
+#include "pet_p4_usb_native.h"
+#include "pet_p4_variable_owners.h"
 #include "pet_p4_conversation.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_audio_patch.h"
+#include "pet_p4_system_cues.h"
+#include "esp_attr.h"
 #include "pet_p4_transport_config.h"
+#include "pet_p4_control_integrity.h"
+#include "pet_p4_control_session.h"
+#include "pet_p4_screenshot_close.h"
+#include "pet_p4_evidence_identity.h"
+#include "pet_p4_component_program.h"
+#include "pet_p4_storage_io_trace.h"
+#include "pet_p4_resources_device.h"
 
 #include <errno.h>
 #include <math.h>
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 
 #include "cJSON.h"
+#include "pet_p4_json_source.h"
 #include "mbedtls/base64.h"
 #include "bsp/display.h"
 #include "esp_app_desc.h"
@@ -38,17 +52,23 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_audio_volume.h"
 #include "pet_p4_audio_frontend.h"
 #include "pet_p4_build_info.h"
 #include "pet_p4_diagnostics.h"
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
+#include "pet_p4_boot_trace.h"
+#include "pet_p4_lcd_profile.h"
+#include "pet_p4_widget_trace.h"
 #include "pet_p4_media.h"
 #include "pet_p4_app_host.h"
 #include "pet_p4_ota.h"
 #include "pet_p4_raw_assets.h"
+#include "pet_p4_renderer.h"
 #include "pet_p4_bubble_pixels.h"
 #include "pet_p4_touch.h"
+#include "pet_p4_notify.h"
 
 #define PET_P4_WIRE_PROTOCOL "pet-usb-jsonl-v3"
 #define PET_P4_SPIFFS_PREFIX "/spiffs"
@@ -70,12 +90,36 @@
 #define PET_P4_APPROVAL_MAX_HOLD_MS 300000ULL
 
 static const char *TAG = "pet-p4-protocol";
-static int g_asset_active_slot = -1;
+static pet_boot_identity_t g_boot_identity;
+void pet_p4_boot_identity_start(uint32_t first,uint32_t second){(void)pet_boot_identity_start(&g_boot_identity,first,second);}
+const char *pet_p4_boot_identity(void){return g_boot_identity.ready?g_boot_identity.id:"";}
+/* Renderer observes this outside the runtime-state mutex. */
+static _Atomic int g_asset_active_slot = -1;
 static int g_asset_transfer_slot = -1;
 static char g_asset_transfer_id[PET_P4_DEVICE_ID_MAX];
 static unsigned long long g_asset_transfer_last_activity_ms;
+static pet_p4_send_line_fn g_asset_sender;
+static void *g_asset_route;
+static pet_appearance_session_t g_appearance_session;
+bool pet_p4_appearance_claim(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind){
+  /* Serialize status-cue admission BEFORE either serial/native owner can start IO.
+   * A refused claim never releases another owner's gate. Main confirms quiescence. */
+  pet_p4_audio_status_cues_defer(true);
+  return pet_appearance_claim(&g_appearance_session,send,ctx,id,kind);
+}
+bool pet_p4_appearance_owned(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind){return pet_appearance_matches(&g_appearance_session,send,ctx,id,kind);}
+bool pet_p4_appearance_end(pet_p4_send_line_fn send,void *ctx,const char *id,unsigned kind){return pet_appearance_release(&g_appearance_session,send,ctx,id,kind);}
+bool pet_p4_appearance_active(void){return g_appearance_session.active;}
+
+bool pet_p4_appearance_native_active(void){return g_appearance_session.active&&g_appearance_session.kind==PET_APPEARANCE_NATIVE;}
+static _Atomic bool g_asset_cleanup_due;
+static bool audio_patch_protocol_active(void);
+static bool audio_patch_idle_due(uint64_t now);
+static void audio_patch_timeout_worker(pet_p4_runtime_state_t *state);
+
 static unsigned long long g_host_wall_clock_ms;
 static unsigned long long g_host_wall_clock_at_ms;
+static bool g_asset_phase_write_attempted;
 static FILE *g_asset_chunk_file;
 static char g_asset_chunk_logical_path[PET_P4_LOGICAL_PATH_MAX];
 static char g_asset_chunk_error[128];
@@ -302,11 +346,16 @@ static void note_remote_lifecycle(pet_p4_runtime_state_t *state, bool was_done) 
   }
 }
 
-static void close_asset_chunk_file(void) {
-  if (g_asset_chunk_file) {
-    fclose(g_asset_chunk_file);
-    g_asset_chunk_file = NULL;
+static bool close_asset_chunk_file(void) {
+  FILE *file = g_asset_chunk_file;
+  g_asset_chunk_file = NULL;
+  if(file)g_asset_phase_write_attempted=true;
+  if (file && fclose(file) != 0) {
+    g_asset_chunk_stat_valid = false;
+    snprintf(g_asset_chunk_error, sizeof(g_asset_chunk_error), "transferred file close failed");
+    return false;
   }
+  return true;
 }
 
 static void reset_asset_chunk_tracking(void) {
@@ -337,8 +386,10 @@ static const char *json_first_string(const cJSON *object, const char *const *key
 
 static unsigned long long json_u64(const cJSON *object, const char *key, unsigned long long fallback) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!cJSON_IsNumber(item)) return fallback;
-  return (unsigned long long) item->valuedouble;
+  if(!cJSON_IsNumber(item)||!isfinite(item->valuedouble)||item->valuedouble<0
+      ||item->valuedouble>PET_P4_JSON_SAFE_INTEGER_MAX)return fallback;
+  unsigned long long value=(unsigned long long)item->valuedouble;
+  return (double)value==item->valuedouble?value:fallback;
 }
 
 static unsigned long long json_bounded_u64(
@@ -348,14 +399,35 @@ static unsigned long long json_bounded_u64(
   unsigned long long fallback
 ) {
   const cJSON *item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!cJSON_IsNumber(item)
+  if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble)
       || item->valuedouble < 0
       || item->valuedouble > (double) maximum) {
     return fallback;
   }
-  return (unsigned long long) item->valuedouble;
+  unsigned long long value=(unsigned long long)item->valuedouble;
+  return (double)value==item->valuedouble?value:fallback;
 }
 
+#if PET_P4_MUTATION_ACK_DEFERRED
+static pet_p4_query_reply_t *g_deferred_reply;
+static TaskHandle_t g_deferred_reply_owner;
+static bool deferrable_topic(const char *topic){
+  if(!topic)return false;
+  if(!strcmp(topic,"widget-install-ack"))return true;
+#if PET_P4_LARGE_REPLY_DEFERRED
+  if(!strcmp(topic,"widget/inventory")||!strcmp(topic,"hello")
+      ||!strcmp(topic,"widget/catalog_snapshot")||!strcmp(topic,"widget/catalog_reconcile_result"))return true;
+#endif
+  return false;
+}
+static void flush_deferred_reply(pet_p4_send_line_fn send_line,void *ctx){
+  if(g_deferred_reply&&g_deferred_reply->line){
+    char *held=g_deferred_reply->line;g_deferred_reply->line=NULL;
+    if(send_line)send_line(held,ctx);
+    cJSON_free(held);
+  }
+}
+#endif
 /* Best-effort host wall clock from the latest system/heartbeat tsMs. Returns 0
  * until an anchor was received, so callers can fail closed instead of guessing. */
 static unsigned long long host_wall_clock_estimate_ms(unsigned long long now_ms) {
@@ -410,6 +482,12 @@ static void send_topic_payload(pet_p4_send_line_fn send_line, void *ctx, const c
   cJSON_AddStringToObject(root, "topic", topic);
   cJSON_AddItemToObject(root, "payload", payload);
   line = cJSON_PrintUnformatted(root);
+#if PET_P4_MUTATION_ACK_DEFERRED
+  if(line&&send_line&&g_deferred_reply&&g_deferred_reply_owner==xTaskGetCurrentTaskHandle()){
+    if(!g_deferred_reply->line&&deferrable_topic(topic)){g_deferred_reply->line=line;cJSON_Delete(root);return;}
+    flush_deferred_reply(send_line,ctx);
+  }
+#endif
   if (line && send_line) send_line(line, ctx);
   cJSON_free(line);
   cJSON_Delete(root);
@@ -424,6 +502,7 @@ static void send_protocol_ack(
   const char *code,
   const char *error
 ) {
+  PET_WIDGET_TRACE_SCOPE(trace_ack, PET_WTRACE_ACK);
   cJSON *payload = cJSON_CreateObject();
   const cJSON *request_id = request_payload
     ? cJSON_GetObjectItemCaseSensitive(request_payload, "requestId")
@@ -546,11 +625,13 @@ static void read_active_slot_marker(void) {
 bool pet_p4_asset_set_active_slot(int slot) {
   FILE *file;
   if (!slot_is_valid(slot)) return false;
+  /* Main resumes admission after the serialized storage transition finishes. */
+  pet_p4_renderer_set_asset_preparation_suspended(true);
   file = fopen(PET_P4_ASSET_SLOT_MARKER, "wb");
   if (!file) return false;
-  fputc('0' + slot, file);
-  fputc('\n', file);
-  fclose(file);
+  bool written=fputc('0'+slot,file)!=EOF&&fputc('\n',file)!=EOF;
+  if(fclose(file)!=0)written=false;
+  if(!written)return false;
   g_asset_active_slot = slot;
   return true;
 }
@@ -565,6 +646,7 @@ int pet_p4_asset_inactive_slot(void) {
 }
 
 static bool clear_slot_files(int slot) {
+  pet_p4_renderer_set_asset_preparation_suspended(true);
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "s%d_", slot);
   while (true) {
@@ -599,20 +681,15 @@ static bool clear_slot_files(int slot) {
   }
 }
 
-static bool ensure_asset_transfer_slot(const char *transfer_id) {
-  const char *id = transfer_id ? transfer_id : "";
-  if (g_asset_transfer_slot < 0 || strcmp(g_asset_transfer_id, id) != 0) {
-    reset_asset_chunk_tracking();
-    pet_p4_asset_clean_legacy_files();
-    g_asset_transfer_slot = PET_P4_RAW_APPEARANCE_SLOT;
-    if (!slot_is_valid(g_asset_transfer_slot)) return false;
-    if (!clear_slot_files(g_asset_transfer_slot)) return false;
-    copy_text(g_asset_transfer_id, sizeof(g_asset_transfer_id), id);
-  }
-  return true;
+static bool ensure_asset_transfer_slot(const char *id) {
+  return pet_appearance_id_valid(id)&&slot_is_valid(g_asset_transfer_slot)
+    &&!strcmp(g_asset_transfer_id,id);
 }
 
 static void reset_asset_transfer_slot(void) {
+  if (pet_p4_appearance_mutation_blocked()) return;
+  (void)pet_p4_appearance_end(g_asset_sender,g_asset_route,g_asset_transfer_id,PET_APPEARANCE_SERIAL);
+  g_asset_sender=NULL;g_asset_route=NULL;
   pet_p4_raw_assets_reset_transfer();
   g_asset_transfer_slot = -1;
   g_asset_transfer_id[0] = '\0';
@@ -623,34 +700,30 @@ static void note_asset_transfer_activity(void) {
     (unsigned long long) (esp_timer_get_time() / 1000ULL);
 }
 
-static void abort_serial_asset_transfer(pet_p4_runtime_state_t *state) {
-  reset_raw_asset_chunk();
-  reset_asset_chunk_tracking();
-  if (slot_is_valid(g_asset_transfer_slot)) {
-    (void) clear_slot_files(g_asset_transfer_slot);
-  }
-  reset_asset_transfer_slot();
-  g_asset_transfer_last_activity_ms = 0;
-  if (state) state->asset_transfer_active = false;
+static bool abort_serial_asset_transfer(pet_p4_runtime_state_t *state) {
+  (void)state;
+  if(g_appearance_session.recovery_blocked)return false;
+  if(!close_asset_chunk_file())return false;
+  g_asset_phase_write_attempted=true;
+  if(slot_is_valid(g_asset_transfer_slot)&&!clear_slot_files(g_asset_transfer_slot))return false;
+  reset_raw_asset_chunk();reset_asset_chunk_tracking();pet_p4_raw_assets_reset_transfer();return true;
 }
 
-void pet_p4_asset_transfer_process(
-  pet_p4_runtime_state_t *state,
-  unsigned long long now_ms
-) {
-  if (!state || !state->asset_transfer_active || g_asset_transfer_slot < 0
-      || g_asset_transfer_last_activity_ms == 0
-      || now_ms < g_asset_transfer_last_activity_ms
-      || now_ms - g_asset_transfer_last_activity_ms < PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS) {
-    return;
-  }
-  ESP_LOGW(
-    TAG,
-    "aborting idle serial appearance transfer id=%s idle_ms=%llu",
-    g_asset_transfer_id,
-    now_ms - g_asset_transfer_last_activity_ms
-  );
-  abort_serial_asset_transfer(state);
+void pet_p4_asset_transfer_process(pet_p4_runtime_state_t *state,unsigned long long now_ms) {
+  /* Main holds the state lock: latch only, no close/free/scan/erase/TX here.
+   * Claims and standalone reads publish true synchronously before admission.
+   * Only this complete lock-held retirement observation may publish false. */
+  if(state)pet_p4_audio_status_cues_defer(state->asset_transfer_active
+    ||g_appearance_session.active||g_appearance_session.operation_active
+    ||g_appearance_session.recovery_blocked||g_raw_asset_chunk.active
+    ||g_raw_asset_chunk.data||g_asset_chunk_file||g_asset_transfer_slot>=0);
+  if(!pet_p4_appearance_mutation_blocked()&&state&&state->asset_transfer_active
+      &&g_asset_transfer_slot>=0&&g_asset_transfer_last_activity_ms
+      &&now_ms>=g_asset_transfer_last_activity_ms
+      &&now_ms-g_asset_transfer_last_activity_ms>=PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS)
+    atomic_store_explicit(&g_asset_cleanup_due,true,memory_order_release);
+  if(!pet_p4_appearance_mutation_blocked()&&audio_patch_idle_due(now_ms))
+    atomic_store_explicit(&g_asset_cleanup_due,true,memory_order_release);
 }
 
 static void p4_asset_fs_path_for_slot(int slot, const char *logical_path, bool tmp, char *out, size_t out_size) {
@@ -769,8 +842,9 @@ static bool read_slot_pack_id(int slot, char *out, size_t out_size) {
     }
     out[written++] = (char) ch;
   }
-  fclose(file);
-  if (ch != '"' || written == 0) {
+  bool closed_ok=!ferror(file);
+  if(fclose(file)!=0)closed_ok=false;
+  if (!closed_ok || ch != '"' || written == 0) {
     out[0] = '\0';
     return false;
   }
@@ -780,7 +854,7 @@ static bool read_slot_pack_id(int slot, char *out, size_t out_size) {
 
 static bool read_ready_slot_pack_id(int slot, char *out, size_t out_size) {
   char manifest_pack_id[PET_P4_PACK_ID_MAX];
-  char marker_pack_id[PET_P4_PACK_ID_MAX];
+  char marker_pack_id[PET_P4_PACK_ID_MAX+2];
   char marker_path[PET_P4_FS_PATH_MAX];
   FILE *file;
   size_t marker_len;
@@ -792,14 +866,15 @@ static bool read_ready_slot_pack_id(int slot, char *out, size_t out_size) {
   out[0] = '\0';
   file = fopen(marker_path, "rb");
   if (!file) return false;
-  if (!fgets(marker_pack_id, sizeof(marker_pack_id), file)) {
-    fclose(file);
-    return false;
-  }
-  fclose(file);
-  marker_len = strcspn(marker_pack_id, "\r\n");
-  marker_pack_id[marker_len] = '\0';
-  if (marker_len == 0 || strcmp(marker_pack_id, manifest_pack_id) != 0) return false;
+  marker_len=fread(marker_pack_id,1,sizeof(marker_pack_id),file);
+  bool closed_ok=!ferror(file)&&fgetc(file)==EOF&&!ferror(file);
+  if(fclose(file)!=0)closed_ok=false;
+  bool exact=marker_len==PET_P4_PACK_ID_MAX-1
+    ||(marker_len==PET_P4_PACK_ID_MAX&&marker_pack_id[marker_len-1]=='\n')
+    ||(marker_len==PET_P4_PACK_ID_MAX+1&&marker_pack_id[marker_len-2]=='\r'&&marker_pack_id[marker_len-1]=='\n');
+  if(!closed_ok||!exact)return false;
+  marker_pack_id[PET_P4_PACK_ID_MAX-1]='\0';
+  if(strcmp(marker_pack_id,manifest_pack_id))return false;
   if (pet_p4_raw_assets_slot_available(slot)) {
     char raw_pack_id[PET_P4_PACK_ID_MAX];
     if (!pet_p4_raw_assets_committed_pack_id_for_slot(
@@ -815,21 +890,11 @@ static bool read_ready_slot_pack_id(int slot, char *out, size_t out_size) {
   return true;
 }
 
+static bool write_ready_pack_exact(int slot,const char *pack,bool *changed);
 bool pet_p4_asset_mark_slot_ready(int slot) {
-  char pack_id[PET_P4_PACK_ID_MAX];
-  char marker_path[PET_P4_FS_PATH_MAX];
-  FILE *file;
-  bool ok;
-  if (!read_slot_pack_id(slot, pack_id, sizeof(pack_id)) ||
-      !p4_asset_ready_marker_path(slot, marker_path, sizeof(marker_path))) {
-    return false;
-  }
-  file = fopen(marker_path, "wb");
-  if (!file) return false;
-  ok = fprintf(file, "%s\n", pack_id) > 0;
-  if (fclose(file) != 0) ok = false;
-  if (!ok) remove(marker_path);
-  return ok;
+  char pack[PET_P4_PACK_ID_MAX];bool changed=false;
+  return read_slot_pack_id(slot,pack,sizeof(pack))
+    &&write_ready_pack_exact(slot,pack,&changed);
 }
 
 bool pet_p4_asset_slot_has_pack_id(int slot) {
@@ -837,32 +902,333 @@ bool pet_p4_asset_slot_has_pack_id(int slot) {
   return read_slot_pack_id(slot, pack_id, sizeof(pack_id));
 }
 
-static void send_asset_slot_query_ack(
-  pet_p4_send_line_fn send_line,
-  void *ctx,
-  const char *transfer_id
-) {
-  cJSON *payload = cJSON_CreateObject();
-  cJSON *slots = cJSON_CreateArray();
-  int active_slot = pet_p4_asset_active_slot();
-  cJSON_AddStringToObject(payload, "transferId", transfer_id ? transfer_id : "");
-  cJSON_AddStringToObject(payload, "phase", "slot-query");
-  cJSON_AddBoolToObject(payload, "builtinProtected", true);
-  cJSON_AddBoolToObject(payload, "systemCues", true);
-  cJSON_AddBoolToObject(payload, "ok", true);
-  if (slot_is_valid(active_slot)) cJSON_AddNumberToObject(payload, "activeSlot", active_slot);
-  for (int slot = 0; slot < PET_P4_ASSET_SLOT_COUNT; slot += 1) {
-    char pack_id[PET_P4_PACK_ID_MAX];
-    bool valid = read_ready_slot_pack_id(slot, pack_id, sizeof(pack_id));
-    cJSON *entry = cJSON_CreateObject();
-    cJSON_AddNumberToObject(entry, "slot", slot);
-    cJSON_AddBoolToObject(entry, "valid", valid);
-    if (valid) cJSON_AddStringToObject(entry, "packId", pack_id);
-    cJSON_AddItemToArray(slots, entry);
+static bool (*g_asset_query_io_begin)(void *);
+static void (*g_asset_query_io_end)(void *);
+static void *g_asset_query_io_context;
+
+static bool appearance_phase_try_begin(pet_appearance_phase_t *p,
+    pet_p4_runtime_state_t *state,pet_p4_send_line_fn send,void *route,
+    const char *id,unsigned kind,int slot,const pet_appearance_commit_io_t *io,
+    bool *storage_busy) {
+  if(storage_busy)*storage_busy=false;
+  if(!p||!state||!io||!io->begin||!io->end||pet_p4_appearance_mutation_blocked()
+      ||!pet_p4_appearance_owned(send,route,id,kind)
+      ||(kind==PET_APPEARANCE_SERIAL&&send==pet_p4_native_usb_send_json_line&&!pet_p4_native_usb_route_current(route))||(io->current&&!io->current(io->context)))return false;
+  memset(p,0,sizeof(*p));
+  pet_resource_result_t opened=pet_resources_device_owner_open(
+    PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK),&p->owner);
+  pet_resource_result_t acquired=opened==PET_RESOURCE_OK
+    ?pet_resources_device_acquire(p->owner,PET_RESOURCE_STORAGE_WORK,1,&p->lease)
+    :PET_RESOURCE_UNAVAILABLE;
+  if(opened!=PET_RESOURCE_OK||acquired!=PET_RESOURCE_OK){
+    /* Only physical occupancy is transient here. Protected audio, stale owner,
+     * owner-table exhaustion and invalid inputs are not admission retries. */
+    if(storage_busy)*storage_busy=opened==PET_RESOURCE_OK&&acquired==PET_RESOURCE_BUSY;
+    pet_resources_device_revoke(p->owner);return false;
   }
-  cJSON_AddItemToObject(payload, "slots", slots);
-  send_topic_payload(send_line, ctx, "asset/ack", payload);
+  p->generation=g_appearance_session.generation;p->revision=state->asset_revision;
+  p->active_slot=g_asset_active_slot;p->target_slot=slot;p->kind=kind;p->sender=send;p->route=route;
+  copy_text(p->id,sizeof(p->id),id);p->io=*io;
+  g_appearance_session.operation_active=true;
+  if(!io->begin(io->context)){
+    g_appearance_session.operation_active=false;
+    (void)pet_resources_device_finish(p->lease);pet_resources_device_revoke(p->owner);return false;
+  }
+  /* begin borrowed the state lock; only captured route/atomic current is safe here. */
+  if((p->kind==PET_APPEARANCE_SERIAL&&p->sender==pet_p4_native_usb_send_json_line
+        &&!pet_p4_native_usb_route_current(p->route))
+      ||(p->io.current&&!p->io.current(p->io.context))){
+    p->io.end(p->io.context);
+    if(g_appearance_session.generation==p->generation)g_appearance_session.operation_active=false;
+    (void)pet_resources_device_finish(p->lease);pet_resources_device_revoke(p->owner);
+    return false;
+  }
+  p->active=true;return true;
 }
+bool pet_p4_appearance_phase_begin(pet_appearance_phase_t *p,
+    pet_p4_runtime_state_t *state,pet_p4_send_line_fn send,void *route,
+    const char *id,unsigned kind,int slot,const pet_appearance_commit_io_t *io){
+  return appearance_phase_try_begin(p,state,send,route,id,kind,slot,io,NULL);
+}
+/* The serial raw header has not run and no ready ACK/body has been granted.
+ * Yield only a BUSY storage admission, without retaining owner/lease/state lock.
+ * This 1s budget fits inside the existing PC 5s ready-ACK deadline; it never
+ * retries an entered phase, an allocator failure, a protected audio reservation
+ * or any physical mutation. */
+static bool serial_raw_phase_begin_wait(pet_appearance_phase_t *p,
+    pet_p4_runtime_state_t *state,pet_p4_send_line_fn send,void *route,
+    const char *id,int slot,const pet_appearance_commit_io_t *io){
+  if(!state||!io||!io->begin||!io->end)return false;
+  uint64_t generation=g_appearance_session.generation;
+  unsigned revision=state->asset_revision;
+  int active_slot=g_asset_active_slot;
+  uint64_t started=(uint64_t)esp_timer_get_time()/1000ULL;
+  for(;;){
+    bool storage_busy=false;
+    if(appearance_phase_try_begin(p,state,send,route,id,PET_APPEARANCE_SERIAL,slot,io,&storage_busy))return true;
+    uint64_t now=(uint64_t)esp_timer_get_time()/1000ULL;
+    if(!storage_busy||now<started||now-started>=1000ULL)return false;
+    if(!io->begin(io->context))return false;
+    TickType_t ticks=pdMS_TO_TICKS(10);
+    vTaskDelay(ticks?ticks:1);
+    io->end(io->context);
+    /* Re-admission is about the same unexecuted header, never a newer owner. */
+    now=(uint64_t)esp_timer_get_time()/1000ULL;
+    if(now<started||now-started>=1000ULL
+        ||g_appearance_session.generation!=generation
+        ||state->asset_revision!=revision||g_asset_active_slot!=active_slot
+        ||g_asset_transfer_slot!=slot||!ensure_asset_transfer_slot(id)
+        ||pet_p4_appearance_mutation_blocked()||g_raw_asset_chunk.active
+        ||!pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL)
+        ||(send==pet_p4_native_usb_send_json_line&&!pet_p4_native_usb_route_current(route))
+        ||(io->current&&!io->current(io->context)))return false;
+  }
+}
+pet_appearance_commit_result_t pet_p4_appearance_phase_end(pet_appearance_phase_t *p,
+    pet_p4_runtime_state_t *state,int slot,bool ok,bool attempted) {
+  if(!p||!p->active)return PET_APPEARANCE_COMMIT_FAILED;
+  p->io.end(p->io.context);p->active=false;
+  bool current=g_appearance_session.operation_active&&!g_appearance_session.recovery_blocked
+    &&g_appearance_session.generation==p->generation
+    &&pet_p4_appearance_owned(p->sender,p->route,p->id,p->kind)
+    &&state->asset_revision==p->revision&&g_asset_active_slot==p->active_slot
+    &&slot==p->target_slot&&pet_resources_device_current(p->lease)
+    &&(p->kind!=PET_APPEARANCE_SERIAL||p->sender!=pet_p4_native_usb_send_json_line||pet_p4_native_usb_route_current(p->route))
+    &&(!p->io.current||p->io.current(p->io.context));
+  pet_appearance_commit_result_t result=current&&ok?PET_APPEARANCE_COMMIT_OK:PET_APPEARANCE_COMMIT_FAILED;
+  if(!current||(!ok&&attempted)){
+    g_appearance_session.recovery_blocked=true;result=PET_APPEARANCE_COMMIT_UNKNOWN;
+  }
+  if(g_appearance_session.generation==p->generation)g_appearance_session.operation_active=false;
+  (void)pet_resources_device_finish(p->lease);pet_resources_device_revoke(p->owner);return result;
+}
+
+#define APPEARANCE_OBSERVATION_SCHEMA "p4-appearance-quiescent-v1"
+static bool (*g_asset_query_pending)(void *);
+static void *g_asset_query_pending_context;
+bool pet_p4_protocol_asset_query_pending_configure(bool (*pending)(void *),void *context) {
+  if(!pending||g_asset_query_pending)return false;
+  g_asset_query_pending=pending;g_asset_query_pending_context=context;return true;
+}
+typedef struct {
+  bool asset_transfer,raw_receiving,appearance_owner,file_open,slot_pending;
+  bool native_transfer,native_receiving,native_pending,worker_pending,storage_pending,firmware_ota,reboot_pending;
+  uint32_t native_epoch;
+} appearance_io_observation_t;
+static appearance_io_observation_t appearance_io_observe(const pet_p4_runtime_state_t *state) {
+  pet_p4_native_io_snapshot_t native=pet_p4_native_usb_io_snapshot();
+  bool busy=pet_p4_appearance_mutation_blocked();
+  appearance_io_observation_t s={
+    .asset_transfer=state->asset_transfer_active,.raw_receiving=busy||g_raw_asset_chunk.active,
+    .appearance_owner=pet_p4_appearance_active(),.file_open=busy||g_asset_chunk_file!=NULL,
+    .slot_pending=busy||g_asset_transfer_slot>=0,.native_transfer=native.transfer_active,
+    .native_receiving=native.receiving,.native_pending=native.worker_pending,
+    .worker_pending=!g_asset_query_pending||g_asset_query_pending(g_asset_query_pending_context),
+    .storage_pending=pet_p4_miniapp_storage_busy(),
+    .firmware_ota=pet_p4_ota_transfer_active(),.reboot_pending=pet_p4_diagnostics_reboot_pending(),
+    .native_epoch=native.epoch
+  };return s;
+}
+static bool appearance_io_busy(appearance_io_observation_t s) {
+  return s.asset_transfer||s.raw_receiving||s.appearance_owner||s.file_open||s.slot_pending
+    ||s.native_transfer||s.native_receiving||s.native_pending||s.worker_pending||s.storage_pending||s.firmware_ota||s.reboot_pending;
+}
+
+bool pet_p4_protocol_asset_query_io_configure(bool (*begin)(void *),
+    void (*end)(void *), void *context) {
+  if (!begin || !end || g_asset_query_io_begin) return false;
+  g_asset_query_io_begin=begin;g_asset_query_io_end=end;
+  g_asset_query_io_context=context;return true;
+}
+static void asset_query_refuse(pet_p4_send_line_fn send,void *route,const char *id,const char *error){
+  if(g_asset_query_io_begin&&g_asset_query_io_end&&g_asset_query_io_begin(g_asset_query_io_context)){
+    send_asset_ack(send,route,id,"slot-query",NULL,false,error);g_asset_query_io_end(g_asset_query_io_context);
+  }
+}
+/* Modern requests cannot downgrade to an unbound legacy read. Only immutable
+ * request fields and caller-mutex-owned session metadata are read here. */
+static bool asset_query_modern(const cJSON *request){
+  static const char *const keys[]={"observationSchema","queryNonce","expectedBoardDeviceId","expectedBootId"};
+  for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++)
+    if(cJSON_GetObjectItemCaseSensitive(request,keys[i]))return true;
+  return false;
+}
+static bool asset_query_bound(const pet_p4_runtime_state_t *state,const cJSON *request,const char *id){
+  static const char *const keys[]={"observationSchema","queryNonce","expectedBoardDeviceId","expectedBootId","transferId"};
+  if(!state||!cJSON_IsObject(request)||!pet_appearance_id_valid(id))return false;
+  for(size_t i=0;i<sizeof(keys)/sizeof(keys[0]);i++){
+    unsigned count=0;const cJSON *item=NULL;
+    cJSON_ArrayForEach(item,request)if(item->string&&!strcmp(item->string,keys[i]))count++;
+    if(count!=1||!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(request,keys[i])))return false;
+  }
+  return !strcmp(json_string(request,"observationSchema"),APPEARANCE_OBSERVATION_SCHEMA)
+    &&pet_appearance_id_valid(json_string(request,"queryNonce"))
+    &&!strcmp(json_string(request,"transferId"),id)
+    &&state->board_device_id[0]&&pet_p4_boot_identity()[0]
+    &&!strcmp(json_string(request,"expectedBoardDeviceId"),state->board_device_id)
+    &&!strcmp(json_string(request,"expectedBootId"),pet_p4_boot_identity());
+}
+static void asset_query_not_proof(const pet_p4_runtime_state_t *state,const cJSON *request,
+    pet_p4_send_line_fn send,void *route,const char *id,bool unknown){
+  /* Snapshot identity before borrowing IO. Never inspect private transfer/file
+   * tracking, sample storage, or synthesize slot contents on this fast path. */
+  char board[sizeof(state->board_device_id)],boot[128];
+  const char *current_boot=pet_p4_boot_identity();
+  if(strlen(state->board_device_id)>=sizeof(board)||strlen(current_boot)>=sizeof(boot))return;
+  memcpy(board,state->board_device_id,strlen(state->board_device_id)+1);
+  memcpy(boot,current_boot,strlen(current_boot)+1);
+  if(!g_asset_query_io_begin(g_asset_query_io_context))return;
+  cJSON *payload=cJSON_CreateObject();
+  bool ok=payload&&cJSON_AddStringToObject(payload,"transferId",id)
+    &&cJSON_AddStringToObject(payload,"phase","slot-query")
+    &&cJSON_AddBoolToObject(payload,"ok",false)
+    &&cJSON_AddStringToObject(payload,"observationSchema",APPEARANCE_OBSERVATION_SCHEMA)
+    &&cJSON_AddStringToObject(payload,"queryNonce",json_string(request,"queryNonce"))
+    &&cJSON_AddStringToObject(payload,"boardDeviceId",board)
+    &&cJSON_AddStringToObject(payload,"bootId",boot)
+    &&cJSON_AddBoolToObject(payload,"serialized",true)
+    &&cJSON_AddBoolToObject(payload,"proof",false)
+    &&cJSON_AddBoolToObject(payload,"quiescent",false)
+    &&cJSON_AddStringToObject(payload,"errorCode",unknown?
+      "appearance_query_outcome_unknown":"appearance_query_busy");
+  if(ok){send_topic_payload(send,route,"asset/ack",payload);payload=NULL;}
+  cJSON_Delete(payload);g_asset_query_io_end(g_asset_query_io_context);
+}
+/* RAM-only manifest snapshot while the state mutex is held. Header metadata
+ * reads/JSON allocation happen only in the existing borrowed storage window. */
+typedef struct {char path[PET_P4_ASSET_PATH_MAX];uint32_t size;} asset_query_video_t;
+static EXT_RAM_BSS_ATTR asset_query_video_t g_asset_query_videos[PET_P4_ASSET_CATALOG_MAX_FAMILIES];
+static unsigned g_asset_query_video_count;
+static bool asset_query_snapshot_videos(const pet_p4_asset_catalog_t *catalog){
+  g_asset_query_video_count=0;
+  if(!catalog||!catalog->count||catalog->count>PET_P4_ASSET_CATALOG_MAX_FAMILIES)return false;
+  for(unsigned i=0;i<catalog->count;i++){
+    const pet_p4_asset_entry_t *entry=&catalog->entries[i];
+    if(!memchr(entry->path,0,sizeof(entry->path))||!entry->path[0]||!entry->stream_bytes)return false;
+    unsigned j=0;
+    for(;j<g_asset_query_video_count;j++)if(!strcmp(g_asset_query_videos[j].path,entry->path))break;
+    if(j<g_asset_query_video_count){if(g_asset_query_videos[j].size!=entry->stream_bytes)return false;continue;}
+    copy_text(g_asset_query_videos[j].path,sizeof(g_asset_query_videos[j].path),entry->path);
+    g_asset_query_videos[j].size=entry->stream_bytes;g_asset_query_video_count++;
+  }
+  return true;
+}
+static cJSON *asset_query_video_proof(int slot,const char *pack){
+  cJSON *videos=cJSON_CreateArray();if(!videos)return NULL;
+  for(unsigned i=0;i<g_asset_query_video_count;i++){
+    uint32_t size=0;unsigned long long checksum=0;char hex[17];
+    if(!pet_p4_raw_assets_stat_for_slot(slot,pack,g_asset_query_videos[i].path,
+        g_asset_query_videos[i].size,&size,&checksum)){cJSON_Delete(videos);return NULL;}
+    snprintf(hex,sizeof(hex),"%016llx",checksum);
+    cJSON *entry=cJSON_CreateObject();
+    bool ok=entry&&cJSON_AddStringToObject(entry,"path",g_asset_query_videos[i].path)
+      &&cJSON_AddNumberToObject(entry,"size",size)&&cJSON_AddStringToObject(entry,"checksum",hex);
+    if(ok&&cJSON_AddItemToArray(videos,entry))entry=NULL;else ok=false;
+    cJSON_Delete(entry);if(!ok){cJSON_Delete(videos);return NULL;}
+  }
+  return videos;
+}
+static void send_asset_slot_query_ack(pet_p4_runtime_state_t *state,const cJSON *request,
+    pet_p4_send_line_fn send,void *route,const char *id){
+  bool observation=asset_query_modern(request);
+  const char *nonce=json_string(request,"queryNonce");
+  if(!state||!g_asset_query_io_begin||!g_asset_query_io_end
+      ||(observation&&(!g_asset_query_pending||!asset_query_bound(state,request,id)))){
+    asset_query_refuse(send,route,id,"appearance observation binding unavailable");return;
+  }
+  /* UNKNOWN wins over concurrent operation flags. It is not retryable busy.
+   * Both refusals precede FS, broker acquisition and private tracking reads. */
+  if(g_appearance_session.recovery_blocked){
+    if(observation)asset_query_not_proof(state,request,send,route,id,true);
+    else asset_query_refuse(send,route,id,"appearance outcome unknown");
+    return;
+  }
+  if(pet_p4_appearance_mutation_blocked()||pet_p4_appearance_active()||state->asset_transfer_active){
+    if(observation)asset_query_not_proof(state,request,send,route,id,false);
+    else asset_query_refuse(send,route,id,"appearance IO active");
+    return;
+  }
+  pet_p4_audio_status_cues_defer(true); /* Read-only storage also needs cue exclusion. */
+  pet_resource_owner_t owner={0};pet_resource_lease_t lease={0};
+  pet_resource_result_t admission=pet_resources_device_owner_open(PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK),&owner);
+  if(admission==PET_RESOURCE_OK)admission=pet_resources_device_acquire(owner,PET_RESOURCE_STORAGE_WORK,1,&lease);
+  if(admission!=PET_RESOURCE_OK){
+    pet_resources_device_revoke(owner);
+    if(observation&&admission==PET_RESOURCE_BUSY)asset_query_not_proof(state,request,send,route,id,false);
+    else asset_query_refuse(send,route,id,"appearance storage unavailable");
+    return;
+  }
+  appearance_io_observation_t before=appearance_io_observe(state);
+  int slot=atomic_load_explicit(&g_asset_active_slot,memory_order_acquire);
+  unsigned revision=state->asset_revision;uint64_t generation=g_appearance_session.generation;
+  bool video_snapshot=slot==PET_P4_RAW_APPEARANCE_SLOT&&asset_query_snapshot_videos(&state->asset_catalog);
+  /* The read owns exclusion too; it is not an active appearance mutation and
+   * does not create a durable result/ACK. Own exclusion is removed before the
+   * second sample, while the caller still holds the state mutex. */
+  g_appearance_session.operation_active=true;state->asset_transfer_active=true;
+  if(!g_asset_query_io_begin(g_asset_query_io_context)){
+    g_appearance_session.operation_active=false;state->asset_transfer_active=false;
+    (void)pet_resources_device_finish(lease);pet_resources_device_revoke(owner);return;
+  }
+  cJSON *payload=cJSON_CreateObject(),*slots=cJSON_CreateArray();
+  bool ok=payload&&slots;
+  if(ok){
+    ok=cJSON_AddStringToObject(payload,"transferId",id?id:"")
+      &&cJSON_AddStringToObject(payload,"phase","slot-query")
+      &&cJSON_AddBoolToObject(payload,"builtinProtected",true)
+      &&cJSON_AddBoolToObject(payload,"systemCues",true)
+      &&cJSON_AddBoolToObject(payload,"ok",true);
+    if(ok&&slot_is_valid(slot))ok=cJSON_AddNumberToObject(payload,"activeSlot",slot)!=NULL;
+    for(int i=0;ok&&i<PET_P4_ASSET_SLOT_COUNT;i++){
+      char pack[PET_P4_PACK_ID_MAX];bool valid=read_ready_slot_pack_id(i,pack,sizeof(pack));
+      cJSON *entry=cJSON_CreateObject();
+      ok=entry&&cJSON_AddNumberToObject(entry,"slot",i)&&cJSON_AddBoolToObject(entry,"valid",valid);
+      if(ok&&valid)ok=cJSON_AddStringToObject(entry,"packId",pack)!=NULL;
+      if(ok&&valid&&i==slot&&video_snapshot){
+        cJSON *videos=asset_query_video_proof(slot,pack);
+        /* Missing proof never authorizes an audio-only custom-pack mismatch. */
+        if(videos&&!cJSON_AddItemToObject(payload,"videos",videos)){cJSON_Delete(videos);ok=false;}
+      }
+      if(ok&&cJSON_AddItemToArray(slots,entry))entry=NULL;else ok=false;
+      cJSON_Delete(entry);
+    }
+    if(ok&&cJSON_AddItemToObject(payload,"slots",slots))slots=NULL;else ok=false;
+  }
+  g_asset_query_io_end(g_asset_query_io_context);
+  bool current=g_appearance_session.generation==generation&&g_appearance_session.operation_active
+    &&!g_appearance_session.active&&!g_appearance_session.recovery_blocked
+    &&state->asset_revision==revision&&g_asset_active_slot==slot&&pet_resources_device_current(lease);
+  g_appearance_session.operation_active=false;state->asset_transfer_active=false;
+  appearance_io_observation_t after=appearance_io_observe(state);
+  bool changed=!current||before.native_epoch!=after.native_epoch;
+  (void)pet_resources_device_finish(lease);pet_resources_device_revoke(owner);
+  if(!g_asset_query_io_begin(g_asset_query_io_context)){
+    /* Adapter failure: bounded, private JSON metadata only; no file handle,
+     * lease or payload escapes and no success is emitted. */
+    cJSON_Delete(slots);cJSON_Delete(payload);return;
+  }
+  if(observation&&ok){
+    ok=cJSON_AddStringToObject(payload,"observationSchema",APPEARANCE_OBSERVATION_SCHEMA)
+      &&cJSON_AddStringToObject(payload,"queryNonce",nonce)
+      &&cJSON_AddStringToObject(payload,"boardDeviceId",state->board_device_id)
+      &&cJSON_AddStringToObject(payload,"bootId",pet_p4_boot_identity())
+      &&cJSON_AddBoolToObject(payload,"serialized",true)
+      &&cJSON_AddBoolToObject(payload,"snapshotChanged",changed)
+      &&cJSON_AddBoolToObject(payload,"quiescent",!changed&&!appearance_io_busy(before)&&!appearance_io_busy(after));
+#define OBS(name,field) if(ok)ok=cJSON_AddBoolToObject(payload,name,before.field||after.field)!=NULL
+    OBS("assetTransferActive",asset_transfer);OBS("rawReceiving",raw_receiving);OBS("appearanceOwnerActive",appearance_owner);
+    OBS("assetFileOpen",file_open);OBS("assetSlotPending",slot_pending);OBS("nativeTransferActive",native_transfer);
+    OBS("nativeReceiving",native_receiving);OBS("nativeWorkerPending",native_pending);OBS("protocolWorkerPending",worker_pending);
+    OBS("storageWorkerPending",storage_pending);OBS("firmwareOtaActive",firmware_ota);OBS("rebootPending",reboot_pending);
+#undef OBS
+    if(ok)ok=cJSON_AddNumberToObject(payload,"nativeIoEpoch",after.native_epoch)!=NULL;
+  }
+  cJSON_Delete(slots);
+  if(ok&&current){send_topic_payload(send,route,"asset/ack",payload);payload=NULL;}
+  else if(payload)send_asset_ack(send,route,id,"slot-query",NULL,false,"appearance read snapshot unavailable");
+  cJSON_Delete(payload);g_asset_query_io_end(g_asset_query_io_context);
+}
+
 
 void pet_p4_asset_clean_legacy_files(void) {
   DIR *dir = opendir(PET_P4_SPIFFS_PREFIX);
@@ -883,7 +1249,8 @@ static bool read_file_stat(const char *fs_path, unsigned long long *size, unsign
   if (!file) return false;
   unsigned long long local_size = 0;
   unsigned long long local_checksum = fnv1a64_file(file, &local_size);
-  fclose(file);
+  bool ok=!ferror(file);if(fclose(file)!=0)ok=false;
+  if(!ok)return false;
   if (size) *size = local_size;
   if (checksum) *checksum = local_checksum;
   return true;
@@ -967,6 +1334,7 @@ static bool write_asset_chunk_bytes(
   if (g_asset_transfer_slot == PET_P4_RAW_APPEARANCE_SLOT
       && pet_p4_raw_assets_available()
       && pet_p4_raw_assets_supports_path(path)) {
+    g_asset_phase_write_attempted=true;
     return pet_p4_raw_assets_write_chunk(
       path,
       index,
@@ -982,9 +1350,11 @@ static bool write_asset_chunk_bytes(
   }
   starts_new_file = strcmp(index, "0") == 0;
   if (starts_new_file || strcmp(g_asset_chunk_logical_path, path) != 0) {
+    if(!close_asset_chunk_file())return false;
     reset_asset_chunk_tracking();
   }
   if (!g_asset_chunk_file) {
+    g_asset_phase_write_attempted=true;
     file = fopen(fs_path, starts_new_file ? "wb" : "ab");
     if (file) {
       g_asset_chunk_file = file;
@@ -1021,7 +1391,6 @@ static bool write_asset_chunk_bytes(
       errno ? strerror(errno) : "unknown"
     );
   }
-  if (!ok) reset_asset_chunk_tracking();
   return ok;
 }
 
@@ -1072,8 +1441,10 @@ static bool begin_raw_asset_chunk(
   pet_p4_runtime_state_t *state,
   const cJSON *payload,
   pet_p4_send_line_fn send_line,
-  void *ctx
+  void *ctx,
+  const char **error_code
 ) {
+  if(error_code)*error_code="raw_ready_ack_unconfirmed";
   const char *transfer_id = json_string(payload, "transferId");
   const char *path = json_string(payload, "path");
   const char *index = json_string(payload, "index");
@@ -1082,7 +1453,10 @@ static bool begin_raw_asset_chunk(
   char *checksum_end = NULL;
   unsigned long long expected_checksum;
 
-  reset_raw_asset_chunk();
+  if(g_raw_asset_chunk.active){
+    if(error_code)*error_code="raw_already_receiving";
+    send_asset_ack_indexed(send_line,ctx,transfer_id,"raw-ready",path,index,false,"raw chunk still active");return false;
+  }
   g_asset_chunk_error[0] = '\0';
   errno = 0;
   expected_checksum = strtoull(checksum_text, &checksum_end, 16);
@@ -1095,6 +1469,7 @@ static bool begin_raw_asset_chunk(
       || errno != 0
       || expected_size == 0
       || expected_size > PET_P4_RAW_ASSET_CHUNK_LIMIT) {
+    if(error_code)*error_code="invalid_raw_header";
     send_asset_ack_indexed(
       send_line,
       ctx,
@@ -1108,6 +1483,7 @@ static bool begin_raw_asset_chunk(
     return false;
   }
   if (!ensure_asset_transfer_slot(transfer_id)) {
+    if(error_code)*error_code="transfer_slot_mismatch";
     send_asset_ack_indexed(
       send_line,
       ctx,
@@ -1123,6 +1499,7 @@ static bool begin_raw_asset_chunk(
 
   g_raw_asset_chunk.data = (unsigned char *) malloc((size_t) expected_size);
   if (!g_raw_asset_chunk.data) {
+    if(error_code)*error_code="raw_buffer_unavailable";
     send_asset_ack_indexed(
       send_line,
       ctx,
@@ -1136,13 +1513,14 @@ static bool begin_raw_asset_chunk(
     reset_raw_asset_chunk();
     return false;
   }
+  if(error_code)*error_code=NULL;
   g_raw_asset_chunk.active = true;
   g_raw_asset_chunk.expected_size = (size_t) expected_size;
   g_raw_asset_chunk.expected_checksum = expected_checksum;
   copy_text(g_raw_asset_chunk.transfer_id, sizeof(g_raw_asset_chunk.transfer_id), transfer_id);
   copy_text(g_raw_asset_chunk.logical_path, sizeof(g_raw_asset_chunk.logical_path), path);
   copy_text(g_raw_asset_chunk.index, sizeof(g_raw_asset_chunk.index), index);
-  if (state) state->asset_transfer_active = true;
+  (void)state; /* caller publishes transfer state under its existing mutex */
   send_asset_ack_indexed(
     send_line,
     ctx,
@@ -1156,66 +1534,19 @@ static bool begin_raw_asset_chunk(
   return true;
 }
 
-bool pet_p4_raw_asset_chunk_active(void) {
-  return g_raw_asset_chunk.active;
+bool pet_p4_raw_asset_chunk_active_for_route(pet_p4_send_line_fn send,void *ctx){
+  return !pet_p4_appearance_mutation_blocked()&&g_raw_asset_chunk.active
+    &&pet_p4_appearance_owned(send,ctx,g_raw_asset_chunk.transfer_id,PET_APPEARANCE_SERIAL);
+}
+bool pet_p4_raw_asset_chunk_active(void){
+  return !pet_p4_appearance_mutation_blocked()&&g_raw_asset_chunk.active;
 }
 
-size_t pet_p4_consume_raw_asset_bytes(
-  const unsigned char *data,
-  size_t len,
-  pet_p4_send_line_fn send_line,
-  void *ctx
-) {
-  size_t remaining;
-  size_t consumed;
-  bool ok;
-  unsigned long long checksum;
-  if (!g_raw_asset_chunk.active || !data || len == 0) return 0;
-  note_asset_transfer_activity();
-
-  remaining = g_raw_asset_chunk.expected_size - g_raw_asset_chunk.received_size;
-  consumed = len < remaining ? len : remaining;
-  memcpy(
-    g_raw_asset_chunk.data + g_raw_asset_chunk.received_size,
-    data,
-    consumed
-  );
-  g_raw_asset_chunk.received_size += consumed;
-  if (g_raw_asset_chunk.received_size < g_raw_asset_chunk.expected_size) {
-    return consumed;
-  }
-
-  checksum = fnv1a64_bytes(g_raw_asset_chunk.data, g_raw_asset_chunk.expected_size);
-  if (checksum != g_raw_asset_chunk.expected_checksum) {
-    snprintf(
-      g_asset_chunk_error,
-      sizeof(g_asset_chunk_error),
-      "raw chunk checksum mismatch expected=%016llx actual=%016llx",
-      g_raw_asset_chunk.expected_checksum,
-      checksum
-    );
-    ok = false;
-  } else {
-    ok = write_asset_chunk_bytes(
-      g_raw_asset_chunk.transfer_id,
-      g_raw_asset_chunk.logical_path,
-      g_raw_asset_chunk.index,
-      g_raw_asset_chunk.data,
-      g_raw_asset_chunk.expected_size
-    );
-  }
-  send_asset_ack_indexed(
-    send_line,
-    ctx,
-    g_raw_asset_chunk.transfer_id,
-    "raw-chunk",
-    g_raw_asset_chunk.logical_path,
-    g_raw_asset_chunk.index,
-    ok,
-    ok ? NULL : g_asset_chunk_error
-  );
-  reset_raw_asset_chunk();
-  return consumed;
+size_t pet_p4_consume_raw_asset_bytes(const unsigned char *data,size_t len,
+    pet_p4_send_line_fn send,void *route) {
+  /* Legacy callers have no physical-task lock adapter: fail closed. Main uses
+   * the scoped entry; never borrow a protocol-worker grant from an RX task. */
+  (void)data;(void)len;(void)send;(void)route;return 0;
 }
 
 static void handle_asset_stat(
@@ -1235,48 +1566,192 @@ static void handle_asset_stat(
   }
   p4_asset_fs_path(path, false, fs_path, sizeof(fs_path));
   if (!read_file_stat(fs_path, &size, &checksum)) {
-    send_asset_ack(send_line, ctx, transfer_id, "stat", path, true, NULL);
+    send_asset_ack(send_line, ctx, transfer_id, "stat", path, false, "asset stat unavailable");
     return;
   }
   send_asset_stat_ack(send_line, ctx, transfer_id, path, size, checksum);
 }
 
+/* One protocol command owns each activation across all unlocked phases.
+ * Native appearance mutations are excluded by the route/ID owner; component
+ * and save writes are excluded by the same STORAGE_WORK broker as miniapp.
+ * An uncertain marker result retains its appearance owner until reboot:
+ * no timeout, retry, cleanup or slot-query echo may resolve a mutation. */
+static uint64_t g_asset_activation_generation;
+typedef struct {
+  char manifest[PET_P4_ASSET_MANIFEST_MAX];
+  pet_p4_asset_catalog_t catalog;
+  char pack_id[PET_P4_PACK_ID_MAX];
+} asset_activation_snapshot_t;
+
+static bool asset_phase_send_current(pet_p4_send_line_fn send,void *route);
+
+static void send_asset_activation_ack(pet_p4_send_line_fn send_line, void *ctx,
+    const char *id, bool ok, const char *error) {
+  /* Same native FIFO command borrows the state lock for exactly one TX.
+   * Missing/invalid dispatcher binding fails closed without sending success. */
+  if (!g_asset_query_io_begin || !g_asset_query_io_end
+      || !g_asset_query_io_begin(g_asset_query_io_context)) return;
+  send_asset_ack(send_line, ctx, id, "activate", NULL, ok, error);
+  g_asset_query_io_end(g_asset_query_io_context);
+}
+
+static bool prepare_asset_snapshot(int slot,const char *expected,
+    asset_activation_snapshot_t *next) {
+  char path[PET_P4_FS_PATH_MAX];
+  if (!p4_asset_manifest_path_for_candidate(slot,path,sizeof(path))) return false;
+  FILE *file = fopen(path, "rb");
+  if (!file) return false;
+  size_t n = fread(next->manifest, 1, sizeof(next->manifest) - 1, file);
+  bool ok = !ferror(file) && fgetc(file) == EOF && !ferror(file);
+  if (fclose(file) != 0) ok = false;
+  next->manifest[n] = '\0';
+  if (!ok || !n || memchr(next->manifest, '\0', n) || !pet_p4_protocol_source_valid(next->manifest)) return false;
+  cJSON *root = cJSON_ParseWithOpts(next->manifest, NULL, true);
+  const cJSON *pack = root ? cJSON_GetObjectItemCaseSensitive(root, "packId") : NULL;
+  unsigned count = 0; const cJSON *field;
+  cJSON_ArrayForEach(field, root) if (field->string && !strcmp(field->string, "packId")) count++;
+  ok = cJSON_IsObject(root) && count == 1 && cJSON_IsString(pack)
+    && strlen(pack->valuestring)==PET_P4_PACK_ID_MAX-1;
+  if(ok) for(const char *p=pack->valuestring;*p;p++)
+    if(!((*p>='0'&&*p<='9')||(*p>='a'&&*p<='f'))) {ok=false;break;}
+  if(ok && expected)ok=!strcmp(pack->valuestring,expected);
+  if(ok)copy_text(next->pack_id,sizeof(next->pack_id),pack->valuestring);
+  cJSON_Delete(root);
+  return ok && pet_p4_asset_catalog_parse(&next->catalog, next->manifest)
+    && next->catalog.count > 0;
+}
+static bool prepare_asset_activation(int slot,const char *expected,
+    asset_activation_snapshot_t *next) {
+  char actual[PET_P4_PACK_ID_MAX];
+  return read_ready_slot_pack_id(slot,actual,sizeof(actual))&&!strcmp(actual,expected)
+    &&prepare_asset_snapshot(slot,expected,next);
+}
+
+static bool write_asset_activation_marker(int slot) {
+  FILE *file = fopen(PET_P4_ASSET_SLOT_MARKER, "wb");
+  if (!file) return false;
+  bool ok = fputc('0' + slot, file) != EOF && fputc('\n', file) != EOF;
+  if (fclose(file) != 0) ok = false;
+  if (!ok) return false;
+  /* No repair/rewrite on a failed readback. A completed but uncertain write
+   * must not be represented as an untouched old slot or automatically retried. */
+  file = fopen(PET_P4_ASSET_SLOT_MARKER, "rb");
+  if (!file) return false;
+  ok = fgetc(file) == '0' + slot && fgetc(file) == '\n'
+    && fgetc(file) == EOF && !ferror(file);
+  if (fclose(file) != 0) ok = false;
+  return ok;
+}
+
 static void handle_asset_activate(
-  pet_p4_runtime_state_t *state,
-  const cJSON *payload,
-  pet_p4_send_line_fn send_line,
-  void *ctx
+  pet_p4_runtime_state_t *state, const cJSON *payload,
+  pet_p4_send_line_fn send_line, void *ctx
 ) {
-  const char *transfer_id = json_string(payload, "transferId");
-  const char *expected_pack_id = json_string(payload, "packId");
-  cJSON *slot_item = cJSON_GetObjectItemCaseSensitive(payload, "slot");
-  int slot = cJSON_IsNumber(slot_item) ? slot_item->valueint : -1;
-  char actual_pack_id[PET_P4_PACK_ID_MAX];
-  if (pet_p4_diagnostics_reboot_pending() || pet_p4_ota_transfer_active() ||
-      state->asset_transfer_active) {
-    send_asset_ack(send_line, ctx, transfer_id, "activate", NULL, false,
-                   "device transfer, firmware update, or reboot is active");
-    return;
+  const char *id = json_string(payload, "transferId");
+  const char *expected = json_string(payload, "packId");
+  const cJSON *slot_item = cJSON_GetObjectItemCaseSensitive(payload, "slot");
+  uint32_t number = 0;
+  const char *error = "appearance activation unavailable";
+  if (!state || !g_asset_query_io_begin || !g_asset_query_io_end
+      || !asset_phase_send_current(send_line, ctx)) return;
+  if (!pet_appearance_size(cJSON_IsNumber(slot_item) ? slot_item->valuedouble : -1, &number)
+      || !slot_is_valid((int)number) || !pet_appearance_id_valid(id)
+      || strlen(expected) != PET_P4_PACK_ID_MAX - 1) {
+    send_asset_activation_ack(send_line, ctx, id, false, "invalid appearance slot, transfer or pack id"); return;
   }
-  if (!slot_is_valid(slot) || !expected_pack_id[0]) {
-    send_asset_ack(send_line, ctx, transfer_id, "activate", NULL, false,
-                   "invalid appearance slot or pack id");
-    return;
+  for (size_t i=0; expected[i]; i++) if (!((expected[i]>='0' && expected[i]<='9')
+      || (expected[i]>='a' && expected[i]<='f'))) {
+    send_asset_activation_ack(send_line, ctx, id, false, "invalid appearance pack id"); return;
   }
-  if (!read_ready_slot_pack_id(slot, actual_pack_id, sizeof(actual_pack_id)) ||
-      strcmp(actual_pack_id, expected_pack_id) != 0) {
-    send_asset_ack(send_line, ctx, transfer_id, "activate", NULL, false,
-                   "appearance pack is not present in requested slot");
-    return;
+  appearance_io_observation_t observed = appearance_io_observe(state);
+  /* Later FIFO commands do not own IO; only actual in-flight actors exclude
+   * this command. Requiring an empty FIFO here could starve user activation. */
+  observed.worker_pending = false;
+  if (appearance_io_busy(observed) || g_asset_activation_generation == UINT64_MAX) {
+    send_asset_activation_ack(send_line, ctx, id, false, "appearance or component storage is busy"); return;
   }
-  if (!pet_p4_asset_set_active_slot(slot)) {
-    send_asset_ack(send_line, ctx, transfer_id, "activate", NULL, false,
-                   "appearance slot activation failed");
-    return;
+  pet_p4_audio_status_cues_defer(true); /* Before broker admission, not after claim. */
+  pet_resource_owner_t owner = {0};
+  pet_resource_lease_t lease = {0};
+  if (pet_resources_device_owner_open(PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK), &owner) != PET_RESOURCE_OK
+      || pet_resources_device_acquire(owner, PET_RESOURCE_STORAGE_WORK, 1, &lease) != PET_RESOURCE_OK) {
+    pet_resources_device_revoke(owner);
+    send_asset_activation_ack(send_line, ctx, id, false, "appearance storage owner unavailable"); return;
   }
-  pet_p4_asset_clean_legacy_files();
-  pet_p4_load_asset_manifest(state);
-  send_asset_ack(send_line, ctx, transfer_id, "activate", NULL, true, NULL);
+  if (!pet_p4_appearance_claim(send_line, ctx, id, PET_APPEARANCE_SERIAL)) {
+    (void)pet_resources_device_finish(lease); pet_resources_device_revoke(owner);
+    send_asset_activation_ack(send_line, ctx, id, false, "appearance owner unavailable"); return;
+  }
+  const uint64_t generation = ++g_asset_activation_generation;
+  const int slot = (int)number, old_slot = g_asset_active_slot;
+  const unsigned revision = state->asset_revision;
+  asset_activation_snapshot_t *next = NULL;
+  bool ok = false, marker_attempted = false, unlocked = false, same = false;
+  if (!g_asset_query_io_begin(g_asset_query_io_context)) goto done;
+  unlocked = true;
+  next = calloc(1, sizeof(*next));
+  if (!next) {error = "appearance activation workspace unavailable"; goto relock;}
+  if (!pet_resources_device_current(lease)
+      || !prepare_asset_activation(slot, expected, next)) {
+    error = "appearance pack is not present in requested slot or failed verification"; goto relock;
+  }
+  /* Reacquire before granting the only persistent write. Payload and physical
+   * resources have not changed, even while main/input remained runnable. */
+  g_asset_query_io_end(g_asset_query_io_context); unlocked = false;
+  if (!asset_phase_send_current(send_line, ctx)
+      || generation != g_asset_activation_generation
+      || !pet_p4_appearance_owned(send_line, ctx, id, PET_APPEARANCE_SERIAL)
+      || g_asset_active_slot != old_slot || state->asset_revision != revision
+      || !pet_resources_device_current(lease)) {
+    error = "appearance activation ownership changed"; goto done;
+  }
+  same = slot == old_slot && state->asset_family_count == next->catalog.count
+    && !strcmp(state->asset_manifest_json, next->manifest);
+  if (!g_asset_query_io_begin(g_asset_query_io_context)) goto done;
+  unlocked = true;
+  /* Same-slot activation still verifies disk bytes, but need not rewrite an
+   * already published exact snapshot. Local/cache IDs alone never admit it. */
+  if (!same) {
+    if (!asset_phase_send_current(send_line, ctx)) {error = "appearance route retired before marker"; goto relock;}
+    marker_attempted = true;
+    if (!write_asset_activation_marker(slot)) {
+      error = "appearance marker outcome unknown; do not replay"; goto relock;
+    }
+  }
+  g_asset_query_io_end(g_asset_query_io_context); unlocked = false;
+  if (!asset_phase_send_current(send_line, ctx)
+      || generation != g_asset_activation_generation
+      || !pet_p4_appearance_owned(send_line, ctx, id, PET_APPEARANCE_SERIAL)
+      || g_asset_active_slot != old_slot || state->asset_revision != revision
+      || !pet_resources_device_current(lease)) {
+    error = "appearance publication outcome unknown; do not replay"; goto done;
+  }
+  /* Publication is only a bounded RAM snapshot; no parser, IO, free or TX. */
+  g_asset_active_slot = slot;
+  memcpy(state->asset_manifest_json, next->manifest, strlen(next->manifest) + 1);
+  state->asset_catalog = next->catalog;
+  state->asset_family_count = next->catalog.count;
+  state->asset_revision++;
+  ok = true;
+  goto done;
+relock:
+  if (unlocked) {g_asset_query_io_end(g_asset_query_io_context); unlocked = false;}
+done:
+  /* Keep an uncertain persistent operation quarantined. Releasing a different
+   * generation's owner or replaying a write is never a recovery strategy. */
+  if (!ok && marker_attempted) {
+    g_appearance_session.recovery_blocked = true;
+    error = "appearance activation outcome unknown; do not replay";
+  }
+  if (ok || !marker_attempted) (void)pet_p4_appearance_end(send_line, ctx, id, PET_APPEARANCE_SERIAL);
+  (void)pet_resources_device_finish(lease); pet_resources_device_revoke(owner);
+  /* Heap release and one ACK also run without retaining the main mutex. */
+  if (g_asset_query_io_begin(g_asset_query_io_context)) {
+    free(next);
+    send_asset_ack(send_line, ctx, id, "activate", NULL, ok, ok ? NULL : error);
+    g_asset_query_io_end(g_asset_query_io_context);
+  } else free(next); /* Broken dispatcher: no success, retry, or leaked workspace. */
 }
 
 static void handle_asset_file(
@@ -1325,7 +1800,10 @@ static void handle_asset_file(
   }
   tracked_stat = g_asset_chunk_stat_valid &&
                  strcmp(g_asset_chunk_logical_path, path) == 0;
-  close_asset_chunk_file();
+  if (!close_asset_chunk_file()) {
+    send_asset_ack(send_line, ctx, transfer_id, "file", path, false, "transferred file close failed");
+    return;
+  }
   if (!pet_p4_asset_fs_path_for_slot(g_asset_transfer_slot, path, false, fs_path, sizeof(fs_path))) {
     reset_asset_chunk_tracking();
     send_asset_ack(send_line, ctx, transfer_id, "file", path, false, "unsupported p4 asset path");
@@ -1351,7 +1829,6 @@ static void handle_asset_file(
       expected_checksum,
       checksum_hex
     );
-    remove(fs_path);
     reset_asset_chunk_tracking();
     send_asset_ack(send_line, ctx, transfer_id, "file", path, false, error);
     return;
@@ -1360,132 +1837,424 @@ static void handle_asset_file(
   send_asset_ack(send_line, ctx, transfer_id, "file", path, true, NULL);
 }
 
-static void handle_asset_topic(
-  pet_p4_runtime_state_t *state,
-  const char *topic,
-  const cJSON *payload,
-  pet_p4_send_line_fn send_line,
-  void *ctx
-) {
-  const char *transfer_id = json_string(payload, "transferId");
-  const char *path = json_string(payload, "path");
-  note_asset_transfer_activity();
-  if (strcmp(topic, "asset/slot-query") == 0) {
-    send_asset_slot_query_ack(send_line, ctx, transfer_id);
-  } else if (strcmp(topic, "asset/activate") == 0) {
-    handle_asset_activate(state, payload, send_line, ctx);
-  } else if (strcmp(topic, "asset/begin") == 0) {
-    unsigned long long total_bytes = json_u64(payload, "totalBytes", 0);
-    unsigned long long raw_bytes = json_u64(payload, "rawBytes", total_bytes);
-    esp_err_t gc_err;
-    if (pet_p4_diagnostics_reboot_pending() || pet_p4_ota_transfer_active()) {
-      send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false,
-                     "device firmware update or reboot is active");
-      return;
-    }
-    state->asset_transfer_active = true;
-    reset_raw_asset_chunk();
-    reset_asset_chunk_tracking();
-    reset_asset_transfer_slot();
-    if (!ensure_asset_transfer_slot(transfer_id)) {
-      state->asset_transfer_active = false;
-      g_asset_transfer_last_activity_ms = 0;
-      send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, "slot prepare failed");
-      return;
-    }
-    if (g_asset_transfer_slot == PET_P4_RAW_APPEARANCE_SLOT
-        && pet_p4_raw_assets_available()) {
-      char error[128];
-      if (!pet_p4_raw_assets_prepare(raw_bytes, error, sizeof(error))) {
-        (void) clear_slot_files(g_asset_transfer_slot);
-        reset_asset_transfer_slot();
-        state->asset_transfer_active = false;
-        g_asset_transfer_last_activity_ms = 0;
-        send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, error);
-        return;
+static void send_serial_commit_ack(pet_p4_send_line_fn send,void *route,
+    const char *id,bool patch,bool ok,const char *error) {
+  if(!g_asset_query_io_begin||!g_asset_query_io_end
+      ||!g_asset_query_io_begin(g_asset_query_io_context))return;
+  send_asset_ack(send,route,id,patch?"patch":"commit",NULL,ok,error);
+  g_asset_query_io_end(g_asset_query_io_context);
+}
+static void handle_serial_asset_commit(pet_p4_runtime_state_t *state,
+    pet_p4_send_line_fn send,void *route,const char *id,bool patch) {
+  const pet_appearance_commit_io_t io={g_asset_query_io_begin,g_asset_query_io_end,
+    NULL,g_asset_query_io_context};
+  char error[128]={0};
+  pet_appearance_commit_result_t result=pet_p4_appearance_commit_slot(state,
+    g_asset_transfer_slot,send,route,id,PET_APPEARANCE_SERIAL,patch,&io,error,sizeof(error));
+  if(result==PET_APPEARANCE_COMMIT_OK) {
+    reset_raw_asset_chunk();reset_asset_chunk_tracking();reset_asset_transfer_slot();
+    state->asset_transfer_active=false;g_asset_transfer_last_activity_ms=0;
+  }
+  send_serial_commit_ack(send,route,id,patch,result==PET_APPEARANCE_COMMIT_OK,
+    result==PET_APPEARANCE_COMMIT_OK?NULL:error);
+}
+
+/* Reply capture is private to this synchronous phase; no route is retained.
+ * Real ACK delivery happens once, only after lock-held final owner validation. */
+enum {
+  RAW_PHASE_OPERATION=1u<<0,RAW_PHASE_RECOVERY=1u<<1,RAW_PHASE_GENERATION=1u<<2,
+  RAW_PHASE_OWNER=1u<<3,RAW_PHASE_REVISION=1u<<4,RAW_PHASE_ACTIVE_SLOT=1u<<5,
+  RAW_PHASE_TARGET_SLOT=1u<<6,RAW_PHASE_LEASE=1u<<7,RAW_PHASE_ROUTE=1u<<8,
+  RAW_PHASE_IO=1u<<9,RAW_PHASE_CAPTURE=1u<<10,RAW_PHASE_BUFFER=1u<<11,
+  RAW_PHASE_RECEIVED=1u<<12,RAW_PHASE_PHYSICAL_IO=1u<<13,RAW_PHASE_ROLLBACK=1u<<14
+};
+typedef struct {char *line;bool ok,seen,invalid;const char *error_code;uint32_t reason_bits;const char *first_cause;} asset_phase_reply_t;
+static void raw_phase_note(asset_phase_reply_t *r,uint32_t bit,const char *cause){
+  r->reason_bits|=bit;if(!r->first_cause)r->first_cause=cause;
+}
+/* Same current gates as phase_end, sampled while holding the state mutex. */
+static uint32_t raw_header_phase_bits(const pet_appearance_phase_t *p,
+    const pet_p4_runtime_state_t *state,int slot){
+  uint32_t bits=0;
+  if(!g_appearance_session.operation_active)bits|=RAW_PHASE_OPERATION;
+  if(g_appearance_session.recovery_blocked)bits|=RAW_PHASE_RECOVERY;
+  if(g_appearance_session.generation!=p->generation)bits|=RAW_PHASE_GENERATION;
+  if(!pet_p4_appearance_owned(p->sender,p->route,p->id,p->kind))bits|=RAW_PHASE_OWNER;
+  if(state->asset_revision!=p->revision)bits|=RAW_PHASE_REVISION;
+  if(g_asset_active_slot!=p->active_slot)bits|=RAW_PHASE_ACTIVE_SLOT;
+  if(slot!=p->target_slot||g_asset_transfer_slot!=slot||!ensure_asset_transfer_slot(p->id))bits|=RAW_PHASE_TARGET_SLOT;
+  if(!pet_resources_device_current(p->lease))bits|=RAW_PHASE_LEASE;
+  if(p->kind==PET_APPEARANCE_SERIAL&&p->sender==pet_p4_native_usb_send_json_line&&!pet_p4_native_usb_route_current(p->route))bits|=RAW_PHASE_ROUTE;
+  if(p->io.current&&!p->io.current(p->io.context))bits|=RAW_PHASE_IO;
+  return bits;
+}
+static const char *raw_phase_first_cause(uint32_t bits){
+  if(bits&RAW_PHASE_OPERATION)return "operation_not_active";
+  if(bits&RAW_PHASE_RECOVERY)return "recovery_blocked";
+  if(bits&RAW_PHASE_GENERATION)return "generation_changed";
+  if(bits&RAW_PHASE_OWNER)return "owner_changed";
+  if(bits&RAW_PHASE_REVISION)return "asset_revision_changed";
+  if(bits&RAW_PHASE_ACTIVE_SLOT)return "active_slot_changed";
+  if(bits&RAW_PHASE_TARGET_SLOT)return "target_slot_changed";
+  if(bits&RAW_PHASE_LEASE)return "storage_lease_not_current";
+  if(bits&RAW_PHASE_ROUTE)return "route_retired";
+  if(bits&RAW_PHASE_IO)return "io_context_retired";
+  return "header_rejected";
+}
+/* Only called before asset_phase_deliver: the positive ready exists solely in
+ * the private capture, never in a transport. No raw/body IO is retried here. */
+static pet_appearance_commit_result_t finish_unpublished_raw_header(
+    pet_appearance_phase_t *p,pet_p4_runtime_state_t *state,int slot,
+    const cJSON *payload,unsigned char *new_buffer,asset_phase_reply_t *reply,bool attempted){
+  if(!p||!p->active)return PET_APPEARANCE_COMMIT_FAILED;
+  p->io.end(p->io.context);
+  uint32_t bits=raw_header_phase_bits(p,state,slot);
+  if(bits)raw_phase_note(reply,bits,raw_phase_first_cause(bits));
+  bool ok=reply->seen&&reply->ok&&!reply->invalid;
+  if(!reply->seen||reply->invalid)raw_phase_note(reply,RAW_PHASE_CAPTURE,"ready_capture_failed");
+  if(attempted)raw_phase_note(reply,RAW_PHASE_PHYSICAL_IO,"physical_io_attempted");
+  bool exact=new_buffer&&g_raw_asset_chunk.active&&g_raw_asset_chunk.data==new_buffer
+    &&g_raw_asset_chunk.expected_size==json_u64(payload,"size",0)
+    &&g_raw_asset_chunk.expected_checksum==strtoull(json_string(payload,"checksum"),NULL,16)
+    &&!strcmp(g_raw_asset_chunk.transfer_id,p->id)
+    &&!strcmp(g_raw_asset_chunk.logical_path,json_string(payload,"path"))
+    &&!strcmp(g_raw_asset_chunk.index,json_string(payload,"index"));
+  if(new_buffer&&!exact)raw_phase_note(reply,RAW_PHASE_BUFFER,"header_buffer_changed");
+  if(new_buffer&&g_raw_asset_chunk.received_size)raw_phase_note(reply,RAW_PHASE_RECEIVED,"body_received_before_ready");
+  bool clean_candidate=exact&&!g_raw_asset_chunk.received_size&&!attempted;
+  bool rolled_back=false;
+  /* A revoked STORAGE_WORK lease still forbids commit. Only this private,
+   * zero-body RAM reservation may be cancelled; all identity gates still hold.
+   * operation_active pins the old buffer while borrowing the mutex for free. */
+  if((!ok||bits)&&clean_candidate&&!(bits&~RAW_PHASE_LEASE)){
+    if(p->io.begin(p->io.context)){
+      reset_raw_asset_chunk();
+      free(reply->line);reply->line=NULL;
+      p->io.end(p->io.context);
+      uint32_t after=raw_header_phase_bits(p,state,slot);
+      if(after)raw_phase_note(reply,after,raw_phase_first_cause(after));
+      rolled_back=!(after&~RAW_PHASE_LEASE)&&!g_raw_asset_chunk.active
+        &&!g_raw_asset_chunk.data&&!g_raw_asset_chunk.received_size&&!g_raw_asset_chunk.expected_size;
+      if(rolled_back){
+        /* Discard the old captured success/invalid ACK. Fresh typed NACK
+         * construction must still complete atomically in asset_phase_deliver. */
+        reply->seen=true;reply->ok=false;reply->invalid=false;
+        reply->error_code="phase_admission_rejected";
       }
     }
-    gc_err = run_spiffs_gc_yielding();
-    if (gc_err != ESP_OK) {
-      char error[128];
-      snprintf(error, sizeof(error), "SPIFFS pre-GC failed: %s", esp_err_to_name(gc_err));
-      (void) clear_slot_files(g_asset_transfer_slot);
-      reset_asset_transfer_slot();
-      state->asset_transfer_active = false;
-      g_asset_transfer_last_activity_ms = 0;
-      send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, false, error);
-      return;
-    }
-    ESP_LOGI(TAG, "prepared asset slot=%d total_bytes=%llu raw_bytes=%llu gc_bytes=%u",
-             g_asset_transfer_slot, total_bytes, raw_bytes,
-             (unsigned int) PET_P4_ASSET_BEGIN_GC_BYTES);
-    send_asset_ack(send_line, ctx, transfer_id, "begin", NULL, true, NULL);
-  } else if (strcmp(topic, "asset/abort") == 0) {
-    abort_serial_asset_transfer(state);
-    send_asset_ack(send_line, ctx, transfer_id, "abort", NULL, true, NULL);
-  } else if (strcmp(topic, "asset/chunk") == 0) {
-    state->asset_transfer_active = true;
-    bool ok = handle_asset_chunk(payload);
-    send_asset_ack_indexed(
-      send_line,
-      ctx,
-      transfer_id,
-      "chunk",
-      path,
-      json_string(payload, "index"),
-      ok,
-      ok ? NULL : g_asset_chunk_error
-    );
-  } else if (strcmp(topic, "asset/raw-chunk") == 0) {
-    (void) begin_raw_asset_chunk(state, payload, send_line, ctx);
-  } else if (strcmp(topic, "asset/file") == 0) {
-    state->asset_transfer_active = true;
-    handle_asset_file(payload, send_line, ctx);
-  } else if (strcmp(topic, "asset/stat") == 0) {
-    handle_asset_stat(payload, send_line, ctx);
-  } else if (strcmp(topic, "asset/commit") == 0) {
-    char commit_error[128];
-    bool commit_ok = g_asset_transfer_slot >= 0;
-    reset_raw_asset_chunk();
-    reset_asset_chunk_tracking();
-    copy_text(commit_error, sizeof(commit_error), "slot commit failed");
-    if (commit_ok && g_asset_transfer_slot == PET_P4_RAW_APPEARANCE_SLOT
-        && pet_p4_raw_assets_available()) {
-      char pack_id[PET_P4_PACK_ID_MAX];
-      commit_ok = read_slot_pack_id(g_asset_transfer_slot, pack_id, sizeof(pack_id))
-               && pet_p4_raw_assets_commit(pack_id, commit_error, sizeof(commit_error));
-    }
-    if (commit_ok) {
-      commit_ok = pet_p4_asset_mark_slot_ready(g_asset_transfer_slot)
-               && pet_p4_asset_set_active_slot(g_asset_transfer_slot);
-    }
-    if (!commit_ok) {
-      reset_asset_transfer_slot();
-      state->asset_transfer_active = false;
-      g_asset_transfer_last_activity_ms = 0;
-      send_asset_ack(send_line, ctx, transfer_id, "commit", NULL, false, commit_error);
-      return;
-    }
-    pet_p4_asset_clean_legacy_files();
-    pet_p4_load_asset_manifest(state);
-    reset_asset_transfer_slot();
-    state->asset_transfer_active = false;
-    g_asset_transfer_last_activity_ms = 0;
-    send_asset_ack(send_line, ctx, transfer_id, "commit", NULL, true, NULL);
-  } else if (strcmp(topic, "asset/patch-commit") == 0) {
-    reset_raw_asset_chunk();
-    reset_asset_chunk_tracking();
-    reset_asset_transfer_slot();
-    state->asset_transfer_active = false;
-    g_asset_transfer_last_activity_ms = 0;
-    send_asset_ack(send_line, ctx, transfer_id, "patch", NULL, true, NULL);
-  } else if (path_is_p4_asset(path)) {
-    send_asset_ack(send_line, ctx, transfer_id, "unknown", path, false, "unknown p4 asset phase");
-  } else {
-    send_asset_ack(send_line, ctx, transfer_id, "unknown", path, false,
-                   "linux mp4/wav assets are not supported on esp-p4");
+    if(!rolled_back)raw_phase_note(reply,RAW_PHASE_ROLLBACK,"header_rollback_unconfirmed");
   }
+  pet_appearance_commit_result_t result=bits==0&&ok?PET_APPEARANCE_COMMIT_OK:PET_APPEARANCE_COMMIT_FAILED;
+  if(rolled_back)result=PET_APPEARANCE_COMMIT_FAILED;
+  else if(bits||attempted||(reply->reason_bits&RAW_PHASE_ROLLBACK)
+      ||(new_buffer&&(!exact||g_raw_asset_chunk.received_size))){
+    result=PET_APPEARANCE_COMMIT_UNKNOWN;
+    if(g_appearance_session.generation==p->generation
+        &&pet_p4_appearance_owned(p->sender,p->route,p->id,p->kind))g_appearance_session.recovery_blocked=true;
+  }
+  p->active=false;
+  if(g_appearance_session.generation==p->generation
+      &&pet_p4_appearance_owned(p->sender,p->route,p->id,p->kind))g_appearance_session.operation_active=false;
+  (void)pet_resources_device_finish(p->lease);pet_resources_device_revoke(p->owner);
+  return result;
 }
+
+static void asset_phase_capture(const char *line,void *context){
+  asset_phase_reply_t *r=context;
+  if(!r||r->seen){if(r){r->invalid=true;raw_phase_note(r,RAW_PHASE_CAPTURE,"ready_capture_failed");}return;}
+  r->seen=true;
+  cJSON *root=cJSON_ParseWithOpts(line,NULL,true);
+  const cJSON *p=cJSON_GetObjectItemCaseSensitive(root,"payload");
+  const cJSON *ok=cJSON_GetObjectItemCaseSensitive(p,"ok");
+  if(!cJSON_IsBool(ok))r->invalid=true;
+  else r->ok=cJSON_IsTrue(ok);
+  cJSON_Delete(root);
+  size_t n=strlen(line)+1;r->line=malloc(n);
+  if(r->line)memcpy(r->line,line,n);else r->invalid=true;
+  if(r->invalid)raw_phase_note(r,RAW_PHASE_CAPTURE,"ready_capture_failed");
+}
+static bool asset_phase_send_current(pet_p4_send_line_fn send,void *route){
+  return send!=pet_p4_native_usb_send_json_line||pet_p4_native_usb_route_current(route);
+}
+/* Snapshotted under the state mutex. Build/send the bounded ACK only after
+ * borrowing the mutex, so TX and allocation do not extend the state lock. */
+typedef struct {
+  bool owner_matched,phase_current,raw_idle,header_accepted;
+  size_t remaining;
+  char board_id[PET_P4_DEVICE_ID_MAX],boot_id[sizeof(g_boot_identity.id)];
+  const char *error_code,*first_cause;
+  uint32_t reason_bits;
+} raw_ready_rejection_t;
+static raw_ready_rejection_t raw_ready_rejection_snapshot(const pet_p4_runtime_state_t *state,
+    pet_p4_send_line_fn send,void *route,const char *id,asset_phase_reply_t *reply,pet_appearance_commit_result_t result){
+  raw_ready_rejection_t proof={0};
+  proof.reason_bits=reply?reply->reason_bits:0;
+  proof.first_cause=reply&&reply->first_cause?reply->first_cause:"not_recorded";
+  proof.owner_matched=pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL);
+  bool coherent=g_raw_asset_chunk.active
+    ?g_raw_asset_chunk.data&&g_raw_asset_chunk.expected_size>0
+      &&g_raw_asset_chunk.expected_size<=PET_P4_RAW_ASSET_CHUNK_LIMIT
+      &&g_raw_asset_chunk.received_size<=g_raw_asset_chunk.expected_size
+    :!g_raw_asset_chunk.data&&!g_raw_asset_chunk.expected_size&&!g_raw_asset_chunk.received_size;
+  proof.raw_idle=coherent&&!g_raw_asset_chunk.active;
+  proof.header_accepted=!proof.raw_idle; /* Never claim rejection means idle. */
+  proof.remaining=coherent&&g_raw_asset_chunk.active
+    ?g_raw_asset_chunk.expected_size-g_raw_asset_chunk.received_size:0;
+  proof.phase_current=coherent&&proof.owner_matched&&asset_phase_send_current(send,route)
+    &&!pet_p4_appearance_mutation_blocked()&&result==PET_APPEARANCE_COMMIT_FAILED
+    &&!(reply&&reply->invalid)&&state&&state->board_device_id[0]&&pet_p4_boot_identity()[0];
+  copy_text(proof.board_id,sizeof(proof.board_id),state?state->board_device_id:"");
+  copy_text(proof.boot_id,sizeof(proof.boot_id),pet_p4_boot_identity());
+  proof.error_code=result==PET_APPEARANCE_COMMIT_UNKNOWN?"phase_outcome_unknown"
+    :reply&&reply->error_code?reply->error_code
+    :reply&&reply->invalid?"raw_ready_ack_unconfirmed"
+    :g_raw_asset_chunk.active?"raw_already_receiving"
+    :!proof.owner_matched?"appearance_owner_mismatch":"phase_admission_rejected";
+  return proof;
+}
+static const char *raw_ready_rejection_message(const char *code){
+  if(!strcmp(code,"raw_already_receiving"))return "raw chunk still active";
+  if(!strcmp(code,"invalid_raw_header"))return "invalid raw asset chunk header";
+  if(!strcmp(code,"transfer_slot_mismatch"))return "slot prepare failed";
+  if(!strcmp(code,"raw_buffer_unavailable"))return "no memory";
+  if(!strcmp(code,"raw_ready_ack_unconfirmed"))return "raw readiness acknowledgement unavailable";
+  if(!strcmp(code,"appearance_owner_mismatch"))return "appearance owner does not match";
+  if(!strcmp(code,"phase_outcome_unknown"))return "appearance phase outcome unknown; do not replay";
+  return "appearance phase admission rejected";
+}
+static void send_raw_ready_rejection(pet_p4_send_line_fn send,void *route,
+    const char *id,const char *path,const char *index,const raw_ready_rejection_t *proof){
+  cJSON *p=cJSON_CreateObject();
+  bool ok=p&&cJSON_AddStringToObject(p,"transferId",id?id:"")
+    &&cJSON_AddStringToObject(p,"phase","raw-ready")
+    &&cJSON_AddStringToObject(p,"path",path?path:"")
+    &&cJSON_AddStringToObject(p,"index",index?index:"")
+    &&cJSON_AddBoolToObject(p,"ok",false)
+    &&cJSON_AddStringToObject(p,"rawReadyProof","p4-raw-ready-proof-v1")
+    &&cJSON_AddStringToObject(p,"boardDeviceId",proof->board_id)
+    &&cJSON_AddStringToObject(p,"bootId",proof->boot_id)
+    &&cJSON_AddBoolToObject(p,"ownerMatched",proof->owner_matched)
+    &&cJSON_AddBoolToObject(p,"phaseCurrent",proof->phase_current)
+    &&cJSON_AddBoolToObject(p,"rawIdle",proof->raw_idle)
+    &&cJSON_AddNumberToObject(p,"rawRemaining",(double)proof->remaining)
+    &&cJSON_AddBoolToObject(p,"headerAccepted",proof->header_accepted)
+    &&cJSON_AddNumberToObject(p,"phaseReasonBits",proof->reason_bits)
+    &&cJSON_AddStringToObject(p,"phaseFirstCause",proof->first_cause)
+    &&cJSON_AddStringToObject(p,"errorCode",proof->error_code)
+    &&cJSON_AddStringToObject(p,"error",raw_ready_rejection_message(proof->error_code));
+  if(ok)send_topic_payload(send,route,"asset/ack",p);else cJSON_Delete(p);
+}
+static void asset_phase_deliver(const pet_p4_runtime_state_t *state,
+    const pet_appearance_commit_io_t *io,
+    pet_p4_send_line_fn send,void *route,asset_phase_reply_t *reply,
+    const char *id,const char *phase,const char *path,const char *index,
+    pet_appearance_commit_result_t result){
+  bool raw_rejected=phase&&!strcmp(phase,"raw-ready")
+    &&result!=PET_APPEARANCE_COMMIT_OK;
+  raw_ready_rejection_t proof={0};
+  if(raw_rejected)proof=raw_ready_rejection_snapshot(state,send,route,id,reply,result);
+  /* An idle boundary proof cannot borrow the mutex and then allow a different
+   * appearance owner to replace its snapshot. Pin only this quiescent owner;
+   * never block draining an already-active raw receiver. No storage lease is
+   * held by this metadata/TX pin. The client still rechecks connection+boot. */
+  uint64_t reply_generation=g_appearance_session.generation;
+  bool reply_pinned=raw_rejected&&proof.phase_current&&proof.raw_idle;
+  if(reply_pinned)g_appearance_session.operation_active=true;
+  if(!io||!io->begin||!io->end||!io->begin(io->context)){
+    if(reply_pinned&&g_appearance_session.generation==reply_generation
+        &&pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL))
+      g_appearance_session.operation_active=false;
+    if(reply){free(reply->line);reply->line=NULL;}return;
+  }
+  if(asset_phase_send_current(send,route)&&send){
+    if(raw_rejected)send_raw_ready_rejection(send,route,id,path,index,&proof);
+    else if(result==PET_APPEARANCE_COMMIT_OK&&reply&&reply->line&&!reply->invalid)send(reply->line,route);
+    else send_asset_ack_indexed(send,route,id,phase,path,index,false,
+      result==PET_APPEARANCE_COMMIT_UNKNOWN?"appearance phase outcome unknown; read-only reconciliation required; do not replay":"appearance phase rejected; no successful result");
+  }
+  if(reply){free(reply->line);reply->line=NULL;}
+  io->end(io->context);
+  if(reply_pinned&&g_appearance_session.generation==reply_generation
+      &&pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL))
+    g_appearance_session.operation_active=false;
+}
+static void serial_retire_locked(pet_p4_runtime_state_t *state){
+  /* Physical close/free/reset was already completed outside the state lock. */
+  (void)pet_p4_appearance_end(g_asset_sender,g_asset_route,g_asset_transfer_id,PET_APPEARANCE_SERIAL);
+  g_asset_sender=NULL;g_asset_route=NULL;g_asset_transfer_slot=-1;g_asset_transfer_id[0]=0;
+  g_asset_transfer_last_activity_ms=0;state->asset_transfer_active=false;
+}
+#include "pet_p4_protocol_audio_patch.inc"
+
+static void handle_asset_topic(pet_p4_runtime_state_t *state,const char *topic,
+    const cJSON *payload,pet_p4_send_line_fn send,void *route){
+  if(!strncmp(topic,"asset/audio-",12)){handle_audio_patch_topic(state,topic,payload,send,route);return;}
+  if(audio_patch_protocol_active()&&strcmp(topic,"asset/slot-query")){
+    const pet_appearance_commit_io_t locked_io={g_asset_query_io_begin,g_asset_query_io_end,NULL,g_asset_query_io_context};
+    asset_phase_deliver(state,&locked_io,send,route,NULL,json_string(payload,"transferId"),topic+6,NULL,NULL,PET_APPEARANCE_COMMIT_FAILED);return;
+  }
+  const char *id=json_string(payload,"transferId"),*path=json_string(payload,"path");
+  const char *index=json_string(payload,"index");
+  const pet_appearance_commit_io_t io={g_asset_query_io_begin,g_asset_query_io_end,NULL,g_asset_query_io_context};
+  bool begin=!strcmp(topic,"asset/begin"),stat=!strcmp(topic,"asset/stat");
+  bool abort=!strcmp(topic,"asset/abort"),raw=!strcmp(topic,"asset/raw-chunk");
+  const char *phase=raw?"raw-ready":topic+6;
+  if(!strcmp(topic,"asset/slot-query")){send_asset_slot_query_ack(state,payload,send,route,id);return;}
+  if(!strcmp(topic,"asset/activate")){handle_asset_activate(state,payload,send,route);return;}
+  if(!strcmp(topic,"asset/commit")||!strcmp(topic,"asset/patch-commit")){
+    if(pet_p4_appearance_mutation_blocked()||!asset_phase_send_current(send,route)
+        ||!pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL)||g_raw_asset_chunk.active){
+      asset_phase_deliver(state,&io,send,route,NULL,id,!strcmp(topic,"asset/patch-commit")?"patch":"commit",path,index,PET_APPEARANCE_COMMIT_FAILED);return;
+    }
+    handle_serial_asset_commit(state,send,route,id,!strcmp(topic,"asset/patch-commit"));return;
+  }
+  bool chunk=!strcmp(topic,"asset/chunk"),file=!strcmp(topic,"asset/file");
+  if(!state||!asset_phase_send_current(send,route)||pet_p4_appearance_mutation_blocked()
+      ||!pet_appearance_id_valid(id)||(!begin&&!stat&&!abort&&!raw&&!chunk&&!file)
+      ||(begin&&pet_p4_appearance_active())
+      ||(stat&&pet_p4_appearance_active()&&!pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL))
+      ||(!begin&&!stat&&!pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL))
+      ||(g_raw_asset_chunk.active&&!abort)){
+    asset_phase_deliver(state,&io,send,route,NULL,id,phase,path,index,PET_APPEARANCE_COMMIT_FAILED);return;
+  }
+  uint32_t total=0,raw_size=0;
+  if(begin){
+    const cJSON *t=cJSON_GetObjectItemCaseSensitive(payload,"totalBytes"),*r=cJSON_GetObjectItemCaseSensitive(payload,"rawBytes");
+    if(pet_p4_diagnostics_reboot_pending()||pet_p4_ota_transfer_active()
+        ||!cJSON_IsNumber(t)||!pet_appearance_size(t->valuedouble,&total)||!total
+        ||(r&&(!cJSON_IsNumber(r)||!pet_appearance_size(r->valuedouble,&raw_size)))){
+      asset_phase_deliver(state,&io,send,route,NULL,id,phase,path,index,PET_APPEARANCE_COMMIT_FAILED);return;
+    }
+    if(!r)raw_size=total;
+  }
+  bool temporary=stat&&!pet_p4_appearance_active();
+  if((begin||temporary)&&!pet_p4_appearance_claim(send,route,id,PET_APPEARANCE_SERIAL)){
+    asset_phase_deliver(state,&io,send,route,NULL,id,phase,path,index,PET_APPEARANCE_COMMIT_FAILED);return;
+  }
+  bool previous=state->asset_transfer_active;
+  if(begin){g_asset_sender=send;g_asset_route=route;g_asset_transfer_slot=PET_P4_RAW_APPEARANCE_SLOT;copy_text(g_asset_transfer_id,sizeof(g_asset_transfer_id),id);}
+  int slot=stat?g_asset_transfer_slot:PET_P4_RAW_APPEARANCE_SLOT;
+  state->asset_transfer_active=true; /* suspension stays asserted for native/RX too */
+  pet_appearance_phase_t op={0};
+  uint64_t phase_generation=g_appearance_session.generation;
+  unsigned phase_revision=state->asset_revision;
+  int phase_active_slot=g_asset_active_slot;
+  bool phase_started=raw
+    ?serial_raw_phase_begin_wait(&op,state,send,route,id,slot,&io)
+    :pet_p4_appearance_phase_begin(&op,state,send,route,id,PET_APPEARANCE_SERIAL,slot,&io);
+  if(!phase_started){
+    if(begin)serial_retire_locked(state);
+    else if(temporary)(void)pet_p4_appearance_end(send,route,id,PET_APPEARANCE_SERIAL);
+    bool original_current=g_appearance_session.generation==phase_generation
+      &&state->asset_revision==phase_revision&&g_asset_active_slot==phase_active_slot
+      &&pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL)
+      &&asset_phase_send_current(send,route);
+    if(!raw||original_current)state->asset_transfer_active=previous;
+    /* Do not certify a newer owner, even if it reused the same transferId. */
+    asset_phase_deliver(state,&io,send,route,NULL,id,phase,path,index,
+      raw&&!original_current?PET_APPEARANCE_COMMIT_UNKNOWN:PET_APPEARANCE_COMMIT_FAILED);return;
+  }
+  asset_phase_reply_t reply={0};g_asset_phase_write_attempted=false;
+  bool raw_was_clean=raw&&!g_raw_asset_chunk.active&&!g_raw_asset_chunk.data
+    &&!g_raw_asset_chunk.expected_size&&!g_raw_asset_chunk.received_size;
+  unsigned char *new_raw_buffer=NULL;
+  /* Only this pinned physical actor touches serial tracking while unlocked. */
+  if(begin){
+    bool ok=!pet_p4_raw_assets_available()||raw_size<=pet_p4_raw_assets_capacity_bytes();
+    if(ok){
+      reset_raw_asset_chunk();ok=close_asset_chunk_file();
+      if(ok){reset_asset_chunk_tracking();g_asset_phase_write_attempted=true;
+        ok=clear_slot_files(slot);
+        if(ok&&pet_p4_raw_assets_available())ok=pet_p4_raw_assets_prepare(raw_size,g_asset_chunk_error,sizeof(g_asset_chunk_error));
+        if(ok)ok=run_spiffs_gc_yielding()==ESP_OK;
+      }
+    }
+    send_asset_ack(asset_phase_capture,&reply,id,"begin",NULL,ok,ok?NULL:"appearance preparation failed");
+  }else if(abort){
+    bool ok=abort_serial_asset_transfer(NULL);
+    send_asset_ack(asset_phase_capture,&reply,id,"abort",NULL,ok,ok?NULL:"appearance cleanup failed");
+  }else if(chunk){
+    bool ok=handle_asset_chunk(payload);
+    send_asset_ack_indexed(asset_phase_capture,&reply,id,"chunk",path,index,ok,ok?NULL:g_asset_chunk_error);
+  }else if(raw){
+    bool prepared=begin_raw_asset_chunk(NULL,payload,asset_phase_capture,&reply,&reply.error_code);
+    if(prepared&&raw_was_clean)new_raw_buffer=g_raw_asset_chunk.data;
+  }
+  else if(file)handle_asset_file(payload,asset_phase_capture,&reply);
+  else if(stat)handle_asset_stat(payload,asset_phase_capture,&reply);
+  bool ok=reply.seen&&reply.ok&&!reply.invalid;
+  pet_appearance_commit_result_t result=raw
+    ?finish_unpublished_raw_header(&op,state,slot,payload,new_raw_buffer,&reply,g_asset_phase_write_attempted)
+    :pet_p4_appearance_phase_end(&op,state,slot,ok,g_asset_phase_write_attempted);
+  if(result==PET_APPEARANCE_COMMIT_OK){
+    if(abort)serial_retire_locked(state);
+    else if(stat){state->asset_transfer_active=previous;if(temporary)(void)pet_p4_appearance_end(send,route,id,PET_APPEARANCE_SERIAL);}
+    else note_asset_transfer_activity();
+  }else if(result==PET_APPEARANCE_COMMIT_FAILED&&begin)serial_retire_locked(state);
+  else if(temporary&&result!=PET_APPEARANCE_COMMIT_UNKNOWN){(void)pet_p4_appearance_end(send,route,id,PET_APPEARANCE_SERIAL);state->asset_transfer_active=previous;}
+  asset_phase_deliver(state,&io,send,route,&reply,id,phase,path,index,result);
+}
+void pet_p4_asset_transfer_cleanup_worker(pet_p4_runtime_state_t *state){
+  if(!atomic_exchange_explicit(&g_asset_cleanup_due,false,memory_order_acq_rel))return;
+  if(audio_patch_protocol_active()){audio_patch_timeout_worker(state);return;}
+  unsigned long long now=(unsigned long long)esp_timer_get_time()/1000ULL;
+  if(!state||pet_p4_appearance_mutation_blocked()||!state->asset_transfer_active
+      ||!g_asset_transfer_last_activity_ms||now<g_asset_transfer_last_activity_ms
+      ||now-g_asset_transfer_last_activity_ms<PET_P4_ASSET_TRANSFER_IDLE_TIMEOUT_MS)return;
+  const pet_appearance_commit_io_t io={g_asset_query_io_begin,g_asset_query_io_end,NULL,g_asset_query_io_context};
+  pet_appearance_phase_t op={0};int slot=g_asset_transfer_slot;
+  if(!pet_p4_appearance_phase_begin(&op,state,g_asset_sender,g_asset_route,g_asset_transfer_id,PET_APPEARANCE_SERIAL,slot,&io))return;
+  g_asset_phase_write_attempted=false;bool ok=abort_serial_asset_transfer(NULL);
+  pet_appearance_commit_result_t result=pet_p4_appearance_phase_end(&op,state,slot,ok,g_asset_phase_write_attempted);
+  if(result==PET_APPEARANCE_COMMIT_OK)serial_retire_locked(state);
+}
+size_t pet_p4_consume_raw_asset_bytes_scoped(pet_p4_runtime_state_t *state,
+    const unsigned char *data,size_t len,pet_p4_send_line_fn send,void *route,
+    const pet_appearance_commit_io_t *io){
+  if(!state||!data||!len||!pet_p4_raw_asset_chunk_active_for_route(send,route))return 0;
+  size_t remaining=g_raw_asset_chunk.expected_size-g_raw_asset_chunk.received_size;
+  size_t used=len<remaining?len:remaining;
+  /* The RX task remains the owner; metadata-only short copy for partial reads.
+   * Terminal FNV and driver IO borrow THIS RX mutex, never protocol task flags. */
+  if(used<remaining){memcpy(g_raw_asset_chunk.data+g_raw_asset_chunk.received_size,data,used);g_raw_asset_chunk.received_size+=used;note_asset_transfer_activity();return used;}
+  int slot=g_asset_transfer_slot;pet_appearance_phase_t op={0};
+  if(!pet_p4_appearance_phase_begin(&op,state,send,route,g_raw_asset_chunk.transfer_id,PET_APPEARANCE_SERIAL,slot,io)){
+    /* A granted raw-ready frame must be drained exactly once even when another
+     * storage actor wins admission. Returning zero with raw still active would
+     * spin the RX loop and implicitly retry this same terminal chunk. No FNV or
+     * driver write is attempted. Pin only its private RAM during free/NACK. */
+    char id[64],path[PET_P4_LOGICAL_PATH_MAX],index[24];
+    copy_text(id,sizeof(id),g_raw_asset_chunk.transfer_id);copy_text(path,sizeof(path),g_raw_asset_chunk.logical_path);copy_text(index,sizeof(index),g_raw_asset_chunk.index);
+    uint64_t generation=g_appearance_session.generation;
+    g_raw_asset_chunk.received_size=g_raw_asset_chunk.expected_size;
+    g_appearance_session.operation_active=true;
+    if(io&&io->begin&&io->end&&(!io->current||io->current(io->context))&&io->begin(io->context)){
+      reset_raw_asset_chunk(); /* RAM only; does not borrow another actor's storage lease */
+      send_asset_ack_indexed(send,route,id,"raw-chunk",path,index,false,"raw terminal storage admission failed before write; not retried");
+      io->end(io->context);
+      if(g_appearance_session.generation!=generation||!pet_p4_appearance_owned(send,route,id,PET_APPEARANCE_SERIAL)
+          ||(io->current&&!io->current(io->context)))g_appearance_session.recovery_blocked=true;
+    }else g_appearance_session.recovery_blocked=true;
+    if(g_appearance_session.generation==generation)g_appearance_session.operation_active=false;
+    return used;
+  }
+  memcpy(g_raw_asset_chunk.data+g_raw_asset_chunk.received_size,data,used);g_raw_asset_chunk.received_size+=used;
+  g_asset_phase_write_attempted=false;
+  unsigned long long checksum=fnv1a64_bytes(g_raw_asset_chunk.data,g_raw_asset_chunk.expected_size);
+  bool ok=checksum==g_raw_asset_chunk.expected_checksum;
+  if(ok)ok=write_asset_chunk_bytes(g_raw_asset_chunk.transfer_id,g_raw_asset_chunk.logical_path,g_raw_asset_chunk.index,g_raw_asset_chunk.data,g_raw_asset_chunk.expected_size);
+  asset_phase_reply_t reply={0};
+  char id[64],path[PET_P4_LOGICAL_PATH_MAX],index[24];
+  copy_text(id,sizeof(id),g_raw_asset_chunk.transfer_id);copy_text(path,sizeof(path),g_raw_asset_chunk.logical_path);copy_text(index,sizeof(index),g_raw_asset_chunk.index);
+  send_asset_ack_indexed(asset_phase_capture,&reply,id,"raw-chunk",path,index,ok,ok?NULL:"raw chunk verification/write failed");
+  bool attempted=g_asset_phase_write_attempted;
+  /* Failed physical writes retain exact staging, including raw bytes. */
+  if(ok||!attempted)reset_raw_asset_chunk();
+  pet_appearance_commit_result_t result=pet_p4_appearance_phase_end(&op,state,slot,ok&&!reply.invalid,attempted);
+  if(result==PET_APPEARANCE_COMMIT_OK)note_asset_transfer_activity();
+  asset_phase_deliver(state,io,send,route,&reply,id,"raw-chunk",path,index,result);return used;
+}
+
 
 void pet_p4_state_init(pet_p4_runtime_state_t *state, const char *board_device_id) {
   if (!state) return;
@@ -1729,6 +2498,7 @@ static void send_widget_ack(
   bool ok,
   const char *message
 ) {
+  PET_WIDGET_TRACE_SCOPE(trace_ack, PET_WTRACE_ACK);
   cJSON *payload = cJSON_CreateObject();
   cJSON_AddStringToObject(payload, "transferId", transfer_id ? transfer_id : "");
   cJSON_AddStringToObject(payload, "phase", phase ? phase : "");
@@ -1737,6 +2507,9 @@ static void send_widget_ack(
   if (path[0]) cJSON_AddStringToObject(payload, "path", path);
   if (index) cJSON_AddItemToObject(payload, "index", cJSON_Duplicate(index, true));
   cJSON_AddBoolToObject(payload, "ok", ok);
+#if PET_P4_STORAGE_PRESERVE_UNCHANGED
+  if(ok&&phase&&!strcmp(phase,"commit"))cJSON_AddBoolToObject(payload,"unchanged",pet_p4_miniapp_install_unchanged());
+#endif
   if (message && message[0]) cJSON_AddStringToObject(payload, "msg", message);
   send_topic_payload(send_line, ctx, "widget-install-ack", payload);
 }
@@ -1751,6 +2524,8 @@ static bool send_widget_inventory(
   char active_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
   bool active = pet_p4_miniapp_active_id(active_widget_id, sizeof(active_widget_id));
   size_t installed_count = pet_p4_miniapp_catalog_count();
+  const size_t selected_index = pet_p4_miniapp_catalog_selected();
+  char selected_widget_id[PET_P4_MINIAPP_WIDGET_ID_MAX] = {0};
   bool active_in_catalog = false;
   cJSON *payload = cJSON_CreateObject();
   cJSON *items = cJSON_CreateArray();
@@ -1775,7 +2550,7 @@ static bool send_widget_inventory(
     (double) ((unsigned long long) esp_timer_get_time() / 1000ULL)
   );
   cJSON_AddBoolToObject(payload, "supportsMultiple", true);
-  cJSON_AddNumberToObject(payload, "maxInstalled", PET_P4_MINIAPP_CATALOG_MAX);
+  cJSON_AddNumberToObject(payload, "maxInstalled", pet_p4_miniapp_catalog_capacity());
   cJSON_AddBoolToObject(payload, "complete", !pet_p4_miniapp_catalog_recovery_blocked());
   cJSON_AddBoolToObject(payload, "recoveryBlocked", pet_p4_miniapp_catalog_recovery_blocked());
   if (!request_id[0] || strlen(request_id) >= 96) {
@@ -1792,6 +2567,7 @@ static bool send_widget_inventory(
     for (size_t index = 0; index < installed_count; index += 1) {
       pet_p4_miniapp_catalog_entry_t entry = {0};
       if (!pet_p4_miniapp_catalog_get(index, &entry)) continue;
+      if (index == selected_index) copy_text(selected_widget_id, sizeof(selected_widget_id), entry.widget_id);
       cJSON *item = cJSON_CreateObject();
       if (!item) {
         cJSON_Delete(payload);
@@ -1820,21 +2596,99 @@ static bool send_widget_inventory(
       );
     }
   }
+  /* Selection is the visible catalog cursor, independent of the active app.
+   * Use the same visible projection as items; an empty catalog has no index. */
+  if (selected_widget_id[0]) {
+    cJSON_AddStringToObject(payload, "selectedWidgetId", selected_widget_id);
+    cJSON_AddNumberToObject(payload, "selectedIndex", (double) selected_index);
+  } else {
+    cJSON_AddNullToObject(payload, "selectedWidgetId");
+    cJSON_AddNullToObject(payload, "selectedIndex");
+  }
   cJSON_AddItemToObject(payload, "items", items);
   cJSON_AddItemToObject(payload, "warnings", warnings);
   send_topic_payload(send_line, ctx, "widget/inventory", payload);
   return request_id[0] && strlen(request_id) < 96;
 }
 
-static void send_miniapp_state(pet_p4_send_line_fn send_line, void *ctx) {
+/* Strict, opt-in metadata administration. Never enters package cleanup or
+ * activation. Failed/unknown acknowledgements authorize no replay. */
+static bool send_catalog_admin(pet_p4_runtime_state_t *state,const char *topic,
+    const cJSON *request,pet_p4_send_line_fn send_line,void *ctx){
+  const bool mutate=!strcmp(topic,"widget/catalog_reconcile");
+  const char *fields[]={"requestId","expectedBoardDeviceId","expectedBootId","expectedCatalogSeq",
+    "expectedCatalogDigest","removeVisibleIds","survivorVisibleOrder","preserveSave"};
+  unsigned seen=0;bool valid=cJSON_IsObject(request);
+  const cJSON *field;
+  cJSON_ArrayForEach(field,request){
+    unsigned at=0;while(at<(mutate?8U:1U)&&(!field->string||strcmp(field->string,fields[at])))at++;
+    if(at==(mutate?8U:1U)||(seen&(1U<<at)))valid=false;
+    else seen|=1U<<at;
+  }
+  const char *id=json_string(request,"requestId");
+  valid=valid&&seen==(mutate?255U:1U)&&id[0]&&strlen(id)<96;
+  const char *commit="not_committed";char error[128]={0};
+  if(!valid)copy_text(error,sizeof(error),"invalid bounded catalog request");
+  else if(mutate&&(!state||!pet_p4_boot_identity()[0]
+      ||strcmp(json_string(request,"expectedBoardDeviceId"),state->board_device_id)
+      ||strcmp(json_string(request,"expectedBootId"),pet_p4_boot_identity())))
+    copy_text(error,sizeof(error),"board or boot identity changed; inspect again");
+  else if(mutate)commit=pet_p4_miniapp_catalog_reconcile(request,error,sizeof(error));
+  cJSON *response=pet_p4_miniapp_catalog_inspect();
+  if(!response)return false;
+  if(!cJSON_AddStringToObject(response,"requestId",id)
+      ||!cJSON_AddStringToObject(response,"boardDeviceId",state?state->board_device_id:"")
+      ||!cJSON_AddStringToObject(response,"bootId",pet_p4_boot_identity())){cJSON_Delete(response);return false;}
+  bool ok=mutate?(!strcmp(commit,"committed")||!strcmp(commit,"unchanged")):valid&&!pet_p4_miniapp_catalog_recovery_blocked();
+  cJSON_DeleteItemFromObjectCaseSensitive(response,"ok");
+  cJSON_AddBoolToObject(response,"ok",ok);
+  if(mutate){
+    const char *drop[]={"items","complete","recoveryBlocked","physicalCount","activeWidgetId","selectedWidgetId"};
+    for(size_t i=0;i<sizeof(drop)/sizeof(drop[0]);i++)cJSON_DeleteItemFromObjectCaseSensitive(response,drop[i]);
+    cJSON_AddStringToObject(response,"commitState",commit);
+    if(ok&&state&&!strcmp(commit,"committed"))state->last_update_ms+=1;
+  }
+  if(error[0])cJSON_AddStringToObject(response,"error",error);
+  send_topic_payload(send_line,ctx,mutate?"widget/catalog_reconcile_result":"widget/catalog_snapshot",response);
+  return ok;
+}
+
+static void send_miniapp_state(pet_p4_send_line_fn send_line, void *ctx, const cJSON *request) {
   pet_p4_miniapp_view_t snapshot = {0};
-  bool available = pet_p4_miniapp_get_view(&snapshot);
+  pet_p4_miniapp_observation_t observation;
+  bool available = pet_p4_miniapp_observe(&observation,&snapshot);
   const pet_p4_miniapp_view_t *view = available ? &snapshot : NULL;
   cJSON *payload = cJSON_CreateObject();
+  cJSON_AddStringToObject(payload,"requestId",json_string(request,"requestId"));
+  cJSON_AddStringToObject(payload,"bootId",pet_p4_boot_identity());
+  cJSON_AddStringToObject(payload,"widgetId",available&&snapshot.active?snapshot.widget_id:"");
+  bool coherent=available;
+  cJSON_AddBoolToObject(payload,"observationAvailable",coherent);
+  if(coherent){
+    char generation[9],persist[9],cells[9],vm[9];
+    snprintf(generation,sizeof(generation),"%08x",(unsigned)observation.instance_generation);
+    snprintf(persist,sizeof(persist),"%08x",(unsigned)observation.persist_digest);
+    snprintf(cells,sizeof(cells),"%08x",(unsigned)observation.cells_digest);
+    snprintf(vm,sizeof(vm),"%08x",(unsigned)observation.vm_digest);
+    cJSON_AddStringToObject(payload,"instanceGeneration",generation);
+    cJSON_AddStringToObject(payload,"observationEngine","p4-miniapp-observation-fnv1a32-v1");
+    cJSON_AddStringToObject(payload,"persistProjectionDigest",persist);
+    cJSON_AddStringToObject(payload,"durability","not_observed");
+    if(observation.has_cells){
+      cJSON *grid=cJSON_AddObjectToObject(payload,"cellsDigest");
+      cJSON_AddNumberToObject(grid,"cols",observation.cols);cJSON_AddNumberToObject(grid,"rows",observation.rows);
+      cJSON_AddNumberToObject(grid,"bits",observation.bits);cJSON_AddNumberToObject(grid,"count",observation.cells_count);
+      cJSON_AddStringToObject(grid,"hash",cells);
+    }
+    if(observation.has_vm){
+      cJSON *program=cJSON_AddObjectToObject(payload,"vmDigest");
+      cJSON_AddNumberToObject(program,"schema",observation.vm_schema);cJSON_AddNumberToObject(program,"cells",observation.vm_cells);
+      cJSON_AddNumberToObject(program,"revision",observation.vm_revision);cJSON_AddStringToObject(program,"hash",vm);
+    }
+  }
   bool active = view && view->active;
   cJSON_AddBoolToObject(payload, "active", active);
   if (active) {
-    cJSON_AddStringToObject(payload, "widgetId", view->widget_id);
     cJSON_AddStringToObject(payload, "state", view->state);
     cJSON_AddStringToObject(payload, "page", view->page);
     cJSON_AddStringToObject(payload, "title", view->title);
@@ -1862,11 +2716,179 @@ static void send_miniapp_state(pet_p4_send_line_fn send_line, void *ctx) {
       cJSON_AddNumberToObject(payload, "gameRevision", view->game.revision);
     }
     cJSON_AddNumberToObject(payload, "revision", view->revision);
+    pet_p4_miniapp_program_status_t program_status;
+    if(pet_p4_miniapp_program_status(&program_status)){
+      cJSON *program=cJSON_AddObjectToObject(payload,"boundedProgram");
+      cJSON_AddStringToObject(program,"engine",PET_COMPONENT_PROGRAM_ENGINE);
+      cJSON_AddNumberToObject(program,"phase",program_status.phase);cJSON_AddBoolToObject(program,"live",program_status.live);
+      cJSON_AddBoolToObject(program,"retiring",program_status.retiring);cJSON_AddBoolToObject(program,"reportValid",program_status.report_valid);
+      cJSON_AddNumberToObject(program,"revision",program_status.revision);cJSON_AddNumberToObject(program,"result",program_status.result);
+      cJSON_AddNumberToObject(program,"usedFuel",program_status.used_fuel);cJSON_AddNumberToObject(program,"lastStepUs",program_status.last_step_us);
+      cJSON_AddNumberToObject(program,"maxStepUs",program_status.max_step_us);
+      cJSON_AddNumberToObject(program,"sliceBudgetUs",program_status.slice_budget_us);cJSON_AddBoolToObject(program,"sliceStalled",program_status.slice_stalled);
+    }
+    pet_p4_miniapp_side_status_t side;
+    if(pet_p4_miniapp_side_status(&side)){
+      cJSON *game=cJSON_AddObjectToObject(payload,"sideScene");
+      cJSON_AddStringToObject(game,"engine","p4-side-scene-v1");
+      cJSON_AddNumberToObject(game,"phase",side.phase);
+      cJSON_AddNumberToObject(game,"x",side.x/256.0);cJSON_AddNumberToObject(game,"y",side.y/256.0);
+      cJSON_AddNumberToObject(game,"vx",side.vx/256.0);cJSON_AddNumberToObject(game,"vy",side.vy/256.0);
+      cJSON_AddNumberToObject(game,"direction",side.direction);
+      cJSON_AddBoolToObject(game,"grounded",side.grounded);cJSON_AddBoolToObject(game,"jumpDown",side.jump_down);
+      cJSON_AddNumberToObject(game,"score",side.score);cJSON_AddNumberToObject(game,"coins",side.coins);
+      cJSON_AddNumberToObject(game,"lives",side.lives);cJSON_AddNumberToObject(game,"checkpoint",side.checkpoint);
+      cJSON_AddNumberToObject(game,"elapsedMs",side.elapsed_ms);cJSON_AddNumberToObject(game,"revision",side.revision);
+      cJSON_AddNumberToObject(game,"lastStepUs",side.last_step_us);cJSON_AddNumberToObject(game,"maxStepUs",side.max_step_us);
+    }
   }
   send_topic_payload(send_line, ctx, "miniapp/state", payload);
 }
 
-void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn send_line, void *ctx) {
+bool pet_p4_appearance_mutation_blocked(void) {
+  return g_appearance_session.operation_active||g_appearance_session.recovery_blocked;
+}
+static bool commit_owner_current(pet_p4_runtime_state_t *state,int old_slot,
+    unsigned revision,uint64_t generation,pet_p4_send_line_fn send,void *route,
+    const char *id,unsigned kind,pet_resource_lease_t lease,
+    const pet_appearance_commit_io_t *io) {
+  return g_appearance_session.operation_active&&!g_appearance_session.recovery_blocked
+    &&g_appearance_session.generation==generation
+    &&pet_p4_appearance_owned(send,route,id,kind)
+    &&(kind!=PET_APPEARANCE_SERIAL||asset_phase_send_current(send,route))
+    &&state->asset_revision==revision&&g_asset_active_slot==old_slot
+    &&pet_resources_device_current(lease)&&(!io->current||io->current(io->context));
+}
+static bool write_ready_pack_exact(int slot,const char *pack,bool *changed) {
+  char path[PET_P4_FS_PATH_MAX],actual[PET_P4_PACK_ID_MAX];
+  if(!p4_asset_ready_marker_path(slot,path,sizeof(path)))return false;
+  *changed=true; /* fopen(wb) itself may truncate before reporting failure. */
+  FILE *file=fopen(path,"wb");if(!file)return false;
+  bool ok=fprintf(file,"%s\n",pack)==PET_P4_PACK_ID_MAX;
+  if(fclose(file)!=0)ok=false;
+  /* Never remove a possibly durable ready marker on a close/readback error. */
+  return ok&&read_ready_slot_pack_id(slot,actual,sizeof(actual))&&!strcmp(actual,pack);
+}
+pet_appearance_commit_result_t pet_p4_appearance_commit_slot(
+    pet_p4_runtime_state_t *state,int slot,pet_p4_send_line_fn send,void *route,
+    const char *id,unsigned kind,bool patch,const pet_appearance_commit_io_t *io,
+    char *error,size_t capacity) {
+  const char *why="appearance commit unavailable";
+  pet_appearance_commit_result_t result=PET_APPEARANCE_COMMIT_FAILED;
+  pet_resource_owner_t owner={0};pet_resource_lease_t lease={0};
+  asset_activation_snapshot_t *next=NULL;
+  bool unlocked=false,changed=false,raw_changed=false;
+  if(!state||!slot_is_valid(slot)||!io||!io->begin||!io->end
+      ||pet_p4_appearance_mutation_blocked()
+      ||!pet_p4_appearance_owned(send,route,id,kind)
+      ||(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route)))goto reject;
+  if(pet_resources_device_owner_open(PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK),&owner)!=PET_RESOURCE_OK
+      ||pet_resources_device_acquire(owner,PET_RESOURCE_STORAGE_WORK,1,&lease)!=PET_RESOURCE_OK) {
+    why="appearance storage owner unavailable";goto reject;
+  }
+  const uint64_t generation=g_appearance_session.generation;
+  const unsigned revision=state->asset_revision;const int old_slot=g_asset_active_slot;
+  g_appearance_session.operation_active=true;
+  if(!io->begin(io->context))goto finish;
+  unlocked=true;
+  if(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route)) {
+    why="appearance route retired before commit IO";goto relock;
+  }
+  /* A close error can follow physical writes. Do not publish or erase staging. */
+  if(kind==PET_APPEARANCE_SERIAL&&!close_asset_chunk_file()) {
+    changed=true;why="appearance staged close outcome unknown; do not replay";goto relock;
+  }
+  if(!patch) {
+    next=calloc(1,sizeof(*next));
+    if(!next){why="appearance commit workspace unavailable";goto relock;}
+    if(!prepare_asset_snapshot(slot,NULL,next)) {
+      why="appearance manifest verification failed";goto relock;
+    }
+  }
+  io->end(io->context);unlocked=false;
+  if(!commit_owner_current(state,old_slot,revision,generation,send,route,id,kind,lease,io)) {
+    why="appearance commit ownership changed";goto finish;
+  }
+  if(patch){result=PET_APPEARANCE_COMMIT_OK;goto finish;}
+  if(!io->begin(io->context))goto finish;
+  unlocked=true;
+  if(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route)) {
+    why="appearance route retired before ready IO";goto relock;
+  }
+  if(slot==PET_P4_RAW_APPEARANCE_SLOT&&pet_p4_raw_assets_available()) {
+    char raw_pack[PET_P4_PACK_ID_MAX];
+    bool present=pet_p4_raw_assets_committed_pack_id_for_slot(slot,raw_pack,sizeof(raw_pack))
+      &&!strcmp(raw_pack,next->pack_id);
+    if(!present&&!pet_p4_raw_assets_commit_observed(next->pack_id,error,capacity,&raw_changed)) {
+      changed|=raw_changed;why="appearance raw header commit failed";goto relock;
+    }
+    changed|=raw_changed;
+  }
+  if(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route)) {
+    why="appearance route retired after raw commit";goto relock;
+  }
+  if(!write_ready_pack_exact(slot,next->pack_id,&changed)) {
+    why="appearance ready marker outcome unknown; do not replay";goto relock;
+  }
+  io->end(io->context);unlocked=false;
+  if(!commit_owner_current(state,old_slot,revision,generation,send,route,id,kind,lease,io)) {
+    why="appearance commit publication ownership changed";goto finish;
+  }
+  if(!io->begin(io->context))goto finish;
+  unlocked=true;
+  if(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route)) {
+    why="appearance route retired before activation marker";goto relock;
+  }
+  changed=true;
+  if(!write_asset_activation_marker(slot)) {
+    why="appearance activation marker outcome unknown; do not replay";goto relock;
+  }
+  io->end(io->context);unlocked=false;
+  if(!commit_owner_current(state,old_slot,revision,generation,send,route,id,kind,lease,io)) {
+    why="appearance commit publication outcome unknown; do not replay";goto finish;
+  }
+  /* Only a bounded staged RAM snapshot is published under the state lock. */
+  g_asset_active_slot=slot;
+  memcpy(state->asset_manifest_json,next->manifest,strlen(next->manifest)+1);
+  state->asset_catalog=next->catalog;state->asset_family_count=next->catalog.count;
+  state->asset_revision++;
+  result=PET_APPEARANCE_COMMIT_OK;
+  goto finish;
+relock:
+  if(unlocked){io->end(io->context);unlocked=false;}
+finish:
+  if(result!=PET_APPEARANCE_COMMIT_OK&&changed) {
+    result=PET_APPEARANCE_COMMIT_UNKNOWN;
+    g_appearance_session.recovery_blocked=true;
+    why="appearance commit outcome unknown; read-only reconciliation required; do not replay";
+  }
+  /* Free in the borrowed IO window while owner and operation remain pinned. */
+  if(next) {
+    if(io->begin(io->context)){free(next);next=NULL;io->end(io->context);}
+    else { /* Broken dispatcher: keep ownership and do not claim completion. */
+      g_appearance_session.recovery_blocked=true;
+      result=PET_APPEARANCE_COMMIT_UNKNOWN;why="appearance commit dispatcher unavailable; do not replay";
+    }
+  }
+  if(g_appearance_session.generation!=generation
+      ||!pet_p4_appearance_owned(send,route,id,kind)
+      ||(kind==PET_APPEARANCE_SERIAL&&!asset_phase_send_current(send,route))
+      ||(io->current&&!io->current(io->context))) {
+    g_appearance_session.recovery_blocked=true;
+    result=PET_APPEARANCE_COMMIT_UNKNOWN;why="appearance commit owner/connection changed; do not replay";
+  }
+  if(g_appearance_session.generation==generation)g_appearance_session.operation_active=false;
+reject:
+  (void)pet_resources_device_finish(lease);pet_resources_device_revoke(owner);
+  if(result!=PET_APPEARANCE_COMMIT_OK)copy_text(error,capacity,why);
+  return result;
+}
+
+/* Cold capability construction only; do not change live audio dispatch flags. */
+#if defined(__GNUC__) && !defined(__clang__)
+__attribute__((optimize("Os")))
+#endif
+void pet_p4_send_hello_for_board(const char *board_id, pet_p4_send_line_fn send_line, void *ctx) {
   const esp_app_desc_t *app = esp_app_get_description();
   cJSON *payload = cJSON_CreateObject();
   cJSON *capabilities = cJSON_CreateObject();
@@ -1887,7 +2909,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON *screen_pages = cJSON_CreateArray();
   cJSON *controls = cJSON_CreateObject();
   cJSON *touch_input = cJSON_CreateObject();
-  cJSON_AddStringToObject(payload, "boardDeviceId", state ? state->board_device_id : "p4-unknown");
+  cJSON_AddStringToObject(payload, "boardDeviceId", board_id ? board_id : "p4-unknown");
   cJSON_AddStringToObject(payload, "runtime", "esp-p4");
   cJSON_AddStringToObject(payload, "deviceModel", "ESP32-P4 RISC-V Dual-Core + ESP32-C6");
   cJSON_AddStringToObject(payload, "fw", app ? app->version : "");
@@ -1910,6 +2932,7 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(capabilities, "bulk", true);
   cJSON_AddNumberToObject(capabilities, "maxAppearanceSlots", 2);
   cJSON_AddBoolToObject(capabilities, "appearanceSlotReuse", true);
+  cJSON_AddStringToObject(capabilities,"appearanceTransaction","p4-appearance-owner-v1");
   cJSON_AddBoolToObject(
     capabilities,
     "rawAppearanceSlot0",
@@ -1937,11 +2960,14 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v1"));
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-grid-scene-v2"));
   cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-touch-slice-v1"));
+  cJSON_AddItemToArray(widget_scenes, cJSON_CreateString("p4-side-scene-v1"));
   cJSON_AddStringToObject(capabilities,"widgetPointer","p4-pointer-v1");
   cJSON_AddNumberToObject(capabilities,"widgetSliceRevision",2);
   cJSON_AddItemToObject(capabilities, "widgetScenes", widget_scenes);
   cJSON_AddBoolToObject(capabilities, "widgetSprites", true);
   cJSON_AddStringToObject(capabilities, "widgetData", "p4-data-list-v1");
+  cJSON_AddStringToObject(capabilities, "widgetDataExpiry", "p4-data-expiry-v1");
+  cJSON_AddNumberToObject(capabilities, "widgetDataSources", 8);
   cJSON_AddStringToObject(capabilities, "widgetMedia", "p4-media-v1");
   cJSON_AddStringToObject(capabilities, "widgetMediaSurface", "p4-media-surface-v1");
   cJSON_AddNumberToObject(capabilities, "widgetMediaQueueMax", 128);
@@ -1959,11 +2985,151 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddStringToObject(capabilities, "widgetLifecycle", "p4-lifecycle-v1");
   cJSON_AddStringToObject(capabilities, "widgetInput", "p4-input-v1");
   cJSON_AddStringToObject(capabilities, "widgetLocalTools", "p4-local-tools-v1");
+  cJSON_AddStringToObject(capabilities, "widgetLocalToolsMasks", "p4-local-masks-v2");
+  cJSON_AddStringToObject(capabilities, "widgetLogic", "p4-logic-v1");
+#if PET_P4_QUOTA_V3
+  /* v3 supersedes v2 in the single-valued key; v2 packages stay accepted and are listed in widgetQuotas. */
+  cJSON_AddStringToObject(capabilities, "widgetQuota", "p4-quota-v3");
+  {cJSON *quotas=cJSON_CreateArray();cJSON_AddItemToArray(quotas,cJSON_CreateString("p4-quota-v2"));cJSON_AddItemToArray(quotas,cJSON_CreateString("p4-quota-v3"));cJSON_AddItemToObject(capabilities,"widgetQuotas",quotas);}
+#else
+  cJSON_AddStringToObject(capabilities, "widgetQuota", "p4-quota-v2");
+#endif
+#if PET_P4_CELLS_V1
+  cJSON_AddStringToObject(capabilities, "widgetCells", PET_CELLS_ENGINE);
+#endif
+#if PET_P4_TEXT_TABLE
+  cJSON_AddStringToObject(capabilities, "widgetTexts", "p4-texts-v1");
+#endif
+  cJSON_AddStringToObject(capabilities, "widgetSfx", "p4-sfx-v1");
+#if PET_P4_SEQUENCE
+  cJSON_AddStringToObject(capabilities, "widgetSequence", "p4-sequence-v1");
+#endif
+#if PET_P4_SAMPLES
+  cJSON_AddStringToObject(capabilities, "widgetSamples", "p4-samples-v1");
+#endif
+#if PET_P4_CLIP
+  cJSON_AddStringToObject(capabilities, "widgetClip", "p4-clip-v1");
+#endif
+#if PET_P4_BIG_IMAGE
+  cJSON_AddStringToObject(capabilities, "widgetBigImage", "p4-big-image-v1");
+#endif
+#if PET_P4_EVENTS
+  cJSON_AddStringToObject(capabilities, "widgetEvents", "p4-events-v1");
+#endif
   cJSON_AddStringToObject(capabilities, "widgetMotion", "p4-motion-v1");
   cJSON_AddStringToObject(capabilities, "widgetPlatformTrack", "p4-platform-track-v1");
+  cJSON_AddStringToObject(capabilities, "widgetSideScene", "p4-side-scene-v1");
+  cJSON_AddNumberToObject(capabilities, "widgetSideSceneMaxActors", PET_SIDE_ACTORS);
+  cJSON_AddNumberToObject(capabilities, "widgetSideSceneMaxWidth", PET_SIDE_WIDTH);
+  cJSON_AddNumberToObject(capabilities, "widgetSideSceneMaxHeight", PET_SIDE_HEIGHT);
   cJSON_AddStringToObject(capabilities, "widgetMediaTouch", "p4-media-touch-v1");
   cJSON_AddStringToObject(capabilities, "widgetSurfaceAtlas", "p4-wide-atlas-v1");
   cJSON_AddStringToObject(capabilities, "widgetAppHost", "p4-app-host-v1");
+  cJSON_AddStringToObject(capabilities, "widgetVariableBindings", "p4-variable-bindings-v1");
+#if PET_CANVAS_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetCanvas","p4-canvas-v1");
+#endif
+#if PET_P4_CANVAS_V2
+  cJSON_ReplaceItemInObject(capabilities,"widgetCanvas",cJSON_CreateString("p4-canvas-v2"));
+#endif
+#if PET_P4_GRAPHICS_V2
+  cJSON_AddStringToObject(capabilities,"widgetGraphicsV2","p4-graphics-v2");
+#endif
+#if PET_P4_PARTICLES
+  cJSON_AddStringToObject(capabilities,"widgetParticles","p4-particles-v1");
+#endif
+#if PET_P4_KEYFRAME_BG
+  if(pet_p4_renderer_keyframe_ready())cJSON_AddStringToObject(capabilities,"widgetKeyframeBackground","p4-keyframe-bg-v1");
+#endif
+#if PET_P4_BODIES
+  /* Default-off candidate grant. Physical admission remains source-bound HIL,
+   * never inferred from this implementation capability. */
+  cJSON_AddStringToObject(capabilities,"widgetBodies","p4-bodies-v1");
+#endif
+  cJSON_AddStringToObject(capabilities,"widgetHostContext","p4-host-context-v1");
+#if PET_SERVICE_BRIDGE_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetServiceBridge","p4-service-bridge-v1");
+  cJSON_AddNumberToObject(capabilities,"widgetServiceBridgeImages",2);
+  cJSON_AddNumberToObject(capabilities,"widgetServiceBridgeImageSide",192);
+#endif
+  cJSON_AddStringToObject(capabilities,"widgetAppNavigation","p4-app-navigation-v1");
+  cJSON_AddStringToObject(capabilities,"widgetActivation","p4-widget-activation-v1");
+#if PET_P4_STORAGE_PRESERVE_UNCHANGED
+  cJSON_AddStringToObject(capabilities,"widgetPreserveUnchanged","p4-preserve-unchanged-v1");
+#endif
+  cJSON_AddStringToObject(capabilities,"widgetCatalogMetadata","p4-catalog-metadata-v1");
+  cJSON_AddStringToObject(capabilities,"widgetAppViewport","p4-app-viewport-v1");
+#if PET_P4_SERIAL_CONTROL_INTEGRITY
+#if PET_P4_SERIAL_CONTROL_NEGOTIATED
+  pet_control_session_capabilities(ctx,capabilities);
+#else
+  cJSON_AddStringToObject(capabilities,"serialControlIntegrity",PET_CONTROL_INTEGRITY_ENGINE);
+  cJSON_AddNumberToObject(capabilities,"serialControlMaxBytes",PET_CONTROL_INTEGRITY_MAX);
+#endif
+#endif
+#if PET_P4_STORAGE_IO_RETAIN_COMPLETED
+  cJSON_AddStringToObject(capabilities,"storageCompletedObservations","p4-storage-completed-v1");
+#endif
+#if PET_P4_RENDER_LCD_SPLIT_PROBE
+  cJSON_AddStringToObject(capabilities,"renderLcdSplit","p4-lcd-split-v1");
+#endif
+  cJSON_AddStringToObject(capabilities,"widgetAppViewports","p4-app-viewports-v1");
+  cJSON_AddStringToObject(capabilities,"widgetStateObservation","p4-miniapp-observation-fnv1a32-v1");
+#if PET_HOST_COLLECTION_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetHostCollection",PET_HOST_COLLECTION_ENGINE);
+#endif
+#if PET_VARIABLE_OWNERS_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetVariableOwners",PET_VARIABLE_OWNERS_ENGINE);
+#endif
+#if PET_COMPONENT_PROGRAM_ENABLED && PET_COMPONENT_PROGRAM_EXECUTION_REVIEWED
+#if PET_P4_PROGRAM_V2
+  /* v2 supersedes v1 in the single-valued key; v1 images stay valid and are listed in widgetPrograms. */
+  cJSON_AddStringToObject(capabilities,"widgetProgram",PET_COMPONENT_PROGRAM_ENGINE_V2);
+  {cJSON *programs=cJSON_CreateArray();cJSON_AddItemToArray(programs,cJSON_CreateString(PET_COMPONENT_PROGRAM_ENGINE));cJSON_AddItemToArray(programs,cJSON_CreateString(PET_COMPONENT_PROGRAM_ENGINE_V2));cJSON_AddItemToObject(capabilities,"widgetPrograms",programs);}
+  cJSON_AddNumberToObject(capabilities,"widgetProgramMaxCode",PET_PROGRAM_CODE);
+  cJSON_AddNumberToObject(capabilities,"widgetProgramMaxCells",PET_PROGRAM_CELLS);
+#else
+  cJSON_AddStringToObject(capabilities,"widgetProgram",PET_COMPONENT_PROGRAM_ENGINE);
+#endif
+  cJSON_AddNumberToObject(capabilities,"widgetProgramMaxFuel",PET_PROGRAM_FUEL);
+  cJSON_AddNumberToObject(capabilities,"widgetProgramQuantum",PET_PROGRAM_QUANTUM);
+#if PET_COMPONENT_BACKGROUND_ENABLED
+  if(pet_p4_miniapp_background_available()){
+    cJSON_AddStringToObject(capabilities,"widgetProgramBackground",PET_P4_MINIAPP_BACKGROUND_ENGINE);
+    cJSON_AddStringToObject(capabilities,"widgetProgramInspect","p4-program-inspect-v1");
+    cJSON_AddNumberToObject(capabilities,"widgetProgramBackgroundMaxActive",pet_resources_limit(PET_RESOURCE_PROGRAM).leases);
+#if PET_COMPONENT_PROGRAM_PARENT_UNIFIED
+    cJSON_AddStringToObject(capabilities,"widgetProgramParent","p4-program-parent-v1");
+    cJSON_AddNumberToObject(capabilities,"widgetProgramAggregateQuantum",64);
+    cJSON_AddNumberToObject(capabilities,"widgetProgramAggregateFuel",pet_resources_limit(PET_RESOURCE_PROGRAM).units);
+#endif
+  }
+#endif
+#endif
+  cJSON_AddStringToObject(capabilities,"widgetAppForm","p4-app-form-v1");
+  if(g_boot_identity.ready){
+    cJSON_AddStringToObject(capabilities,"debugEvidenceIdentity","p4-evidence-identity-v1");
+    cJSON_AddStringToObject(capabilities,"debugBootId",g_boot_identity.id);
+  }
+#if PET_FORM_V2_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetAppFormV2","p4-app-form-v2");
+#endif
+  /* Track D app-shell grants: advertised only when the default-off flag is on. */
+#if PET_FORM_V3_ENABLED
+  cJSON_AddStringToObject(capabilities,"widgetAppFormV3","p4-app-form-v3");
+#endif
+#if PET_P4_APP_SHELL
+  cJSON_AddStringToObject(capabilities,"widgetAppShell","p4-app-shell-v1");
+#endif
+#if PET_P4_DATA_ROWS
+  cJSON_AddStringToObject(capabilities,"widgetDataRows","p4-data-rows-v1");
+#endif
+#if PET_P4_LONGTEXT
+  cJSON_AddStringToObject(capabilities,"widgetLongText","p4-longtext-v1");
+#endif
+#if PET_P4_NOTIFY
+  cJSON_AddStringToObject(capabilities,"widgetNotify","p4-notify-v1");
+#endif
   cJSON_AddStringToObject(capabilities, "widgetState", "p4-app-state-v1");
   cJSON_AddBoolToObject(capabilities, "widgetMediaNotice", true);
   cJSON_AddStringToObject(capabilities, "widgetInstrument", "p4-instrument-v1");
@@ -1972,24 +3138,132 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("blocks"));
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("snake"));
   cJSON_AddItemToArray(widget_games, cJSON_CreateString("flappy"));
+  cJSON_AddItemToArray(widget_games, cJSON_CreateString("gomoku"));
   cJSON_AddItemToObject(capabilities, "widgetGames", widget_games);
   cJSON_AddItemToArray(widget_game_presets, cJSON_CreateString("blocks"));
   cJSON_AddItemToArray(widget_game_presets, cJSON_CreateString("snake"));
   cJSON_AddItemToArray(widget_game_presets, cJSON_CreateString("flappy"));
+  cJSON_AddItemToArray(widget_game_presets, cJSON_CreateString("gomoku"));
   cJSON_AddItemToObject(capabilities, "widgetGamePresets", widget_game_presets);
   cJSON_AddNumberToObject(widget_limits, "maxVars", 8);
   cJSON_AddNumberToObject(widget_limits, "maxStates", 6);
   cJSON_AddNumberToObject(widget_limits, "maxPages", 4);
+  // Preserve the legacy/base limit for clients that do not understand profiles.
   cJSON_AddNumberToObject(widget_limits, "maxTransitions", 12);
+  cJSON_AddNumberToObject(widget_limits, "maxInputTransitions", 24);
+  cJSON_AddNumberToObject(widget_limits, "maxLegacyTransitions", 12);
+  cJSON_AddNumberToObject(widget_limits, "maxSurfaceNodes", 32);
+  cJSON_AddNumberToObject(widget_limits, "maxLegacySurfaceNodes", 20);
   cJSON_AddNumberToObject(widget_limits, "maxTicks", 8);
+  cJSON_AddNumberToObject(widget_limits, "maxConditions", 2);
+  cJSON_AddNumberToObject(widget_limits, "maxSfxCues", 8);
+#if PET_P4_CAPABILITY_EXT
+  {
+    /* Track C budgets, advertised only with their capability strings. */
+    cJSON *ext = cJSON_CreateObject();
+    cJSON_AddNumberToObject(ext, "sequenceTracks", 2);
+    cJSON_AddNumberToObject(ext, "sequenceNotes", 64);
+    cJSON_AddNumberToObject(ext, "sampleSlots", 4);
+    cJSON_AddNumberToObject(ext, "sampleBytes", 65536);
+    cJSON_AddNumberToObject(ext, "sampleBudgetBytes", 262144);
+    cJSON_AddNumberToObject(ext, "clipBytes", 524288);
+    cJSON_AddNumberToObject(ext, "clipSeconds", 5);
+    cJSON_AddNumberToObject(ext, "bigImageTiles", 16);
+    cJSON_AddNumberToObject(ext, "bigImageBudgetBytes", 1048576);
+    cJSON_AddNumberToObject(ext, "eventNames", 8);
+    cJSON_AddNumberToObject(ext, "eventQueue", 8);
+    cJSON_AddNumberToObject(ext, "alarms", 4);
+    cJSON_AddNumberToObject(ext, "alarmMinMs", 60000);
+    cJSON_AddItemToObject(widget_limits, "capabilityExt", ext);
+  }
+#endif
   cJSON_AddNumberToObject(widget_limits, "maxButtons", 8);
   cJSON_AddNumberToObject(widget_limits, "maxSceneEntities", PET_P4_GAME_MAX_ENTITIES);
   cJSON_AddNumberToObject(widget_limits, "maxSceneRules", PET_P4_GAME_MAX_RULES);
   cJSON_AddNumberToObject(widget_limits, "maxSceneOpsPerRule", PET_P4_GAME_MAX_OPS_PER_RULE);
-  cJSON_AddNumberToObject(widget_limits, "maxSceneSprites", PET_P4_MINIAPP_SPRITE_MAX);
-  cJSON_AddNumberToObject(widget_limits, "maxSceneSpritePixels", 4096);
+  /* The base limits stay the v1 contract for every package without graphics:"p4-graphics-v2". */
+  cJSON_AddNumberToObject(widget_limits, "maxSceneSprites", PET_P4_MINIAPP_SPRITE_V1_MAX);
+  cJSON_AddNumberToObject(widget_limits, "maxSceneSpritePixels", PET_P4_MINIAPP_SPRITE_V1_PIXELS);
   cJSON_AddNumberToObject(widget_limits, "maxWidgetJsonBytes", 8191);
+  cJSON_AddNumberToObject(widget_limits, "maxLegacyWidgetJsonBytes", 4095);
   cJSON_AddNumberToObject(widget_limits, "maxButtonsJsonBytes", 2047);
+  {
+    /* Ceilings for packages that declare quota p4-quota-v2; every value above
+     * stays the v1 contract for packages that do not. */
+    cJSON *quota = cJSON_CreateObject();
+    cJSON_AddStringToObject(quota, "profile", "p4-quota-v2");
+    cJSON_AddNumberToObject(quota, "maxVars", 16);
+    cJSON_AddNumberToObject(quota, "maxStates", 8);
+    cJSON_AddNumberToObject(quota, "maxPages", 6);
+    cJSON_AddNumberToObject(quota, "maxTransitions", 32);
+    cJSON_AddNumberToObject(quota, "maxTicks", 12);
+    cJSON_AddNumberToObject(quota, "maxSwitchChoices", 8);
+    cJSON_AddNumberToObject(quota, "maxSurfaceNodes", 48);
+    cJSON_AddNumberToObject(quota, "maxLocalItems", 24);
+    cJSON_AddNumberToObject(quota, "maxSaveVars", 16);
+    cJSON_AddNumberToObject(quota, "maxWidgetJsonBytes", 8191);
+    cJSON_AddItemToObject(widget_limits, "v2", quota);
+  }
+#if PET_P4_QUOTA_V3
+  {
+    /* Ceilings for packages that declare quota p4-quota-v3. */
+    cJSON *quota = cJSON_CreateObject();
+    cJSON_AddStringToObject(quota, "profile", "p4-quota-v3");
+    cJSON_AddNumberToObject(quota, "maxVars", 32);
+    cJSON_AddNumberToObject(quota, "maxStates", 16);
+    cJSON_AddNumberToObject(quota, "maxPages", 12);
+    cJSON_AddNumberToObject(quota, "maxTransitions", 48);
+    cJSON_AddNumberToObject(quota, "maxTicks", 16);
+    cJSON_AddNumberToObject(quota, "maxSwitchChoices", 12);
+    cJSON_AddNumberToObject(quota, "maxSurfaceNodes", 64);
+    cJSON_AddNumberToObject(quota, "maxLocalItems", 64);
+    cJSON_AddNumberToObject(quota, "maxSaveVars", 32);
+    cJSON_AddNumberToObject(quota, "maxStringVarBytes", 127);
+    cJSON_AddNumberToObject(quota, "maxWidgetJsonBytes", 12287);
+    cJSON_AddItemToObject(widget_limits, "v3", quota);
+  }
+#endif
+#if PET_P4_CELLS_V1
+  {
+    cJSON *cells = cJSON_CreateObject();
+    cJSON_AddNumberToObject(cells, "maxSide", PET_CELLS_MAX_SIDE);
+    cJSON_AddNumberToObject(cells, "maxCells", PET_CELLS_MAX);
+    cJSON_AddNumberToObject(cells, "maxOpsPerBranch", 4);
+    cJSON_AddItemToObject(widget_limits, "cells", cells);
+  }
+#endif
+#if PET_P4_TEXT_TABLE
+  {
+    cJSON *texts = cJSON_CreateObject();
+    cJSON_AddNumberToObject(texts, "maxEntries", 64);
+    cJSON_AddNumberToObject(texts, "maxEntryBytes", 120);
+    cJSON_AddNumberToObject(texts, "maxTotalBytes", 4096);
+    cJSON_AddItemToObject(widget_limits, "texts", texts);
+  }
+#endif
+#if PET_P4_GRAPHICS_V2
+  {
+    /* Ceilings for packages that declare graphics:"p4-graphics-v2". */
+    cJSON *graphics = cJSON_CreateObject();
+    cJSON_AddStringToObject(graphics, "profile", "p4-graphics-v2");
+    cJSON_AddNumberToObject(graphics, "maxSceneSprites", PET_P4_MINIAPP_SPRITE_DECLARED_MAX);
+    cJSON_AddNumberToObject(graphics, "maxSceneSpritePixels", PET_P4_MINIAPP_SPRITE_V2_PIXELS);
+    cJSON_AddNumberToObject(graphics, "maxSurfaceImages", PET_SURFACE_IMAGES);
+    cJSON_AddNumberToObject(graphics, "maxSurfaceImagePixels", PET_SURFACE_IMAGE_PIXELS);
+    cJSON_AddNumberToObject(graphics, "maxSurfaceImageBytes", PET_SURFACE_IMAGE_BYTES);
+    cJSON_AddNumberToObject(graphics, "maxFonts", PET_SURFACE_FONTS);
+    cJSON_AddNumberToObject(graphics, "maxFontChars", PET_SURFACE_FONT_CHARS);
+#if PET_P4_KEYFRAME_BG
+    cJSON_AddNumberToObject(graphics, "maxKeyframes", PET_SURFACE_KEYFRAMES);
+    cJSON_AddNumberToObject(graphics, "maxKeyframeBytes", 400000);
+#endif
+#if PET_P4_PARTICLES
+    cJSON_AddNumberToObject(graphics, "maxParticleEmitters", PET_SURFACE_PARTICLE_EMITTERS);
+    cJSON_AddNumberToObject(graphics, "maxParticleDots", PET_SURFACE_PARTICLE_DOTS);
+#endif
+    cJSON_AddItemToObject(widget_limits, "graphicsV2", graphics);
+  }
+#endif
   cJSON_AddBoolToObject(widget_limits, "fetchers", false);
   cJSON_AddBoolToObject(widget_limits, "readers", false);
   cJSON_AddItemToObject(capabilities, "widgetLimits", widget_limits);
@@ -2003,6 +3277,8 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddBoolToObject(capabilities, "diagnostics", true);
   cJSON_AddBoolToObject(capabilities, "resetReporting", true);
   cJSON_AddBoolToObject(capabilities, "audio", audio_ready || audio_playback_ready);
+  if (audio_playback_ready && pet_audio_volume_ready())
+    cJSON_AddStringToObject(capabilities,"audioMasterVolume",PET_AUDIO_MASTER_VOLUME_ENGINE);
   cJSON_AddBoolToObject(capabilities, "touch", touch_ready);
   cJSON_AddStringToObject(audio_capture, "codec", pet_p4_audio_codec_name());
   cJSON_AddStringToObject(audio_capture, "format", "pcm_s16le");
@@ -2038,6 +3314,28 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddStringToObject(capabilities, "bubblePixels", "p4-text-alpha-v2");
   cJSON_AddStringToObject(capabilities, "bubblePixelsBoot", pet_bubble_pixels_boot());
   cJSON_AddBoolToObject(capabilities, "screenshot", true);
+  cJSON_AddStringToObject(capabilities, "screenshotTransfer", "pull-fnv1a32-v1");
+#if PET_P4_SCREENSHOT_CLOSE_ACK
+  cJSON_AddStringToObject(capabilities,"screenshotCloseAck",PET_SCREENSHOT_CLOSE_ACK_ENGINE);
+#endif
+#if PET_P4_STORAGE_IO_TRACE_ENABLE
+  if(pet_storage_io_ready())cJSON_AddStringToObject(capabilities,"storageIoTrace","p4-storage-io-trace-v1");
+#if PET_P4_STORAGE_UNIFORM_CACHE_ENABLE
+  cJSON_AddBoolToObject(capabilities,"storageUniformCacheApplying",PET_P4_STORAGE_UNIFORM_CACHE_APPLY!=0);
+#endif
+#if PET_P4_STORAGE_PAGE_CACHE_ENABLE
+  cJSON_AddBoolToObject(capabilities,"storagePageCacheApplying",PET_P4_STORAGE_PAGE_CACHE_APPLY!=0);
+  cJSON_AddStringToObject(capabilities,"storagePageCacheHash",PET_P4_STORAGE_PAGE_CACHE_STRIDE_HASH?"stride4096-v1":"mixed-v1");
+  cJSON_AddBoolToObject(capabilities,"storagePageCacheAutomatic",PET_P4_STORAGE_CACHE_SCOPE_ENABLED!=0);
+#if PET_P4_STORAGE_SAVE_CACHE_SCOPE_ENABLED
+  cJSON_AddBoolToObject(capabilities,"storageSaveCacheAutomatic",true);
+#endif
+#if PET_P4_BOOT_TRACE_ENABLE
+  cJSON_AddStringToObject(capabilities,"bootTrace","p4-boot-trace-v1");
+  cJSON_AddBoolToObject(capabilities,"storageBootCacheAutomatic",PET_P4_STORAGE_BOOT_CACHE_SCOPE_ENABLED!=0);
+#endif
+#endif
+#endif
   cJSON_AddNumberToObject(display, "width", 640);
   cJSON_AddNumberToObject(display, "height", 480);
   cJSON_AddNumberToObject(display, "physicalWidth", 480);
@@ -2066,10 +3364,17 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToObject(appearance, "formats", appearance_formats);
   cJSON_AddNumberToObject(appearance, "maxSlots", 2);
   cJSON_AddBoolToObject(appearance, "slotReuse", true);
+  if(g_asset_query_io_begin&&g_asset_query_pending)
+    cJSON_AddStringToObject(appearance,"quiescentQuery",APPEARANCE_OBSERVATION_SCHEMA);
   cJSON_AddNumberToObject(appearance, "builtinSlot", 0);
   cJSON_AddNumberToObject(appearance, "customSlot", PET_P4_RAW_APPEARANCE_SLOT);
   cJSON_AddBoolToObject(appearance, "builtinProtected", true);
   cJSON_AddBoolToObject(appearance, "systemCues", true);
+  if(g_asset_query_io_begin&&g_asset_query_io_end&&g_asset_query_pending){
+    cJSON_AddStringToObject(capabilities,"appearanceAudioPatch","p4-audio-patch-v1");
+    cJSON_AddNumberToObject(capabilities,"appearanceAudioPatchMaxBytes",PET_AUDIO_PATCH_MAX_BYTES);
+    cJSON_AddNumberToObject(capabilities,"appearanceAudioPatchChunkBytes",PET_AUDIO_PATCH_CHUNK_BYTES);
+  }
   cJSON_AddBoolToObject(
     appearance,
     "rawSlot0",
@@ -2133,6 +3438,10 @@ void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn 
   cJSON_AddItemToObject(payload, "capabilities", capabilities);
 
   send_topic_payload(send_line, ctx, "hello", payload);
+}
+
+void pet_p4_send_hello(const pet_p4_runtime_state_t *state, pet_p4_send_line_fn send_line, void *ctx) {
+  pet_p4_send_hello_for_board(state ? state->board_device_id : NULL, send_line, ctx);
 }
 
 static void handle_state_topic(pet_p4_runtime_state_t *state, const char *topic, const cJSON *payload) {
@@ -2531,6 +3840,8 @@ static void handle_session_current(pet_p4_runtime_state_t *state, const cJSON *p
   }
 }
 
+#include "pet_p4_background_protocol.inc"
+
 static bool handle_widget_topic(
   pet_p4_runtime_state_t *state,
   const char *topic,
@@ -2542,6 +3853,10 @@ static bool handle_widget_topic(
   char error[160] = {0};
   bool ok = false;
   const char *phase = "unknown";
+  pet_widget_trace_kind_t trace_kind = !strcmp(topic,"widget/commit") ? PET_WTRACE_COMMIT
+    : !strcmp(topic,"widget/delete") ? PET_WTRACE_DELETE
+    : !strcmp(topic,"widget/activate") ? PET_WTRACE_ACTIVATE : PET_WTRACE_NONE;
+  PET_WIDGET_TRACE_OPERATION(trace_operation, trace_kind);
   if (strcmp(topic, "widget/begin") == 0) {
     phase = "begin";
     ok = pet_p4_miniapp_install_begin(payload, error, sizeof(error));
@@ -2554,7 +3869,11 @@ static bool handle_widget_topic(
     phase = "commit";
     const bool repair_resources = pet_p4_miniapp_resource_repair_active();
     ok = pet_p4_miniapp_install_commit(payload, error, sizeof(error));
-    if (ok && state) {
+    bool unchanged=false;
+#if PET_P4_STORAGE_PRESERVE_UNCHANGED
+    unchanged=ok&&pet_p4_miniapp_install_unchanged();
+#endif
+    if (ok && state && !unchanged) {
       pet_p4_miniapp_sync_stats(&state->stats);
       if (!repair_resources) copy_text(state->screen_page, sizeof(state->screen_page), "app");
       state->last_update_ms += 1;
@@ -2562,6 +3881,48 @@ static bool handle_widget_topic(
     send_widget_ack(send_line, ctx, transfer_id, phase, payload, ok, error);
   } else if (strcmp(topic, "widget/list") == 0) {
     ok = send_widget_inventory(state, payload, send_line, ctx);
+  } else if (!strcmp(topic,"widget/program-query")||!strcmp(topic,"widget/program-start")||!strcmp(topic,"widget/program-stop")||!strcmp(topic,"widget/program-inspect")) {
+    ok=handle_background_program_topic(state,topic,payload,send_line,ctx);
+  } else if (!strcmp(topic,"widget/catalog_inspect")||!strcmp(topic,"widget/catalog_reconcile")) {
+    ok=send_catalog_admin(state,topic,payload,send_line,ctx);
+  } else if (strcmp(topic,"widget/select_by_id")==0) {
+    const char *request_id=json_string(payload,"requestId"),*widget_id=json_string(payload,"widgetId");
+    unsigned request_fields=0,id_fields=0;
+    bool fields_ok=cJSON_IsObject(payload)&&request_id[0]&&strlen(request_id)<96
+      &&widget_id[0]&&strlen(widget_id)<PET_P4_MINIAPP_WIDGET_ID_MAX;
+    const cJSON *field;
+    cJSON_ArrayForEach(field,payload){
+      if(field->string&&!strcmp(field->string,"requestId"))request_fields++;
+      else if(field->string&&!strcmp(field->string,"widgetId"))id_fields++;
+      else fields_ok=false;
+    }
+    if(!fields_ok||request_fields!=1||id_fields!=1){
+      send_protocol_ack(send_line,ctx,topic,payload,false,"invalid_selection","selection accepts one bounded requestId and widgetId only");return false;
+    }
+    if(pet_p4_miniapp_catalog_recovery_blocked()){
+      send_protocol_ack(send_line,ctx,topic,payload,false,"catalog_unavailable","catalog recovery is blocked; selection unchanged");return false;
+    }
+    /* Only move the existing visible catalog cursor. Never activate/load a
+     * component, change the screen page, or persist/restart its runtime. */
+    const size_t count=pet_p4_miniapp_catalog_count();
+    for(size_t index=0;index<count;index++){
+      pet_p4_miniapp_catalog_entry_t entry={0};
+      if(!pet_p4_miniapp_catalog_get(index,&entry))break;
+      if(!strcmp(entry.widget_id,widget_id)){ok=pet_p4_miniapp_catalog_select_durable(index);break;}
+    }
+    if(ok&&state)state->last_update_ms+=1;
+    send_protocol_ack(send_line,ctx,topic,payload,ok,ok?"":"selection_failed",ok?"":"existing visible component not found; selection unchanged");
+  } else if (strcmp(topic,"widget/activate")==0) {
+    const cJSON *show=cJSON_GetObjectItemCaseSensitive(payload,"show");
+    bool fields_ok=!show||cJSON_IsBool(show);
+    const cJSON *field; cJSON_ArrayForEach(field,payload){if(!field->string||(strcmp(field->string,"widgetId")&&strcmp(field->string,"show")&&strcmp(field->string,"requestId")))fields_ok=false;}
+    if(!fields_ok){send_protocol_ack(send_line,ctx,topic,payload,false,"invalid_activation","activation accepts widgetId, show and requestId only");return false;}
+    if(pet_p4_audio_active()||pet_p4_audio_playback_active()||pet_p4_audio_conversation_active()||pet_p4_audio_music_active()){
+      send_protocol_ack(send_line,ctx,topic,payload,false,"audio_busy","component navigation deferred while audio is active");return false;
+    }
+    ok=pet_p4_miniapp_catalog_activate_id(json_string(payload,"widgetId"));
+    if(ok&&state){pet_p4_miniapp_sync_stats(&state->stats);if(cJSON_IsTrue(show))copy_text(state->screen_page,sizeof(state->screen_page),"app");state->last_update_ms+=1;}
+    send_protocol_ack(send_line,ctx,topic,payload,ok,ok?"":"activation_failed",ok?"":"installed visible component could not be opened; no package was installed or deleted");
   } else if (strcmp(topic, "widget/delete") == 0) {
     phase = "delete";
     if (!transfer_id[0] || strlen(transfer_id) >= 64) {
@@ -2580,22 +3941,37 @@ static bool handle_widget_topic(
   } else {
     send_widget_ack(send_line, ctx, transfer_id, phase, payload, false, "unsupported widget phase");
   }
+  pet_widget_trace_end(&trace_operation, ok);
   return ok;
 }
 
-bool pet_p4_handle_line(
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((noinline))
+#endif
+bool pet_p4_protocol_source_valid(const char *line){
+  return pet_json_source_bounded_text(line);
+}
+
+bool pet_p4_handle_line_with_reply(
   pet_p4_runtime_state_t *state,
   const char *line,
   pet_p4_send_line_fn send_line,
-  void *ctx
+  void *ctx,
+  pet_p4_query_reply_t *reply
 ) {
   cJSON *root;
   cJSON *payload;
   const char *topic;
-  if (!state || !line || !line[0]) return false;
+  /* A retired physical ingress is consumed, never a fallback dispatch. */
+  if (!asset_phase_send_current(send_line, ctx)) return true;
+  if (!state || !line || !line[0] || (reply && reply->line)) return false;
+  if(!pet_p4_protocol_source_valid(line)){
+    send_protocol_ack(send_line,ctx,"",NULL,false,"invalid_json","device JSON text is invalid or exceeds the container depth limit");
+    return false;
+  }
   pet_app_host_transport(send_line,ctx,state->board_device_id);
   pet_p4_media_transport(send_line,ctx);
-  root = cJSON_Parse(line);
+  root = cJSON_ParseWithOpts(line, NULL, true);
   if (!cJSON_IsObject(root)) {
     send_protocol_ack(send_line, ctx, "", NULL, false, "invalid_json", "message must be a JSON object");
     cJSON_Delete(root);
@@ -2627,8 +4003,21 @@ bool pet_p4_handle_line(
   );
 
   if (strcmp(topic, "ack") == 0 || strcmp(topic, "bind") == 0) {
+#if PET_P4_SERIAL_CONTROL_NEGOTIATED
+    if(!pet_control_session_payload(ctx,payload)){
+      send_protocol_ack(send_line,ctx,topic,payload,false,"invalid_control_negotiation","invalid bounded control integrity proposal");
+      cJSON_Delete(root);return false;
+    }
+#endif
     copy_text(state->desktop_device_id, sizeof(state->desktop_device_id), json_string(payload, "desktopDeviceId"));
     pet_p4_send_hello(state, send_line, ctx);
+  } else if (strcmp(topic,"debug/identity")==0){
+    const char *request=pet_evidence_source_valid(line)?pet_evidence_request(payload):NULL;const esp_app_desc_t *app=esp_app_get_description();
+    char elf[65]={0};if(app)for(unsigned i=0;i<32;i++)snprintf(elf+2*i,3,"%02x",app->app_elf_sha256[i]);
+    int64_t uptime=esp_timer_get_time();
+    cJSON *identity=request&&uptime>=0?pet_evidence_identity(&g_boot_identity,request,state->board_device_id,PET_P4_BUILD_ID,PET_P4_BUILD_GIT_SHA,elf,PET_P4_BUILD_DIRTY!=0,PET_P4_PROTOCOL_SCHEMA,(uint64_t)uptime):NULL;
+    if(identity)send_topic_payload(send_line,ctx,"debug/identity",identity);
+    else send_protocol_ack(send_line,ctx,topic,payload,false,"identity_unavailable","bounded identity request or identity unavailable");
   } else if (strcmp(topic, "approval/cancel") == 0) {
     const char *request_id = json_string(payload, "requestId");
     if (request_id[0]
@@ -2664,6 +4053,28 @@ bool pet_p4_handle_line(
   } else if (strcmp(topic, "speech/text") == 0) {
     handle_speech(state, payload);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+#if PET_P4_NOTIFY
+  } else if (strcmp(topic, PET_NOTIFY_TOPIC) == 0) {
+    /* p4-notify-v1: bounded component notification into the main-page bubble.
+     * Same payload shape as the device -> PC toast; one per component per 30 s. */
+    static pet_notify_limiter_t notify_limiter;
+    pet_notify_t notice;
+    if (!pet_notify_parse(payload, &notice)) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "invalid_notify", "componentId/title required; text<=120, badge int");
+      cJSON_Delete(root);
+      return false;
+    }
+    if (!pet_notify_admit(&notify_limiter, notice.component, (uint64_t) (esp_timer_get_time() / 1000ULL))) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "notify_cooldown", "one notification per component every 30 s");
+      cJSON_Delete(root);
+      return false;
+    }
+    pet_notify_bubble_title(&notice, state->current_title, sizeof(state->current_title));
+    copy_text(state->current_speech, sizeof(state->current_speech), notice.text);
+    copy_text(state->current_status_text, sizeof(state->current_status_text), "通知");
+    state->last_update_ms = (unsigned long long) (esp_timer_get_time() / 1000ULL);
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+#endif
   } else if (strcmp(topic, "session/current") == 0) {
     handle_session_current(state, payload);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
@@ -2756,6 +4167,16 @@ bool pet_p4_handle_line(
       return false;
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+#if PET_SERVICE_BRIDGE_ENABLED
+  } else if (!strcmp(topic,"app/image")) {
+    if(!strcmp(json_string(payload,"operation"),"query")){
+      bool ready=pet_app_host_image_ready(payload,esp_timer_get_time()/1000ULL);send_protocol_ack(send_line,ctx,topic,payload,true,ready?"ready":"missing",NULL);
+    }else{
+      bool ok=pet_app_host_image_apply(payload,esp_timer_get_time()/1000ULL);
+      send_protocol_ack(send_line,ctx,topic,payload,ok,ok?"ok":"app_image_invalid",ok?"":"image did not match the active view");
+    }
+    state->last_update_ms+=1;
+#endif
   } else if (!strcmp(topic,"app/snapshot")) {
     bool ok=pet_app_host_apply(payload,esp_timer_get_time()/1000ULL);
     if(!ok)send_protocol_ack(send_line,ctx,topic,payload,false,"app_snapshot_invalid","app snapshot did not match the active request");
@@ -2770,6 +4191,17 @@ bool pet_p4_handle_line(
       if(pet_p4_miniapp_media_active()||pet_p4_miniapp_host_source(json_string(payload,"source")))copy_text(state->screen_page,sizeof(state->screen_page),"app");
     }
     state->last_update_ms += 1;
+  } else if (strcmp(topic, "audio/volume") == 0) {
+    bool volume_ok=false;
+    char *volume_reply=pet_audio_volume_reply(root,state->board_device_id,
+      pet_p4_audio_playback_ready(),&volume_ok);
+    bool volume_serialized=volume_reply!=NULL;
+    if (volume_reply) {
+      if (reply) reply->line=volume_reply;
+      else {if (send_line) send_line(volume_reply,ctx);cJSON_free(volume_reply);}
+    }
+    cJSON_Delete(root);
+    return volume_serialized && volume_ok;
   } else if (strcmp(topic, "audio/query") == 0) {
     pet_p4_audio_send_status();
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
@@ -2848,6 +4280,23 @@ bool pet_p4_handle_line(
     pet_p4_conversation_playback_begin(state, "");
     pet_p4_audio_stream_flush();
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+#if PET_P4_EVENTS
+  } else if (strcmp(topic, "component/alarm_policy") == 0) {
+    /* p4-events-v1: the PC authorises (per boot) whether hidden background alarms may
+     * raise a main-page bubble. Default off; never persisted; no alarm data crosses. */
+    const cJSON *background = cJSON_GetObjectItemCaseSensitive(payload, "background");
+    if (!cJSON_IsBool(background)) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "invalid_alarm_policy", "background must be a boolean");
+      cJSON_Delete(root);
+      return false;
+    }
+    if (!pet_p4_miniapp_alarm_policy_prepare(cJSON_IsTrue(background))) {
+      send_protocol_ack(send_line, ctx, topic, payload, false, "alarm_restore_unavailable", "saved alarms unavailable; prior policy retained");
+      cJSON_Delete(root);
+      return false;
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+#endif
   } else if (strcmp(topic, "ui/conversation") == 0) {
     bool phase_changed = strcmp(state->conversation_state, json_string(payload, "state")) != 0;
     bool accepted = pet_p4_conversation_update(state, json_string(payload, "sessionId"),
@@ -2874,7 +4323,7 @@ bool pet_p4_handle_line(
       g_host_wall_clock_at_ms = heartbeat_now_ms;
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
-  } else if (pet_p4_diagnostics_handle_topic(topic, payload, state, send_line, ctx)) {
+  } else if (pet_p4_diagnostics_handle_topic_with_reply(topic, payload, state, send_line, ctx, reply)) {
     state->last_update_ms += 1;
   } else if (pet_p4_ota_handle_topic(topic, payload, send_line, ctx)) {
     state->last_update_ms += 1;
@@ -2906,7 +4355,7 @@ bool pet_p4_handle_line(
     state->last_update_ms += 1;
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "miniapp/query") == 0) {
-    send_miniapp_state(send_line, ctx);
+    send_miniapp_state(send_line, ctx, payload);
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else {
     bool known = topic_is_known_but_unsupported(topic);
@@ -2926,3 +4375,60 @@ bool pet_p4_handle_line(
   cJSON_Delete(root);
   return true;
 }
+
+/* RAM-only service lane during a storage command. Caller owns the state
+ * mutex; returned serialization is sent only after releasing it. This never
+ * enters the mutation dispatcher, adopts its deferred ACK, or touches files. */
+static void storage_query_capture(const char *line, void *ctx) {
+  pet_p4_query_reply_t *reply = ctx;
+  if (!reply || reply->line || !line) return;
+  size_t bytes = strlen(line) + 1;
+  reply->line = cJSON_malloc(bytes);
+  if (reply->line) memcpy(reply->line, line, bytes);
+}
+bool pet_p4_handle_storage_query(pet_p4_runtime_state_t *state,
+    const char *line, pet_p4_query_reply_t *reply) {
+  if (!state || !line || !reply || reply->line || strlen(line) > 1024
+      || !pet_p4_protocol_source_valid(line)) return false;
+  cJSON *root = cJSON_ParseWithOpts(line, NULL, true);
+  const cJSON *payload = root ? cJSON_GetObjectItemCaseSensitive(root, "payload") : NULL;
+  const char *topic = json_string(root, "topic");
+  bool handled = false;
+  if (cJSON_IsObject(root) && cJSON_IsObject(payload)) {
+    if (!strcmp(topic, "system/heartbeat")) {
+      const cJSON *clock = cJSON_GetObjectItemCaseSensitive(payload, "clock");
+      if (clock) (void)pet_p4_miniapp_clock_sync(clock, esp_timer_get_time()/1000ULL);
+      send_protocol_ack_if_requested(storage_query_capture, reply, topic, payload);
+      handled = true;
+    } else if (!strcmp(topic,"widget/catalog_inspect")) {
+      (void)send_catalog_admin(state,topic,payload,storage_query_capture,reply);
+      handled=true;
+    } else if (!strcmp(topic, "widget/list")) {
+      (void)send_widget_inventory(state, payload, storage_query_capture, reply);
+      handled = true;
+#if PET_P4_DIAGNOSTIC_STORAGE_CACHED && PET_P4_OTA_METADATA_CACHED
+    } else if (!strcmp(topic, "diagnostics/query")) {
+      handled = pet_p4_diagnostics_handle_topic_with_reply(topic, payload, state,
+        storage_query_capture, reply, reply);
+#endif
+    }
+    if (handled) pet_p4_state_note_host_activity(state, esp_timer_get_time()/1000ULL);
+  }
+  cJSON_Delete(root);
+  return handled;
+}
+
+bool pet_p4_handle_line(
+  pet_p4_runtime_state_t *state, const char *line,
+  pet_p4_send_line_fn send_line, void *ctx
+) {
+  return pet_p4_handle_line_with_reply(state, line, send_line, ctx, NULL);
+}
+#if PET_P4_MUTATION_ACK_DEFERRED
+void pet_p4_protocol_set_deferred_reply(pet_p4_query_reply_t *reply){
+  /* Dispatcher only, around one locked dispatch; NULL restores the original
+   * locked ACK path. Never called from handlers, hosts or other tasks. */
+  g_deferred_reply=reply;
+  g_deferred_reply_owner=reply?xTaskGetCurrentTaskHandle():NULL;
+}
+#endif

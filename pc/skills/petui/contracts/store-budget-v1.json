@@ -1,0 +1,1172 @@
+{
+ "profile": "p4-store-budget-v1",
+ "cases": [
+  {
+   "name": "legacy eight integers",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "int",
+      "init": 0
+     },
+     "v1": {
+      "type": "int",
+      "init": 0
+     },
+     "v2": {
+      "type": "int",
+      "init": 0
+     },
+     "v3": {
+      "type": "int",
+      "init": 0
+     },
+     "v4": {
+      "type": "int",
+      "init": 0
+     },
+     "v5": {
+      "type": "int",
+      "init": 0
+     },
+     "v6": {
+      "type": "int",
+      "init": 0
+     },
+     "v7": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    }
+   },
+   "ok": true
+  },
+  {
+   "name": "v2 sixteen integers",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "int",
+      "init": 0
+     },
+     "v1": {
+      "type": "int",
+      "init": 0
+     },
+     "v2": {
+      "type": "int",
+      "init": 0
+     },
+     "v3": {
+      "type": "int",
+      "init": 0
+     },
+     "v4": {
+      "type": "int",
+      "init": 0
+     },
+     "v5": {
+      "type": "int",
+      "init": 0
+     },
+     "v6": {
+      "type": "int",
+      "init": 0
+     },
+     "v7": {
+      "type": "int",
+      "init": 0
+     },
+     "v8": {
+      "type": "int",
+      "init": 0
+     },
+     "v9": {
+      "type": "int",
+      "init": 0
+     },
+     "v10": {
+      "type": "int",
+      "init": 0
+     },
+     "v11": {
+      "type": "int",
+      "init": 0
+     },
+     "v12": {
+      "type": "int",
+      "init": 0
+     },
+     "v13": {
+      "type": "int",
+      "init": 0
+     },
+     "v14": {
+      "type": "int",
+      "init": 0
+     },
+     "v15": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10",
+      "v11",
+      "v12",
+      "v13",
+      "v14",
+      "v15"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v2"
+   },
+   "ok": true
+  },
+  {
+   "name": "v3 all thirty-two integers",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "int",
+      "init": 0
+     },
+     "v1": {
+      "type": "int",
+      "init": 0
+     },
+     "v2": {
+      "type": "int",
+      "init": 0
+     },
+     "v3": {
+      "type": "int",
+      "init": 0
+     },
+     "v4": {
+      "type": "int",
+      "init": 0
+     },
+     "v5": {
+      "type": "int",
+      "init": 0
+     },
+     "v6": {
+      "type": "int",
+      "init": 0
+     },
+     "v7": {
+      "type": "int",
+      "init": 0
+     },
+     "v8": {
+      "type": "int",
+      "init": 0
+     },
+     "v9": {
+      "type": "int",
+      "init": 0
+     },
+     "v10": {
+      "type": "int",
+      "init": 0
+     },
+     "v11": {
+      "type": "int",
+      "init": 0
+     },
+     "v12": {
+      "type": "int",
+      "init": 0
+     },
+     "v13": {
+      "type": "int",
+      "init": 0
+     },
+     "v14": {
+      "type": "int",
+      "init": 0
+     },
+     "v15": {
+      "type": "int",
+      "init": 0
+     },
+     "v16": {
+      "type": "int",
+      "init": 0
+     },
+     "v17": {
+      "type": "int",
+      "init": 0
+     },
+     "v18": {
+      "type": "int",
+      "init": 0
+     },
+     "v19": {
+      "type": "int",
+      "init": 0
+     },
+     "v20": {
+      "type": "int",
+      "init": 0
+     },
+     "v21": {
+      "type": "int",
+      "init": 0
+     },
+     "v22": {
+      "type": "int",
+      "init": 0
+     },
+     "v23": {
+      "type": "int",
+      "init": 0
+     },
+     "v24": {
+      "type": "int",
+      "init": 0
+     },
+     "v25": {
+      "type": "int",
+      "init": 0
+     },
+     "v26": {
+      "type": "int",
+      "init": 0
+     },
+     "v27": {
+      "type": "int",
+      "init": 0
+     },
+     "v28": {
+      "type": "int",
+      "init": 0
+     },
+     "v29": {
+      "type": "int",
+      "init": 0
+     },
+     "v30": {
+      "type": "int",
+      "init": 0
+     },
+     "v31": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10",
+      "v11",
+      "v12",
+      "v13",
+      "v14",
+      "v15",
+      "v16",
+      "v17",
+      "v18",
+      "v19",
+      "v20",
+      "v21",
+      "v22",
+      "v23",
+      "v24",
+      "v25",
+      "v26",
+      "v27",
+      "v28",
+      "v29",
+      "v30",
+      "v31"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3"
+   },
+   "ok": true
+  },
+  {
+   "name": "v3 two full ordinary strings",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "a": {
+      "type": "string",
+      "init": ""
+     },
+     "b": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "a",
+      "b"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3"
+   },
+   "ok": true
+  },
+  {
+   "name": "v3 three full ordinary strings overflow despite empty initial values",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "a": {
+      "type": "string",
+      "init": ""
+     },
+     "b": {
+      "type": "string",
+      "init": ""
+     },
+     "c": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "a",
+      "b",
+      "c"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3"
+   },
+   "ok": false
+  },
+  {
+   "name": "only selected fields consume budget",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "string",
+      "init": ""
+     },
+     "v1": {
+      "type": "string",
+      "init": ""
+     },
+     "v2": {
+      "type": "string",
+      "init": ""
+     },
+     "v3": {
+      "type": "string",
+      "init": ""
+     },
+     "v4": {
+      "type": "string",
+      "init": ""
+     },
+     "v5": {
+      "type": "string",
+      "init": ""
+     },
+     "v6": {
+      "type": "string",
+      "init": ""
+     },
+     "v7": {
+      "type": "string",
+      "init": ""
+     },
+     "v8": {
+      "type": "string",
+      "init": ""
+     },
+     "v9": {
+      "type": "string",
+      "init": ""
+     },
+     "v10": {
+      "type": "string",
+      "init": ""
+     },
+     "v11": {
+      "type": "string",
+      "init": ""
+     },
+     "v12": {
+      "type": "string",
+      "init": ""
+     },
+     "v13": {
+      "type": "string",
+      "init": ""
+     },
+     "v14": {
+      "type": "string",
+      "init": ""
+     },
+     "v15": {
+      "type": "string",
+      "init": ""
+     },
+     "v16": {
+      "type": "string",
+      "init": ""
+     },
+     "v17": {
+      "type": "string",
+      "init": ""
+     },
+     "v18": {
+      "type": "string",
+      "init": ""
+     },
+     "v19": {
+      "type": "string",
+      "init": ""
+     },
+     "v20": {
+      "type": "string",
+      "init": ""
+     },
+     "v21": {
+      "type": "string",
+      "init": ""
+     },
+     "v22": {
+      "type": "string",
+      "init": ""
+     },
+     "v23": {
+      "type": "string",
+      "init": ""
+     },
+     "v24": {
+      "type": "string",
+      "init": ""
+     },
+     "v25": {
+      "type": "string",
+      "init": ""
+     },
+     "v26": {
+      "type": "string",
+      "init": ""
+     },
+     "v27": {
+      "type": "string",
+      "init": ""
+     },
+     "v28": {
+      "type": "string",
+      "init": ""
+     },
+     "v29": {
+      "type": "string",
+      "init": ""
+     },
+     "v30": {
+      "type": "string",
+      "init": ""
+     },
+     "v31": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v31"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3"
+   },
+   "ok": true
+  },
+  {
+   "name": "thirty-two full strings cannot fit",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "string",
+      "init": ""
+     },
+     "v1": {
+      "type": "string",
+      "init": ""
+     },
+     "v2": {
+      "type": "string",
+      "init": ""
+     },
+     "v3": {
+      "type": "string",
+      "init": ""
+     },
+     "v4": {
+      "type": "string",
+      "init": ""
+     },
+     "v5": {
+      "type": "string",
+      "init": ""
+     },
+     "v6": {
+      "type": "string",
+      "init": ""
+     },
+     "v7": {
+      "type": "string",
+      "init": ""
+     },
+     "v8": {
+      "type": "string",
+      "init": ""
+     },
+     "v9": {
+      "type": "string",
+      "init": ""
+     },
+     "v10": {
+      "type": "string",
+      "init": ""
+     },
+     "v11": {
+      "type": "string",
+      "init": ""
+     },
+     "v12": {
+      "type": "string",
+      "init": ""
+     },
+     "v13": {
+      "type": "string",
+      "init": ""
+     },
+     "v14": {
+      "type": "string",
+      "init": ""
+     },
+     "v15": {
+      "type": "string",
+      "init": ""
+     },
+     "v16": {
+      "type": "string",
+      "init": ""
+     },
+     "v17": {
+      "type": "string",
+      "init": ""
+     },
+     "v18": {
+      "type": "string",
+      "init": ""
+     },
+     "v19": {
+      "type": "string",
+      "init": ""
+     },
+     "v20": {
+      "type": "string",
+      "init": ""
+     },
+     "v21": {
+      "type": "string",
+      "init": ""
+     },
+     "v22": {
+      "type": "string",
+      "init": ""
+     },
+     "v23": {
+      "type": "string",
+      "init": ""
+     },
+     "v24": {
+      "type": "string",
+      "init": ""
+     },
+     "v25": {
+      "type": "string",
+      "init": ""
+     },
+     "v26": {
+      "type": "string",
+      "init": ""
+     },
+     "v27": {
+      "type": "string",
+      "init": ""
+     },
+     "v28": {
+      "type": "string",
+      "init": ""
+     },
+     "v29": {
+      "type": "string",
+      "init": ""
+     },
+     "v30": {
+      "type": "string",
+      "init": ""
+     },
+     "v31": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10",
+      "v11",
+      "v12",
+      "v13",
+      "v14",
+      "v15",
+      "v16",
+      "v17",
+      "v18",
+      "v19",
+      "v20",
+      "v21",
+      "v22",
+      "v23",
+      "v24",
+      "v25",
+      "v26",
+      "v27",
+      "v28",
+      "v29",
+      "v30",
+      "v31"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3"
+   },
+   "ok": false
+  },
+  {
+   "name": "p4-app-form-v2 v3 four bounded committed strings",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "f0": {
+      "type": "string",
+      "init": ""
+     },
+     "f1": {
+      "type": "string",
+      "init": ""
+     },
+     "f2": {
+      "type": "string",
+      "init": ""
+     },
+     "f3": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "f0",
+      "f1",
+      "f2",
+      "f3"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3",
+    "form": {
+     "engine": "p4-app-form-v2",
+     "fields": [
+      {
+       "kind": "text",
+       "var": "f0",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f1",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f2",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f3",
+       "max_bytes": 63
+      }
+     ]
+    }
+   },
+   "ok": true
+  },
+  {
+   "name": "p4-app-form-v3 v3 four bounded committed strings",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "f0": {
+      "type": "string",
+      "init": ""
+     },
+     "f1": {
+      "type": "string",
+      "init": ""
+     },
+     "f2": {
+      "type": "string",
+      "init": ""
+     },
+     "f3": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "f0",
+      "f1",
+      "f2",
+      "f3"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v3",
+    "form": {
+     "engine": "p4-app-form-v3",
+     "fields": [
+      {
+       "kind": "text",
+       "var": "f0",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f1",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f2",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "f3",
+       "max_bytes": 63
+      }
+     ]
+    }
+   },
+   "ok": true
+  },
+  {
+   "name": "legacy ordinary strings remain unowned",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "a": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "a"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    }
+   },
+   "ok": false
+  },
+  {
+   "name": "v2 three committed strings overflow",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "a": {
+      "type": "string",
+      "init": ""
+     },
+     "b": {
+      "type": "string",
+      "init": ""
+     },
+     "c": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "a",
+      "b",
+      "c"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v2",
+    "form": {
+     "engine": "p4-app-form-v2",
+     "fields": [
+      {
+       "kind": "text",
+       "var": "a",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "b",
+       "max_bytes": 63
+      },
+      {
+       "kind": "text",
+       "var": "c",
+       "max_bytes": 63
+      }
+     ]
+    }
+   },
+   "ok": false
+  },
+  {
+   "name": "v3 page and alarm metadata reserved",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "a": {
+      "type": "string",
+      "init": ""
+     },
+     "b": {
+      "type": "string",
+      "init": ""
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "a",
+      "b"
+     ],
+     "states": {
+      "ready": "ready"
+     },
+     "page": true
+    },
+    "quota": "p4-quota-v3",
+    "pages": [
+     {
+      "id": "main"
+     }
+    ],
+    "alarms": [
+     {
+      "id": "tick"
+     }
+    ]
+   },
+   "ok": true
+  },
+  {
+   "name": "v2 over count rejected",
+   "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "states": [
+     "ready"
+    ],
+    "initial_state": "ready",
+    "surface": {
+     "engine": "p4-app-surface-v1"
+    },
+    "vars": {
+     "v0": {
+      "type": "int",
+      "init": 0
+     },
+     "v1": {
+      "type": "int",
+      "init": 0
+     },
+     "v2": {
+      "type": "int",
+      "init": 0
+     },
+     "v3": {
+      "type": "int",
+      "init": 0
+     },
+     "v4": {
+      "type": "int",
+      "init": 0
+     },
+     "v5": {
+      "type": "int",
+      "init": 0
+     },
+     "v6": {
+      "type": "int",
+      "init": 0
+     },
+     "v7": {
+      "type": "int",
+      "init": 0
+     },
+     "v8": {
+      "type": "int",
+      "init": 0
+     },
+     "v9": {
+      "type": "int",
+      "init": 0
+     },
+     "v10": {
+      "type": "int",
+      "init": 0
+     },
+     "v11": {
+      "type": "int",
+      "init": 0
+     },
+     "v12": {
+      "type": "int",
+      "init": 0
+     },
+     "v13": {
+      "type": "int",
+      "init": 0
+     },
+     "v14": {
+      "type": "int",
+      "init": 0
+     },
+     "v15": {
+      "type": "int",
+      "init": 0
+     },
+     "v16": {
+      "type": "int",
+      "init": 0
+     }
+    },
+    "persist": {
+     "version": 1,
+     "vars": [
+      "v0",
+      "v1",
+      "v2",
+      "v3",
+      "v4",
+      "v5",
+      "v6",
+      "v7",
+      "v8",
+      "v9",
+      "v10",
+      "v11",
+      "v12",
+      "v13",
+      "v14",
+      "v15",
+      "v16"
+     ],
+     "states": {
+      "ready": "ready"
+     }
+    },
+    "quota": "p4-quota-v2"
+   },
+   "ok": false
+  }
+ ]
+}

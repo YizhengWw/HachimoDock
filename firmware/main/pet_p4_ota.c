@@ -28,6 +28,10 @@
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
 #include "pet_p4_diagnostics.h"
+#include "pet_p4_boot_trace.h"
+#if PET_P4_OTA_METADATA_CACHED
+#include "esp_attr.h"
+#endif
 
 #define PET_P4_OTA_TRANSFER_ID_MAX 64
 #define PET_P4_OTA_SHA256_HEX_LEN 64
@@ -76,6 +80,36 @@ static unsigned long long g_last_activity_ms;
 static SemaphoreHandle_t g_ota_mutex;
 static bool g_initialized;
 static pet_p4_ota_commit_result_t g_commit_result;
+
+#if PET_P4_OTA_METADATA_CACHED
+/* Descriptor pointers are native boot data, stable until reboot, and are
+ * only read/written under the existing OTA mutex. A failed set-boot result
+ * invalidates the boot observation instead of publishing a stale success. */
+static const esp_partition_t *g_observed_running,*g_observed_boot,*g_observed_next;
+/* Hot diagnostics need only these two scalar values. No SDK, allocation,
+ * external-memory pointer, log, callback or filesystem call under this mux. */
+static DRAM_ATTR portMUX_TYPE g_image_observation_mux=portMUX_INITIALIZER_UNLOCKED;
+static DRAM_ATTR esp_ota_img_states_t g_observed_image_state=ESP_OTA_IMG_UNDEFINED;
+static DRAM_ATTR esp_err_t g_observed_image_error=ESP_ERR_INVALID_STATE;
+static void observe_image_state(esp_err_t error,esp_ota_img_states_t state){
+  portENTER_CRITICAL(&g_image_observation_mux);
+  if(error==ESP_OK)g_observed_image_state=state;
+  g_observed_image_error=error;
+  portEXIT_CRITICAL(&g_image_observation_mux);
+}
+esp_err_t pet_p4_ota_observed_image_state(esp_ota_img_states_t *out){
+  if(!out)return ESP_ERR_INVALID_ARG;
+  esp_ota_img_states_t state;esp_err_t error;
+  portENTER_CRITICAL(&g_image_observation_mux);
+  state=g_observed_image_state;error=g_observed_image_error;
+  portEXIT_CRITICAL(&g_image_observation_mux);
+  *out=state;return error;
+}
+static void observe_boot_result(esp_err_t error,const esp_partition_t *target){
+  /* Caller still owns the existing OTA mutex after the original SDK call. */
+  g_observed_boot=error==ESP_OK?target:NULL;
+}
+#endif
 
 static const char *json_string(const cJSON *object, const char *key) {
   const cJSON *item = object ? cJSON_GetObjectItemCaseSensitive(object, key) : NULL;
@@ -148,6 +182,14 @@ static void send_status_locked(
   pet_p4_send_line_fn send_line,
   void *ctx
 ) {
+#if PET_P4_OTA_METADATA_CACHED
+  const esp_partition_t *running=g_observed_running;
+  const esp_partition_t *boot=g_observed_boot;
+  const esp_partition_t *next=g_observed_next;
+  const esp_app_desc_t *app=esp_app_get_description();
+  esp_ota_img_states_t image_state=ESP_OTA_IMG_UNDEFINED;
+  esp_err_t state_err=pet_p4_ota_observed_image_state(&image_state);
+#else
   const esp_partition_t *running = esp_ota_get_running_partition();
   const esp_partition_t *boot = esp_ota_get_boot_partition();
   const esp_partition_t *next = esp_ota_get_next_update_partition(NULL);
@@ -156,6 +198,7 @@ static void send_status_locked(
   esp_err_t state_err = running
     ? esp_ota_get_state_partition(running, &image_state)
     : ESP_ERR_NOT_FOUND;
+#endif
   cJSON *payload = cJSON_CreateObject();
   const char *request_id = json_string(request, "requestId");
   if (request_id[0]) cJSON_AddStringToObject(payload, "requestId", request_id);
@@ -163,6 +206,10 @@ static void send_status_locked(
   cJSON_AddBoolToObject(payload, "active", g_active);
   cJSON_AddBoolToObject(payload, "pendingVerify", g_pending_verify);
   cJSON_AddBoolToObject(payload, "runtimeReady", g_runtime_ready);
+#if PET_P4_OTA_METADATA_CACHED
+  cJSON_AddBoolToObject(payload,"metadataCached",true);
+  cJSON_AddBoolToObject(payload,"bootPartitionAvailable",boot!=NULL);
+#endif
   cJSON_AddStringToObject(payload, "version", app ? app->version : "unknown");
   cJSON_AddStringToObject(payload, "projectName", app ? app->project_name : "unknown");
   cJSON_AddStringToObject(
@@ -625,6 +672,9 @@ static void handle_commit(const cJSON *payload, pet_p4_send_line_fn send_line, v
     return;
   }
   esp_err_t boot_err = esp_ota_set_boot_partition(g_update_partition);
+#if PET_P4_OTA_METADATA_CACHED
+  observe_boot_result(boot_err,g_update_partition);
+#endif
   if (boot_err != ESP_OK) {
     send_ack(send_line, ctx, g_transfer_id, "commit", false, esp_err_to_name(boot_err));
     clear_transfer(false);
@@ -678,13 +728,27 @@ esp_err_t pet_p4_ota_init(
   esp_err_t err = running
     ? esp_ota_get_state_partition(running, &image_state)
     : ESP_ERR_NOT_FOUND;
+#if PET_P4_OTA_METADATA_CACHED
+  g_observed_running=running;
+  g_observed_boot=esp_ota_get_boot_partition();
+  g_observed_next=esp_ota_get_next_update_partition(NULL);
+  observe_image_state(err,image_state);
+#endif
   g_pending_verify = err == ESP_OK && image_state == ESP_OTA_IMG_PENDING_VERIFY;
+#if PET_P4_BOOT_TRACE_ENABLE
+  if(err==ESP_OK&&image_state==ESP_OTA_IMG_VALID)(void)pet_boot_trace_mark(PET_BOOT_IMAGE_VALID);
+#endif
   g_initialized_ms = (unsigned long long) (esp_timer_get_time() / 1000ULL);
   ESP_LOGI(TAG, "running partition=%s state=%s rollback=%s",
            running ? running->label : "none",
            err == ESP_OK ? ota_state_name(image_state) : "unavailable",
            g_pending_verify ? "pending" : "settled");
-  bool supported = running && esp_ota_get_next_update_partition(NULL);
+  bool supported = running &&
+#if PET_P4_OTA_METADATA_CACHED
+    g_observed_next;
+#else
+    esp_ota_get_next_update_partition(NULL);
+#endif
   g_initialized = true;
   xSemaphoreGive(g_ota_mutex);
   pet_p4_ota_send_status(send_line, ctx);
@@ -794,8 +858,14 @@ void pet_p4_ota_process(unsigned long long now_ms) {
     && now_ms - g_runtime_last_healthy_ms <= PET_P4_OTA_VALIDATE_SAMPLE_GAP_MS;
   if (g_pending_verify && g_runtime_ready) {
     esp_err_t err = esp_ota_mark_app_valid_cancel_rollback();
+#if PET_P4_OTA_METADATA_CACHED
+    observe_image_state(err,ESP_OTA_IMG_VALID);
+#endif
     if (err == ESP_OK) {
       g_pending_verify = false;
+#if PET_P4_BOOT_TRACE_ENABLE
+      (void)pet_boot_trace_mark(PET_BOOT_IMAGE_VALID);
+#endif
       ESP_LOGI(TAG, "OTA image marked valid after sustained runtime validation");
     } else {
       ESP_LOGE(TAG, "failed to mark OTA image valid: %s", esp_err_to_name(err));

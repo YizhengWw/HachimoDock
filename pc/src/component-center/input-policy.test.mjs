@@ -49,3 +49,13 @@ test("care cooldown starts at time zero and touch/key actions share it",()=>{
   s=appAdvance(r,s,1);assert.equal(actionEnabled(r,s,"feed"),true);
   s=appAction(r,s,"feed");assert.equal(s.vars.bond,4);
 });
+test('accepted local-tool actions share cooldown while a refused operation never starts one',()=>{
+  const r={input:{engine:'p4-input-v1',cooldown:{draw:250,exclude:250}},initial_state:'ready',states:['ready','busy','result','editing','empty','offline'],
+    vars:Object.fromEntries(Array.from({length:7},(_,i)=>[`local${i}`,{type:'int',init:i===2?-1:0}])),tick:[],
+    transitions:[{from:'*',on:'draw'},{from:'*',on:'exclude'}],local:{kind:'deck',reveal_ms:20,actions:{draw:'draw',exclude:'exclude'},groups:[{title:'Deck',items:[{title:'One',note:''}]}]}};
+  let s=initialApp(r);assert.equal(appAction(r,s,'exclude'),s);
+  s=appAction(r,s,'draw');assert.equal(s.actionTimes.draw,0);assert.equal(s.local.phase,1);
+  s=appAdvance(r,s,20);assert.equal(s.local.phase,2);assert.equal(appAction(r,s,'draw'),s);
+  s=appAdvance(r,s,230);assert.equal(actionEnabled(r,s,'draw'),true);
+  s=appAction(r,s,'draw');assert.equal(s.actionTimes.draw,250);
+});

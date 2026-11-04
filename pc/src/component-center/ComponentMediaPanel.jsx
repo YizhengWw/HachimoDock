@@ -65,7 +65,7 @@ export default function ComponentMediaPanel({component, request=invoke}) {
     <details className="component-media__permission">
       <summary>服务与数据使用说明</summary>
       <p>组件服务默认启用，更新后无需再次授权。{component.pcExtension.discovery?.autoPlayOnEnter?"自动备好本地与全国电台，进入设备组件即可收听；本 PC 面板不会自动播放。":"打开组件后自动加载电台列表，在设备选择、切台即可；不会自动播放。"}</p>
-      <p>搜索访问：{permissions.networkHosts.join("、")}。播放访问搜索结果的公网音频地址；收藏和历史仅保存在本机。若系统 DNS 失败或返回代理虚拟地址，使用阿里公共 DNS／Cloudflare 安全 DNS 解析公网电台域名（不发送搜索词、对话或凭据）。不会获取任意文件或命令执行权限。</p>
+      <p>{component.pcExtension.search?.catalog?"搜索读取组件包内电台目录。辅助服务：":"搜索访问："}{permissions.networkHosts.join("、")}。播放访问目录中的公网音频地址；收藏和历史仅保存在本机。若系统 DNS 失败或返回代理虚拟地址，使用阿里公共 DNS 解析公网电台域名（不发送搜索词、对话或凭据）。不会获取任意文件或命令执行权限。</p>
     </details>
     {!checking&&!enabled&&!error&&<div className="component-media__permission">
       <p>此组件服务已手动停用，收藏和历史仍保留。</p>

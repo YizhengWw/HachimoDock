@@ -1,3 +1,6 @@
+import {validateDataRows} from '../component-center/data-rows-schema.js';
+import {validateFormWriters,validateDerivedWriters} from '../component-center/app-writers.js';
+import {validateRuntimeTexts} from '../component-center/texts-schema.js';
 /**
  * [Input] 设备端 fb_speech_overlay.c 的 STATS_DASHBOARD_V1 版式与 br_stats_dashboard_model 字节上限。
  * [Output] .clawpkg 包结构常量、game/tool 类型、可选 COMPONENT_DASHBOARD_V1 内容与视觉槽位、
@@ -6,6 +9,9 @@
  * [Pos] lib node in pc/src
  * [Sync] If this file changes, update `pc/src/.folder.md`.
  */
+
+import {validateBodiesScene} from '../component-center/bodies-schema.js';
+import {validateSceneViewBindings} from '../component-center/graphics-scene-view.js';
 
 export const CLAWPKG_FILES = [
   { name: "component.json", role: "组件元数据:id、name、version、author、capabilities、入口" },
@@ -49,7 +55,7 @@ export const COMPONENT_VISUAL_PRESETS = {
 export const COMPONENT_RUNTIME_ENGINES = ["p4-bounded-runtime-v3", "p4-bounded-runtime-v4"];
 export const COMPONENT_SCENE_ENGINES = ["p4-grid-scene-v1", "p4-grid-scene-v2", "p4-touch-slice-v1"];
 export const COMPONENT_SCENE_ENGINE = COMPONENT_SCENE_ENGINES[1];
-export const COMPONENT_GAME_PRESETS = ["blocks", "snake", "flappy"];
+export const COMPONENT_GAME_PRESETS = ["blocks", "snake", "flappy", "gomoku"];
 // Backward-compatible export for callers that still label native presets as game types.
 export const COMPONENT_GAME_TYPES = COMPONENT_GAME_PRESETS;
 export const COMPONENT_KINDS = ["game", "tool"];
@@ -179,7 +185,8 @@ function validateLegacyGame(widget, buttons, errors) {
   }
   const requiredActions = game.type === "blocks"
     ? ["start", "left", "right", "rotate", "drop"]
-    : game.type === "snake" ? ["start", "left", "right"] : ["flap"];
+    : game.type === "snake" ? ["start", "left", "right"]
+    : game.type === "gomoku" ? ["place", "left", "right", "up", "down", "undo"] : ["flap"];
   const actionKeys = isObject(game.actions) ? Object.keys(game.actions) : [];
   if (actionKeys.length !== requiredActions.length
       || actionKeys.some((key) => !requiredActions.includes(key))) {
@@ -218,7 +225,9 @@ function validateSceneOp(op, entityIds, errors, label) {
     return true;
   };
   const vectorsValid = (x, y) => isBoundedInt(op[x], -4, 4) && isBoundedInt(op[y], -4, 4);
-  if (op.op === "move") {
+  if(op.op==='impulse'){
+    if(!hasOnlyKeys(op,['op','entity','dx','dy'])||Object.keys(op).length!==4||!requireEntity()||!isBoundedInt(op.dx,-64,64)||!isBoundedInt(op.dy,-64,64)||(!op.dx&&!op.dy))errors.push(`${label} impulse 刚体向量无效`);
+  } else if (op.op === "move") {
     if (!hasOnlyKeys(op, ["op", "entity", "dx", "dy"]) || !requireEntity()
         || !vectorsValid("dx", "dy") || (op.dx === 0 && op.dy === 0)) {
       errors.push(`${label} move 需要实体及 -4..4 的非零 dx/dy`);
@@ -277,16 +286,21 @@ function validateBoundedScene(widget, buttons, errors) {
   const slicing = scene?.engine === "p4-touch-slice-v1";
   if (!hasOnlyKeys(scene, slicing ? ["engine", "duration_sec", "lives", "sound_volume", "sprites", "revision"] : [
     "tick_ms", "active_state", "result_state", "score_var", "auto_start",
-    "grid", "sprites", "entities", "rules",
+    "grid", "sprites", "entities", "rules", "bodies", "gravity",
   ])) {
     errors.push("runtime/widget.json scene 含未知字段或不是对象");
     return;
   }
+  if(Object.hasOwn(scene,'bodies')||Object.hasOwn(scene,'gravity')||(Array.isArray(scene.rules)?scene.rules:[]).some(r=>Array.isArray(r?.do)&&r.do.some(o=>o?.op==='impulse'))){
+    try{if(widget.engine!=='p4-bounded-runtime-v4')throw Error('Bodies require v4');validateBodiesScene(scene);}catch(e){errors.push(e.message);}
+  }
+  try{validateSceneViewBindings(widget.surface,widget);}catch(e){errors.push(e.message);}
+  const graphicsV2=widget.graphics==='p4-graphics-v2',maxSprites=graphicsV2?8:COMPONENT_SCENE_MAX_SPRITES,maxSpritePixels=graphicsV2?16384:COMPONENT_SCENE_MAX_SPRITE_PIXELS;
   const sprites = scene.sprites === undefined ? [] : scene.sprites;
   const spriteIds = new Set();
   let spritePixels = 0;
-  if (!Array.isArray(sprites) || sprites.length > COMPONENT_SCENE_MAX_SPRITES) {
-    errors.push(`runtime/widget.json scene.sprites 最多允许 ${COMPONENT_SCENE_MAX_SPRITES} 项`);
+  if (!Array.isArray(sprites) || sprites.length > maxSprites) {
+    errors.push(`runtime/widget.json scene.sprites 最多允许 ${maxSprites} 项`);
   } else {
     if (sprites.length > 0 && widget.engine !== "p4-bounded-runtime-v4") {
       errors.push("runtime/widget.json scene.sprites 需要 engine=p4-bounded-runtime-v4");
@@ -315,8 +329,8 @@ function validateBoundedScene(widget, buttons, errors) {
       }
     });
   }
-  if (spritePixels > COMPONENT_SCENE_MAX_SPRITE_PIXELS) {
-    errors.push(`runtime/widget.json scene.sprites 总像素超过 ${COMPONENT_SCENE_MAX_SPRITE_PIXELS}`);
+  if (spritePixels > maxSpritePixels) {
+    errors.push(`runtime/widget.json scene.sprites 总像素超过 ${maxSpritePixels}`);
   }
   if (slicing) {
     if (widget.engine !== "p4-bounded-runtime-v4" || !isBoundedInt(scene.duration_sec,30,120)
@@ -332,7 +346,7 @@ function validateBoundedScene(widget, buttons, errors) {
     }
     return;
   }
-  if (!isBoundedInt(scene.tick_ms, COMPONENT_GAME_TICK_MIN_MS, COMPONENT_GAME_TICK_MAX_MS)) {
+  if (!isBoundedInt(scene.tick_ms, scene.bodies?20:COMPONENT_GAME_TICK_MIN_MS, scene.bodies?200:COMPONENT_GAME_TICK_MAX_MS)) {
     errors.push(`runtime/widget.json scene.tick_ms 必须在 ${COMPONENT_GAME_TICK_MIN_MS}-${COMPONENT_GAME_TICK_MAX_MS}`);
   }
   const stateIds = new Set(Array.isArray(widget.states) ? widget.states : []);
@@ -463,6 +477,15 @@ function validateComponentGame(widget, buttons, errors) {
   validateLegacyGame(widget, buttons, errors);
 }
 
+function widgetProfile(widget) {
+  const v4=widget?.engine==='p4-bounded-runtime-v4';
+  const v3=v4&&widget.quota==='p4-quota-v3',v2=v4&&widget.quota==='p4-quota-v2';
+  const legacyForm=['p4-app-form-v1','p4-app-form-v2'].includes(widget?.form?.engine);
+  const eightSlots=legacyForm||widget?.program!==undefined||widget?.ownership!==undefined;
+  return {vars:eightSlots?8:v3?32:v2?16:8,stringBytes:legacyForm?63:v3?127:63,
+    jsonBytes:v3?12287:v2||widget?.surface?.graphics==='p4-app-graphics-v1'?8191:P4_WIDGET_JSON_MAX_BYTES};
+}
+
 function validateWidgetVars(widget, errors) {
   if (!widget || typeof widget !== "object" || Array.isArray(widget)) {
     errors.push("runtime/widget.json 必须是 JSON 对象");
@@ -477,8 +500,9 @@ function validateWidgetVars(widget, errors) {
     return;
   }
   const entries = Object.entries(widget.vars);
-  if (entries.length > P4_WIDGET_MAX_VARS) {
-    errors.push(`runtime/widget.json.vars 最多允许 ${P4_WIDGET_MAX_VARS} 个变量`);
+  const profile=widgetProfile(widget);
+  if (entries.length > profile.vars) {
+    errors.push(`runtime/widget.json.vars 最多允许 ${profile.vars} 个变量`);
   }
   entries.forEach(([name, declaration]) => {
     const label = `runtime/widget.json.vars.${name}`;
@@ -508,16 +532,17 @@ function validateWidgetVars(widget, errors) {
         errors.push(`${label}.init 必须是 ${P4_WIDGET_INT_MIN}..${P4_WIDGET_INT_MAX} 的整数`);
       }
     } else if (typeof declaration.init !== "string"
-        || utf8Bytes(declaration.init) > P4_WIDGET_STRING_VAR_MAX_BYTES) {
-      errors.push(`${label}.init 必须是最多 ${P4_WIDGET_STRING_VAR_MAX_BYTES} 个 UTF-8 字节的字符串`);
+        || utf8Bytes(declaration.init) > profile.stringBytes) {
+      errors.push(`${label}.init 必须是最多 ${profile.stringBytes} 个 UTF-8 字节的字符串`);
     }
   });
 }
 
 export function validateWidgetData(widget, errors) {
-  if (widget?.data === undefined) return;
+  if (widget?.data === undefined) {try{validateDataRows(widget);}catch(error){errors.push(error.message);}return;}
+  try{validateDataRows(widget);}catch(error){errors.push(error.message);}
   const data = widget.data;
-  if (!isObject(data) || Object.keys(data).some((key) => !["source", "page_var"].includes(key))
+  if (!isObject(data) || Object.keys(data).some((key) => !["source", "page_var", "select_var", "filters", "refresh_action"].includes(key))
       || !/^[a-z0-9_.-]{1,47}$/.test(data.source || "")
       || widget.vars?.[data.page_var]?.type !== "int"
       || widget.engine !== "p4-bounded-runtime-v4" || "scene" in widget || "game" in widget) {
@@ -551,12 +576,15 @@ function validateWidgetEffectBounds(widget, errors) {
     });
   };
   checkRules(widget.transitions, "transitions");
+  checkRules(widget.transitions?.map(t=>t.else), "transitions.else");
   checkRules(widget.tick, "tick");
   checkRules(widget.tick, "tick.then", true);
 }
 
 export function validateClawpkgManifest(manifest) {
   const errors = [];
+  const runtime=manifest?.['runtime/widget.json'];
+  if(runtime)for(const validate of [validateFormWriters,validateDerivedWriters,validateRuntimeTexts])try{validate(runtime);}catch(error){errors.push(error.message);}
   for (const file of CLAWPKG_FILES) {
     if (!(file.name in (manifest || {}))) errors.push(`缺少 ${file.name}`);
   }
@@ -580,11 +608,16 @@ export function validateClawpkgManifest(manifest) {
     validateComponentButtons(manifest["buttons.json"], errors);
   }
   if ("runtime/widget.json" in (manifest || {})) {
+    const widget=manifest["runtime/widget.json"],profile=widgetProfile(widget);
+    if(widget&&Object.hasOwn(widget,'quota')&&(!['p4-quota-v2','p4-quota-v3'].includes(widget.quota)
+      ||widget.engine!=='p4-bounded-runtime-v4'||Object.hasOwn(widget,'game'))){
+      errors.push('runtime/widget.json.quota 只接受 v4 的 p4-quota-v2/v3，不能与旧版 game 混用');
+    }
     if (manifest["runtime/widget.json"]?.scene?.engine === "p4-touch-slice-v1" && meta?.kind !== "game") {
       errors.push("触屏切果组件 kind 必须为 game");
     }
-    if (compactJsonBytes(manifest["runtime/widget.json"]) > P4_WIDGET_JSON_MAX_BYTES) {
-      errors.push(`runtime/widget.json 压缩后超过 P4 ${P4_WIDGET_JSON_MAX_BYTES} 字节上限`);
+    if (compactJsonBytes(manifest["runtime/widget.json"]) > profile.jsonBytes) {
+      errors.push(`runtime/widget.json 压缩后超过 P4 ${profile.jsonBytes} 字节上限`);
     }
     validateWidgetVars(manifest["runtime/widget.json"], errors);
     validateWidgetData(manifest["runtime/widget.json"], errors);

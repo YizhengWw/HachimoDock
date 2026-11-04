@@ -1,0 +1,25 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {verifyEvidence,verifyScreenshot,REQUIRED_STAGES,fnv} from './verify-framework-evidence.mjs';
+const source={valid:true,digest:'b'.repeat(64),commit:'c'.repeat(40),dirty:true,scope:{entireRepository:false}};
+function sample(){
+ const target={status:'built',exitCode:0,version:'0.7.103-p4-r27',elfSha256:'a'.repeat(64),imageSha256:'d'.repeat(64),imageBytes:1024,elfBytes:2048,budget:{appBytes:1024,otaBytes:2621440,otaHeadroomBytes:2620416,internalStaticBytes:592,externalStaticBytes:1024,minimumOtaHeadroomBytes:131072,maximumInternalStaticBytes:393216,memoryAccounting:'p4-allocated-ram-v2',internalSections:{'.iram0.text':64,'.dram0.data':96,'.dram0.bss':128,'.dram1.bss':256,'.tcm.text':32,'.rtc.text':16}}};
+ const builds={engine:'p4-build-evidence-v1',status:'built_source_consistent',sourceConsistent:true,sourceBefore:source,sourceAfter:source,hardwareVerified:false,releaseReady:false,targets:[{...target,id:'normal',target:'esp32_p4_evboard'},{...target,id:'ui',target:'esp32_p4_canvas_candidate'}]};
+ const offline={source,sourceAfter:source,stages:REQUIRED_STAGES.map(id=>({id,status:'passed',selected:true,...(id==='source_consistency'?{}:{tests:{passed:1,failed:0,skipped:0}})}))};
+ const raw=Buffer.alloc(614400),checksum=fnv(raw,true),boot='01020304aabbccdd';
+ const capture={passed:true,receivedBytes:614400,expectedBytes:614400,errors:[],eventQueueDrops:0,audioUsed:false,cloudCalls:0,
+  begin:{id:'frame',width:640,height:480,format:'rgb565le',integrity:'chunk-fnv1a32-v1',totalBytes:614400,chunkBytes:3072,bootId:boot},
+  end:{id:'frame',totalBytes:614400,chunks:200,checksum},nextIndex:200,endReceived:true,metadataMatches:true,checksumMatches:true,computedChecksum:checksum,
+  chunks:Array.from({length:200},(_,index)=>({index,expectedBytes:3072,receivedBytes:3072,rawSize:3072,rawSizeMatches:true,checksumMatches:true,checksum:fnv(raw.subarray(index*3072,(index+1)*3072)),computedChecksum:fnv(raw.subarray(index*3072,(index+1)*3072))})),
+  identity:{engine:'p4-evidence-binding-v1',boardMatched:true,bootBound:true,sourceBound:true,bootId:boot,appElfSha256:target.elfSha256,authentication:false,fromUptimeUs:10,toUptimeUs:20,buildId:'0.7.103-p4-r27+cccccccccccc-dirty',gitSha:'cccccccccccc',buildDirty:true,protocolSchema:7}};
+ return {offline,builds,capture,raw,profile:'ui'};
+}
+test('coherent source/build/boot/frame evidence does not imply framework, acoustic or release acceptance',()=>{const r=verifyEvidence(sample());assert.equal(r.status,'evidence_chain_verified');assert.equal(r.evidenceChainReady,true);assert.equal(r.frameworkComplete,false);assert.equal(r.releaseReady,false);assert.equal(r.deviceContacted,false);assert(r.remainingGates.includes('voice_and_aec_acceptance'));});
+test('missing device or skipped offline stage stays pending, never silently passes',()=>{const s=sample();s.capture=s.raw=null;assert.equal(verifyEvidence(s).status,'pending');s.offline.stages[1].status='skipped';s.offline.stages[1].tests.skipped=1;assert.equal(verifyEvidence(s).gates.find(g=>g.id==='offline').status,'pending');});
+test('wrong source revision, stale firmware record and false-success test counts fail',()=>{for(const mutate of [s=>{s.builds.sourceBefore={...source,digest:'e'.repeat(64)};},s=>{s.builds.targets[0].exitCode=1;},s=>{s.offline.stages[1].tests.failed=1;},s=>{s.offline.stages.push(s.offline.stages[0]);}]){const s=sample();mutate(s);assert.equal(verifyEvidence(s).status,'failed');}});
+test('bytes are independently rechecked even when every previous report says success',()=>{const s=sample();s.raw[1000]=1;assert.throws(()=>verifyScreenshot(s.capture,s.raw,s.builds.targets[1]),/frame_checksum/);const again=sample();again.capture.chunks[87].receivedBytes-=240;assert.equal(verifyEvidence(again).status,'failed');});
+test('different boots, missing provenance, changed build and duplicate chunk indices fail',()=>{for(const mutate of [s=>{s.capture.begin.bootId='02020304aabbccdd';},s=>{s.capture.identity.sourceBound=false;},s=>{s.capture.identity.appElfSha256='e'.repeat(64);},s=>{s.capture.chunks[87].index=86;},s=>{s.capture.eventQueueDrops=1;},s=>{s.capture.identity.toUptimeUs=10;}]){const s=sample();mutate(s);assert.equal(verifyEvidence(s).status,'failed');}});
+test('exported summary contains no screenshot pixels, input paths or arbitrary text fields',()=>{const s=sample();s.offline.note='SECRET/company/path';s.capture.note='SECRET/private/text';s.capture.begin.extra='SECRET/token';const output=JSON.stringify(verifyEvidence(s));assert(!output.includes('SECRET'));assert(!output.includes('synthetic-board'));assert(!output.includes('data:image'));});
+test('old unversioned or inconsistent memory accounting cannot remain verified',()=>{
+ for(const mutate of [b=>delete b.memoryAccounting,b=>b.memoryAccounting='three-sections-v1',b=>b.internalStaticBytes=288,b=>b.internalSections={'.iram0.text':592},b=>b.internalSections={'.SECRET/private':592}]){
+  const s=sample();mutate(s.builds.targets[0].budget);const r=verifyEvidence(s);assert.equal(r.gates.find(g=>g.id==='firmware').status,'failed');
+ }
+});

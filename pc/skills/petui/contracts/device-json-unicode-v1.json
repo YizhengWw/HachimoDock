@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "representation": "device-unicode-scalars-no-nul-v1",
+  "scope": "String representation and spelling only, not complete grammar/duplicate-key/depth/schema validation",
+  "cases": [
+    {
+      "name": "plain multilingual and astral",
+      "source": "{\"v\":\"中文 café 🐾\"}",
+      "allowed": true
+    },
+    {
+      "name": "escaped supplementary pair",
+      "source": "{\"v\":\"\\ud83d\\udc3e\"}",
+      "allowed": true
+    },
+    {
+      "name": "high surrogate",
+      "source": "{\"v\":\"\\ud800\"}",
+      "allowed": false
+    },
+    {
+      "name": "low surrogate",
+      "source": "{\"v\":\"\\udfff\"}",
+      "allowed": false
+    },
+    {
+      "name": "high followed by ordinary escape",
+      "source": "{\"v\":\"\\ud800\\u0041\"}",
+      "allowed": false
+    },
+    {
+      "name": "high surrogate key",
+      "source": "{\"\\ud800\":\"x\"}",
+      "allowed": false
+    },
+    {
+      "name": "lone after valid pair",
+      "source": "{\"v\":\"\\ud83d\\udc3e\\ud800\"}",
+      "allowed": false
+    },
+    {
+      "name": "ordinary escaped controls",
+      "source": "{\"v\":\"\\b\\f\\n\\r\\t\\/\\\"\\\\\"}",
+      "allowed": true
+    },
+    {
+      "name": "escaped NUL",
+      "source": "{\"v\":\"A\\u0000B\"}",
+      "allowed": false
+    },
+    {
+      "name": "literal surrogate escape spelling",
+      "source": "{\"v\":\"\\\\ud800\"}",
+      "allowed": true
+    },
+    {
+      "name": "literal NUL escape spelling",
+      "source": "{\"v\":\"\\\\u0000\"}",
+      "allowed": true
+    },
+    {
+      "name": "invalid escape",
+      "source": "{\"v\":\"\\x01\"}",
+      "allowed": false
+    },
+    {
+      "name": "outside whitespace",
+      "source": " \n\t{\"v\":\"okay\"}\r\n",
+      "allowed": true
+    },
+    {
+      "name": "BMP edge scalars",
+      "source": "{\"v\":\"\\u0001\\u007f\\u0080\\ud7ff\\ue000\\uffff\"}",
+      "allowed": true
+    }
+  ],
+  "byteCases": [
+    {
+      "name": "overlong two",
+      "hex": "7b2276223a22c080227d",
+      "allowed": false
+    },
+    {
+      "name": "overlong three",
+      "hex": "7b2276223a22e08080227d",
+      "allowed": false
+    },
+    {
+      "name": "UTF8 surrogate",
+      "hex": "7b2276223a22eda080227d",
+      "allowed": false
+    },
+    {
+      "name": "past Unicode max",
+      "hex": "7b2276223a22f4908080227d",
+      "allowed": false
+    },
+    {
+      "name": "invalid leading byte",
+      "hex": "7b2276223a22f5808080227d",
+      "allowed": false
+    },
+    {
+      "name": "continuation alone",
+      "hex": "7b2276223a2280227d",
+      "allowed": false
+    },
+    {
+      "name": "truncated two",
+      "hex": "7b2276223a22c2227d",
+      "allowed": false
+    },
+    {
+      "name": "truncated three",
+      "hex": "7b2276223a22e4b8227d",
+      "allowed": false
+    },
+    {
+      "name": "invalid continuation",
+      "hex": "7b2276223a22e44180227d",
+      "allowed": false
+    },
+    {
+      "name": "raw LF",
+      "hex": "7b2276223a220a227d",
+      "allowed": false
+    },
+    {
+      "name": "raw tab",
+      "hex": "7b2276223a2209227d",
+      "allowed": false
+    },
+    {
+      "name": "raw CR",
+      "hex": "7b2276223a220d227d",
+      "allowed": false
+    },
+    {
+      "name": "raw NUL",
+      "hex": "7b2276223a2200227d",
+      "allowed": false
+    },
+    {
+      "name": "min two",
+      "hex": "7b2276223a22c280227d",
+      "allowed": true
+    },
+    {
+      "name": "min three",
+      "hex": "7b2276223a22e0a080227d",
+      "allowed": true
+    },
+    {
+      "name": "last before surrogate",
+      "hex": "7b2276223a22ed9fbf227d",
+      "allowed": true
+    },
+    {
+      "name": "first after surrogate",
+      "hex": "7b2276223a22ee8080227d",
+      "allowed": true
+    },
+    {
+      "name": "min four",
+      "hex": "7b2276223a22f0908080227d",
+      "allowed": true
+    },
+    {
+      "name": "max scalar",
+      "hex": "7b2276223a22f48fbfbf227d",
+      "allowed": true
+    }
+  ]
+}

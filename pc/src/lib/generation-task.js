@@ -89,7 +89,7 @@ export function initializeGenerationRecovery() {
         automatic: session.automatic === true,
         appearanceName: session.appearanceName, startedAt: session.createdAt || 0,
         appearanceId: session.appearanceId || "", error: "",
-        progress: { ...summary, stage: session.phase || "paused", message: `${summary.label}。已保存 ${summary.completed}/${summary.total} 段。恢复复用原参考图及已有结果，不会自动重发结果未知的请求。${session.skipProcessing ? "此旧任务使用原图，恢复不会重新去背景；需要清理背景请另建任务，已有视频保留。" : ""}` } });
+        progress: { ...summary, stage: session.phase || "paused", message: `${summary.localInspectionNotice || summary.label}。已保存 ${summary.completed}/${summary.total} 段。恢复复用原参考图及已有结果，不会自动重发结果未知的请求。${session.skipProcessing ? "此旧任务使用原图，恢复不会重新去背景；需要清理背景请另建任务，已有视频保留。" : ""}` } });
       scheduleResume(session);
     }
   }).catch(error => { console.warn("generation recovery unavailable", error.message); });

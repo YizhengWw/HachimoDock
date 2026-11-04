@@ -1,0 +1,357 @@
+{
+  "synthetic": true,
+  "deviceEvidence": false,
+  "providerEvidence": false,
+  "timelineVectors": [
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 0,
+      "value": 10
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 1500,
+      "value": 11
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 5000,
+      "value": 12
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": false,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 5000,
+      "value": 10
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "position"
+      },
+      "age": 5000,
+      "value": 12000
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "remaining"
+      },
+      "age": 5000,
+      "value": 88000
+    },
+    {
+      "timeline": {
+        "positionMs": 99900,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 1000,
+      "value": 100
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 100000,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 10000,
+      "value": null
+    },
+    {
+      "timeline": {
+        "positionMs": 10000,
+        "durationMs": 0,
+        "running": true,
+        "horizonMs": 2000,
+        "projection": "percent"
+      },
+      "age": 0,
+      "value": null
+    }
+  ],
+  "runtime": {
+    "schema_version": 1,
+    "engine": "p4-bounded-runtime-v4",
+    "host": true,
+    "host_context": "p4-host-context-v1",
+    "vars": {
+      "title": {
+        "type": "string",
+        "init": ""
+      },
+      "progress": {
+        "type": "int",
+        "init": 0
+      }
+    },
+    "states": [
+      "ready"
+    ],
+    "initial_state": "ready",
+    "transitions": [
+      {
+        "from": "*",
+        "on": "host.level"
+      }
+    ],
+    "tick": [],
+    "input": {
+      "engine": "p4-input-v1"
+    },
+    "dashboard": {
+      "title": "Synthetic service contract",
+      "visualStyle": "clean",
+      "visualPalette": "ember",
+      "visualLayout": "tool"
+    },
+    "surface": {
+      "engine": "p4-app-surface-v1",
+      "graphics": "p4-app-graphics-v1",
+      "bindings": "p4-variable-bindings-v1",
+      "services": "p4-service-bridge-v1",
+      "background": 0,
+      "elements": [
+        {
+          "type": "text",
+          "x": 20,
+          "y": 20,
+          "w": 500,
+          "h": 40,
+          "color": 65535,
+          "var_bind": "title"
+        },
+        {
+          "type": "meter",
+          "x": 20,
+          "y": 80,
+          "w": 400,
+          "h": 16,
+          "color": 63488,
+          "var_bind": "progress",
+          "action": "host.level",
+          "value_param": "volume",
+          "value_min": 0,
+          "value_max": 100
+        }
+      ]
+    },
+    "host_contract": "d0f829335629afa0e6b42194a14585c4c3da5033f10a54da1e4b4fa869b2208a"
+  },
+  "declaration": {
+    "schemaVersion": 1,
+    "engine": "pc-service-bridge-v1",
+    "service": "bridge",
+    "actions": {
+      "host.level": "source:volume"
+    },
+    "content": [
+      {
+        "services": {
+          "source": {
+            "kind": "local-media"
+          }
+        },
+        "bindings": {
+          "title": {
+            "service": "source",
+            "pointer": "/title",
+            "fallback": "等待数据"
+          },
+          "progress": {
+            "service": "source",
+            "pointer": "/volume",
+            "fallback": 0
+          }
+        },
+        "commands": {
+          "host.level": {
+            "service": "source",
+            "method": "volume",
+            "arguments": {
+              "volume": {
+                "type": "int",
+                "value": {
+                  "event": "volume"
+                },
+                "min": 0,
+                "max": 100
+              }
+            }
+          }
+        },
+        "timelines": {
+          "progress": {
+            "service": "source",
+            "position": "/positionMs",
+            "duration": "/durationMs",
+            "running": "/running",
+            "horizonMs": 2000,
+            "projection": "percent"
+          }
+        }
+      }
+    ]
+  },
+  "scenarios": [
+    "local-music",
+    "podcast",
+    "audiobook",
+    "task-progress",
+    "countdown",
+    "weather-and-list"
+  ],
+  "reject": [
+    {
+      "pointer": "/content/0/commands/host.level/arguments/volume/type",
+      "value": "string"
+    },
+    {
+      "pointer": "/content/0/services/source/kind",
+      "value": "shell"
+    },
+    {
+      "pointer": "/content/0/timelines/progress/horizonMs",
+      "value": 10001
+    },
+    {
+      "pointer": "/content/0/images",
+      "value": {
+        "cover": {
+          "service": "missing",
+          "pointer": "/cover",
+          "fallback": null
+        }
+      }
+    }
+  ],
+  "contractVectors": [
+    {
+      "declaration": {
+        "schemaVersion": 1,
+        "engine": "pc-service-bridge-v1",
+        "service": "bridge",
+        "actions": {},
+        "content": [
+          {
+            "numbers": [
+              0,
+              1,
+              -1,
+              1.0,
+              -0.0,
+              1e-08,
+              1e+20
+            ],
+            "unicode": "汉字🙂"
+          }
+        ]
+      },
+      "runtime": {
+        "sample": [
+          true,
+          false,
+          null,
+          {
+            "z": "last",
+            "a": "first"
+          }
+        ]
+      },
+      "expected": "1e29918542ca0a0d4bef29eaee655045d52e18ef2d30413830310e62ada56da3"
+    },
+    {
+      "name": "zero-int",
+      "declaration": {
+        "schemaVersion": 1,
+        "engine": "pc-service-bridge-v1",
+        "service": "bridge",
+        "actions": {},
+        "content": []
+      },
+      "runtime": {
+        "zero": 0
+      },
+      "runtimeJson": "{\"zero\":0}",
+      "expected": "f71baca528d91a0e94d2d9fa6a91f2b938358df74bdae2fbe16ca5400ba887cf"
+    },
+    {
+      "name": "zero-json-negative-int",
+      "declaration": {
+        "schemaVersion": 1,
+        "engine": "pc-service-bridge-v1",
+        "service": "bridge",
+        "actions": {},
+        "content": []
+      },
+      "runtime": {
+        "zero": 0
+      },
+      "runtimeJson": "{\"zero\":-0}",
+      "expected": "f71baca528d91a0e94d2d9fa6a91f2b938358df74bdae2fbe16ca5400ba887cf"
+    },
+    {
+      "name": "zero-positive-float",
+      "declaration": {
+        "schemaVersion": 1,
+        "engine": "pc-service-bridge-v1",
+        "service": "bridge",
+        "actions": {},
+        "content": []
+      },
+      "runtime": {
+        "zero": 0.0
+      },
+      "runtimeJson": "{\"zero\":0.0}",
+      "expected": "f71baca528d91a0e94d2d9fa6a91f2b938358df74bdae2fbe16ca5400ba887cf"
+    },
+    {
+      "name": "zero-negative-float",
+      "declaration": {
+        "schemaVersion": 1,
+        "engine": "pc-service-bridge-v1",
+        "service": "bridge",
+        "actions": {},
+        "content": []
+      },
+      "runtime": {
+        "zero": -0.0
+      },
+      "runtimeJson": "{\"zero\":-0.0}",
+      "expected": "f71baca528d91a0e94d2d9fa6a91f2b938358df74bdae2fbe16ca5400ba887cf"
+    }
+  ]
+}

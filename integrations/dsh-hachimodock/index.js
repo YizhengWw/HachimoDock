@@ -16,12 +16,25 @@
  * @module @hachimodock/dsh-bridge
  */
 
-const { apply, AGENT_ID, PLUGIN_NAME, INJECT } = require('./dsh-bridge')
+const { createBridge, AGENT_ID, PLUGIN_NAME } = require('./dsh-bridge')
+const { capabilities, serviceView } = require('./host-contract')
+
+function apply(ctx, config) {
+  const bridge = createBridge(ctx, config)
+  // get(name) is the public optional-service lookup. Read each independent
+  // service at the point of use, never couple agents to controller activation.
+  bridge.ctx = serviceView(ctx)
+  bridge.server.capabilities = () => capabilities(bridge.ctx)
+  ctx.effect(async () => {
+    await bridge.start()
+    return () => bridge.stop()
+  }, 'hachimodock: http bridge')
+}
 
 /** @type {string} Cordis plugin display name. */
 const name = PLUGIN_NAME
 /** @type {string[]} Cordis services the plugin waits for before mounting. */
-const inject = INJECT
+const inject = ['sessions']
 
 module.exports = {
   name,

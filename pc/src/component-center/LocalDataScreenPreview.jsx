@@ -26,7 +26,7 @@ export default function LocalDataScreenPreview({ source, active, name }) {
     <div className="local-data-screen__rows">{rows.map(row => todos
       ? <div key={row.id} className={`local-todo-preview-row ${row.tone < 0 ? "is-done" : "is-pending"}`}><strong>{row.label}{row.meta}</strong><div><small>{row.value}</small><small>{row.detail}</small></div></div>
       : <div key={row.id}><div><strong>{row.label}</strong><small>{row.meta}</small></div><span>{row.value}<small>{row.detail}</small></span></div>)}</div>
-    {!rows.length && <p>{snapshot?.message || (source === "todos.upcoming" ? "还没有待办 · 在详情中添加" : "等待电脑状态")}</p>}
+    {!rows.length && <p>{snapshot?.message || (source === "todos.upcoming" ? "还没有待办 · 在详情中添加" : source === "location.current" ? "请在设置中查看共享位置" : "等待电脑状态")}</p>}
     <footer>{snapshot?.status === "error" ? snapshot.message : "摇杆左右翻页 · 主操作回首页"}</footer>
   </div>;
 }

@@ -610,9 +610,15 @@ pet_bubble_pixels_draw_pinned(const pet_bubble_text_view_t * view, unsigned styl
   }
   text_image_t   *image = &cache[slot];
   image->age = ++clock_age;
+  /* A draw owns a separate pin: a caller may release its view or the peer
+   * may retire it after this unlock. Only the final unpin may free the page. */
+  image->readers++;
+  const uint8_t *data = image->data;
+  size_t size = image->size;
   unsigned        width = width_for(style), pixel = 0;
-  for (size_t i = 0; i < image->size; i++) {
-    unsigned        alpha = image->data[i] >> 4, run = (image->data[i] & 15U) + 1U;
+  xSemaphoreGive(mutex);
+  for (size_t i = 0; i < size; i++) {
+    unsigned        alpha = data[i] >> 4, run = (data[i] & 15U) + 1U;
     for (unsigned end = pixel + run; pixel < end; pixel++) {
       if (!alpha)
         continue;
@@ -623,6 +629,8 @@ pet_bubble_pixels_draw_pinned(const pet_bubble_text_view_t * view, unsigned styl
       *out = blend(*out, color, alpha);
     }
   }
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  unpin(slot);
   xSemaphoreGive(mutex);
   return true;
 }

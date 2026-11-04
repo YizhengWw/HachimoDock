@@ -1,0 +1,564 @@
+{
+ "engine": "p4-data-rows-v1",
+ "rows": [
+  {
+   "id": "a",
+   "label": "Apple",
+   "value": "1.0",
+   "detail": "+1%",
+   "meta": "fruit",
+   "tone": 1
+  },
+  {
+   "id": "b",
+   "label": "Beet",
+   "value": "2.0",
+   "detail": "-2%",
+   "meta": "veg",
+   "tone": -1
+  },
+  {
+   "id": "c",
+   "label": "Cherry",
+   "value": "3.0",
+   "detail": "0%",
+   "meta": "fruit",
+   "tone": 0
+  },
+  {
+   "id": "d",
+   "label": "Date",
+   "value": "4.0",
+   "detail": "+4%",
+   "meta": "fruit",
+   "tone": 1
+  },
+  {
+   "id": "e",
+   "label": "Endive",
+   "value": "5.0",
+   "detail": "-5%",
+   "meta": "veg",
+   "tone": -1
+  },
+  {
+   "id": "f",
+   "label": "Fig",
+   "value": "6.0",
+   "detail": "+6%",
+   "meta": "fruit",
+   "tone": 1
+  },
+  {
+   "id": "g",
+   "label": "Grape",
+   "value": "7.0",
+   "detail": "+7%",
+   "meta": "fruit",
+   "tone": 1
+  }
+ ],
+ "config": {
+  "select_var": "sel",
+  "filters": [
+   {
+    "var": "kind",
+    "field": "meta",
+    "values": [
+     "fruit",
+     "veg"
+    ]
+   },
+   {
+    "var": "dir",
+    "field": "tone",
+    "values": [
+     "1",
+     "-1",
+     "0"
+    ]
+   }
+  ],
+  "refresh_action": "data.refresh"
+ },
+ "cases": [
+  {
+   "values": {
+    "page": 0,
+    "sel": 0,
+    "kind": 0,
+    "dir": 0
+   },
+   "visible": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g"
+   ],
+   "page": 0,
+   "pages": 2,
+   "rows": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e"
+   ],
+   "selected": "a"
+  },
+  {
+   "values": {
+    "page": 1,
+    "sel": 9,
+    "kind": 0,
+    "dir": 0
+   },
+   "visible": [
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+    "g"
+   ],
+   "page": 1,
+   "pages": 2,
+   "rows": [
+    "f",
+    "g"
+   ],
+   "selected": "g"
+  },
+  {
+   "values": {
+    "page": -1,
+    "sel": -3,
+    "kind": 1,
+    "dir": 0
+   },
+   "visible": [
+    "a",
+    "c",
+    "d",
+    "f",
+    "g"
+   ],
+   "page": 0,
+   "pages": 1,
+   "rows": [
+    "a",
+    "c",
+    "d",
+    "f",
+    "g"
+   ],
+   "selected": "a"
+  },
+  {
+   "values": {
+    "page": 0,
+    "sel": 1,
+    "kind": 2,
+    "dir": 2
+   },
+   "visible": [
+    "b",
+    "e"
+   ],
+   "page": 0,
+   "pages": 1,
+   "rows": [
+    "b",
+    "e"
+   ],
+   "selected": "e"
+  },
+  {
+   "values": {
+    "page": 0,
+    "sel": 0,
+    "kind": 1,
+    "dir": 1
+   },
+   "visible": [
+    "a",
+    "d",
+    "f",
+    "g"
+   ],
+   "page": 0,
+   "pages": 1,
+   "rows": [
+    "a",
+    "d",
+    "f",
+    "g"
+   ],
+   "selected": "a"
+  },
+  {
+   "values": {
+    "page": 0,
+    "sel": 0,
+    "kind": 2,
+    "dir": 1
+   },
+   "visible": [],
+   "page": 0,
+   "pages": 1,
+   "rows": [],
+   "selected": null
+  },
+  {
+   "values": {
+    "page": 3,
+    "sel": 0,
+    "kind": 0,
+    "dir": 3
+   },
+   "visible": [
+    "c"
+   ],
+   "page": 0,
+   "pages": 1,
+   "rows": [
+    "c"
+   ],
+   "selected": "c"
+  }
+ ],
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "quota": "p4-quota-v2",
+  "vars": {
+   "page": {
+    "type": "int",
+    "init": 0
+   },
+   "sel": {
+    "type": "int",
+    "init": 0
+   },
+   "kind": {
+    "type": "int",
+    "init": 0
+   },
+   "dir": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "pages": [
+   {
+    "id": "list"
+   },
+   {
+    "id": "detail"
+   }
+  ],
+  "initial_page": "list",
+  "input": {
+   "engine": "p4-input-v1",
+   "cooldown": {
+    "data.refresh": 15000
+   }
+  },
+  "data": {
+   "source": "fetch.quotes",
+   "page_var": "page",
+   "select_var": "sel",
+   "filters": [
+    {
+     "var": "kind",
+     "field": "meta",
+     "values": [
+      "fruit",
+      "veg"
+     ]
+    },
+    {
+     "var": "dir",
+     "field": "tone",
+     "values": [
+      1,
+      -1,
+      0
+     ]
+    }
+   ],
+   "refresh_action": "data.refresh"
+  },
+  "transitions": [
+   {
+    "from": "*",
+    "on": "next",
+    "inc": {
+     "page": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "prev",
+    "inc": {
+     "page": -1
+    }
+   },
+   {
+    "from": "*",
+    "on": "down",
+    "inc": {
+     "sel": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "up",
+    "inc": {
+     "sel": -1
+    }
+   },
+   {
+    "from": "*",
+    "on": "kind",
+    "inc": {
+     "kind": 1
+    }
+   },
+   {
+    "from": "*",
+    "on": "data.refresh"
+   },
+   {
+    "from": "*",
+    "on": "open",
+    "page": "detail"
+   },
+   {
+    "from": "*",
+    "on": "close",
+    "page": "list"
+   }
+  ],
+  "tick": [],
+  "limits": {
+   "kind": [
+    0,
+    2
+   ],
+   "dir": [
+    0,
+    3
+   ]
+  },
+  "dashboard": {
+   "title": "Quotes",
+   "footer": "等待数据",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "data_view": {
+    "engine": "p4-data-surface-v1",
+    "x": 0,
+    "y": 40,
+    "w": 640,
+    "h": 320,
+    "layout": "rows",
+    "colors": [
+     65535,
+     33808,
+     2016,
+     63488,
+     8452
+    ]
+   },
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 8,
+     "w": 300,
+     "h": 24,
+     "color": 65535,
+     "text": "行情",
+     "page": 0
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 400,
+     "h": 32,
+     "color": 65535,
+     "row_bind": "label",
+     "page": 1
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 60,
+     "w": 400,
+     "h": 32,
+     "color": 65535,
+     "row_bind": "value",
+     "page": 1
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 100,
+     "w": 400,
+     "h": 32,
+     "color": 65535,
+     "row_bind": "detail",
+     "page": 1
+    },
+    {
+     "type": "text",
+     "x": 20,
+     "y": 140,
+     "w": 400,
+     "h": 32,
+     "color": 65535,
+     "row_bind": "meta",
+     "page": 1
+    }
+   ]
+  }
+ },
+ "invalid": [
+  {
+   "path": [
+    "data",
+    "filters"
+   ],
+   "value": []
+  },
+  {
+   "path": [
+    "data",
+    "filters",
+    0,
+    "field"
+   ],
+   "value": "id"
+  },
+  {
+   "path": [
+    "data",
+    "filters",
+    0,
+    "var"
+   ],
+   "value": "page"
+  },
+  {
+   "path": [
+    "data",
+    "filters",
+    1,
+    "values"
+   ],
+   "value": [
+    2
+   ]
+  },
+  {
+   "path": [
+    "data",
+    "select_var"
+   ],
+   "value": "nope"
+  },
+  {
+   "path": [
+    "data",
+    "refresh_action"
+   ],
+   "value": "refresh"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    1,
+    "row_bind"
+   ],
+   "value": "tone"
+  },
+  {
+   "path": [
+    "surface",
+    "elements",
+    1,
+    "row_bind"
+   ],
+   "value": "id"
+  },
+  {
+   "path": [
+    "data",
+    "filters",
+    0,
+    "values"
+   ],
+   "value": []
+  },
+  {
+   "path": [
+    "data",
+    "filters",
+    0,
+    "values"
+   ],
+   "value": [
+    "xxxxxxxxxxxxxxxxxxxxxxxxx"
+   ]
+  },
+  {
+   "path": [
+    "data",
+    "filters"
+   ],
+   "value": [
+    {
+     "var": "kind",
+     "field": "meta",
+     "values": [
+      "a"
+     ]
+    },
+    {
+     "var": "kind",
+     "field": "meta",
+     "values": [
+      "b"
+     ]
+    }
+   ]
+  },
+  {
+   "path": [
+    "surface",
+    "data_view",
+    "layout"
+   ],
+   "value": "grid"
+  }
+ ]
+}

@@ -1,0 +1,219 @@
+{
+ "engine": "p4-notify-v1",
+ "topic": "widget/notify",
+ "runtime": {
+  "schema_version": 1,
+  "engine": "p4-bounded-runtime-v4",
+  "vars": {
+   "count": {
+    "type": "int",
+    "init": 0
+   }
+  },
+  "states": [
+   "ready"
+  ],
+  "initial_state": "ready",
+  "transitions": [
+   {
+    "from": "*",
+    "on": "ping",
+    "inc": {
+     "count": 1
+    },
+    "notify": true
+   }
+  ],
+  "tick": [],
+  "notify": {
+   "title": "番茄钟完成",
+   "badge_var": "count"
+  },
+  "dashboard": {
+   "title": "Notify",
+   "visualStyle": "clean",
+   "visualPalette": "mono",
+   "visualLayout": "tool",
+   "visualSprite": "gauge"
+  },
+  "surface": {
+   "engine": "p4-app-surface-v1",
+   "graphics": "p4-app-graphics-v1",
+   "bindings": "p4-variable-bindings-v1",
+   "background": 0,
+   "elements": [
+    {
+     "type": "text",
+     "x": 20,
+     "y": 20,
+     "w": 300,
+     "h": 32,
+     "color": 65535,
+     "var_bind": "count"
+    },
+    {
+     "type": "button",
+     "x": 20,
+     "y": 80,
+     "w": 200,
+     "h": 48,
+     "color": 65535,
+     "foreground": 0,
+     "text": "Ping",
+     "action": "ping"
+    }
+   ]
+  }
+ },
+ "invalid": [
+  {
+   "path": [
+    "notify",
+    "title"
+   ],
+   "value": ""
+  },
+  {
+   "path": [
+    "notify",
+    "title"
+   ],
+   "value": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  },
+  {
+   "path": [
+    "notify",
+    "badge_var"
+   ],
+   "value": "missing"
+  },
+  {
+   "path": [
+    "transitions",
+    0,
+    "notify"
+   ],
+   "value": "yes"
+  },
+  {
+   "path": [
+    "notify"
+   ],
+   "value": {
+    "title": "x",
+    "text": "y"
+   }
+  }
+ ],
+ "payloads": [
+  {
+   "componentId": "pomodoro",
+   "title": "番茄钟完成"
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "番茄钟完成",
+   "text": "休息 5 分钟",
+   "badge": 3
+  },
+  {
+   "componentId": "a-b_1",
+   "title": "t",
+   "badge": -1000000000
+  }
+ ],
+ "rejectedPayloads": [
+  {
+   "title": "x"
+  },
+  {
+   "componentId": "Pomodoro",
+   "title": "x"
+  },
+  {
+   "componentId": "pomodoro",
+   "title": ""
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "x",
+   "badge": 1.5
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "x",
+   "extra": 1
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "x\n"
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "x",
+   "text": "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  },
+  {
+   "componentId": "pomodoro",
+   "title": "tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+  }
+ ],
+ "limiter": [
+  {
+   "component": "pomodoro",
+   "now_ms": 1000,
+   "admit": true
+  },
+  {
+   "component": "pomodoro",
+   "now_ms": 20000,
+   "admit": false
+  },
+  {
+   "component": "other",
+   "now_ms": 20000,
+   "admit": true
+  },
+  {
+   "component": "pomodoro",
+   "now_ms": 31000,
+   "admit": true
+  },
+  {
+   "component": "other",
+   "now_ms": 49999,
+   "admit": false
+  },
+  {
+   "component": "other",
+   "now_ms": 50000,
+   "admit": true
+  }
+ ],
+ "bubble": [
+  {
+   "payload": {
+    "componentId": "pomodoro",
+    "title": "番茄钟完成"
+   },
+   "title": "番茄钟完成"
+  },
+  {
+   "payload": {
+    "componentId": "pomodoro",
+    "title": "番茄钟完成",
+    "text": "休息 5 分钟",
+    "badge": 3
+   },
+   "title": "番茄钟完成 · 3"
+  },
+  {
+   "payload": {
+    "componentId": "a-b_1",
+    "title": "t",
+    "badge": -1000000000
+   },
+   "title": "t · -1000000000"
+  }
+ ]
+}

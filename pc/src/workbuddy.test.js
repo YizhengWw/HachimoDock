@@ -24,15 +24,15 @@ test("WorkBuddy stays isolated through native USB routing and Bridge startup", (
   assert.match(bridge, /new WorkBuddyAdapter/);
 });
 test("WorkBuddy voice uses its own current desktop composer and never falls back to Codex", () => {
-  const source = read("../src-tauri/src/lib.rs").split("fn start_device_voice_context(")[1].split("fn ")[0];
+  const source = read("../src-tauri/src/lib.rs").split("fn continue_device_voice_context_start(")[1].split("fn ")[0];
   assert.doesNotMatch(source, /暂不支持按键语音输入/);
-  assert.match(source, /if startup_context.target.agent_id == "workbuddy" \{\s*Err\(/);
+  assert.match(source, /matches!\(startup_context.target.agent_id.as_str\(\), "workbuddy" \| "deepseek-harness"\) \{\s*Err\(/);
   const composer = read("../src-tauri/src/codex_composer.rs");
   assert.match(composer, /"workbuddy" => macos::MacosAgent::WorkBuddy/);
   assert.match(composer, /"workbuddy" => &\["workbuddy.exe"\]/);
   // Every WorkBuddy write re-verifies the bound composer identity, ownership,
   // writability and exact last text without repeating the full window lookup.
-  assert.match(composer, /\$state.CurrentVisible -and \$state.Agent -eq 'workbuddy'\) \{\s*Assert-WorkBuddyComposerCurrent \$state/);
+  assert.match(composer, /\$state.CurrentVisible -and \(Test-CurrentElectronAgent \$state.Agent\)\) \{\s*Assert-WorkBuddyComposerCurrent \$state/);
   const recheck = composer.split("function Assert-WorkBuddyComposerCurrent(")[1].split("\nfunction ")[0];
   assert.match(recheck, /\$runtimeId -ne \$state.ComposerRuntimeId/);
   assert.match(recheck, /Test-WorkBuddyElementOwner/);
@@ -49,7 +49,12 @@ test("WorkBuddy diagnostic uses the actual draft writer and never submits", () =
   const source = read("../src-tauri/src/lib.rs").split("async fn write_workbuddy_voice_test_draft(")[1].split("#[tauri::command]")[0];
   assert.match(source, /start_current\("workbuddy"/);
   assert.match(source, /update_confirmed/);
-  assert.match(source, /preserve_draft/);
+  assert.match(source, /ensure_pending_voice_writer_released/);
+  assert.match(source, /ensure_device_voice_writer_released\(&context\)/);
+  const native = read("../src-tauri/src/lib.rs");
+  const release = native.split("fn ensure_device_voice_writer_released(")[1].split("fn ensure_pending_voice_writer_released")[0];
+  assert.match(release, /preserve_draft\(\)/);
+  assert.match(release, /owner.finish\(result\)/);
   assert.doesNotMatch(source, /\.confirm\(/);
   assert.match(read("./DeviceDashboard.jsx"), /invoke\("write_workbuddy_voice_test_draft"/);
   assert.match(read("./dashboard/VoiceAssistantPanel.jsx"), /只写入 WorkBuddy 草稿/);
@@ -73,7 +78,9 @@ test("Windows WorkBuddy requires writable owned editors and rejects ambiguity", 
   const filter = source.split("function Get-ComposerCandidates(")[1].split("function Find-Composer(")[0];
   assert.match(filter, /\[bool\]\$workbuddy = \$false/);
   assert.match(filter, /Test-WorkBuddyWritablePattern/);
-  assert.match(filter, /Test-WorkBuddyElementOwner/);
+  assert.match(filter, /Test-ComposerElementOwner/);
+  const owner = source.split("function Test-ComposerElementOwner(")[1].split("\nfunction ")[0];
+  assert.match(owner, /if \(\$element -is \[WorkBuddyUiaElement\]\) \{ return Test-WorkBuddyElementOwner/);
   assert.match(filter, /searchbox/);
   assert.match(filter, /-not \$documentHint\) \{ continue \}/);
   const select = source.split("function Select-WorkBuddyComposer(")[1].split("function Get-WorkBuddyTarget(")[0];
@@ -125,7 +132,7 @@ test("Windows WorkBuddy reads Chromium only through the native UIA COM client", 
   const source = read("../src-tauri/src/codex_composer.rs");
   const between = (start, end) => source.split(start)[1].split(end)[0];
   const workbuddyPaths = [
-    between("function Test-WorkBuddyElementOwner(", "function Get-ComposerCandidates("),
+    between("function Test-WorkBuddyElementOwner(", "\nfunction "),
     between("function Find-WorkBuddyFocusedComposer(", "function Initialize-WorkBuddyAccessibility("),
     between("function Get-WorkBuddyTarget(", "function Get-CurrentVisibleTarget("),
     between("function Invoke-SendButton(", "} else {"),
@@ -133,7 +140,8 @@ test("Windows WorkBuddy reads Chromium only through the native UIA COM client", 
   for (const path of workbuddyPaths) {
     assert.doesNotMatch(path, /Automation\.AutomationElement|Automation\.TreeWalker|Find-BoundedComposerElements|Find-PointComposerElements/);
   }
-  assert.match(workbuddyPaths[3], /\$state.Agent -eq 'workbuddy'[\s\S]*\[WorkBuddyUia\]::FindBounded/);
+  assert.match(workbuddyPaths[3], /Test-CurrentElectronAgent \$state.Agent[\s\S]*\[WorkBuddyUia\]::FindBounded/);
+  assert.match(source, /return @\('workbuddy','deepseek-harness'\) -contains \$agent/);
   const native = between("public static class WorkBuddyUia {", '"@');
   assert.match(native, /e22ad333-b25f-460c-83d0-0581107395c9/);
   assert.match(native, /GetRawViewWalker\(\)/);

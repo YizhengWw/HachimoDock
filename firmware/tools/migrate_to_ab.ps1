@@ -50,7 +50,7 @@ try {
   $layout = (& $python $partitionTool $partitionDump | Out-String)
   if ($LASTEXITCODE -ne 0) { throw "failed to decode the current partition table" }
   if ($layout -match "(?m)^ota_0,") {
-    throw "device already uses an A/B partition table; use Pet Manager OTA instead"
+    throw "device already uses an A/B partition table; this legacy migration tool cannot migrate the 20MiB-to-18MiB data layout. OTA does not update the partition table; use verified backup/preservation migration instead"
   }
   if ($layout -notmatch "(?m)^storage,.*0x210000,.*0x1000000") {
     throw "legacy 16MB SPIFFS partition at 0x210000 was not found; refusing migration"

@@ -11,6 +11,7 @@
 #include "hal/lcd_types.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_idf_version.h"
+#include "soc/soc_caps.h"
 
 #if SOC_LCD_RGB_SUPPORTED
 #include "esp_lcd_panel_rgb.h"
@@ -93,6 +94,20 @@ typedef struct {
  *      - Otherwise             on fail
  */
 esp_err_t esp_lcd_new_panel_st7701(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config, esp_lcd_panel_handle_t *ret_panel);
+
+#if SOC_MIPI_DSI_SUPPORTED
+/**
+ * @brief Create an ST7701 panel for a board with a fixed MIPI interface
+ *
+ * @note The generic constructor remains available for boards selecting RGB or MIPI.
+ * @param[in] io LCD panel IO handle, forwarded to the MIPI constructor
+ * @param[in] panel_dev_config Panel configuration with vendor_config and use_mipi_interface set
+ * @param[out] ret_panel Returned LCD panel handle
+ * @return ESP_ERR_INVALID_ARG for invalid arguments or an unset MIPI flag;
+ *         otherwise the MIPI constructor's result
+ */
+esp_err_t esp_lcd_new_panel_st7701_mipi_only(const esp_lcd_panel_io_handle_t io, const esp_lcd_panel_dev_config_t *panel_dev_config, esp_lcd_panel_handle_t *ret_panel);
+#endif
 
 /**
  * @brief 3-wire SPI panel IO configuration structure

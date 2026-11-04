@@ -4,7 +4,8 @@
 use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use rand::{rngs::OsRng, RngCore};
-use rsa::{pkcs8::DecodePublicKey, Pkcs1v15Encrypt, RsaPublicKey};
+#[path = "miot_public_rsa.rs"]
+mod public_rsa;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -57,10 +58,7 @@ pub async fn token(data: Value) -> Result<Value, String> {
 pub async fn post(access_token: &str, path: &str, data: Value) -> Result<Value, String> {
     let mut key = [0_u8; 16];
     OsRng.fill_bytes(&mut key);
-    let public = RsaPublicKey::from_public_key_pem(PUBLIC_KEY).map_err(|_| "家居协议初始化失败")?;
-    let secret = public
-        .encrypt(&mut OsRng, Pkcs1v15Encrypt, &key)
-        .map_err(|_| "家居协议初始化失败")?;
+    let secret = public_rsa::wrap_session_key(PUBLIC_KEY, &key, &mut OsRng)?;
     let encrypted = cbc::Encryptor::<aes::Aes128>::new((&key).into(), (&key).into())
         .encrypt_padded_vec_mut::<Pkcs7>(data.to_string().as_bytes());
     let response = crate::llm_network::client(Duration::from_secs(25))?
@@ -174,7 +172,7 @@ mod tests {
     use super::*;
     #[test]
     fn protocol_key_is_public_and_valid() {
-        assert!(RsaPublicKey::from_public_key_pem(PUBLIC_KEY).is_ok());
+        assert!(public_rsa::parse_public_key(PUBLIC_KEY).is_ok());
     }
     #[test]
     fn business_failure_is_not_success() {

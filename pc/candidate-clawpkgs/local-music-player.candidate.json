@@ -1,0 +1,70 @@
+{
+  "status": "CANDIDATE_STRUCTURE_VALID_SMOKE_BLOCKED",
+  "candidateExpectedOnly": true,
+  "deviceEvidence": false,
+  "published": false,
+  "runtimeContract": "8f1b135ea8516ff4452424d806927609a7d675bd51612a772d14bbf23dc5fb8c",
+  "archiveSha256": "73ac869b7da9fc68912e73f01ecd0cc8d3ecf9db33e2e83b3692507ca9e8756b",
+  "files": {
+    "assets/vinyl.png": "950380744d8764f19eeecf11719cfd74516db4e8f172edbaee42a3397befbdb0",
+    "buttons.json": "90f249829be71ae89ee7748c43e9a430d353225a653b37988453209328b315a5",
+    "component.json": "8427f1d462826b2de151e30ebf541ea111853e023aa17c65500a4fcb7bc7a9fc",
+    "negative-screen.json": "6b239e1bffbecccc7055dcdf66e0daa07c6c02427d1acd5e75151684eee7fa29",
+    "pc/application.json": "8996c9f10a28cae6707c1eeeee42911f115caa1bf15b8be7ea4a3502c4634eb7",
+    "runtime/widget.json": "f72b1e7f6f92cd46973a3b5800faad1f230f6a362308c657311ee6293acf5d97",
+    "share.json": "bbb4e957c87192f5c8a0ffa2baa4519370a5ef735026b16721a77a3e4088c2ab"
+  },
+  "expectedCapabilities": {
+    "widgetServiceBridge": "p4-service-bridge-v1",
+    "widgetHostCollection": "p4-host-collection-v1",
+    "widgetAppSurface": "p4-app-surface-v1",
+    "widgetAppGraphics": "p4-app-graphics-v1",
+    "widgetVariableBindings": "p4-variable-bindings-v1",
+    "widgetHostContext": "p4-host-context-v1",
+    "widgetInput": "p4-input-v1",
+    "widgetQuota": "p4-quota-v2",
+    "widgetMedia": "p4-media-v1"
+  },
+  "realR158BridgeAvailable": false,
+  "requiresFinalRealHelloBeforePublish": true,
+  "candidateExpectedCapabilitiesFile": "local-music-player.expected-capabilities.json",
+  "candidateExpectedCapabilitiesSha256": "6e03a737583df8269d1c2cfb45cab6c63d960f222abab39d4f2c73926c68ba77",
+  "expectedCapabilitiesProvenance": {
+    "source": "private evidence; identified by sourceSha256, not distributed",
+    "sourceSha256": "765967a4788270d62ba34be783ed436183217a7fc98a0180d7e3a1ab8465f583",
+    "actualFirmware": "0.7.103-p4-r158",
+    "actualBuildId": "0.7.103-p4-r158+0773644d9b8e-dirty",
+    "deviceBridgeEvidence": false,
+    "expectedOnlyOverrides": [
+      "widgetServiceBridge",
+      "widgetServiceBridgeImages",
+      "widgetServiceBridgeImageSide"
+    ]
+  },
+  "fallbackArtwork": {
+    "dashboardVisualSprite": "music",
+    "surfaceImage": "vinyl",
+    "asset": "assets/vinyl.png",
+    "dynamicAlias": "cover",
+    "opaquePng": true
+  },
+  "focusedValidation": {
+    "expectedOnly": true,
+    "exitCode": 0,
+    "log": "private evidence; identified by logSha256, not distributed",
+    "logSha256": "aed98903fb939f68ae132e74511eaa6835d0b1b069bed4aa870e2b76f14024af",
+    "deviceVerified": false
+  },
+  "focusedSmoke": {
+    "exitCode": 1,
+    "log": "private evidence; identified by logSha256, not distributed",
+    "logSha256": "f28e2987043d72655e7a38e3cadb47edbfacc9272c7f502d946f3af0ff4a7085",
+    "blocker": "bounded_app.py host-contract smoke omits validated collection_view.actions",
+    "missingActions": [
+      "host.row0",
+      "host.row1"
+    ],
+    "hostServicesVerified": false,
+    "deviceVerified": false
+  }
+}

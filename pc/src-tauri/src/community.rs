@@ -66,6 +66,7 @@ pub struct CommunityInput {
     pub metadata: Option<Value>,
     pub covers: Option<Vec<String>>,
     pub expected_content_hash: Option<String>,
+    // Accepted for older clients; publication no longer requires or fabricates acknowledgments.
     pub rights_confirmed: Option<bool>,
     pub privacy_confirmed: Option<bool>,
 }
@@ -590,24 +591,14 @@ pub fn execute(home: &Path, input: CommunityInput) -> Result<Value, String> {
                 .get("LICENSE.txt")
                 .is_some_and(|b| !b.is_empty());
             Ok(
-                json!({"id":prepared.entry.id,"name":prepared.entry.name,"version":prepared.entry.version,"description":prepared.entry.description,"kind":prepared.entry.kind,"contentHash":prepared.hash,"packageBytes":prepared.archive.len(),"expandedBytes":prepared.expanded,"files":prepared.files.keys().collect::<Vec<_>>(),"hasLicense":license,"canPublish":license,"warning":if license{"扫描不能替代人工检查，请确认截图、授权与所有公开文件。"}else{"缺少 LICENSE.txt，请在源组件加入授权文件并重新发布到本地库。"}}),
+                json!({"id":prepared.entry.id,"name":prepared.entry.name,"version":prepared.entry.version,"description":prepared.entry.description,"kind":prepared.entry.kind,"contentHash":prepared.hash,"packageBytes":prepared.archive.len(),"expandedBytes":prepared.expanded,"files":prepared.files.keys().collect::<Vec<_>>(),"hasLicense":license,"canPublish":true,"warning":"扫描不能替代社区审核，请检查截图与公开文件。"}),
             )
         }
         "publish" => {
             let _lock = MUTATION.lock().map_err(|_| "社区操作繁忙")?;
-            if input.rights_confirmed != Some(true) || input.privacy_confirmed != Some(true) {
-                return Err("请确认授权与隐私检查".into());
-            }
             let prepared = prepare(home, input.path.as_deref().ok_or("请选择本地组件")?)?;
             if input.expected_content_hash.as_deref() != Some(prepared.hash.as_str()) {
                 return Err("组件文件在预览后发生变化，请重新检查再发布".into());
-            }
-            if !prepared
-                .files
-                .get("LICENSE.txt")
-                .is_some_and(|b| !b.is_empty())
-            {
-                return Err("组件缺少 LICENSE.txt".into());
             }
             let covers = input.covers.ok_or("请选择真实截图")?;
             if covers.is_empty()
@@ -624,7 +615,7 @@ pub fn execute(home: &Path, input: CommunityInput) -> Result<Value, String> {
                 home,
                 "/api/v1/works",
                 Some(
-                    json!({"requestId":input.request_id.ok_or("缺少发布请求编号")?,"metadata":metadata,"package":base64::engine::general_purpose::STANDARD.encode(&prepared.archive),"covers":covers,"rightsConfirmed":true,"privacyConfirmed":true}),
+                    json!({"requestId":input.request_id.ok_or("缺少发布请求编号")?,"metadata":metadata,"package":base64::engine::general_purpose::STANDARD.encode(&prepared.archive),"covers":covers}),
                 ),
                 true,
                 true,

@@ -345,10 +345,10 @@ function AppInner({
               type="button"
               className={`sidebar-nav__item ${activeTab === "api" ? "is-active" : ""}`}
               onClick={handleOpenApiSettings}
-              title="API 配置"
+              title="设置"
             >
               <KeyRound size={16} />
-              <span className="sidebar-nav-label">API 配置</span>
+              <span className="sidebar-nav-label">设置</span>
             </button>
             <FirmwareUpdateNavItem usb={usb} />
           </nav>
@@ -422,7 +422,7 @@ function AppInner({
             )}
             {(apiVisited || view === "api") && (
               <div hidden={view !== "api"}>
-                <ApiSettings onBack={handleApiSettingsBack} configReadError={configReadError} />
+                <ApiSettings active={view === "api"} onBack={handleApiSettingsBack} configReadError={configReadError} />
               </div>
             )}
             {view === "home" && <SmartHome />}

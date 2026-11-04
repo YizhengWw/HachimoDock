@@ -1,6 +1,6 @@
 [package]
 name = "pet-manager-tauri"
-version = "0.1.168"
+version = "0.1.197"
 description = "pet-manager Tauri client"
 authors = ["pet-manager contributors"]
 license-file = "../../LICENSE"
@@ -29,7 +29,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-http = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 semver = "1"
 regex = "1"
 encoding_rs = "0.8"
@@ -40,8 +40,14 @@ reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-
 uuid = { version = "1", features = ["v4"] }
 flate2 = "1"
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "time"] }
+# Keep this compatible branch above the AsyncFd I/O-safety fix.
+tokio = { version = "~1.51.6", features = ["sync", "time"] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-native-roots"] }
+# Security floors for the TLS runtime shared by WebSocket/HTTP clients. No new
+# default features: do not enable HTTP/3, a new crypto provider or cert compression.
+rustls = { version = "0.23.46", default-features = false }
+rustls-webpki = { version = "0.103.16", default-features = false }
+webpki-roots = "1.0.10"
 # image/webp decode for M13.1 codex-pet import (sprite sheet -> per-state MP4)
 image = { version = "0.25", default-features = false, features = ["webp", "png", "jpeg"] }
 # USB serial communication with claw-pet board
@@ -52,7 +58,12 @@ sha2 = "0.10"
 sha1 = "0.10"
 aes = "0.8"
 cbc = { version = "0.1", features = ["alloc"] }
-rsa = { version = "0.9", features = ["pem"] }
+# MIoCo needs only fixed public-key RSAES-PKCS1-v1_5 encryption. Avoid the
+# unpatched rsa private-operation implementation (CVE-2023-49092).
+num-bigint-dig = { version = "0.8.6", default-features = false, features = ["std", "u64_digit", "zeroize"] }
+pkcs1 = { version = "0.7.5", default-features = false }
+spki = { version = "0.7.3", default-features = false }
+zeroize = { version = "1.8.2", features = ["alloc"] }
 rand = "0.8"
 ring = "0.17.14"
 zip = "0.6"
@@ -62,7 +73,7 @@ tempfile = "3.27.0"
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6.3", features = ["windows-native"] }
 winreg = "0.52"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_Devices_Communication", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Security"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_Devices_Communication", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_Security"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 accessibility = "0.2"

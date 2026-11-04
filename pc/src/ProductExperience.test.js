@@ -218,7 +218,13 @@ test("Tauri release resources are target-specific and package only audited LGPL 
   assert.match(localMacDmgBundler, /readFileSync\(tauriConfigPath, "utf8"\)/);
   assert.match(localMacDmgBundler, /PET_MANAGER_DMG_FLAVOR/);
   assert.match(localMacDmgBundler, /\$\{productName\}_\$\{appVersion\}\$\{dmgFlavorSuffix\}_\$\{dmgArchitecture\}\.dmg/);
-  assert.match(localMacDmgBundler, /verifyStableApp\(join\(mountRoot, appBundleName\)\)/);
+  assert.match(localMacDmgBundler, /verifyStableApp\(stagedAppPath,\s*true\)/);
+  assert.match(localMacDmgBundler, /verifyStableApp\(join\(mountRoot, appBundleName\),\s*true\)/);
+  const verifyStableApp = localMacDmgBundler.split("function verifyStableApp(")[1].split("\nverifyStableApp(appPath)")[0];
+  assert.match(verifyStableApp, /macAppIdentity\(path,\s*appVersion\)/);
+  assert.match(verifyStableApp, /if\(receipt\)verifyBuildReceipt\(identity,receipt,\{relocated\}\)/);
+  assert.match(verifyStableApp, /'--verify-only'/);
+  assert.match(verifyStableApp, /relocated\?\['--relocated'\]:\[\]/);
   assert.doesNotMatch(localMacDmgBundler, /Pet Manager_0\.1\.0/);
   assert.match(localMacDmgBundler, /hdiutil/);
   assert.match(localMacDmgBundler, /--skip-jenkins/);
@@ -316,7 +322,23 @@ test("Tauri release resources are target-specific and package only audited LGPL 
   assert.match(p4ReadyScript, /cachedAudioHashes\.get\(family\) === audioHash/);
   assert.match(p4ReadyScript, /Git LFS 指针/);
   assert.match(p4ReadyScript, /git lfs pull/);
-  assert.match(prepareScript, /npmArgs = \["ci", "--omit=dev"/);
+  const dependencyCheck = prepareScript.slice(prepareScript.indexOf("function ensureBridgeDependencies()"), prepareScript.indexOf("\nconst target = requestedTarget"));
+  const dependencies = ["fixture-a", "fixture-b"];
+  for (const missing of [null, ...dependencies]) {
+    const check = new Function("readFileSync", "join", "bridgeRuntimePackage", "existsSync", "spawnSync", `${dependencyCheck};return ensureBridgeDependencies;`)(
+      (path, encoding) => {
+        assert.equal(path, "/fixture/bridge/package.json");
+        assert.equal(encoding, "utf8");
+        return JSON.stringify({ dependencies: Object.fromEntries(dependencies.map(name => [name, "1.0.0"])) });
+      },
+      posix.join,
+      "/fixture/bridge",
+      path => dependencies.some(name => name !== missing && path === `/fixture/bridge/node_modules/${name}/package.json`),
+      () => assert.fail("packaging preflight must never install or fetch dependencies"),
+    );
+    if (missing) assert.throws(check, /缺少 bridge 生产依赖/);
+    else assert.doesNotThrow(check);
+  }
   assert.match(ffmpeg, /bundled_ffmpeg_candidates|PET_MANAGER_BUNDLED_FFMPEG/);
   assert.match(ffmpeg, /h264_videotoolbox/);
   assert.match(ffmpeg, /h264_mf/);

@@ -50,6 +50,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { watch } from "@tauri-apps/plugin-fs";
 import { useExitProtection } from "./lib/exit-protection.js";
+import {syncAudioPreflight,deviceDeletePolicy,componentTransferError} from './component-center/component-transfer-policy.js';
 import { componentRequiresPc } from "./component-center/catalog-state.js";
 import { BUILTIN_COMPONENT_CENTER } from "./fixtures";
 import {
@@ -67,6 +68,7 @@ import { useDeviceContext } from "./shell/DeviceContext.jsx";
 import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
 import CandidateCard, { resolveComponentKind } from "./component-center/CandidateCard.jsx";
 import ComponentPreviewModal from "./component-center/ComponentPreviewModal.jsx";
+import {ProgramBackgroundProvider} from './component-center/ProgramBackground.jsx';
 import CommunityCenter from "./component-center/CommunityCenter.jsx";
 import RemovedComponents from './component-center/RemovedComponents.jsx';
 import WorkflowConfirm from './component-center/WorkflowConfirm.jsx';
@@ -114,88 +116,10 @@ const CONTROL_HELP = Object.fromEntries(
   COMPONENT_CONTROL_OPTIONS.map((option) => [option.label, option.help]),
 );
 
-function gameInstallBlockedReason(component, usb) {
-  if(component?.pcExtension?.discovery && (Number(usb?.capabilities?.widgetMediaQueueMax||20)<128 || usb?.capabilities?.widgetMediaLifecycle!=="p4-media-lifecycle-v1")) return "自动电台列表需要升级设备固件（媒体队列与进入自动播放能力）";
-  if ((component?.inputPolicy || component?.appRuntime?.input) && usb?.capabilities?.widgetInput !== "p4-input-v1") return "需要新版触屏、按键与摇杆交互能力，请先升级设备固件";
-  if(component?.appRuntime?.lifecycle&&usb?.capabilities?.widgetLifecycle!=="p4-lifecycle-v1")return "需要游戏暂停与成绩存档能力，请先升级设备固件";
-  const surface=component?.mediaSurface||component?.appRuntime?.surface;
-  if (surface?.fonts?.some(f=>f.cell) && usb?.capabilities?.widgetGlyphCells!=="p4-glyph-cells-v1") return "需要高清字形格能力，请先升级设备固件";
-  if(surface?.input&&usb?.capabilities?.widgetMediaTouch!=="p4-media-touch-v1")return "需要媒体触屏控制能力，请先升级设备固件";
-  if(surface?.images?.some(im=>im.encoding!=="jpeg"&&im.frame_width>240)&&usb?.capabilities?.widgetSurfaceAtlas!=="p4-wide-atlas-v1")return "需要高清分格素材能力，请先升级设备固件";
-  if(component?.appRuntime?.game?.vertical_speed_percent!==undefined && usb?.capabilities?.widgetFlappyTuning!=="p4-flappy-tuning-v1") return "需要飞鸟速度参数能力，请先升级设备固件";
-  if((component?.mediaSurface?.game_view || component?.appRuntime?.surface?.game_view) && usb?.capabilities?.widgetGameSurface!=="p4-game-surface-v1") return "需要精细游戏画面能力，请先升级设备固件";
-  if((component?.mediaSurface?.data_view || component?.appRuntime?.surface?.data_view) && usb?.capabilities?.widgetDataSurface!=="p4-data-surface-v1") return "需要精细数据画面能力，请先升级设备固件";
-  if((component?.mediaSurface?.scene_view || component?.appRuntime?.surface?.scene_view) && usb?.capabilities?.widgetSceneSurface!=="p4-scene-surface-v1") return "需要精细场景画面能力，请先升级设备固件";
-  if(component?.mediaSurface?.engine==="p4-app-surface-v1" && usb?.capabilities?.widgetAppSurface!=="p4-app-surface-v1") return "需要通用应用界面能力，请先升级设备固件";
-  if(component?.mediaSurface?.graphics && usb?.capabilities?.widgetAppGraphics!=="p4-app-graphics-v1") return "需要高清背景、图标和精细排版能力，请先升级设备固件";
-  if(component?.mediaSurface?.typography && usb?.capabilities?.widgetAppTypography!=="p4-app-type-v1") return "需要组件字形和动态按键提示能力，请先升级设备固件";
-  if(component?.mediaSurface?.interaction && usb?.capabilities?.widgetAppInteraction!=="p4-app-interaction-v1") return "需要组件分格素材与条件显示能力，请先升级设备固件";
-  if(component?.appRuntime?.persist && usb?.capabilities?.widgetState!=="p4-app-state-v1") return "需要组件存档能力，请先升级设备固件";
-  if(component?.appRuntime?.host && usb?.capabilities?.widgetAppHost!=="p4-app-host-v1") return "需要组件宿主服务能力，请先升级设备固件和 PC 客户端";
-  if(component?.mediaSurface?.images?.length && usb?.capabilities?.widgetSurfaceImages!=="p4-surface-images-v1") return "需要图片与旋转能力，请先升级设备固件";
-  if(component?.scene?.engine === "p4-touch-slice-v1" && (component.scene.revision||1)>(usb?.capabilities?.widgetSliceRevision||1)) {
-    return "这个游戏版本需要新版切果能力，请先升级设备固件。";
-  }
-  if(component?.scene?.engine === "p4-touch-slice-v1" && (usb?.capabilities?.widgetPointer!=="p4-pointer-v1" || usb?.capabilities?.touchInput?.ready!==true)) {
-    return "这个游戏需要连续触控，请更新固件并确认触屏就绪。";
-  }
-  if (component?.instrumentSource && usb?.capabilities?.widgetInstrument !== "p4-instrument-v1") {
-    return "这个组件需要本地木鱼音效能力，请先升级设备固件。";
-  }
-  // Capability requirements depend on declared actions, not per-user key remapping.
-  // This module-level function must not call ComponentCenter's render-local helpers.
-  const bindings = Array.isArray(component?.defaultBindings) ? component.defaultBindings : [];
-  if (bindings.some((binding) => binding?.action === "media.lyrics")
-      && usb?.capabilities?.widgetLyrics !== "p4-lrc-v1") {
-    return "这个组件的歌词模式需要更新固件，请先升级设备固件。";
-  }
-  if (component?.pcExtension && usb?.capabilities?.widgetMediaSurface !== "p4-media-surface-v1") {
-    return "当前固件不支持此媒体组件，请先升级固件";
-  }
-  if ((component?.mediaSource || component?.id === "music-player") && usb?.capabilities?.widgetMedia !== "p4-media-v1") {
-    return "这个组件需要音乐播放能力，请先升级设备固件。";
-  }
-  if (component?.dataSource && usb?.capabilities?.widgetData !== "p4-data-list-v1") {
-    return "这个组件需要实时数据列表能力，请先升级设备固件。";
-  }
-  const requiredRuntime = String(component?.runtimeEngine || "");
-  const requiredScene = String(component?.sceneEngine || "");
-  const preset = String(component?.gamePreset || component?.gameType || "");
-  if (!requiredRuntime && !requiredScene && !preset) return "";
-  const runtime = String(usb?.capabilities?.widgetRuntime || "");
-  const scene = String(usb?.capabilities?.widgetScene || "");
-  const runtimes = Array.isArray(usb?.capabilities?.widgetRuntimes)
-    ? usb.capabilities.widgetRuntimes.map(String)
-    : runtime
-      ? [runtime]
-      : [];
-  const scenes = Array.isArray(usb?.capabilities?.widgetScenes)
-    ? usb.capabilities.widgetScenes.map(String)
-    : scene
-      ? [scene]
-      : [];
-  const presets = Array.isArray(usb?.capabilities?.widgetGamePresets)
-    ? usb.capabilities.widgetGamePresets
-    : Array.isArray(usb?.capabilities?.widgetGames)
-      ? usb.capabilities.widgetGames
-    : [];
-  if (requiredRuntime && !runtimes.includes(requiredRuntime)) {
-    return `这个组件需要 P4 通用运行时（${requiredRuntime}），请先升级设备固件。`;
-  }
-  if (requiredScene && !scenes.includes(requiredScene)) {
-    return `这个组件需要 P4 场景能力（${requiredScene}），请先升级设备固件。`;
-  }
-  if (preset && !presets.includes(preset)) {
-    return `这个旧版游戏预设需要设备能力（${preset}），请先升级设备固件。`;
-  }
-  if (
-    preset &&
-    !runtimes.some((value) =>
-      ["p4-bounded-v2", "p4-bounded-runtime-v3", "p4-bounded-runtime-v4"].includes(value),
-    )
-  ) {
-    return `这个旧版游戏预设需要 P4 组件运行时，请先升级设备固件。`;
-  }
+function gameInstallBlockedReason(_component, _usb) {
+  // Optional device capability/ready snapshots do not prohibit installation.
+  // Package validity, target scope, capacity and actual native transfer errors
+  // remain authoritative. Installation never asserts optional features can run.
   return "";
 }
 
@@ -207,11 +131,6 @@ function localInstallBlockedReason(component) {
   return `正式本地组件校验失败：${errors.join("；") || "组件包结构或运行时声明无效"}`;
 }
 
-function deviceTouchReady(usb) {
-  const reportedReady = usb?.capabilities?.touchInput?.ready;
-  if (typeof reportedReady === "boolean") return reportedReady;
-  return usb?.capabilities?.touch === true;
-}
 
 function loadComponentButtonOverrides() {
   if (typeof window === "undefined" || !window.localStorage) return {};
@@ -509,6 +428,10 @@ export default function ComponentCenter({ active = true }) {
   const [pendingComponentAction, setPendingComponentAction] = useState(null);
   const [componentActionPending, setComponentActionPending] = useState(false);
   const [componentActionError, setComponentActionError] = useState("");
+  const [clearDeviceSave,setClearDeviceSave]=useState(false);
+  const [clearSaveConfirmationMode,setClearSaveConfirmationMode]=useState(null);
+  const [audioSyncPending,setAudioSyncPending]=useState(null);
+  useEffect(()=>{setClearDeviceSave(false);},[pendingComponentAction]);
   const [deviceInventory, setDeviceInventory] = useState(
     () => readSessionDeviceInventory(liveInventoryTarget) || EMPTY_DEVICE_INVENTORY,
   );
@@ -956,8 +879,8 @@ export default function ComponentCenter({ active = true }) {
     ) {
       push({
         tone: "warning",
-        title: `设备最多同步 ${maxInstalled} 个组件`,
-        message: "请先在任一已同步组件卡片上点击移除，再同步新组件。",
+        title: `设备组件已满：${deviceInventory.items.length}/${maxInstalled}，无法再同步「${component.name}」`,
+        message: `设备最多同时保留 ${maxInstalled} 个组件。请先在组件中心找到你不再使用的已同步组件，点击卡片右下角的「移除」把它从设备删掉，腾出空位后再回来同步「${component.name}」。`,
       });
       return;
     }
@@ -1006,6 +929,8 @@ export default function ComponentCenter({ active = true }) {
       ? deviceInventory.items.find((item) => item.id === component.id)
       : null;
     componentActionReturnFocusRef.current = document.activeElement;
+    setClearDeviceSave(false);
+    setClearSaveConfirmationMode(null);
     setPendingComponentAction({
       type: "delete-options",
       component,
@@ -1030,13 +955,14 @@ export default function ComponentCenter({ active = true }) {
 
   function cancelComponentAction() {
     if (componentActionPending) return;
+    setClearSaveConfirmationMode(null);
     setPendingComponentAction(null);
     setComponentActionError("");
     restoreComponentActionFocus();
   }
 
   useEffect(() => {
-    if (!pendingComponentAction) return undefined;
+    if (!pendingComponentAction || clearSaveConfirmationMode) return undefined;
     componentActionCancelRef.current?.focus();
     const handleKeyDown = (event) => {
       if (event.key === "Escape" && !componentActionPending) {
@@ -1063,7 +989,7 @@ export default function ComponentCenter({ active = true }) {
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [componentActionPending, pendingComponentAction]);
+  }, [componentActionPending, pendingComponentAction, clearSaveConfirmationMode]);
 
   function clearActiveComponentState(target) {
     setActiveComponentRecord(null);
@@ -1084,7 +1010,7 @@ export default function ComponentCenter({ active = true }) {
     setSavedBindingOverrides(current=>Object.fromEntries(Object.entries(current).filter(([key])=>!key.startsWith(keyPrefix))));
   }
 
-  async function confirmComponentAction(mode) {
+  async function confirmComponentAction(mode, clearSaveConfirmed = false) {
     if (!pendingComponentAction?.component || componentActionPending) return;
     const {
       component,
@@ -1097,6 +1023,10 @@ export default function ComponentCenter({ active = true }) {
     const removesDevice = mode === "device-only" || (deleteLibrary && installedOnDevice);
     if (!removesDevice && !deleteLibrary) return;
     if (deleteLibrary && !isLocal) return;
+    if (removesDevice && clearDeviceSave && !clearSaveConfirmed) {
+      setClearSaveConfirmationMode(mode);
+      return;
+    }
     setComponentActionPending(true);
     setComponentActionError("");
     let deviceRemoved=false;
@@ -1104,8 +1034,10 @@ export default function ComponentCenter({ active = true }) {
       let deviceResult = null;
       if (removesDevice) {
         if (!target) throw new Error("无法确认要删除组件的目标设备");
+        const savePolicy=deviceDeletePolicy({clearSave:clearDeviceSave,transport:target.transport,capabilities:usb.capabilities});
         deviceResult = await invoke("remove_widget_from_device", {
           input: {
+            ...savePolicy,
             componentId: component.id,
             transport: target.transport,
             boardDeviceId: target.boardDeviceId || "",
@@ -1219,9 +1151,6 @@ export default function ComponentCenter({ active = true }) {
     }
     const seen = new Map();
     for (const binding of resolveComponentBindings(component)) {
-      if (binding.event.startsWith("screen.") && !deviceTouchReady(usb)) {
-        return `${binding.label} 使用了屏幕手势，但当前设备未报告触屏可用，请改为未被全局退出占用的按键或摇杆`;
-      }
       for (const eventSlot of componentInputEventSlots(binding.event)) {
         if (globalExitEvents.includes(eventSlot)) {
           return `${binding.label} 占用了当前全局退出键，请改用其他按键`;
@@ -1263,16 +1192,10 @@ export default function ComponentCenter({ active = true }) {
     );
     return COMPONENT_CONTROL_OPTIONS
       .filter((option) => componentControlOptionAllowed(option, binding, component))
-      .filter((option) => (
-        !option.event.startsWith("screen.")
-        || deviceTouchReady(usb)
-        || option.event === currentEvent
-      ))
       .map((option) => ({
         ...option,
         disabled: (
           componentInputEventSlots(option.event).some((event) => globalExitEvents.includes(event))
-          || (option.event.startsWith("screen.") && !deviceTouchReady(usb))
           || (
             option.event !== currentEvent
             && componentInputEventSlots(option.event).some((event) => usedEvents.has(event))
@@ -1388,6 +1311,14 @@ export default function ComponentCenter({ active = true }) {
         }
         installTarget = { transport: "usb", boardDeviceId };
         if(options.target&&activeComponentTargetKey(options.target)!==activeComponentTargetKey(installTarget))throw new Error('目标设备已变化，请重新确认同步目标。');
+        const audio=await syncAudioPreflight(invoke,boardDeviceId);
+        if(options.epoch!==undefined&&options.epoch!==installEpoch.current)return false;
+        if(audio.blocked){
+          setAudioSyncPending({componentId,clawpkgPath,options,message:audio.message});
+          setOtaPhase("audio-blocked");
+          return false;
+        }
+        setAudioSyncPending(null);
         setOtaProgress(null);
         const footerOverride = options.skipFooterOverride ? "" : buildBindingsFooter(component);
         result = await invoke("install_clawpkg_over_usb", {
@@ -1418,8 +1349,7 @@ export default function ComponentCenter({ active = true }) {
       });
       return true;
     } catch (err) {
-      const detail = typeof err === "string" ? err : String(err);
-      const msg = detail;
+      const msg = componentTransferError(err);
       if (
         !componentPackageInstalled
         && !attemptedSsh
@@ -1529,6 +1459,7 @@ export default function ComponentCenter({ active = true }) {
   }
 
   return (
+    <ProgramBackgroundProvider usb={usb} active={active}>
     <PageShell
       title="组件中心"
       subtitle="发现、创作与分享属于你的桌面玩法"
@@ -1695,6 +1626,7 @@ export default function ComponentCenter({ active = true }) {
 
       {previewComponent && isComponentVisible(previewComponent) && (
         <ComponentPreviewModal
+          active={active}
           component={previewComponent}
           onSourceChange={openComponent}
           usb={usb}
@@ -1839,7 +1771,21 @@ export default function ComponentCenter({ active = true }) {
       )}
 
       {downgradeComponent&&<WorkflowConfirm title="设备版本更高" description={`继续会使用当前选择的 ${downgradeComponent.version} 覆盖设备上的「${downgradeComponent.name}」资源。请确认是否需要降级。`} confirmLabel="确认降级并同步" onCancel={()=>setDowngradeComponent(null)} onConfirm={()=>{const component=downgradeComponent;setDowngradeComponent(null);syncSelectedComponent(component,true);}}/>}
-      {pendingComponentAction && (
+      {audioSyncPending&&<div className="modal-backdrop"><section className="modal-card component-action-confirm" role="dialog" aria-modal="true" aria-label="停止播放后同步">
+        <h2>停止播放后同步</h2><p role="status">{audioSyncPending.message}</p>
+        <p>请在电台/播放器中停止播放；若正在录音或实时语音，请先结束。这里不会自动停止语音，也尚未发送组件安装事务。</p>
+        <button type="button" onClick={()=>{setAudioSyncPending(null);setOtaPhase(null);}}>取消</button>
+        <button type="button" onClick={()=>{const pending=audioSyncPending;setAudioSyncPending(null);startOtaInstall(pending.componentId,pending.clawpkgPath,pending.options);}}>已停止，重新检查并同步</button>
+      </section></div>}
+      {pendingComponentAction && clearSaveConfirmationMode && <WorkflowConfirm
+        title="清除设备端应用存档"
+        description="确认清除此组件的设备端应用存档？此操作不可撤销。PC 记录不受影响；独立后台 program 快照不保证被清除。"
+        confirmLabel="确认删除并清除存档"
+        cancelLabel="返回删除选项"
+        onCancel={()=>setClearSaveConfirmationMode(null)}
+        onConfirm={()=>{const mode=clearSaveConfirmationMode;setClearSaveConfirmationMode(null);confirmComponentAction(mode,true);}}
+      />}
+      {pendingComponentAction && !clearSaveConfirmationMode && (
         <div
           ref={componentActionDialogRef}
           className="component-replace-modal"
@@ -1870,6 +1816,11 @@ export default function ComponentCenter({ active = true }) {
                   : "本次仅移除本机资源，不操作设备；设备是否安装请以最近核对结果为准。"}
               {pendingComponentAction.component.isDeviceOnly&&' 本机没有安装源；移除这个设备副本后，不能通过本机回收站恢复，请确认已另存资源包。'}
             </p>
+            {pendingComponentAction.installedOnDevice&&<div className="component-save-policy">
+              <p>默认仅卸载设备组件，保留设备端应用存档；PC 本机记录另行保留。设备必须明确支持保留存档卸载。</p>
+              <label><input type="checkbox" checked={clearDeviceSave} disabled={componentActionPending} onChange={e=>setClearDeviceSave(e.target.checked)}/>同时清除此组件的设备端应用存档（不可撤销）</label>
+              <p>此选项不代表完全清除独立后台 program 快照，也不会删除 PC 的笔记、收藏或历史记录。</p>
+            </div>}
             {pendingComponentAction.target && (
               <p className="component-action-confirm__target">
                 <span>删除目标</span>
@@ -1934,6 +1885,7 @@ export default function ComponentCenter({ active = true }) {
       )}
       </div>
     </PageShell>
+    </ProgramBackgroundProvider>
   );
 }
 

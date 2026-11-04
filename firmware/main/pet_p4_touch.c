@@ -439,10 +439,13 @@ static void process_touch_event(
     if(event->gesture==PET_P4_TOUCH_TAP) {
       int hit=pet_center_hit(event->x,event->y,selected,count);
       if(hit>=0&&pet_p4_miniapp_catalog_select((size_t)hit)) {
-        if(pet_p4_miniapp_catalog_activate_selected()) {
-          pet_p4_miniapp_sync_stats(&state->stats);
-          snprintf(state->screen_page,sizeof(state->screen_page),"app");
-          snprintf(action,sizeof(action),"component_open");handled_locally=true;
+        pet_p4_miniapp_activation_request_t activation=pet_p4_miniapp_activation_request_selected();
+        if(activation!=PET_MINIAPP_ACTIVATION_REJECTED) {
+          if(activation==PET_MINIAPP_ACTIVATION_READY) {
+            pet_p4_miniapp_sync_stats(&state->stats);
+            snprintf(state->screen_page,sizeof(state->screen_page),"app");
+          }
+          snprintf(action,sizeof(action),"%s",activation==PET_MINIAPP_ACTIVATION_READY?"component_open":"component_open_pending");handled_locally=true;
         }
       }
     }else if(event->gesture==PET_P4_TOUCH_SWIPE_LEFT||event->gesture==PET_P4_TOUCH_SWIPE_RIGHT) {
@@ -546,6 +549,8 @@ void pet_p4_touch_process(
     if (sample.has_gesture && !captured && !test && !component
         && !application)
       process_touch_event(state, send_line, ctx, &sample.gesture);
+    pet_p4_miniapp_activation_guard(state && !strcmp(state->screen_page, "components")
+      && !pet_p4_conversation_active(state));
   }
 }
 
