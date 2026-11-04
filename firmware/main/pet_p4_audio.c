@@ -125,6 +125,7 @@ static atomic_bool g_music;
 static atomic_bool g_music_paused;
 static atomic_bool g_music_pause_requested;
 static atomic_uint g_music_volume = 65;
+static atomic_uint g_output_volume = 70;
 static int32_t g_music_gain = 0;
 
 unsigned int pet_p4_audio_stream_played_bytes(void) { return atomic_load(&g_stream_played_bytes); }
@@ -854,7 +855,7 @@ esp_err_t pet_p4_audio_init(
   if (!g_speaker && es8311_available) g_speaker = bsp_audio_codec_speaker_init();
   if (g_speaker) {
     g_stream_lock = xSemaphoreCreateRecursiveMutex();
-    int volume_result = esp_codec_dev_set_out_vol(g_speaker, PET_P4_AUDIO_PLAYBACK_VOLUME);
+    int volume_result = esp_codec_dev_set_out_vol(g_speaker, (int) atomic_load(&g_output_volume));
     int open_result = esp_codec_dev_open(g_speaker, &format);
     g_playback_queue = open_result == ESP_OK
       ? xQueueCreate(1, sizeof(pet_p4_audio_playback_request_t))
@@ -1199,4 +1200,19 @@ void pet_p4_audio_music_pause(bool paused) {
   if(!paused || !atomic_load(&g_stream_playing))atomic_store(&g_music_paused,paused);
 }
 void pet_p4_audio_music_volume(unsigned int v) {atomic_store(&g_music_volume,v>100?100:v);}
+
+esp_err_t pet_p4_audio_set_output_volume(unsigned int volume) {
+  /* Cap below the codec's full-scale setting to avoid clipping and protect
+   * the speaker; the App mirrors the same 0..90 range. */
+  if (volume > 100) volume = 100;
+  atomic_store(&g_output_volume, volume);
+  if (!g_speaker) return ESP_ERR_INVALID_STATE;
+  return esp_codec_dev_set_out_vol(g_speaker, (int) volume);
+}
+
+int pet_p4_audio_output_volume(void) {
+  int value = -1;
+  if (g_speaker) (void) esp_codec_dev_get_out_vol(g_speaker, &value);
+  return value >= 0 ? value : (int) atomic_load(&g_output_volume);
+}
 unsigned int pet_p4_audio_music_buffered_ms(void) {return (unsigned int)(stream_buffered()*1000ULL/96000ULL);}

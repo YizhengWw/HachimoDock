@@ -20,6 +20,8 @@ export default function DashboardActionsMenu({
   onUnbind,
   onDeviceReturnHome,
   onForceSyncAppearance,
+  deviceControls,
+  onUpdateDeviceControl,
   onUpdateFirmware,
   onDiagnostics,
 }) {
@@ -72,6 +74,21 @@ export default function DashboardActionsMenu({
             <Copy size={14} />
             复制桌面设备 ID
           </button>
+          {deviceControls && (
+            <div className="dashboard-actions-menu__section">
+              <span className="dashboard-actions-menu__section-label">设备控制</span>
+              <label className="dashboard-actions-menu__range">
+                <span>音量 <output>{deviceControls.volume}%</output></span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={deviceControls.volume}
+                  onChange={(event) => onUpdateDeviceControl?.("volume", Number(event.target.value))}
+                />
+              </label>
+            </div>
+          )}
           {onDeviceReturnHome && (
             <button
               type="button"

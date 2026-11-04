@@ -2848,6 +2848,15 @@ bool pet_p4_handle_line(
     pet_p4_conversation_playback_begin(state, "");
     pet_p4_audio_stream_flush();
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
+  } else if (strcmp(topic, "ui/device_controls") == 0) {
+    const cJSON *volume = cJSON_GetObjectItemCaseSensitive(payload, "volume");
+    if (cJSON_IsNumber(volume)) {
+      int value = (int) volume->valuedouble;
+      if (value < 0) value = 0;
+      if (value > 100) value = 100;
+      (void) pet_p4_audio_set_output_volume((unsigned int) value);
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "ui/conversation") == 0) {
     bool phase_changed = strcmp(state->conversation_state, json_string(payload, "state")) != 0;
     bool accepted = pet_p4_conversation_update(state, json_string(payload, "sessionId"),

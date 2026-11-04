@@ -14835,3 +14835,37 @@ select:focus-visible {
 .wifi-settings__note--warning {
   color: var(--warning);
 }
+
+.dashboard-actions-menu__section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
+.dashboard-actions-menu__section-label {
+  padding: 6px 10px 2px;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.dashboard-actions-menu__range {
+  display: grid;
+  gap: 5px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.dashboard-actions-menu__range > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dashboard-actions-menu__range input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
