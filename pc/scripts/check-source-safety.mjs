@@ -39,7 +39,7 @@ for (const file of new Set(paths)) {
   // Text-only policy checks do not apply to resolved binary assets.
   if (bytes.includes(0)) continue;
   if ((/^pc\/docs\//.test(file) || /^(?:README(?:\.en)?\.md|firmware\/README\.md)$/.test(file)) && /\.md$/.test(file)
-      && /内部版本有意保留|保留明确授权的内部凭据\/CA|内部版批准的凭据\/CA|本机正式库已移动到私有|本机证据在工作区同级|内部 Windows 包：|当前内部构建/.test(text)) {
+      && /内部版本有意保留|保留明确授权的内部凭据\/CA|内部版批准的凭据\/CA|本机正式库已移动到私有|本机证据在工作区同级|内部 Windows 包：|当前内部构建|两项已授权 Key|两张企业 CA|仅限内部流转/.test(text)) {
     problems.push(`${file}: private delivery or local acceptance notes`);
   }
   if (text.startsWith('version https://git-lfs.github.com/spec/v1\n')) {

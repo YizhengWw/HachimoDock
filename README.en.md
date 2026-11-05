@@ -1,51 +1,57 @@
 # HachimoDock
 
-[简体中文 · Product gallery](README.md) · [Downloads](https://github.com/YizhengWw/HachimoDock/releases)
+[简体中文](README.md) · [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest) · [Issues](https://github.com/YizhengWw/HachimoDock/issues)
 
-HachimoDock turns Agent activity into a desktop companion: pet animations, conversation bubbles, voice dictation and interactive components on an ESP32-P4 display. Pet Manager supports macOS and Windows and integrates with agents including ChatGPT (Codex), Claude, OpenClaw, MiMoCode and WorkBuddy.
+HachimoDock is a desktop interface for AI Agents. A Windows/macOS manager and an ESP32-P4 display provide task-state animations, conversation bubbles, voice input, custom appearances and interactive components. The installed desktop app is named **HachimiDock**; some developer documentation calls it **Pet Manager**.
 
-Home-control capabilities are provided by [**Xiaomi MiLoCo**](https://github.com/XiaoMi/xiaomi-miloco). The relevant MiLoCo licensed works are copyrighted by Xiaomi and subject to the [Xiaomi Miloco License](licenses/Xiaomi-Miloco-LICENSE.md); copyright notices, disclaimers and the license are retained with the relevant implementation. Non-commercial use must still comply with the license's permitted scope. This project grants no additional commercial, sublicensing or trademark rights. See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for details.
+## Versions and downloads
 
-## Source and builds
+| Component | Current release | Platform |
+| --- | --- | --- |
+| Desktop client | **0.1.197** | Apple silicon macOS / Windows x64 |
+| Device firmware | **0.7.103-p4-r178** | Separate ESP32-P4 v1 and v3 images |
+| Current source | Client 0.1.197 / firmware R178 version identifiers | `main` may contain post-release changes |
 
-- [`pc/`](pc/README.md): desktop client 0.1.197, local Agent bridge, component-generation Skill and built-in resources.
-- [`firmware/`](firmware/BUILD.md): ESP32-P4 runtime 0.7.103-p4-r178, board drivers, tests and complete factory-image tools. The 0.7.108 development branch is not included.
-- Current `main` includes its release resources in ordinary Git; a fresh checkout does not depend on Git LFS quota. Build dependencies are described in each directory.
-- For a ready-to-use app or a complete device flashing kit, visit [Downloads](https://github.com/YizhengWw/HachimoDock/releases/latest).
-- To use speech recognition or appearance generation, enter your service keys in Pet Manager’s API settings.
+Use the DMG or Windows x64 installer in [v0.1.197](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197). Verify downloaded files against `SHA256SUMS`. The source-to-binary correspondence for 197 is described in that Release's source notes; matching version numbers alone do not establish an identical build. Intel Mac and Linux installers are not provided.
 
-Choose the complete v1 or v3 flashing kit for your actual chip revision; they are not interchangeable. Contact customer support if unsure. Windows and macOS use the same firmware for each chip family. The scripts require Python 3.10+ and install esptool **5.4.0**. They check the chip before erasing; a complete flash clears settings, appearances and components. Connect the display to **DSI**, not CSI, with power disconnected. The v3 24 MHz display fix restored pet animation on a physical board; input, audio and large-file transfers still require release-level hardware validation. See the [flashing guide](firmware/BUILD.md) for tool versions and instructions.
+Complete flashing kits are for first installation or factory recovery. Choose the kit for the actual chip revision: **v1 and v3 are not interchangeable**. A complete flash erases settings, appearances and components. Routine client OTA updates only the application and does not repartition existing devices. See [firmware build and flashing](firmware/BUILD.md).
 
-## Device and voice use
+## Features and compatibility
 
-The current source improves dictation, device connection and recovery, appearance generation, component resources, volume and city settings, and status audio and bubbles. Generation supports human and animal characters, optional style descriptions and action-specific reference frames. Third-party components and services retain their respective licenses and conditions.
+- Follow supported Agent activity on the device through animations and task bubbles.
+- Hold SW1 to record speech; release to append a draft. Confirm separately to send it.
+- Long-press SW2 in the pet view to start or end real-time conversation, after configuring speech/chat services.
+- Import or generate appearances; compatible firmware supports separate status-audio synchronization.
+- Install games, tools and PC-fed components. Optional missing touch capability does not block installation, but touch-dependent gameplay may be unavailable. Schema, integrity and storage checks still apply.
+- Adjust device volume and automatic/manual city location below voice input on the device home page. City selection is not GPS positioning and can be disabled.
 
-The supported desktop targets are Windows x64 and Apple silicon macOS. See each build guide for prerequisites. The `main` branch may contain source updates newer than the downloadable installers; the latest release manifest identifies the published packages. Third-party software and materials retain their original license terms.
+Integrations include ChatGPT (Codex), Claude, OpenClaw, MiMoCode, WorkBuddy and DeepSeek Harness. Status reporting, dictation, sending and desktop conversation switching are distinct capabilities. WorkBuddy and DeepSeek target conversations must be opened in their own apps; selecting a device bubble does not switch those desktop conversations. MiMoCode voice support is platform-dependent. See the [Agent matrix](pc/docs/agent-integration-audit.md) and [WorkBuddy guide](pc/docs/workbuddy.md).
 
-Configure speech and chat-model credentials, then long-press SW2 in the pet view to start or end real-time conversation. Compatible firmware supports listening during playback and interruption. Pair your home account on the Smart Home page for natural-language control of authorized devices. The built-in stock watchlist defaults to Xiaomi and Alibaba; manage it in component details. Quotes are refreshed by the PC every two seconds and forwarded over USB, may be delayed, and do not enable trading.
+Unavailable or ambiguous editors stop the operation. Unknown write/send results are not automatically replayed. Detecting an Agent does not prove its editor is ready. Runtime features depend on actual firmware capabilities; host tests and successful compilation do not establish hardware, performance or acoustic acceptance.
 
-Public installers contain no API keys, enterprise CA certificates or fixed proxy addresses. For image moderation failures, the client explains the rejected stage and offers manual MP4 import using material you are authorized to use.
+Public installers do not supply service API keys. Enter your own credentials in API settings. Online recognition, generation, data providers and Agents may require internet access; PC-fed components require the manager to remain running. User-uploaded materials retain their respective rights.
 
-Default short presses: SW1 confirms, SW2 switches the pet/component-center view, SW3 returns. Long-press SW1 records speech; releasing writes a draft, and Confirm sends it. Permissions are required to control the chosen Agent's input field. Dictation targets and desktop session switching depend on each Agent's integration. For WorkBuddy, manually open the target conversation and keep its input visible; changing the device bubble does not switch the desktop conversation. See [WorkBuddy](pc/docs/workbuddy.md) and [Agent integration](pc/docs/agent-integration-audit.md) for platform limits.
+## Installation and default controls
 
-Component behavior and physical bindings can be adjusted in Pet Manager. Use the bundled `petui` Skill inside an Agent to create and iterate on non-commercial components, then synchronize them to the device.
+The macOS package is not Apple-notarized; the Windows installer is not publisher-signed. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
 
-## macOS installation
+SW1 short press and joystick centre confirm; SW2 short press switches pet/component views; SW3 returns. Joystick directions select sessions/components or perform component actions. These defaults can be changed in the manager. Confirming voice input is separate from approving an Agent's tool permissions.
 
-If a downloaded app will not open, after verifying its origin and checksum run:
+## Hardware and development
 
-```sh
-xattr -cr "/Applications/HachimiDock.app"
-```
+The paired hardware uses ESP32-P4, 32 MiB Flash, 32 MiB PSRAM and a 480×640 MIPI-DSI panel. Components use a rotated 640×480 logical canvas. Connect the display to **DSI**, not CSI, with power disconnected. Consult the [hardware project](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) before substituting parts.
 
-Enable Pet Manager in **System Settings → Privacy & Security → Accessibility** when prompted to allow Agent input and control. See each release for complete firmware flashing instructions.
+- [Desktop source and build guide](pc/README.md)
+- [Firmware source and build guide](firmware/BUILD.md)
+- [PetUI component contracts](pc/skills/petui/SKILL.md)
+- [Volume and shared city settings](pc/docs/shared-device-settings.md)
 
-## License and notices
+Resources are stored in ordinary Git; Git LFS is not required. Preserve dependency locks and choose the correct target configuration. Published binaries retain their original build contents even when `main` changes.
 
-**Non-commercial source available.** The [HachimoDock Project License](LICENSE) permits non-commercial use, project modifications and component creation within its scope. Commercial use, paid services, commercial integration and independent apps/services/products require prior written permission. Project branding is not licensed for misleading promotion or endorsement. Third-party code and materials retain their [own licenses](THIRD_PARTY_NOTICES.md); earlier releases retain their accompanying licenses.
+## License and feedback
 
-For authorization, use the maintainer contact published in the [Chinese README](README.md#作者--author). Report security issues privately as described in [SECURITY.md](SECURITY.md).
+**Non-commercial source available.** The [project license](LICENSE) permits use, modification and component creation within its stated scope. Commercial use and independent products require prior written permission. Third-party software and materials retain their [own licenses](THIRD_PARTY_NOTICES.md); earlier releases retain their accompanying terms.
 
-## Working after the history cleanup
+Home-control capabilities integrate [Xiaomi MiLoCo](https://github.com/XiaoMi/xiaomi-miloco), whose relevant works are copyrighted by Xiaomi and governed by the [Xiaomi Miloco License](licenses/Xiaomi-Miloco-LICENSE.md). This project grants no additional commercial, sublicensing or trademark rights.
 
-Public history was cleaned on 2026-10-28. Prefer a fresh clone and do not merge or force-push old refs back into the repository. Existing Release installer and firmware attachments were not replaced. Rewriting Git history cannot recall downloaded copies or by itself purge cached GitHub views.
+For project contact, see [作者 / Author](README.md#作者--author). Report bugs through Issues with versions and reproduction steps, excluding credentials, personal data and raw logs. Report security issues privately under [SECURITY.md](SECURITY.md).

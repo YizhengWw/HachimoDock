@@ -57,3 +57,10 @@ test('ordinary binary resources and public service endpoints remain publishable'
   const result = check({ 'image.bin': Buffer.from([0, 1, 2, 255]), 'service.js': 'export const endpoint = "https://example.org/api";' });
   assert.equal(result.status, 0, result.output);
 });
+
+test('public guides reject private delivery records but retain user API configuration instructions', () => {
+  assert.equal(check({ 'pc/docs/example.md': '仅限内部' + '流转' }).status, 1);
+  assert.equal(check({ 'pc/docs/example.md': '两项已授权' + ' Key 与两张企业' + ' CA' }).status, 1);
+  const result = check({ 'pc/docs/example.md': '请在 API 配置中填写自己的服务 Key。' });
+  assert.equal(result.status, 0, result.output);
+});

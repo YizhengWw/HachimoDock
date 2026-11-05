@@ -1452,11 +1452,15 @@ settlement. This diagnostic is independent of installed components.
 ### PetUI touch slicing
 
 `capabilities.widgetScenes` now includes `p4-touch-slice-v1`, with
-`widgetPointer: "p4-pointer-v1"`. Installation requires `touchInput.ready=true`;
-an old firmware or disconnected touch controller must not be treated as ready.
+`widgetPointer: "p4-pointer-v1"`. The desktop permits installation when optional touch support is unavailable;
+this does not establish that touch gameplay is usable. Runtime interaction still
+requires a ready controller. Package schema, integrity and resource limits apply.
 `widgetSliceRevision: 2` adds three selectable modes, radius-based collision,
 golden fruit and bounded double-score energy. A package declaring
-`scene.revision: 2` must not install onto revision-1 devices.
+`scene.revision: 2` requires revision-2 runtime behavior for full gameplay.
+The authoring validator checks the declared target revision. Desktop installation
+does not turn missing optional capabilities into a readiness guarantee; installed
+packages may have reduced or unavailable gameplay on older devices.
 Top-level `p4-bounded-runtime-v4` packages can select this bounded scene and
 provide four PNG fruit sprites, a 30–120 second duration, 1–5 lives and a
 0–100 effect volume. Package scripts and executable assets remain forbidden.
@@ -1663,27 +1667,18 @@ The Linux runtime consumes MP4/WAV. The P4 runtime consumes preprocessed packs:
   and packaging prebuilder then replace x264's SPS with the minimal SPS proven
   against `esp_h264`; device synchronization only validates and transfers the
   finished ready pack and never invokes FFmpeg.
-- Current macOS-bundled `0.7.50-p4` USB-UART firmware runs UART0 at 4 Mbaud. It receives a small
-  `asset/raw-chunk` JSON header followed immediately by bounded binary data
-  and verifies the per-chunk FNV-1a checksum in RAM. The protocol accepts up
-  to 65,536 bytes; the desktop deliberately uses 8,192-byte chunks for the
-  CH343 link. Every ACK echoes the exact chunk index. A timeout flushes the
-  pending binary frame and retries the same index, while firmware recognizes
-  matching duplicate chunks without writing them to flash a second time.
-  H.264 targeting slot 1 is written sequentially to the dedicated `appearance`
-  partition; manifest/WAV files remain in SPIFFS. A 4KiB lookup header is
-  written only at commit, before the ready marker and active-slot switch.
-  This removes Base64 expansion, JSON bulk parsing, and SPIFFS video-write
-  amplification. The 64KiB value is a device maximum, not a required host
-  chunk size: macOS uses 8KiB logical chunks with drained 64-byte writes,
-  while Windows `0.7.50-p4` retains its 2 Mbaud transport, starts at up to 64KiB, and
-  restarts the aborted transaction at 2KiB after a checksum or timeout failure.
-  Windows CH343 raw
-  bodies use paced 128-byte slices while control frames retain 64-byte writes.
-  Raw-partition erase is performed
-  in 16KiB yielding slices so the UART receive task cannot trip its watchdog.
-  Windows probes 2 Mbaud first; macOS probes 4 Mbaud first. Both retain
-  3 Mbaud, the other high-speed rate, 921,600, and 115,200 compatibility fallbacks.
+- Current public R178 images use 4 Mbaud UART for both Windows and macOS.
+  `asset/raw-chunk` carries a bounded JSON header followed by binary data with
+  a per-chunk FNV-1a check. The host selects bounded, paced writes using the
+  negotiated capability; a device maximum is not a required host chunk size.
+  Exact transaction/path/index receipts are required before advancing.
+  A timeout is an unknown mutation result, not proof that the write failed.
+  The desktop does not automatically flush/replay that mutation, abort the
+  transaction or restart with another chunk size. Read-only identity/status
+  reconciliation and a new explicit operation are separate from retrying an
+  unknown write. Compatibility probing for older baud rates is not permission
+  to resume an unconfirmed transfer. Video data uses the dedicated appearance
+  slot; manifest/audio storage and commit rules remain separately checked.
 - Older firmware without `transport.rawAssetChunks` continues to receive
   20,478-byte pre-Base64 `asset/chunk` JSON Lines. File checksum commits remain
   authoritative for both transports.

@@ -1,9 +1,9 @@
 <div align="center">
   <img src="assets/hachimodock-mark.png" width="112" alt="HachimoDock（哈基米机）logo" />
   <h1>HachimoDock（哈基米机）</h1>
-  <p><strong>哈基米机 HachimoDock：让你的宠物 / 朋友 / 你推变成 AI Agent，和你一起工作</strong></p>
+  <p><strong>面向 AI Agent 的桌面交互终端</strong></p>
   <p>
-    把 ChatGPT（Codex）、Claude 等 Agent 的实时工作状态变成桌上宠物的表情、动作、Session 气泡和提醒。
+    通过 Windows/macOS 管理端与 ESP32-P4 设备，呈现任务状态、语音输入与互动组件。
   </p>
   <p>
     <a href="https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB">
@@ -32,16 +32,89 @@
 
 ## 项目简介
 
-HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件和开源硬件方案。它把电脑里正在运行的 Agent Session 实时同步到桌面小屏，让 AI 的思考、执行、完成和报错状态变成看得见的宠物动画与气泡；实体按键、四向摇杆和麦克风又能把操作与语音送回 Agent。
+HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Windows/macOS 管理端与 ESP32-P4 设备组成，提供工作状态显示、语音输入、自定义形象和互动组件。桌面应用的安装名称为 **HachimiDock**，部分开发文档使用 **Pet Manager** 指代管理端。
 
-你可以在这里下载 Windows/macOS 客户端和 ESP32-P4 完整烧录包，也可以获取源码自行构建。硬件资料与装配教程见 OSHWHub。
+[English](README.en.md) · [下载最新版本](https://github.com/YizhengWw/HachimoDock/releases/latest) · [问题反馈](https://github.com/YizhengWw/HachimoDock/issues) · [安全反馈](SECURITY.md)
 
+## 当前版本与下载
 
-| 端 | 入口 | 说明 |
-|---|---|---|
-| 软件端 | [GitHub Releases](https://github.com/YizhengWw/HachimoDock/releases/latest) | Windows x64 与 Apple silicon macOS 客户端。负责设备绑定、Agent 检测与跟随、形象管理、组件中心、语音入口、按钮配置和 USB 下发。 |
-| 固件端 / 设备运行时 | [GitHub Releases](https://github.com/YizhengWw/HachimoDock/releases/latest) | ESP32-P4 完整出厂镜像，包含应用固件、默认形象和内置组件。 |
-| 硬件端 | [OSHWHub 硬件复刻页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) | PCB、BOM、结构/装配和硬件复刻资料。 |
+| 项目 | 版本 / 平台 | 获取方式 |
+| --- | --- | --- |
+| 桌面安装包 | **0.1.197**；macOS Apple silicon / Windows x64 | [Release 附件](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197) |
+| 配套设备固件 | **0.7.103-p4-r178**；ESP32-P4 v1 / v3 分别提供 | 同一 Release 的完整烧录包；日常升级使用客户端 |
+| 当前源码 | 客户端版本 0.1.197 / 固件版本 R178，可能包含发布后的修正 | `main`；[PC 构建](pc/README.md)、[固件构建](firmware/BUILD.md) |
+
+下载时选择 `HachimiDock_0.1.197_macOS-arm64.dmg` 或 `HachimiDock_0.1.197_Windows-x64-setup.exe`。完整烧录包的文件名标注 v1/v3，按实际芯片选择，不能互刷。**源码版本号相同不等于与已发布二进制完全同源**；197 的源码归档对应关系见该 Release 的“源码说明”。
+
+当前预编译桌面包覆盖 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 包未经过 Apple 公证，Windows 安装器未做发行者签名。下载后先按 `SHA256SUMS` 核对完整性；不要关闭系统安全检查来运行来源不明的副本。
+
+## 核心能力
+
+| 能力 | 说明 |
+| --- | --- |
+| Agent 状态跟随 | 将活动会话的思考、执行、等待、完成和错误状态呈现在设备动画与任务气泡中。事件完整程度取决于 Agent 适配器。 |
+| 语音输入 | 按住语音键录音，松开后识别并追加到目标输入框；确认后才发送。灰色提示文字不属于草稿。 |
+| 实时对话 | 在宠物页面长按 SW2 开始或结束；使用用户配置的识别、对话和语音服务。 |
+| 形象与音效 | 内置西高地形象，支持导入或生成自定义外观、状态视频和提示音；兼容固件支持独立下发音效。 |
+| 组件中心 | 预览、安装和移除游戏、工具及 PC 数据组件；通过 `petui` Skill 创作声明式有界组件。 |
+| 音量与城市 | 首页语音输入模块下方统一调整设备总音量、自动识别城市或搜索并保存手动城市/区县。 |
+| 按键配置 | 配置三个按键与摇杆的操作，组件退出遵循设备全局返回设置。 |
+| USB 协同 | 桌面端负责状态、数据、素材与升级传输；连接状态和回执未知时不会自动重放变更。 |
+
+公开发行版不提供服务 Key。需要语音、对话或内容生成能力时，请在客户端“API 配置”中填写自己的凭据。城市定位可关闭；自动模式通过出口 IP 估算城市，不能代替 GPS。详见[音量与共享城市](pc/docs/shared-device-settings.md)。
+
+### Agent 兼容范围
+
+当前适配 ChatGPT（Codex）、Claude、OpenClaw、MiMoCode、WorkBuddy 和 DeepSeek Harness。**状态跟随、语音草稿、确认发送与桌面对话切换是不同能力**；检测到程序不代表其输入框已可用。
+
+- ChatGPT（Codex）、Claude、WorkBuddy、DeepSeek Harness 的桌面语音输入依赖当前可用的系统辅助功能输入框。
+- WorkBuddy 与 DeepSeek 的目标对话需在对应应用中打开；设备气泡选择不会自动切换它们的桌面对话。
+- MiMoCode 的语音支持与平台相关；OpenClaw 使用其会话路由。具体限制见 [Agent 接入与兼容说明](pc/docs/agent-integration-audit.md)。
+- 目标不明确、输入框不可用或提交结果未知时，本次操作会停止；不会选取最近的历史会话或自动重复发送。
+
+### 组件与资源
+
+设备运行声明式组件及受限运行时原语，不是通用浏览器或任意脚本环境。新能力以设备实际声明和对应契约为准；开发配置、离线测试和编译通过不能代替实机兼容与性能验证。
+
+组件通过 PC 同步。缺少可选触控能力不阻止安装，但触控玩法可能无法使用；包格式、资源完整性和存储上限仍需满足。音乐、电台、天气等 PC 数据功能需要管理端保持运行，部分内容需要联网。用户上传内容的权利由相应权利人保留。
+
+1. 在支持的 Agent 中使用 `petui` Skill 描述游戏或工具。
+2. 按设备逻辑画布、输入与资源配额生成组件，通过结构和资源校验。
+3. 在组件中心预览，选择“同步到设备”；不用的组件可从设备移除。
+
+开发契约见 [PetUI Skill](pc/skills/petui/SKILL.md)，实时数据见 [数据组件](pc/docs/widget-live-data.md)、[电脑状态与近期待办](pc/docs/local-live-widgets.md)。
+
+### 状态跟随演示
+
+<p align="center"><img src="assets/agent-status.gif" alt="Agent 工作状态与设备宠物动画" /></p>
+
+## 快速开始
+
+1. 下载并安装适合电脑系统的客户端，将设备通过数据线连接电脑。
+2. 在设备首页确认设备连接与固件版本；已有设备优先使用“固件升级”。
+3. 选择跟随的 Agent、形象和按键配置。需要语音输入时，授权客户端的系统辅助功能，并打开目标对话。
+4. 配置所需语音与对话服务；按住 SW1 说话，松开后查看草稿，短按确认键发送。
+
+| 默认操作 | 行为 |
+| --- | --- |
+| SW1 短按 / 摇杆中键 | 确认或进入 |
+| 按住 SW1、松开 | 录音、结束并写入语音草稿 |
+| SW2 短按 | 切换宠物页面与组件中心；组件可绑定自己的动作 |
+| SW2 长按 | 开始或结束实时对话 |
+| SW3 短按 | 返回或取消 |
+| 摇杆方向 | 选择会话、组件或执行组件映射动作 |
+
+这些是出厂默认值，用户配置优先。语音确认发送不等于批准 Agent 的工具权限请求。WorkBuddy 的操作边界见[专门说明](pc/docs/workbuddy.md)。
+
+macOS 安装受阻时，先检查下载来源和校验值，再按系统“隐私与安全性”的提示处理。不要对未知应用解除隔离或关闭 Gatekeeper。语音输入所需权限位于“系统设置 → 隐私与安全性 → 辅助功能”。
+
+### 新设备或恢复出厂
+
+Release 提供 v1、v3 两种完整烧录包，均包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请按实际芯片修订版选择，不能互刷；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
+
+**v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。** 包内脚本需要 Python 3.10+，自动安装 esptool **5.4.0**。屏幕连接 **DSI**，不是 CSI；请断电后插拔排线。详细版本和步骤见 [固件构建与烧录指南](firmware/BUILD.md)。
+
+v3 的 24 MHz 显示修复已在实机确认恢复宠物动画；本版本按键、麦克风、完整形象与固件传输等仍需实机验收，请先在测试设备上验证。
 
 ## 图集
 
@@ -62,112 +135,6 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 
 家居控制能力由[**Xiaomi MiLoCo**](https://github.com/XiaoMi/xiaomi-miloco) 提供，相关 MiLoCo 授权作品的版权归小米所有，适用 [Xiaomi Miloco License](https://github.com/YizhengWw/HachimoDock/blob/main/licenses/Xiaomi-Miloco-LICENSE.md)，版权标识、免责声明及许可证随相关实现一并保留。非商业使用仍须符合该许可证的用途范围；本项目不向第三方授予额外的商业使用、再许可或商标权限。完整说明见 [第三方声明](https://github.com/YizhengWw/HachimoDock/blob/main/THIRD_PARTY_NOTICES.md)。
 
-## 核心亮点
-
-### 0.1.167：当前公开源码
-
-- 同步桌面端 0.1.167 的语音输入、任务回执、照片图库导入、形象生成与组件交互优化。
-- 配套 v1/v3 固件为 **0.7.103-p4-r1**，包含组件资源完整性与恢复改进；不包含 0.7.108 开发分支。
-- 每日资讯在 PC 后台准备文字与语音缓存，失败保留上一期；阅读及电台组件支持进入自动播放，主动停止后保持停止。
-- 形象生成支持人物与动物、可选风格描述及预览、动作差异化参考帧和已有成果恢复，避免对结果未知的任务自动重复付费提交。
-- 正常公开版不提供服务 Key、证书内容或打包电脑的代理配置；请在 API 配置中填写自己的服务凭据。源码、文档与素材的发布边界由仓库检查维护，不将单次扫描视为对未知副本的安全保证。
-- 已发布的 0.1.167 安装包和固件资产保持不变。部分 Windows 电脑在此固件上的 COM 口打开问题仍在排查，本次源码同步不宣称修复该问题。
-
-### 0.1.101：桌面组件与交互优化
-
-- 可见内置工具依次为自选股行情、敲木鱼、近期待办、电脑状态，之后为其他组件。
-- 配套 v1/v3 固件 0.7.72-p4；保留实时对话和按键语音、实时组件及全局按键设置。
-- 对外安装包不内置 API Key、企业 CA 证书或固定代理。第三方组件及服务仍适用各自许可证和使用条件。
-
-### 0.1.82：语音配置与联网问答
-
-- 对话大模型支持编辑模型名，并按服务商分别保存 Key；默认豆包，MiMo 默认 `mimo-v2.6-flash`。
-- 实时对话支持按需联网与行情查询，由宠物口语总结结果，不新增 PC 搜索结果面板。公开包需填写自己的服务 Key，调用能力取决于账号权限。
-- 西高地出厂默认音色调整为「佩奇猪 2.0」，保留已有个人音色设置。
-- 配套 v1/v3 固件 0.7.64-p4 去掉实时对话状态文案中的省略号，避免显示为问号；普通字幕保留标点。
-- 回复阶段增加 ASR 二次确认后打断，支持单字“停”。间歇性误打断仍在排查，尤其音箱播放、环境声和 Windows 使用场景；本版不承诺已消除。
-
-公开安装包不含内置 Key、企业 CA 或固定代理；保留 Xiaomi MiLoCo 和 ESP-SR 许可证。安装客户端后需在「固件升级」中手动更新设备，普通 OTA 保留用户数据。
-
-### 0.1.79：实时对话、智能家居与实时行情
-
-- **实时对话**：配置语音服务与对话大模型后，在宠物界面长按 SW2 开始聊天，再次长按结束。支持人设、TTS 2.0 音色、蓝色字幕气泡；配套固件支持边听边说与打断，效果受麦克风、扬声器安装位置和环境影响。
-- **智能家居**：在「智能家居」授权米家账号后，可在实时对话中用自然语言控制账号授权的设备，例如“让音箱放一首爵士乐”。能力取决于设备及账号权限；较长编排通过语音确认，不要求回到 PC 点击。
-- **自选股行情**：组件列表第一项内置行情组件，默认小米与阿里。在组件详情页按名称或代码搜索、管理自选股；PC 每 2 秒更新并通过 USB 下发，需保持客户端运行。涨价和涨幅红色、下跌绿色，行情可能有延迟，不提供交易功能。
-- **Windows 音频与形象管理**：改善实时对话句内断音、内置形象切换和跨形象提示音；Agent 语音输入可多次追加。
-- **生成失败提示**：区分生图与图生视频审核；明确人像限制，并提供自行生成 MP4 后上传的入口说明，不承诺绕过平台审核。
-
-公开包不内置 API Key、企业 CA 或固定代理地址。首次使用请在「API 配置」中填写自己的服务凭据。详见 [实时对话](pc/docs/realtime-chat.md)、[智能家居](pc/docs/smart-home.md)、[实时数据组件](pc/docs/widget-live-data.md)。
-
-| 能力 | 说明 |
-|---|---|
-| Agent 状态跟随 | Agent 思考、执行工具、等待确认、完成或报错时，设备屏会显示对应表情、动作、颜色和短标签。 |
-| 桌面小屏常驻 | 不用切窗口，抬头就能看到当前 Agent 是否还在工作、是否需要用户决策。 |
-| 自定义宠物形象 | 内置西高地小狗状态动画，也可以导入或生成自己的宠物形象。 |
-| PetUI 组件中心 | 可见内置组件依次以自选股行情、敲木鱼、近期待办、电脑状态开头，其后为小游戏及其他工具；支持通过 Agent Skill 生成新组件。 |
-| USB 直连 | PC 与 ESP32-P4 通过 USB 串行协议同步状态、按钮配置、形象和组件，无需设备加入局域网。 |
-| 语音与实体交互 | 三个按键的短按/长按、摇杆四向与中键短按/长按均可配置；长按语音键可把 ASR 文本发送到当前 Agent Session。 |
-
-## 桌面软件
-
-桌面端不是一个简单的串口烧录工具，而是 HachimoDock 的管理与 Agent 路由中心。当前版本支持 Windows 与 Apple silicon macOS，预编译安装包可从 GitHub Releases 下载。
-
-| 页面 / 模块 | 当前能力 |
-|---|---|
-| 设备首页 | 自动发现并识别 ESP32-P4，不依赖固定 COM 端口；显示连接、固件、Flash/PSRAM、资源与传输状态，并提供重连、诊断和固件维护入口。 |
-| Agent 跟随 | 支持 ChatGPT（Codex）、Claude、OpenClaw、MiMoCode 和 WorkBuddy；通过各自适配器同步状态及可取得的标题、摘要，具体能力和平台限制见 [Agent 接入说明](pc/docs/agent-integration-audit.md)。 |
-| Session 切换 | 设备可切换会话气泡；桌面对话是否随之切换取决于 Agent 的适配能力。WorkBuddy 不会自动切换桌面对话，需手动打开目标会话。已显示任务完成或报错后保留 60 秒再消失。 |
-| 形象管理 | 内置西高地形象；支持 AI 生成、Codex 社区形象导入和本地视频导入；在传输前完成面向 P4 的裁切、转码和资源校验。 |
-| 形象同步 | 设备保留一个固定西高地槽和一个可替换形象槽；下发保持原始宽高比，避免拉伸，并显示传输进度与失败原因。 |
-| PetUI 组件中心 | 统一管理 PC 与设备组件，卡片直接显示“同步到设备”或“已同步到设备”；支持安装、移除、预览和容量校验。 |
-| PetUI Skill | 用户在 Agent 中调用 `petui` Skill 生成游戏或工具，经过结构、字节预算和设备能力校验后原子发布到组件库。 |
-| 按键与摇杆 | SW1/SW2/SW3 的短按、长按，以及摇杆上、下、左、右、中键短按/长按均可绑定动作；配置通过 USB 下发并持久化。 |
-| 语音输入 | 长按语音键录音，桌面端调用 ASR；写入目标由所选 Agent 的适配方式决定。WorkBuddy 写入当前可见目标对话，不能仅凭设备气泡切换桌面会话；识别结果先保留为草稿，确认后发送。 |
-| API 设置 | 集中配置语音识别和形象生成服务的凭据；密钥只保存在本机应用配置中，不写入固件和仓库。 |
-
-### Session 气泡规则
-
-- 扫描时处于 working/thinking/tool-running 等活跃状态的 Session 才会新增到设备。
-- 已经显示在设备上的活跃 Session 会持续接收后续状态变化，不会因一次扫描遗漏而立即消失。
-- Session 进入 done 或 error 后保留 60 秒；idle、历史完成任务和 Agent 内部会话不会作为新气泡下发。
-- 气泡数量由 Agent 当前活跃 Session 自动决定，不需要用户手动配置。
-
-<table>
-  <tr>
-    <td width="50%"><img src="assets/session-bubbles.webp" alt="Session 气泡与任务内容" /></td>
-    <td width="50%"><img src="https://image.lceda.cn/oshwhub/pullImage/0dddebc05c064f3a812d278b7c5dbe6e.png" alt="设备语音输入" /></td>
-  </tr>
-  <tr>
-    <td><sub>气泡自动对应当前正在工作的 Agent Session。</sub></td>
-    <td><sub>长按按键录音，把 ASR 文字送入目标 Session。</sub></td>
-  </tr>
-</table>
-
-### PetUI 组件工作流
-
-开发中的通用扩展提供命名变量驱动的文字、进度、显隐与图片分格，以及计数、计时、
-时钟和公开 JSON GET 的有界服务组合；显式组合 v2 增加受限计算、记录集合和原子本地流程。
-新包先协商设备能力，旧组件和存档继续兼容；
-没有任意脚本、私网访问或无限资源。契约与验收边界见
-[通用绑定与服务组合](pc/skills/petui/references/composition.md)，不代表旧 Release 已具备这些新能力。
-
-1. 在 ChatGPT（Codex）或 Claude 中调用 `petui` Skill，并描述希望生成的小游戏或工具。
-2. Skill 按 640×480 横向逻辑画布、三个按键和四向中按摇杆的设备能力生成组件，不套用固定游戏外壳。
-3. 校验脚本检查 manifest、状态机、按钮映射、资源路径和设备字节限制，再原子发布到统一组件库。
-4. 桌面端自动读取组件库，用户在组件卡片上直接同步到设备或从 PC/设备双端删除。
-
-### 状态跟随与互动
-
-<p align="center">
-  <img src="assets/agent-status.gif" alt="HachimoDock（哈基米机）状态跟随动图" />
-  <br />
-  <sub>Agent 状态变化时，宠物动画随之变化。</sub>
-</p>
-
-### 自定义形象与组件
-
-上传本地视频、导入社区形象，或使用 AI 生成自己的宠物动作；通过 `petui` Skill 还可以创建番茄钟、喝水提醒、Token 仪表盘和小游戏。新机型对应的形象管理与组件中心截图将在完整代码同步后补充。
-
 ## 硬件方案
 
 本仓库给出软件和固件配套；PCB、BOM、硬件装配和复刻资料请看：
@@ -177,8 +144,8 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 |---|---|
 | 主控 | ESP32-P4，RISC-V 双核，HP 最高 400MHz |
 | 存储 | 32MB Flash，32MB PSRAM |
-| 屏幕 | 2.8 英寸 480×640 MIPI-DSI，竖屏显示 |
-| 输入 | 3 个实体按键 + 1 个四向中按摇杆，共 12 种可配置手势 |
+| 屏幕 | 2.8 英寸 MIPI-DSI；物理面板 480×640，应用逻辑画布 640×480，经旋转输出 |
+| 输入 | 3 个实体按键、四向中按摇杆及配套触控屏；按键可配置 |
 | 音频 | 板载麦克风语音采集，桌面端 ASR 与 Agent 输入路由 |
 | 连接 | USB-UART 用于烧录、日志和日常数据传输；硬件保留原生 USB HS OTG 能力 |
 | 扩展 | PetUI 通用小组件/小游戏运行时，组件通过桌面端同步到设备 |
@@ -191,109 +158,42 @@ HachimoDock（哈基米机）是一套桌面端管理器、ESP32-P4 小屏固件
 |---|---|
 | 硬件复刻总入口 | [OSHWHub 项目页](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) |
 | 桌面客户端与完整固件 | [GitHub Releases](https://github.com/YizhengWw/HachimoDock/releases/latest) |
-| 完整性校验 | 每个 Release 附带 `SHA256SUMS` 与 `release-manifest.json` |
+| 完整性校验 | 当前 Release 提供 `SHA256SUMS`；烧录清单位于完整烧录包内 |
 
-## 软件架构
+## 软件架构与开发
 
 ```mermaid
 flowchart LR
-  agent["Agent<br/>ChatGPT（Codex）/ Claude"]
-  desktop["HachimoDock（哈基米机）桌面端<br/>Tauri + React"]
-  bridge["Bridge sidecar<br/>Session / ASR / USB"]
-  board["ESP32-P4 firmware<br/>renderer / input / PetUI runtime"]
-  screen["480×640 MIPI 小屏<br/>宠物动画 / 气泡 / PetUI 组件"]
-
-  agent --> desktop
-  desktop --> bridge
-  bridge -->|"USB serial"| board
-  board --> screen
+  agents[Agent 适配器] --> desktop[桌面管理端 Tauri + React]
+  desktop --> bridge[本机 Bridge / 语音与数据服务]
+  bridge -->|USB| board[ESP32-P4 运行时]
+  board --> screen[动画 / 气泡 / 组件]
+  board -->|按键 / 触控 / 录音| desktop
 ```
 
-桌面端读取并归一化 Agent Session，将正在设备上显示的活跃任务及其状态变化通过 USB 下发。ESP32-P4 固件负责动画和气泡生命周期、输入事件、资源双槽以及 PetUI 组件运行；设备输入则由桌面端路由回对应 Agent。
+| 目录 | 内容 | 开发入口 |
+| --- | --- | --- |
+| `pc/` | 桌面 UI、本机适配器、组件 Skill 与资源 | [PC 构建](pc/README.md) |
+| `firmware/` | 板级驱动、渲染、输入、协议及出厂镜像工具 | [固件构建](firmware/BUILD.md)、[协议](firmware/protocol.md) |
+| `integrations/` | Agent 集成与相关契约 | [DSH 集成](integrations/dsh-hachimodock/README.md) |
 
-## 复刻与部署
+资源保存在普通 Git 中，克隆不依赖 Git LFS。构建以锁定依赖和目标平台配置为准；不同发布包的源码对应关系以各 Release 说明为准。源码实现、离线验证、硬件测试和声学验证应分别评估，不作所有设备均已验收的承诺。
 
-硬件复刻请从 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) 开始，页面提供 PCB、BOM、结构与装配资料。设备端采用完整 ESP32-P4 镜像，镜像同时包含应用固件、分区表、内置西高地形象和默认 PetUI 组件，避免首次安装后缺少资源。
-
-首次烧录请使用与芯片版本对应的完整烧录包，工具核对芯片后再擦除并从地址 `0x0` 写入；日常升级请使用 Pet Manager 的固件升级功能。完整镜像会覆盖设备设置、形象和组件，仅应在新设备或明确恢复出厂时使用。
-
-## 快速开始
-
-### 安装桌面端
-
-前往 [最新 Release](https://github.com/YizhengWw/HachimoDock/releases/latest)：
-
-- Apple silicon Mac 下载 `HachimiDock_0.1.167_macOS-arm64.dmg`；
-- Windows x64 下载 `HachimiDock_0.1.167_Windows-x64-setup.exe`；
-- 安装后连接设备，Pet Manager 会自动识别 ESP32-P4，并提供固件升级、形象和组件同步入口。
-
-公开安装包不内置 ASR 或内容生成 API Key；需要相关能力时请在 Pet Manager 的“API 配置”中填写自己的服务凭据。
-
-### 新设备或恢复出厂
-
-Release 提供 v1、v3 两种完整烧录包，均包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请按实际芯片修订版选择，不能互刷；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
-
-**v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。** 包内脚本需要 Python 3.10+，自动安装 esptool **5.4.0**。屏幕连接 **DSI**，不是 CSI；请断电后插拔排线。详细版本和步骤见 [固件构建与烧录指南](firmware/BUILD.md)。
-
-v3 的 24 MHz 显示修复已在实机确认恢复宠物动画；本版本按键、麦克风、完整形象与固件传输等仍需实机验收，请先在测试设备上验证。
+新机的 32 MiB Flash 使用双 OTA 各 3 MiB、组件与元数据 8.875 MiB、内置及自定义形象各 8.5 MiB。普通 OTA 不会改变旧设备分区；迁移分区需要完整烧录，会清除设备数据。
 
 ## 常见问题
 
-### 这个 GitHub 仓库包含什么？
+**物理屏幕与组件画布为什么尺寸不同？** 物理面板为 480×640，组件使用 640×480 横向逻辑坐标，由固件旋转输出。更换屏幕需同时核对接口、初始化和触控坐标，不能只看驱动芯片名称。
 
-提供软件端和固件端的正式二进制文件：
+**缺少触控还能安装组件吗？** 可以安装；依赖触控的玩法可能不可用。实体按键、摇杆和语音有各自的输入路径。
 
-- 软件端：Windows x64 与 Apple silicon macOS 安装包。
-- 固件端 / 设备运行时：可烧录到 ESP32-P4 的完整出厂镜像与清单。
-- 硬件端：PCB、BOM、装配和复刻资料在 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
+**设备一定要联网吗？** 设备状态、形象和组件同步走 USB，不要求 ESP32-P4 加入局域网。语音识别、Agent 本身以及 AI 形象或组件生成仍可能需要电脑联网。
 
-### 一定要使用 ESP32-P4 吗？
-
-当前固件、完整镜像、MIPI 显示、资源分区和 USB 协议均针对 ESP32-P4 实现。更换主控需要重新适配显示、输入、存储布局和桌面端通信协议。
-
-### 屏幕、麦克风、喇叭和摇杆能换型号吗？
-
-可以，但必须确认接口、电压、排线定义和初始化序列。当前固件按 2.8 英寸 480×640 MIPI-DSI 屏、三个按键、GPIO20/GPIO21 双轴与 GPIO4 中键摇杆和配套音频电路适配；GPIO2/GPIO3 的旧旋钮输入仍保留兼容。仅仅驱动 IC 相同不代表屏幕或输入器件可以直接互换。
-
-### 屏幕一定要带触摸吗？
-
-不需要。当前产品交互以三个实体按键、四向摇杆和语音为主，固件不依赖触摸屏。
-
-### 必须做定制 PCB 底板吗？
-
-不是必须。定制 PCB 主要是为了减少杜邦线、让结构更整洁。调试阶段可以先用杜邦线直连；想做成完整产品形态时再按 OSHWHub 的硬件资料打样。
-
-### 大概成本多少？
-
-成本取决于 ESP32-P4 主板、MIPI 屏、PCB、音频器件、摇杆按键、外壳和打样数量，请以硬件复刻页面的最新 BOM 为准。
-
-### 支持哪些 Agent？
-
-当前重点适配 ChatGPT（Codex）和 Claude 桌面 Agent，并通过本地 bridge 读取 Session、切换会话和路由语音输入。状态协议保持可扩展，后续可以接入更多 Agent。
-
-### 设备一定要联网吗？
-
-设备状态、形象和组件同步走 USB，不要求 ESP32-P4 加入局域网。语音识别、Agent 本身以及 AI 形象或组件生成仍可能需要电脑联网。
-
-### 语音交互怎么用？
-
-按住绑定的语音输入键开始录音，松开后由桌面端完成 ASR，并把文字注入当前气泡对应的 Agent Session。设备没有气泡时，桌面端会拉起当前跟随的 Agent，再定位其输入框。语音识别需要已配置且可用的 ASR 服务。
-
-### 能自己加组件吗？
-
-可以。项目提供 `petui` Skill，用户可以在 Agent 中用自然语言生成小组件或小游戏，校验并发布到统一组件库，再由桌面端通过 USB 同步到设备。
-
-### 使用什么许可证？
-
-当前源码采用 [HachimoDock 项目许可证](LICENSE)，仅限许可范围内的非商业用途。商业使用、商业集成或独立产品开发须另行取得权利人书面授权。允许个人非商业复刻、项目内修改，以及组件的生成、调试和分享。第三方材料继续遵循 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 中各自的许可证；历史安装包遵循其随包许可证。
-
-### 怎么反馈问题或参与贡献？
-
-可以在 GitHub 提 Issue 或 Discussion。硬件复刻相关问题建议同时参考 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
+**如何反馈？** 使用 [GitHub Issues](https://github.com/YizhengWw/HachimoDock/issues)，附客户端/固件版本、系统和复现步骤。不要公开 Key、完整用户日志、对话正文或设备/个人标识。安全问题请按 [SECURITY.md](SECURITY.md) 私下反馈。
 
 ## 下载完整性
 
-每个 Release 都提供 `SHA256SUMS` 和 `release-manifest.json`。下载后请先核对 SHA-256，再安装客户端或烧录固件；不要混用不同 Release 的出厂镜像和 JSON 清单。
+当前 Release 的 `SHA256SUMS` 对照实际附件；完整烧录包内部另含镜像和分段校验清单。下载后核对 SHA-256，避免混用不同版本、芯片的镜像及清单。校验值能检查文件一致性，不替代来源与签名核验。
 
 ## 致谢 / Acknowledgements
 
@@ -302,7 +202,7 @@ HachimoDock 的实现参考、借鉴并集成了以下开源项目，特此致�
 - [Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk) — 开源项目致谢；第三方版权与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 - [OpenClaw](https://github.com/openclaw/openclaw)（MIT）— CLI Agent 运行时与插件 SDK。
 - [Claude Code](https://github.com/anthropics/claude-code) — 主力 coding agent 与 hook 状态协议。
-- [Codex](https://github.com/openai/codex) — 被适配的 CLI Agent 之一；同时支持 Cursor、Gemini CLI、GitHub Copilot CLI 等。
+- [Codex](https://github.com/openai/codex) — Agent 会话与桌面输入适配。
 
 ## 作者 / Author
 
@@ -335,23 +235,3 @@ Copyright (C) 2026 Yizheng Wang.
 **重要声明：本项目仅限许可范围内的非商业用途。未经权利人书面授权，不得用于商业产品、收费服务或独立于本项目的 APP、Web 服务及其他软件、硬件产品。** 项目内非商业组件开发按许可证明确允许。
 
 Current sources are provided under the [HachimoDock Project License](LICENSE) for permitted non-commercial purposes only. Commercial use and independent product development require prior written permission. Third-party licenses and licenses accompanying earlier releases remain applicable. See the [English overview](README.en.md).
-
-## 源码与构建
-
-想自行编译或修改功能？请从下方目录开始。直接使用请前往 [下载页面](https://github.com/YizhengWw/HachimoDock/releases/latest)，选择适合电脑系统的客户端和设备烧录包。
-
-| 目录 | 内容 | 构建说明 |
-|---|---|---|
-| [`pc/`](pc/) | Tauri/React 客户端、Agent bridge、生成 Skill、内置形象与组件 | [PC 构建](pc/README.md) |
-| [`firmware/`](firmware/) | ESP32-P4 固件、板级驱动、协议、测试与完整烧录包工具 | [固件构建](firmware/BUILD.md) |
-
-当前 `main` 的配套素材直接保存在普通 Git 中，克隆后即可获取，不依赖 Git LFS 额度。使用语音识别或形象生成时，在客户端的“API 配置”中填写自己的服务 Key。
-
-`main` 现为 0.1.167 正常公开版的功能源码；为保护隐私，已移除仅用于非公开发行的构建选项及本机资料，不是非公开开发仓库的历史镜像。社区客户端调用的公开服务地址与第三方许可仍保留；仓库只提供社区公开页面的静态资源，不包含运营后台及部署配置。历史引用经过资料清理，最新源码请使用 `main`；已经下载的安装包仍以随包清单为准。
-
-## 历史清理后的协作
-
-2026-10-28 对公开历史执行了资料清理，提交与标签指向可能变化，但 Release 安装包和固件附件未替换。已有克隆请优先重新克隆；不要直接合并旧分支或强推旧引用，以免重新带回已移除内容。Git 历史清理不能撤回他人已经下载的副本，也不能代替 GitHub 对旧缓存的处理。
-
-
-新机出厂分区方案使用 32 MiB Flash：双 OTA 各 3 MiB，组件/元数据 8.875 MiB，内置及自定义形象各 8.5 MiB（合计 17 MiB）。旧设备普通 OTA 不会改变分区；调整分区需要通过 USB 完整烧录并提前保存设备数据。设备总音量与共享城市位置位于首页语音输入模块下方。

@@ -5866,12 +5866,7 @@ impl UsbSerialManager {
 
                 for asset in &assets {
                     self.ensure_appearance_sync_not_cancelled(Some(&transfer_id))?;
-                    eprintln!(
-                        "[usb-p4-ota] file family={} kind={} path={}",
-                        asset.family_name,
-                        asset.kind,
-                        asset.source_path.display()
-                    );
+                    eprintln!("[usb-p4-ota] transferring prepared asset kind={}", asset.kind);
                     let mut file = std::fs::File::open(&asset.source_path)
                         .map_err(|e| format!("打开 P4 资源失败 {}: {}", asset.family_name, e))?;
                     let mut buf = Vec::new();

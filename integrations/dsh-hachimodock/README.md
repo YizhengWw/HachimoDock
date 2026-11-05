@@ -2,8 +2,8 @@
 
 This dependency-free Cordis plugin adds DSH session status, exact-session prompt
 admission/cancellation, a physical approval relay and session-scoped voice input.
-The original PR's firmware cues and DSP implementation are unchanged by the host
-remediation. No device or installed DSH validation is claimed by the Node tests.
+Node tests cover the host protocol in isolation; they do not certify an installed
+DSH version or a physical device.
 
 ## Compatibility
 
@@ -84,9 +84,12 @@ Cancel/expiry/disconnect remove and wake waiters, including timeout sentinel
 starts a new lease without replaying approval/voice commands. Unknown decision
 POST outcomes are logged generically and never automatically resent.
 
-## Voice and receipt semantics
+## Legacy plugin voice protocol and receipt semantics
 
-At capture start, native asynchronously sends `voice/begin` for the frozen
+The following describes the retained explicit-ticket/InputActions compatibility
+API for older integrations. The current desktop manager uses the OS composer
+path above and does not send `voice/begin` or wait for a plugin input ACK.
+For a caller explicitly using this legacy protocol, capture start sends `voice/begin` for the frozen
 session/utterance without blocking the USB reader. Final insertion requires the
 mounted owner's captured InputActions span ACK (a late/missing ACK fails closed).
 Native buffers the recording while awaiting the exact input capture receipt; ASR and audio forwarding start only after that acknowledgement.
