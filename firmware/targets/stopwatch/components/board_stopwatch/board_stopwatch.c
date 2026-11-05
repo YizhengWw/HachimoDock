@@ -201,7 +201,9 @@ esp_err_t stopwatch_board_vibrate(bool enabled) {
 }
 int stopwatch_board_battery_mv(void) {
   uint8_t data[2];
-  return read_reg(pm1, 0x22, data, 2) == ESP_OK ? data[0] | ((data[1] & 15) << 8) : -1;
+  // PM1 reports a full little-endian uint16 millivolt value, not a 12-bit ADC.
+  // Masking the high byte wraps a normally charged cell above 4095 mV.
+  return read_reg(pm1, 0x22, data, 2) == ESP_OK ? data[0] | (data[1] << 8) : -1;
 }
 esp_err_t stopwatch_board_health(stopwatch_board_health_t *h) {
   if (!h) return ESP_ERR_INVALID_ARG;
