@@ -2,6 +2,9 @@
 
 Status: experimental; display, touch, both keys and vibration verified on one
 physical StopWatch v1.0. See the [hardware acceptance record](m5stack-stopwatch-hil-2026-11-05.md).
+The native macOS client and real Codex sessions have also completed an
+[end-to-end verification round](m5stack-stopwatch-e2e-2026-11-05.md), including
+disconnect/reboot recovery and the fixes discovered during that round.
 This is an additional HachimoDock board target, not a replacement UI stack.
 The original P4 environments, dispatcher, renderer and release images remain
 separate. Never flash a P4 image onto StopWatch.
@@ -24,6 +27,7 @@ separate. Never flash a P4 image onto StopWatch.
 - Desktop S3 identification and the existing channel/session follow workflow.
   Select the built-in westie in the desktop channel card; fixed-device follow
   skips P4 appearance mutation and preserves board/connection/boot checks.
+  A StopWatch session panel shows the PC selection and scoped device readback.
 
 Audio, configurable button mappings, custom appearance transfer, PetUI
 components, screenshots, sleep and in-application OTA are not implemented.

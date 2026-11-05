@@ -64,6 +64,7 @@ import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
 import { subscribeAsrCredentialUpdates } from "./dashboard/voice-credential-events.js";
 import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
 import { supportsDeviceSessions, isStopwatchDevice } from "./lib/device-capabilities.js";
+import StopwatchSessionPanel from "./dashboard/StopwatchSessionPanel.jsx";
 import DashboardActionsMenu from "./dashboard/DashboardActionsMenu.jsx";
 import FirmwareUpdateModal from "./dashboard/FirmwareUpdateModal.jsx";
 import DeviceDiagnosticsModal from "./dashboard/DeviceDiagnosticsModal.jsx";
@@ -821,6 +822,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const isStopwatch = isStopwatchDevice(usb);
   const hasSessionSync = supportsDeviceSessions(usb);
   const hasKnownRuntime = buttonControlRowsForRuntime(usb.runtime).length > 0;
+  const showDeviceControls = usb.connected && hasKnownRuntime && !isStopwatch;
   const voiceTarget = voiceRuntimeTarget(usb, selectedAgentId);
   const voiceTargetKeyRef = useRef(voiceTarget.key);
   // Update during render: an old Promise may settle before effect cleanup.
@@ -1543,6 +1545,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         <p>黄色键切换到下一个会话，蓝色键切换到上一个会话，也可以左右滑动圆屏。长按黄色键调亮，长按蓝色键调暗。</p>
         <p>当前版本使用内置宠物，支持 Agent 状态、会话切换和震动提醒。语音、自定义形象、小组件及客户端固件升级暂未开放。</p>
       </Card>}
+      {isStopwatch && <StopwatchSessionPanel usb={usb} sessionSync={p4SessionSync} />}
 
       {realtimeChat?.error && !isRecoveringAsr(realtimeChat) && <div role="alert" className="message-banner message-banner--error">
         实时对话失败：{realtimeChat.error}。详情与诊断日志见下方「实时对话」。
@@ -1568,7 +1571,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         <ChannelMatrixCard />
       </Card>
 
-      {!isStopwatch && <Card>
+      {showDeviceControls && <Card>
         <BoardButtonPanel
           selectedAgentId={selectedAgentId}
           voiceConfig={runtimeVoiceConfig}
@@ -1585,7 +1588,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         />
       </Card>}
 
-      {!isStopwatch && <><Card.Collapsible
+      {showDeviceControls && <><Card.Collapsible
         title="语音输入"
         summary={buildVoiceSummary(runtimeVoiceConfig, selectedVoiceTrigger)}
         defaultOpen

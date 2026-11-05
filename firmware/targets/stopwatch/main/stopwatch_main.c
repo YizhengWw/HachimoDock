@@ -150,6 +150,10 @@ static void receive_line(const char *line) {
     cJSON_AddNumberToObject(runtime,"uptimeMs",now_ms());
     cJSON_AddNumberToObject(runtime,"sessionCount",model.count);
     cJSON_AddNumberToObject(runtime,"selectedSession",model.count ? model.selected+1 : 0);
+    const pet_device_session_t *selected = pet_device_sessions_selected(&model);
+    cJSON_AddStringToObject(runtime,"sessionId",selected ? selected->id : "");
+    cJSON_AddStringToObject(runtime,"sessionTitle",selected ? selected->title : "");
+    cJSON_AddStringToObject(runtime,"agentState",pet_device_sessions_lifecycle(&model));
     stopwatch_board_health_t health;
     esp_err_t health_error = stopwatch_board_health(&health);
     cJSON *display = cJSON_AddObjectToObject(reply,"display");

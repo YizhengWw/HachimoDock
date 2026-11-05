@@ -1037,8 +1037,8 @@ fn probe_serial_port(
 
         // Runtime connections must not assert boot/reset control lines on
         // any platform. Firmware flashing keeps its separate esptool path.
-        let _ = writer.write_data_terminal_ready(false);
         let _ = writer.write_request_to_send(false);
+        let _ = writer.write_data_terminal_ready(false);
         let attempt_timeout = serial_probe_attempt_timeout(index, baud, probe_timeout);
         transfer_log::record(
             "connection",

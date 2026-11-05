@@ -21,6 +21,7 @@ import { prepareBuiltInP4Ready } from "./prepare-p4-ready-assets.mjs";
 import { cleanSkillBytecode } from "./clean-skill-bytecode.mjs";
 import { prepareVoiceRuntime } from "./voice-runtime-resources.mjs";
 import { copyNodeRuntimeLicense, verifyDesktopLicenseInventory } from "./dependency-license-resources.mjs";
+import { p4FirmwareSourceVersion } from "./firmware-source-version.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDir, "../..");
@@ -374,7 +375,7 @@ function validateBundledP4Firmware(target, firmwareName, expectedMin, expectedMa
   const version = readNullTerminatedUtf8(firmware.subarray(descriptorOffset + 16, descriptorOffset + 48));
   const projectName = readNullTerminatedUtf8(firmware.subarray(descriptorOffset + 48, descriptorOffset + 80));
   const cmake = readFileSync(p4ProjectCmake, "utf8");
-  const sourceVersion = cmake.match(/set\(PROJECT_VER\s+"([^"]+)"\)/)?.[1] || "";
+  const sourceVersion = p4FirmwareSourceVersion(cmake);
   const expectedVersion = sourceVersion;
   if (projectName !== "pet_manager_p4_runtime") {
     throw new Error(`PC 内置固件 projectName 异常：${projectName || "(empty)"}`);

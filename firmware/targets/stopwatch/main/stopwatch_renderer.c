@@ -107,7 +107,7 @@ esp_err_t stopwatch_renderer_draw(const pet_device_sessions_t *m, uint64_t now, 
   bool online = m->host_seen && (now < m->last_host_ms ||
     now-m->last_host_ms < PET_DEVICE_SESSION_TIMEOUT_MS);
   const char *life = pet_device_sessions_lifecycle(m);
-  pet_frame(online ? life : "idle",now);
+  pet_frame(online ? (!strcmp(life,"speaking") ? "working" : life) : "idle",now);
   uint16_t white = rgb(240,240,240), muted = rgb(150,170,170);
   uint16_t tone = !strcmp(life,"error") ? rgb(255,90,90) :
     !strcmp(life,"waiting_user") ? rgb(255,190,60) : rgb(100,220,170);
@@ -116,6 +116,7 @@ esp_err_t stopwatch_renderer_draw(const pet_device_sessions_t *m, uint64_t now, 
   text(info,132,38,360,muted);
   const pet_device_session_t *card = pet_device_sessions_selected(m);
   const char *label = !online ? "等待电脑连接" : !strcmp(life,"working") ? "工作中" :
+    !strcmp(life,"speaking") ? "正在回复" :
     !strcmp(life,"waiting_user") ? "等待操作" : !strcmp(life,"done") ? "已完成" :
     !strcmp(life,"error") ? "出错了" : !strcmp(life,"stopped") ? "已停止" : "休息中";
   text(label,196,308,370,tone);
