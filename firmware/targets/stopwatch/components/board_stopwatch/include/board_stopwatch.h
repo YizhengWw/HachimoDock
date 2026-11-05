@@ -12,3 +12,11 @@ bool stopwatch_board_touch(int *x, int *y);
 bool stopwatch_board_touch_ready(void);
 esp_err_t stopwatch_board_vibrate(bool enabled);
 int stopwatch_board_battery_mv(void);
+typedef struct {
+  uint32_t display_frames;
+  int display_error, motor_error;
+  uint8_t ioe_address, touch_chip, touch_firmware, power_config;
+  uint16_t ioe_mode, ioe_output, ioe_input, ioe_drive;
+  bool touch_ready, motor_on;
+} stopwatch_board_health_t;
+esp_err_t stopwatch_board_health(stopwatch_board_health_t *health);

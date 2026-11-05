@@ -179,14 +179,16 @@ void pet_device_sessions_tick(pet_device_sessions_t *m, uint64_t now) {
   for (unsigned i = 0; i < m->count; ++i) {
     pet_device_session_t *card = &m->sessions[i];
     bool expired = terminal(card->state) ? now >= card->terminal_until_ms :
-      (m->snapshot_seen && now-m->last_snapshot_ms >= PET_DEVICE_SESSION_TIMEOUT_MS);
+      (m->snapshot_seen && now >= m->last_snapshot_ms &&
+       now-m->last_snapshot_ms >= PET_DEVICE_SESSION_TIMEOUT_MS);
     if (!expired) m->sessions[n++] = *card;
   }
   bool cleared = m->count && !n;
   m->count = n;
   int i = find(m->sessions,n,selected);
   m->selected = i < 0 ? 0 : (unsigned)i;
-  if (cleared || (!n && m->host_seen && now-m->last_host_ms >= PET_DEVICE_SESSION_TIMEOUT_MS)) {
+  if (cleared || (!n && m->host_seen && now >= m->last_host_ms &&
+                  now-m->last_host_ms >= PET_DEVICE_SESSION_TIMEOUT_MS)) {
     pet_device_text_copy(m->state,sizeof(m->state),"idle");
     m->title[0] = m->content[0] = 0;
   }

@@ -1,6 +1,7 @@
 # M5Stack StopWatch v1.0 — upstream board adaptation
 
-Status: experimental, build/host-tested; physical hardware acceptance pending.
+Status: experimental; display, touch, both keys and vibration verified on one
+physical StopWatch v1.0. See the [hardware acceptance record](m5stack-stopwatch-hil-2026-11-05.md).
 This is an additional HachimoDock board target, not a replacement UI stack.
 The original P4 environments, dispatcher, renderer and release images remain
 separate. Never flash a P4 image onto StopWatch.
@@ -18,6 +19,8 @@ separate. Never flash a P4 image onto StopWatch.
 - Eight bounded session cards; one visible card; revision-aware terminal TTL,
   stable ordering, Agent isolation and exact-ID previous/next selection.
 - Physical keys, horizontal swipe, brightness presets and 120 ms vibration.
+- Scoped on-board diagnostics, RGB/border and touch-grid patterns, input counters
+  and motor/display/power readback. Diagnostic display leases expire after 60 s.
 - Desktop S3 identification and the existing channel/session follow workflow.
   Select the built-in westie in the desktop channel card; fixed-device follow
   skips P4 appearance mutation and preserves board/connection/boot checks.
@@ -165,8 +168,12 @@ Before declaring hardware support verified, record:
 8. Battery reading, USB power transitions and 24-hour heap/stability observations.
 
 No physical board was connected during initial source/build verification.
+Subsequent on-board verification and fixes are recorded separately below.
 
 ## Initial verification record — 2026-11-05
+
+The following record predates connecting the physical board; see the subsequent
+0.1.1 on-board record for the four completed peripheral checks.
 
 - StopWatch native ESP-IDF 5.5.5 build: passed.
 - StopWatch PlatformIO / ESP-IDF 5.5.4 build and merged factory image: passed.
@@ -180,3 +187,32 @@ No physical board was connected during initial source/build verification.
 - Source publication check: passed. P4 dependency locks/configs are unchanged.
 - Physical panel, touch, motor, USB reconnect and battery/stability tests remain
   pending. GitHub-hosted CI has not been run from this local checkout.
+
+## On-board verification — 0.1.1
+
+Display, touch, short/long presses and three bounded vibration pulses passed on
+a physical v1.0. The initial black screen, intermittent touch identification and
+fresh-session timeout were corrected during testing. See the acceptance record
+for evidence and the remaining untested functions.
+
+The opt-in console requires pyserial and an exact device ID read from hello:
+
+~~~sh
+python firmware/tools/stopwatch_hil.py \
+  --port PORT --expected-id DEVICE_ID --duration 600 --pattern pet \
+  --output artifacts/stopwatch/hil/session.jsonl \
+  --control artifacts/stopwatch/hil/control.json
+~~~
+
+Replace the control JSON atomically to request a pattern:
+{"pattern":"colorbars"}, {"pattern":"touch"} or {"pattern":"pet"}.
+{"vibrate":120} requests one pulse; firmware only accepts integer durations
+20–300 ms, an exact boardDeviceId and a bounded requestId.
+Existing actuator commands are not replayed when the console restarts.
+The console records synthetic sessions, device replies and input events locally,
+then clears its test cards and restores the pet view when stopped.
+
+On this board native USB watchdog reset successfully returned to application
+mode after flashing. If an RTS reset leaves download mode active, use the
+installed esptool's --after watchdog-reset option. The supported normal
+application image address is 0x10000; do not write an app image at 0x0.

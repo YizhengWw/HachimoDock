@@ -26,6 +26,26 @@ static QueueHandle_t input_events;
 static QueueHandle_t vibration_requests;
 static pet_device_sessions_t model;
 static char board_id[40], boot_id[17];
+typedef struct {
+  int action;
+  unsigned source;
+} input_event_t;
+typedef struct {
+  bool buttons[2], touch_down;
+  int touch_x, touch_y;
+  uint32_t short_presses[2], long_presses[2], touch_presses, swipes;
+} input_snapshot_t;
+static input_snapshot_t input_snapshot;
+static portMUX_TYPE input_mux = portMUX_INITIALIZER_UNLOCKED;
+static unsigned diagnostic_pattern;
+static uint64_t diagnostic_until;
+static input_snapshot_t input_health(void) {
+  input_snapshot_t copy;
+  portENTER_CRITICAL(&input_mux);
+  copy = input_snapshot;
+  portEXIT_CRITICAL(&input_mux);
+  return copy;
+}
 static uint64_t now_ms(void) { return esp_timer_get_time()/1000ULL; }
 static void send_topic(const char *topic, cJSON *payload) {
   if (!payload) return;
@@ -67,6 +87,7 @@ static void hello(void) {
   cJSON_AddBoolToObject(cap,"usbOnly",true);
   cJSON_AddBoolToObject(cap,"sessionSync",true);
   cJSON_AddBoolToObject(cap,"protocolAck",true);
+  cJSON_AddStringToObject(cap,"diagnosticsControl","stopwatch-hil-v1");
   cJSON_AddBoolToObject(cap,"inputs",true);
   cJSON_AddBoolToObject(cap,"touch",stopwatch_board_touch_ready());
   cJSON_AddBoolToObject(cap,"inputConfig",false);
@@ -83,6 +104,7 @@ static void hello(void) {
   cJSON_AddStringToObject(display,"pixelFormat","rgb565");
   cJSON *features = cJSON_AddObjectToObject(cap,"features");
   cJSON_AddBoolToObject(features,"mainPage",true);
+  cJSON_AddBoolToObject(features,"diagnostics",true);
   cJSON_AddBoolToObject(features,"voiceCapture",false);
   cJSON_AddBoolToObject(features,"audioPlayback",false);
   cJSON_AddBoolToObject(features,"widgets",false);
@@ -125,7 +147,68 @@ static void receive_line(const char *line) {
     cJSON_AddStringToObject(runtime,"projectName","hachimo_stopwatch");
     cJSON_AddNumberToObject(runtime,"freeHeap",esp_get_free_heap_size());
     cJSON_AddNumberToObject(runtime,"batteryMv",stopwatch_board_battery_mv());
+    cJSON_AddNumberToObject(runtime,"uptimeMs",now_ms());
+    cJSON_AddNumberToObject(runtime,"sessionCount",model.count);
+    cJSON_AddNumberToObject(runtime,"selectedSession",model.count ? model.selected+1 : 0);
+    stopwatch_board_health_t health;
+    esp_err_t health_error = stopwatch_board_health(&health);
+    cJSON *display = cJSON_AddObjectToObject(reply,"display");
+    cJSON_AddNumberToObject(display,"frames",health.display_frames);
+    cJSON_AddNumberToObject(display,"error",health.display_error);
+    cJSON_AddNumberToObject(display,"pattern",diagnostic_pattern);
+    cJSON *board = cJSON_AddObjectToObject(reply,"board");
+    cJSON_AddNumberToObject(board,"queryError",health_error);
+    cJSON_AddNumberToObject(board,"ioeAddress",health.ioe_address);
+    cJSON_AddNumberToObject(board,"powerConfig",health.power_config);
+    cJSON_AddNumberToObject(board,"ioeMode",health.ioe_mode);
+    cJSON_AddNumberToObject(board,"ioeOutput",health.ioe_output);
+    cJSON_AddNumberToObject(board,"ioeInput",health.ioe_input);
+    cJSON_AddNumberToObject(board,"ioeDrive",health.ioe_drive);
+    cJSON_AddBoolToObject(board,"touchReady",health.touch_ready);
+    cJSON_AddNumberToObject(board,"touchChip",health.touch_chip);
+    cJSON_AddNumberToObject(board,"touchFirmware",health.touch_firmware);
+    cJSON_AddBoolToObject(board,"motorOn",health.motor_on);
+    cJSON_AddNumberToObject(board,"motorError",health.motor_error);
+    input_snapshot_t snapshot = input_health();
+    cJSON *inputs = cJSON_AddObjectToObject(reply,"inputs");
+    cJSON *buttons = cJSON_AddArrayToObject(inputs,"buttons");
+    for (unsigned i = 0; i < 2; ++i) {
+      cJSON *button = cJSON_CreateObject();
+      cJSON_AddBoolToObject(button,"pressed",snapshot.buttons[i]);
+      cJSON_AddNumberToObject(button,"shortPresses",snapshot.short_presses[i]);
+      cJSON_AddNumberToObject(button,"longPresses",snapshot.long_presses[i]);
+      cJSON_AddItemToArray(buttons,button);
+    }
+    cJSON_AddBoolToObject(inputs,"touchDown",snapshot.touch_down);
+    cJSON_AddNumberToObject(inputs,"touchX",snapshot.touch_x);
+    cJSON_AddNumberToObject(inputs,"touchY",snapshot.touch_y);
+    cJSON_AddNumberToObject(inputs,"touchPresses",snapshot.touch_presses);
+    cJSON_AddNumberToObject(inputs,"swipes",snapshot.swipes);
     send_topic("diagnostics/status",reply);
+  } else if (!strcmp(topic,"diagnostics/control")) {
+    const char *action = pet_device_json_string(p,"action");
+    const char *pattern = pet_device_json_string(p,"pattern");
+    bool ok = false;
+    if (strcmp(pet_device_json_string(p,"boardDeviceId"),board_id) ||
+        !pet_device_json_string(p,"requestId")[0] ||
+        strlen(pet_device_json_string(p,"requestId")) > 64) {
+      ack(topic,p,false,"invalid_diagnostic_scope");
+      cJSON_Delete(root); return;
+    }
+    if (!strcmp(action,"display")) {
+      if (!strcmp(pattern,"pet")) { diagnostic_pattern = 0; ok = true; }
+      if (!strcmp(pattern,"colorbars")) { diagnostic_pattern = 1; ok = true; }
+      if (!strcmp(pattern,"touch")) { diagnostic_pattern = 2; ok = true; }
+      if (ok) diagnostic_until = now_ms()+60000;
+    } else if (!strcmp(action,"vibrate")) {
+      const cJSON *duration = cJSON_GetObjectItemCaseSensitive(p,"durationMs");
+      if (cJSON_IsNumber(duration) && duration->valuedouble >= 20 &&
+          duration->valuedouble <= 300 && duration->valuedouble == duration->valueint) {
+        uint32_t milliseconds = duration->valueint;
+        ok = xQueueOverwrite(vibration_requests,&milliseconds) == pdTRUE;
+      }
+    }
+    ack(topic,p,ok,ok ? NULL : "invalid_diagnostic_action");
   } else ack(topic,p,false,"unsupported_topic");
   cJSON_Delete(root);
 }
@@ -180,6 +263,7 @@ static void input_task(void *unused) {
   int start_x = 0, last_x = 0;
   bool touching = false;
   uint64_t vibration_until = 0;
+  input_snapshot_t snapshot = {.touch_x = -1, .touch_y = -1};
   for (;;) {
     uint64_t now = now_ms();
     uint32_t duration;
@@ -192,22 +276,32 @@ static void input_task(void *unused) {
       vibration_until = 0;
     }
     for (unsigned i = 0; i < 2; ++i) {
-      uint8_t events = pet_p4_button_decoder_update(&buttons[i],stopwatch_board_button(i),(uint32_t)(now-previous));
-      int event = 0;
-      if (events & PET_P4_BUTTON_EVENT_SHORT_PRESS) event = i ? -1 : 1;
-      if (events & PET_P4_BUTTON_EVENT_LONG_PRESS) event = i ? -2 : 2;
-      if (event) (void)xQueueSend(input_events,&event,0);
+      snapshot.buttons[i] = stopwatch_board_button(i);
+      uint8_t events = pet_p4_button_decoder_update(&buttons[i],snapshot.buttons[i],(uint32_t)(now-previous));
+      input_event_t event = {.source = i};
+      if (events & PET_P4_BUTTON_EVENT_SHORT_PRESS) {
+        event.action = i ? -1 : 1; ++snapshot.short_presses[i];
+      }
+      if (events & PET_P4_BUTTON_EVENT_LONG_PRESS) {
+        event.action = i ? -2 : 2; ++snapshot.long_presses[i];
+      }
+      if (event.action) (void)xQueueSend(input_events,&event,0);
     }
     previous = now;
     int x,y;
     bool down = stopwatch_board_touch(&x,&y);
-    if (down && !touching) start_x = x;
-    if (down) last_x = x;
+    if (down && !touching) { start_x = x; ++snapshot.touch_presses; }
+    if (down) { last_x = x; snapshot.touch_x = x; snapshot.touch_y = y; }
+    snapshot.touch_down = down;
     if (!down && touching && abs(last_x-start_x) > 60) {
-      int event = last_x < start_x ? 1 : -1;
+      input_event_t event = {.action = last_x < start_x ? 1 : -1, .source = 2};
       (void)xQueueSend(input_events,&event,0);
+      ++snapshot.swipes;
     }
     touching = down;
+    portENTER_CRITICAL(&input_mux);
+    input_snapshot = snapshot;
+    portEXIT_CRITICAL(&input_mux);
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
@@ -226,7 +320,7 @@ void app_main(void) {
   usb_serial_jtag_driver_config_t usb = {.tx_buffer_size = 4096,.rx_buffer_size = 8192};
   ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb));
   lines = xQueueCreate(RX_QUEUE,sizeof(char *));
-  input_events = xQueueCreate(8,sizeof(int));
+  input_events = xQueueCreate(8,sizeof(input_event_t));
   vibration_requests = xQueueCreate(1,sizeof(uint32_t));
   if (!lines || !input_events || !vibration_requests) abort();
   if (xTaskCreate(rx_task,"stopwatch-rx",4096,NULL,8,NULL) != pdPASS) abort();
@@ -243,11 +337,14 @@ void app_main(void) {
     for (unsigned i = 0; i < RX_QUEUE && xQueueReceive(lines,&line,0) == pdTRUE; ++i) {
       receive_line(line); free(line);
     }
+    now = now_ms();
     pet_device_sessions_tick(&model,now);
-    int input;
+    input_event_t input;
     while (xQueueReceive(input_events,&input,0) == pdTRUE) {
-      if (input == 2 || input == -2) (void)stopwatch_board_brightness(input == 2 ? 160 : 64);
-      else select_session(input,"screen.navigation");
+      if (input.action == 2 || input.action == -2)
+        (void)stopwatch_board_brightness(input.action == 2 ? 160 : 64);
+      else select_session(input.action,input.source == 0 ? "button.sw1.short_press" :
+        input.source == 1 ? "button.sw2.short_press" : "screen.swipe");
     }
     const char *life = pet_device_sessions_lifecycle(&model);
     if (strcmp(last_life,life)) {
@@ -260,7 +357,11 @@ void app_main(void) {
     if (now >= next_hello) { hello(); next_hello = now+5000; }
     if (now >= next_battery) { battery = stopwatch_board_battery_mv(); next_battery = now+5000; }
     if (now >= next_frame) {
-      esp_err_t err = stopwatch_renderer_draw(&model,now,battery);
+      if (diagnostic_pattern && now >= diagnostic_until) diagnostic_pattern = 0;
+      input_snapshot_t snapshot = input_health();
+      esp_err_t err = diagnostic_pattern
+        ? stopwatch_renderer_diagnostic(diagnostic_pattern,snapshot.touch_x,snapshot.touch_y)
+        : stopwatch_renderer_draw(&model,now,battery);
       if (err != ESP_OK) ESP_LOGW("stopwatch","display: %s",esp_err_to_name(err));
       next_frame = now+125;
     }

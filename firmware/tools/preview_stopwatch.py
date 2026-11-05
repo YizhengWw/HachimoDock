@@ -11,7 +11,7 @@ import sys
 from build_stopwatch_assets import build
 
 
-def preview(output):
+def preview(output, pattern="pet"):
     firmware = pathlib.Path(__file__).resolve().parents[1]
     work = firmware / "build/stopwatch-preview"
     work.mkdir(parents=True, exist_ok=True)
@@ -43,6 +43,7 @@ def preview(output):
     (work / "preview.c").write_text(r'''
 #include <stdio.h>
 #include <assert.h>
+#include <stdlib.h>
 #include "lvgl.h"
 #include "board_stopwatch.h"
 #include "stopwatch_renderer.h"
@@ -62,7 +63,7 @@ esp_err_t stopwatch_board_present(const uint16_t *pixels) {
   assert(colored > 5000); // Detect missing/failed factory JPEG decode.
   return ESP_OK;
 }
-int main(void) {
+int main(int argc, char **argv) {
   lv_init();
   assert(stopwatch_renderer_init()==ESP_OK);
   cJSON *payload=cJSON_Parse("{\"agentId\":\"codex\",\"sessions\":["
@@ -70,7 +71,9 @@ int main(void) {
     "\"content\":\"正在运行 HachimoDock 会话\",\"state\":\"working\"}]}");
   assert(pet_device_sessions_handle(&model,"session/current",payload,1000));
   cJSON_Delete(payload);
-  assert(stopwatch_renderer_draw(&model,1000,3980)==ESP_OK);
+  int pattern = argc > 1 ? atoi(argv[1]) : 0;
+  if (pattern) assert(stopwatch_renderer_diagnostic(pattern,233,233)==ESP_OK);
+  else assert(stopwatch_renderer_draw(&model,1000,3980)==ESP_OK);
   return 0;
 }
 ''')
@@ -99,7 +102,8 @@ target_link_libraries(preview PRIVATE lvgl m)
 ''')
     subprocess.run(["cmake", "-S", str(work), "-B", str(work / "native")], check=True)
     subprocess.run(["cmake", "--build", str(work / "native"), "--parallel", "4"], check=True)
-    subprocess.run([str(work / "native/preview")], cwd=work, check=True, timeout=20)
+    pattern_id = {"pet": 0, "colorbars": 1, "touch": 2}[pattern]
+    subprocess.run([str(work / "native/preview"), str(pattern_id)], cwd=work, check=True, timeout=20)
     from PIL import Image
     output.parent.mkdir(parents=True, exist_ok=True)
     Image.open(work / "preview.ppm").save(output)
@@ -109,4 +113,6 @@ target_link_libraries(preview PRIVATE lvgl m)
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=pathlib.Path, required=True)
-    preview(parser.parse_args().output.resolve())
+    parser.add_argument("--pattern", choices=["pet", "colorbars", "touch"], default="pet")
+    args = parser.parse_args()
+    preview(args.output.resolve(), args.pattern)

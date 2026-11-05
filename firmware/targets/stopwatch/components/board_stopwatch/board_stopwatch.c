@@ -4,6 +4,7 @@
  */
 #include "board_stopwatch.h"
 #include <string.h>
+#include <stdatomic.h>
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
@@ -24,6 +25,11 @@ static esp_lcd_panel_io_handle_t io;
 static SemaphoreHandle_t dma_done;
 static uint8_t *stripe;
 static bool display_failed;
+static uint32_t display_frames;
+static int display_error;
+static atomic_bool motor_on;
+static atomic_int motor_error;
+static uint8_t ioe_address, touch_chip, touch_firmware;
 enum { STRIPE_LINES = 32 };
 
 static esp_err_t read_reg(i2c_master_dev_handle_t dev, uint8_t reg, void *out, size_t n) {
@@ -58,6 +64,9 @@ static esp_err_t add_device(uint8_t addr, i2c_master_dev_handle_t *dev) {
 static esp_err_t ioe_output(unsigned pin, bool value) {
   unsigned bit = pin - 1;
   uint8_t mask = 1u << (bit % 8);
+  ESP_RETURN_ON_ERROR(update_reg(ioe, 0x09 + bit / 8, mask, 0), TAG, "IOE pullup");
+  ESP_RETURN_ON_ERROR(update_reg(ioe, 0x0b + bit / 8, mask, 0), TAG, "IOE pulldown");
+  ESP_RETURN_ON_ERROR(update_reg(ioe, 0x13 + bit / 8, mask, 0), TAG, "IOE push-pull");
   ESP_RETURN_ON_ERROR(update_reg(ioe, 0x03 + bit / 8, mask, mask), TAG, "IOE direction");
   return update_reg(ioe, 0x05 + bit / 8, mask, value ? mask : 0);
 }
@@ -92,6 +101,7 @@ esp_err_t stopwatch_board_init(void) {
     if (!ioe_addr) vTaskDelay(pdMS_TO_TICKS(20));
   }
   if (!ioe_addr) return ESP_ERR_NOT_FOUND;
+  ioe_address = ioe_addr;
   ESP_RETURN_ON_ERROR(add_device(ioe_addr, &ioe), TAG, "IOE");
   ESP_RETURN_ON_ERROR(write_reg(ioe, 0x23, 0), TAG, "IOE wake");
   // IO9/PWM1 may have been left enabled by another application.
@@ -109,9 +119,6 @@ esp_err_t stopwatch_board_init(void) {
   gpio_config_t keys = {.pin_bit_mask = (1ULL << 1) | (1ULL << 2),
     .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
   ESP_RETURN_ON_ERROR(gpio_config(&keys), TAG, "keys");
-  // CST820B absence does not disable the physical navigation keys.
-  if (i2c_master_probe(bus, 0x15, 100) == ESP_OK)
-    ESP_RETURN_ON_ERROR(add_device(0x15, &touch), TAG, "touch");
   dma_done = xSemaphoreCreateBinary();
   stripe = heap_caps_malloc(STOPWATCH_WIDTH * STRIPE_LINES * 2, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
   if (!dma_done || !stripe) return ESP_ERR_NO_MEM;
@@ -129,7 +136,26 @@ esp_err_t stopwatch_board_init(void) {
     .vendor_config = &vendor};
   ESP_RETURN_ON_ERROR(esp_lcd_new_panel_co5300(io, &panel_cfg, &panel), TAG, "CO5300");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "panel init");
-  return esp_lcd_panel_set_gap(panel, 6, 0);
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(panel, 6, 0), TAG, "panel gap");
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, true), TAG, "panel on");
+  // Reset CST820B after the long panel initialization, as the official HAL does.
+  // Register reads wake/identify it; a single address probe can miss standby.
+  ESP_RETURN_ON_ERROR(add_device(0x15, &touch), TAG, "touch handle");
+  bool identified = false;
+  for (unsigned attempt = 0; attempt < 3 && !identified; ++attempt) {
+    ESP_RETURN_ON_ERROR(ioe_output(4, false), TAG, "touch reset");
+    vTaskDelay(pdMS_TO_TICKS(10));
+    ESP_RETURN_ON_ERROR(ioe_output(4, true), TAG, "touch release");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    identified = read_reg(touch, 0xa7, &touch_chip, 1) == ESP_OK &&
+      read_reg(touch, 0xa9, &touch_firmware, 1) == ESP_OK &&
+      touch_chip != 0 && touch_chip != 0xff;
+  }
+  if (!identified) {
+    ESP_ERROR_CHECK(i2c_master_bus_rm_device(touch));
+    touch = NULL;
+  }
+  return ESP_OK;
 }
 
 esp_err_t stopwatch_board_present(const uint16_t *pixels) {
@@ -143,13 +169,15 @@ esp_err_t stopwatch_board_present(const uint16_t *pixels) {
       stripe[2 * i + 1] = p;
     }
     esp_err_t err = esp_lcd_panel_draw_bitmap(panel, 0, y, STOPWATCH_WIDTH, y + lines, stripe);
-    if (err != ESP_OK) { display_failed = true; return err; }
+    if (err != ESP_OK) { display_failed = true; display_error = err; return err; }
     if (xSemaphoreTake(dma_done, pdMS_TO_TICKS(500)) != pdTRUE) {
       // Never overwrite a DMA buffer whose ownership is now uncertain.
       display_failed = true;
+      display_error = ESP_ERR_TIMEOUT;
       return ESP_ERR_TIMEOUT;
     }
   }
+  ++display_frames;
   return ESP_OK;
 }
 esp_err_t stopwatch_board_brightness(uint8_t value) {
@@ -158,14 +186,39 @@ esp_err_t stopwatch_board_brightness(uint8_t value) {
 bool stopwatch_board_button(unsigned index) { return gpio_get_level(index ? 1 : 2) == 0; }
 bool stopwatch_board_touch(int *x, int *y) {
   uint8_t data[7];
-  if (!touch || read_reg(touch, 0, data, sizeof(data)) != ESP_OK || !(data[2] & 0x0f)) return false;
+  if (!touch || read_reg(touch, 0, data, sizeof(data)) != ESP_OK ||
+      !(data[2] & 0x0f) || ((data[3] >> 6) & 3) == 1) return false;
   *x = ((data[3] & 15) << 8) | data[4];
   *y = ((data[5] & 15) << 8) | data[6];
   return *x < STOPWATCH_WIDTH && *y < STOPWATCH_HEIGHT;
 }
 bool stopwatch_board_touch_ready(void) { return touch != NULL; }
-esp_err_t stopwatch_board_vibrate(bool enabled) { return ioe_output(9, enabled); }
+esp_err_t stopwatch_board_vibrate(bool enabled) {
+  esp_err_t err = ioe_output(9, enabled);
+  atomic_store(&motor_error, err);
+  if (err == ESP_OK) atomic_store(&motor_on, enabled);
+  return err;
+}
 int stopwatch_board_battery_mv(void) {
   uint8_t data[2];
   return read_reg(pm1, 0x22, data, 2) == ESP_OK ? data[0] | ((data[1] & 15) << 8) : -1;
+}
+esp_err_t stopwatch_board_health(stopwatch_board_health_t *h) {
+  if (!h) return ESP_ERR_INVALID_ARG;
+  memset(h, 0, sizeof(*h));
+  h->display_frames = display_frames; h->display_error = display_error;
+  h->motor_on = atomic_load(&motor_on); h->motor_error = atomic_load(&motor_error);
+  h->ioe_address = ioe_address; h->touch_chip = touch_chip;
+  h->touch_firmware = touch_firmware; h->touch_ready = touch != NULL;
+  ESP_RETURN_ON_ERROR(read_reg(pm1, 0x06, &h->power_config, 1), TAG, "power snapshot");
+  uint8_t bytes[2];
+  ESP_RETURN_ON_ERROR(read_reg(ioe, 0x03, bytes, 2), TAG, "mode snapshot");
+  h->ioe_mode = bytes[0] | (bytes[1] << 8);
+  ESP_RETURN_ON_ERROR(read_reg(ioe, 0x05, bytes, 2), TAG, "output snapshot");
+  h->ioe_output = bytes[0] | (bytes[1] << 8);
+  ESP_RETURN_ON_ERROR(read_reg(ioe, 0x07, bytes, 2), TAG, "input snapshot");
+  h->ioe_input = bytes[0] | (bytes[1] << 8);
+  ESP_RETURN_ON_ERROR(read_reg(ioe, 0x13, bytes, 2), TAG, "drive snapshot");
+  h->ioe_drive = bytes[0] | (bytes[1] << 8);
+  return ESP_OK;
 }

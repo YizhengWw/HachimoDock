@@ -15,6 +15,9 @@ int main(void) {
     "{\"id\":\"a\",\"title\":\"会话甲\",\"state\":\"thinking\",\"transitionRevision\":1},"
     "{\"id\":\"b\",\"title\":\"会话乙\",\"state\":\"working\",\"transitionRevision\":1}]}",100);
   assert(m.count == 2 && !strcmp(pet_device_sessions_lifecycle(&m),"working"));
+  // A frame timestamp can precede a message received later in the same loop.
+  pet_device_sessions_tick(&m,99);
+  assert(m.count == 2 && !strcmp(pet_device_sessions_lifecycle(&m),"working"));
   assert(pet_device_sessions_select(&m,-1) && m.selected == 1);
   receive("session/current","{\"agentId\":\"codex\",\"sessions\":["
     "{\"id\":\"b\",\"title\":\"会话乙\",\"state\":\"working\",\"transitionRevision\":1},"
@@ -70,5 +73,9 @@ int main(void) {
   assert(m.sessions[1].terminal_until_ms == 96000);
   receive("speech/text","{\"sessionId\":\"y\",\"status\":\"done\"}",37000);
   assert(m.sessions[1].terminal_until_ms == 96000);
+  memset(&m,0,sizeof(m));
+  receive("state/codex","{\"state\":\"working\"}",1000);
+  pet_device_sessions_tick(&m,999);
+  assert(!strcmp(pet_device_sessions_lifecycle(&m),"working"));
   puts("StopWatch lifecycle, TTL, ordering, navigation, isolation and UTF-8 passed");
 }

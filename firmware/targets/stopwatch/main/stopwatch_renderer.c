@@ -104,7 +104,8 @@ esp_err_t stopwatch_renderer_init(void) {
 esp_err_t stopwatch_renderer_draw(const pet_device_sessions_t *m, uint64_t now, int battery) {
   if (!framebuffer) return ESP_ERR_INVALID_STATE;
   memset(framebuffer,0,STOPWATCH_WIDTH*STOPWATCH_HEIGHT*2);
-  bool online = m->host_seen && now-m->last_host_ms < PET_DEVICE_SESSION_TIMEOUT_MS;
+  bool online = m->host_seen && (now < m->last_host_ms ||
+    now-m->last_host_ms < PET_DEVICE_SESSION_TIMEOUT_MS);
   const char *life = pet_device_sessions_lifecycle(m);
   pet_frame(online ? life : "idle",now);
   uint16_t white = rgb(240,240,240), muted = rgb(150,170,170);
@@ -122,5 +123,32 @@ esp_err_t stopwatch_renderer_draw(const pet_device_sessions_t *m, uint64_t now, 
   text(card ? card->content : m->content,85,368,381,muted);
   snprintf(info,sizeof(info),"%u / %u",m->count ? m->selected+1 : 0,m->count);
   text(info,211,405,300,muted);
+  return stopwatch_board_present(framebuffer);
+}
+esp_err_t stopwatch_renderer_diagnostic(unsigned pattern, int tx, int ty) {
+  if (!framebuffer) return ESP_ERR_INVALID_STATE;
+  for (int y = 0; y < STOPWATCH_HEIGHT; ++y) {
+    for (int x = 0; x < STOPWATCH_WIDTH; ++x) {
+      uint16_t color = 0;
+      if (pattern == 1) color = x < 155 ? rgb(255,0,0) : x < 311 ? rgb(0,255,0) : rgb(0,0,255);
+      else if (x % 50 == 0 || y % 50 == 0) color = rgb(45,65,65);
+      int dx = x-233, dy = y-233, radius = dx*dx+dy*dy;
+      if (radius >= 229*229 && radius <= 231*231) color = 0xffff;
+      pixel(x,y,color);
+    }
+  }
+  if (pattern == 1) {
+    text("RED",90,215,150,0xffff);
+    text("GREEN",205,215,300,0xffff);
+    text("BLUE",350,215,420,0xffff);
+  } else {
+    if (tx >= 0 && ty >= 0) {
+      for (int d = -12; d <= 12; ++d) { pixel(tx+d,ty,0xffe0); pixel(tx,ty+d,0xffe0); }
+    }
+    char label[64];
+    snprintf(label,sizeof(label),"Touch x=%d y=%d",tx,ty);
+    text(label,130,350,400,0xffff);
+    text("触摸圆屏，观察十字是否跟手",125,385,360,0xffff);
+  }
   return stopwatch_board_present(framebuffer);
 }
