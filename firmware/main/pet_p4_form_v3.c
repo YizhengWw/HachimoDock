@@ -163,7 +163,8 @@ bool pet_form3_allowed(const pet_form3_t *f,const pet_form3_value_t v[PET_FORM3_
   int focus=v[f->focus_var].number;const pet_form3_field_t *q=&f->fields[focus];bool active=v[f->active_var].number==1;
   const char *buffer=v[f->buffer_var].text;int32_t key=v[f->key_var].number,cursor=v[f->cursor_var].number;
   if(!active){
-    if(op==PET_FORM_PREVIOUS)return focus>0;if(op==PET_FORM_NEXT)return focus+1<f->count;
+    if(op==PET_FORM_PREVIOUS)return focus>0;
+    if(op==PET_FORM_NEXT)return focus+1<f->count;
     return op==PET_FORM_ACCEPT;
   }
   if(op==PET_FORM_CANCEL)return true;

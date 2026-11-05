@@ -149,11 +149,15 @@ static void *late_cookie;
 static unsigned input[8],output[8];
 static esp_err_t ppa_register_client(const ppa_client_config_t *config,ppa_client_handle_t *out){
   assert(!held&&config->oper_type==PPA_OPERATION_SRM&&config->max_pending_trans_num==1&&config->data_burst_length==128);
-  if(client_result)return client_result;*out=(void*)(uintptr_t)1;return ESP_OK;
+  if(client_result)return client_result;
+  *out=(void*)(uintptr_t)1;
+  return ESP_OK;
 }
 static esp_err_t ppa_client_register_event_callbacks(ppa_client_handle_t client,const ppa_event_callbacks_t *cbs){
   assert(!held&&client==(void*)(uintptr_t)1);registrations++;
-  if(registration_result)return registration_result;callback=cbs->on_trans_done;return ESP_OK;
+  if(registration_result)return registration_result;
+  callback=cbs->on_trans_done;
+  return ESP_OK;
 }
 static esp_err_t ppa_do_scale_rotate_mirror(ppa_client_handle_t client,const ppa_srm_oper_config_t *config){
   assert(!held&&client==(void*)(uintptr_t)1);

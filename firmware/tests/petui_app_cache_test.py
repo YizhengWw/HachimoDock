@@ -119,7 +119,8 @@ static void reference(const pet_surface_node_t *n) {
   const uint8_t r=((n->color>>11)&31)*255/31,g=((n->color>>5)&63)*255/63,b=(n->color&31)*255/31;
   const int radius=n->radius;
   int x0=n->x<0?-n->x:0,y0=n->y<0?-n->y:0,x1=n->w,y1=n->h;
-  if(n->x+x1>640)x1=640-n->x;if(n->y+y1>480)y1=480-n->y;
+  if(n->x+x1>640)x1=640-n->x;
+  if(n->y+y1>480)y1=480-n->y;
   if(g_app_clip.active){if(n->x+x0<g_app_clip.x)x0=g_app_clip.x-n->x;if(n->y+y0<g_app_clip.y)y0=g_app_clip.y-n->y;if(n->x+x1>g_app_clip.right)x1=g_app_clip.right-n->x;if(n->y+y1>g_app_clip.bottom)y1=g_app_clip.bottom-n->y;}
   for(int y=y0;y<y1;y++){
     float qy=fabsf(y+.5f-n->h*.5f)-(n->h*.5f-radius);

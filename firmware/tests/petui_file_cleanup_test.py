@@ -126,7 +126,8 @@ int main(void){
  assert(opens==1&&closes==1&&removes==2&&!exists("store/one")&&!exists("store/two"));
  assert(exists("other/one")&&exists("store/one-more"));
  reset();assert(pet_file_cleanup_prepare(&plan,"store",targets,3,guard)&&plan.snapshot_used);
- for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));assert(removes==0);
+ for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));
+ assert(removes==0);
  for(int failure=1;failure<=7;failure++){
   reset();put("store/one");put("store/two");fault=failure;
   assert(pet_file_cleanup_prepare(&plan,"store",targets,3,guard)&&!plan.snapshot_used);
@@ -182,7 +183,8 @@ int main(void){
  assert(plan.diagnostic.first_read_errno==EIO&&plan.diagnostic.first_entries==1);
  assert(plan.diagnostic.first_flags&PET_CLEANUP_DIAG_CLOSED_OK);
  assert(plan.diagnostic.reason==PET_CLEANUP_SNAPSHOT&&!plan.diagnostic.read_errno);
- for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));assert(removes==1);
+ for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));
+ assert(removes==1);
  /* Error with a failed close (even errno=0), or activity after the first
   * scan, cannot authorize a second open. No new baseline is accepted. */
  for(int f=15;f<=17;f++){
@@ -192,25 +194,29 @@ int main(void){
   assert(plan.diagnostic.first_reason==PET_CLEANUP_READ_FAILED&&plan.diagnostic.first_read_errno==EIO);
   if(f==15)assert(!plan.diagnostic.close_errno&&!(plan.diagnostic.flags&PET_CLEANUP_DIAG_CLOSED_OK));
   else assert(plan.diagnostic.activity&PET_CLEANUP_ACTIVITY_EPOCH_CHANGED);
-  for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));assert(removes==3);
+  for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));
+  assert(removes==3);
  }
  reset();put("store/one");fault=18;
  assert(!pet_file_cleanup_prepare(&plan,"store",targets,3,guard));
  assert(logs==1&&opens==2&&closes==2&&!plan.valid&&plan.diagnostic.attempts==2);
  assert(plan.diagnostic.reason==PET_CLEANUP_OWNER_DURING&&plan.diagnostic.first_read_errno==EIO);
- for(unsigned i=0;i<3;i++)assert(!pet_file_cleanup_remove_at(&plan,i));assert(!removes&&exists("store/one"));
+ for(unsigned i=0;i<3;i++)assert(!pet_file_cleanup_remove_at(&plan,i));
+ assert(!removes&&exists("store/one"));
  for(int f=19;f<=24;f++){
   reset();put("store/one");fault=f;
   assert(pet_file_cleanup_prepare(&plan,"store",targets,3,guard)&&!plan.snapshot_used);
   assert(logs==1&&opens==2&&closes==(f==19?1U:2U)&&plan.diagnostic.attempts==2);
   assert(plan.diagnostic.first_reason==PET_CLEANUP_READ_FAILED&&plan.diagnostic.first_entries==1);
-  for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));assert(removes==3);
+  for(unsigned i=0;i<3;i++)assert(pet_file_cleanup_remove_at(&plan,i));
+  assert(removes==3);
  }
  reset();put("store/one");fault=25;
  assert(!pet_file_cleanup_prepare(&plan,"store",targets,3,guard)&&!plan.valid);
  assert(logs==1&&opens==2&&closes==1&&plan.diagnostic.reason==PET_CLEANUP_OWNER_AFTER);
  assert(plan.diagnostic.first_read_errno==EIO&&plan.diagnostic.open_errno==EIO);
- for(unsigned i=0;i<3;i++)assert(!pet_file_cleanup_remove_at(&plan,i));assert(!removes&&exists("store/one"));
+ for(unsigned i=0;i<3;i++)assert(!pet_file_cleanup_remove_at(&plan,i));
+ assert(!removes&&exists("store/one"));
  reset();pet_file_cleanup_guard_t no_observer=guard;no_observer.idle_epoch=NULL;
  assert(pet_file_cleanup_prepare(&plan,"store",targets,3,no_observer)&&!plan.snapshot_used);
  assert(logs==1&&plan.diagnostic.reason==PET_CLEANUP_OBSERVER_MISSING&&!opens);

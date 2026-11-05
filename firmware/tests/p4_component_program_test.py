@@ -226,8 +226,8 @@ bool pet_program_persistence_enqueue(const char *id,const pet_program_snapshot_t
 pet_program_save_result_t pet_program_persistence_load(const char *id,const pet_program_image_t *image,pet_program_snapshot_t *seed){(void)image;assert(!locked&&id[0]);loads++;if(load_status==PET_PROGRAM_SAVE_VALUE)*seed=stored;return load_status;}
 pet_program_save_result_t pet_program_persistence_load_with_lease(const char *id,const pet_program_image_t *image,pet_program_snapshot_t *seed,pet_resource_lease_t value){(void)value;return pet_program_persistence_load(id,image,seed);}
 static bool restore_component_runtime_from(miniapp_runtime_t *r,bool cached){(void)r;(void)cached;return true;}
-pet_app_store_status_t pet_app_store_load(const char *id,char *s){(void)id;(void)s;assert(!"unrelated app save must not be loaded");return PET_APP_STORE_INVALID;}
-pet_app_store_status_t pet_app_store_load_with_lease(const char *id,char *s,pet_resource_lease_t value){(void)value;return pet_app_store_load(id,s);}
+pet_app_store_status_t pet_app_store_load(const char *id,char s[PET_APP_SAVE_BYTES]){(void)id;(void)s;assert(!"unrelated app save must not be loaded");return PET_APP_STORE_INVALID;}
+pet_app_store_status_t pet_app_store_load_with_lease(const char *id,char s[PET_APP_SAVE_BYTES],pet_resource_lease_t value){(void)value;return pet_app_store_load(id,s);}
 '''+helpers+restore+status+'\nstatic const char *fixture='+definition+r''';
 int main(void){
  cJSON *root=cJSON_Parse(fixture);assert(root&&pet_component_program_parse(root,&g_runtime.program));cJSON_Delete(root);

@@ -5367,7 +5367,8 @@ static void draw_app_panel(const pet_surface_node_t *n) {
   const uint8_t r=((n->color>>11)&31)*255/31,g=((n->color>>5)&63)*255/63,b=(n->color&31)*255/31;
   const int radius=n->radius;
   int x0=n->x<0?-n->x:0,y0=n->y<0?-n->y:0,x1=n->w,y1=n->h;
-  if(n->x+x1>640)x1=640-n->x;if(n->y+y1>480)y1=480-n->y;
+  if(n->x+x1>640)x1=640-n->x;
+  if(n->y+y1>480)y1=480-n->y;
   if(g_app_clip.active){if(n->x+x0<g_app_clip.x)x0=g_app_clip.x-n->x;if(n->y+y0<g_app_clip.y)y0=g_app_clip.y-n->y;if(n->x+x1>g_app_clip.right)x1=g_app_clip.right-n->x;if(n->y+y1>g_app_clip.bottom)y1=g_app_clip.bottom-n->y;}
 #if PET_P4_APP_COLD_FAST
   if(!radius&&!n->stroke_width&&n->opacity==n->opacity_end&&n->opacity&&n->opacity!=255&&g_framebuffer&&x1>x0&&y1>y0){
@@ -5513,9 +5514,14 @@ static inline float app_glyph_row_alpha(int ix,float fx,float fy){
 typedef struct {int x0,x1,y0,y1;} glyph_pixel_bounds_t;
 static inline bool glyph_pixel_bounds(const pet_surface_node_t *clip,int left,int right,int top,int bottom,glyph_pixel_bounds_t *out){
   int x0=left,x1=right,y0=top,y1=bottom;
-  if(x0<clip->x)x0=clip->x;if(x1>clip->x+clip->w)x1=clip->x+clip->w;
-  if(y0<clip->y)y0=clip->y;if(y1>clip->y+clip->h)y1=clip->y+clip->h;
-  if(x0<0)x0=0;if(y0<0)y0=0;if(x1>PET_P4_UI_WIDTH)x1=PET_P4_UI_WIDTH;if(y1>PET_P4_UI_HEIGHT)y1=PET_P4_UI_HEIGHT;
+  if(x0<clip->x)x0=clip->x;
+  if(x1>clip->x+clip->w)x1=clip->x+clip->w;
+  if(y0<clip->y)y0=clip->y;
+  if(y1>clip->y+clip->h)y1=clip->y+clip->h;
+  if(x0<0)x0=0;
+  if(y0<0)y0=0;
+  if(x1>PET_P4_UI_WIDTH)x1=PET_P4_UI_WIDTH;
+  if(y1>PET_P4_UI_HEIGHT)y1=PET_P4_UI_HEIGHT;
   if(g_app_clip.active){if(x0<g_app_clip.x)x0=g_app_clip.x;if(y0<g_app_clip.y)y0=g_app_clip.y;if(x1>g_app_clip.right)x1=g_app_clip.right;if(y1>g_app_clip.bottom)y1=g_app_clip.bottom;}
   *out=(glyph_pixel_bounds_t){x0,x1,y0,y1};
   return g_framebuffer&&x0<x1&&y0<y1;

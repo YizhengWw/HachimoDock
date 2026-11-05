@@ -91,6 +91,7 @@ def native_harness():
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #define PET_P4_RAW_APPEARANCE_SLOT 1
 #define PET_P4_PACK_ID_MAX 65
 #define PET_P4_FS_PATH_MAX 64
@@ -275,6 +276,7 @@ def test_native_mount_callbacks_only_publish_bounded_work_not_block_usb_task(tmp
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <stddef.h>
 typedef struct{uint8_t kind;uint32_t seq,payload_len;uint8_t*payload;}pet_p4_native_rx_frame_t;
 typedef struct{char board_device_id[64];bool mounted;}state_t;
 static state_t state={"review-board",false},*g_state=&state;

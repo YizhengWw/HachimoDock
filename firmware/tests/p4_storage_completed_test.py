@@ -48,7 +48,8 @@ int main(void){
  assert(!pet_storage_io_completed_read(3,0,0,&s,out));assert(!pet_storage_io_completed_read(3,0,5,&s,out));
  assert(!pet_storage_io_completed_read(3,0,3,&io_status,out));
  assert(!pet_storage_io_completed_read(3,0,3,&s,completed_io[0].counters[0]));
- assert(!pet_storage_io_completed_read(3,0,3,&s,(pet_storage_io_counter_t*)&s));
+ union {pet_storage_io_status_t status;pet_storage_io_counter_t counters[3];} alias;
+ assert(!pet_storage_io_completed_read(3,0,3,&alias.status,alias.counters));
  assert(sizeof(completed_io)<=2048&&!io_meta_depth);return 0;
 }
 ''')

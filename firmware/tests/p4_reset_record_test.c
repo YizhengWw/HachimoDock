@@ -7,7 +7,9 @@
 #include <string.h>
 static unsigned writes,cut=UINT_MAX;
 bool pet_reset_test_store(volatile uint32_t *p,uint32_t value){
-  if(writes++>=cut)return false;*p=value;return true;
+  if(writes++>=cut)return false;
+  *p=value;
+  return true;
 }
 static const uint32_t build[8]={1,2,3,4,5,6,7,8};
 static pet_reset_record_snapshot_t observe(const pet_reset_record_storage_t *s){

@@ -78,7 +78,8 @@ static void *reader(void *unused){
  assert(pet_cmedia_sample_pin(0,&sample));assert(pet_cmedia_clip_pin(0,&clip));
  uint32_t old=sample.generation;
  pthread_mutex_lock(&gate);state=1;pthread_cond_broadcast(&cond);
- while(state<2)pthread_cond_wait(&cond,&gate);pthread_mutex_unlock(&gate);
+ while(state<2)pthread_cond_wait(&cond,&gate);
+ pthread_mutex_unlock(&gate);
  for(unsigned i=0;i<10000;i++){assert(sample.pcm[0]==1234);assert(clip.stream[0]==0x65);}
  pet_cmedia_sample_lease_t stale={0};assert(!pet_cmedia_sample_pin_at(0,old,&stale));
  assert(pet_cmedia_unpin(sample.token));assert(!pet_cmedia_unpin(sample.token));
@@ -322,7 +323,10 @@ static void *clip_worker_thread(void *unused){
 }
 static void *store_holder(void *unused){
  (void)unused;lock();pthread_mutex_lock(&gate);state=1;pthread_cond_broadcast(&cond);
- while(state<2)pthread_cond_wait(&cond,&gate);pthread_mutex_unlock(&gate);unlock();return NULL;
+ while(state<2)pthread_cond_wait(&cond,&gate);
+ pthread_mutex_unlock(&gate);
+ unlock();
+ return NULL;
 }
 static bool finish_commit,finish_result;
 static void *finish_producer(void *arg){(void)arg;finish_result=finish_commit?miniapp_ext_commit(&preparing_ticket):miniapp_ext_abort(&preparing_ticket);return NULL;}

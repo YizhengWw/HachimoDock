@@ -113,7 +113,11 @@ static bool pet_cmedia_stage_matches(const int*r,char*error,size_t n){(void)r;(v
 static bool pet_cmedia_persist(size_t s,uint8_t g,const int*r){(void)s;(void)g;(void)r;assert(!held);return true;}
 static bool miniapp_ext_prepare(miniapp_runtime_t *next,size_t slot,uint8_t generation,pet_cext_publish_ticket_t*t){
  (void)slot;(void)generation;assert(!held&&!critical&&!pending&&!commits);media_prepares++;
- if(media_fail_prepare)return false;t->next=next;t->prepared=true;pending=t;return true;
+ if(media_fail_prepare)return false;
+ t->next=next;
+ t->prepared=true;
+ pending=t;
+ return true;
 }
 static bool miniapp_ext_commit(pet_cext_publish_ticket_t*t){assert(held&&!critical&&commits==1&&pending==t&&t->prepared);if(media_fail_commit)return false;media_commits++;pending=NULL;t->prepared=false;return true;}
 static bool miniapp_ext_abort(pet_cext_publish_ticket_t*t){assert(pending==t&&t->prepared&&!critical);media_aborts++;pending=NULL;t->prepared=false;return true;}
@@ -196,7 +200,11 @@ typedef struct{miniapp_runtime_t *next;bool prepared;}pet_cext_publish_ticket_t;
 static bool media_fail_prepare,media_fail_commit;static unsigned media_prepares,media_commits,media_aborts;static pet_cext_publish_ticket_t *pending;
 static bool miniapp_ext_prepare(miniapp_runtime_t*n,size_t slot,uint8_t gen,pet_cext_publish_ticket_t*t){
  (void)slot;(void)gen;assert((boot||!held)&&!critical&&!pending);media_prepares++;
- if(media_fail_prepare)return false;t->next=n;t->prepared=true;pending=t;return true;
+ if(media_fail_prepare)return false;
+ t->next=n;
+ t->prepared=true;
+ pending=t;
+ return true;
 }
 static bool miniapp_ext_commit(pet_cext_publish_ticket_t*t){assert(held&&!critical&&pending==t&&t->prepared);if(media_fail_commit)return false;pending=NULL;t->prepared=false;media_commits++;return true;}
 static bool miniapp_ext_abort(pet_cext_publish_ticket_t*t){assert((boot||!held)&&!critical&&pending==t&&t->prepared);pending=NULL;t->prepared=false;media_aborts++;return true;}

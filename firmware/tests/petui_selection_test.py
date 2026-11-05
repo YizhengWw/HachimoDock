@@ -29,7 +29,8 @@ int main(void){
  char out[48];bool has=true;assert(!pet_selection_read(10,out,&has)&&!has&&!*out);
  assert(!pet_selection_write(10,"../private")&&!pet_selection_write(10,"Upper")&&!pet_selection_write(10,NULL)&&writes==0);
  assert(pet_selection_write(10,"first")&&writes==1&&commits==1);
- for(int i=0;i<100;i++)assert(pet_selection_write(10,"first"));assert(writes==1&&commits==1);
+ for(int i=0;i<100;i++)assert(pet_selection_write(10,"first"));
+ assert(writes==1&&commits==1);
  assert(pet_selection_read(10,out,&has)&&has&&!strcmp(out,"first"));
  assert(!pet_selection_read(11,out,&has)&&has&&!*out); // New catalog wins, no stale legacy fallback.
  assert(pet_selection_write(11,"second")&&writes==2&&commits==2);

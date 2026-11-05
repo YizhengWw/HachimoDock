@@ -31,8 +31,12 @@ typedef int portMUX_TYPE;
 #define DRAM_ATTR
 #define portMUX_INITIALIZER_UNLOCKED 0
 static bool meta_held,ota_held;
-#define portENTER_CRITICAL(p) do{assert((p)&&!meta_held);meta_held=true;}while(0)
-#define portEXIT_CRITICAL(p) do{assert((p)&&meta_held);meta_held=false;}while(0)
+#if PET_P4_OTA_METADATA_CACHED
+static void meta_enter(const void*p){assert(p&&!meta_held);meta_held=true;}
+static void meta_exit(const void*p){assert(p&&meta_held);meta_held=false;}
+#endif
+#define portENTER_CRITICAL(p) meta_enter(p)
+#define portEXIT_CRITICAL(p) meta_exit(p)
 #define pdTRUE 1
 #define portMAX_DELAY 0
 static int g_ota_mutex;

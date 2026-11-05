@@ -209,7 +209,8 @@ int main(void){
  // No failure before publication changes active identity, image generation or NVS.
  for(int fault=1;fault<=5;fault++){
   reset();if(fault==1)fail_alloc=true;if(fault==2)fail_load=true;if(fault==3)fail_restore=true;
-  if(fault==4)fail_save_at=1;if(fault==5)fail_save_at=2;
+  if(fault==4)fail_save_at=1;
+  if(fault==5)fail_save_at=2;
   queue();assert(run()==PET_MINIAPP_ACTIVATION_FAILED);
   assert(!strcmp(g_runtime.widget_id,"old-app")&&g_image_revision==4&&writes==0);
  }

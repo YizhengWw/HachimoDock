@@ -36,7 +36,8 @@ int main(void){
  assert(g_render_trace.app_nodes.clear_us==10);early();assert(g_render_trace.app_nodes.images_us==5);
  for(unsigned i=0;i<32;i++){
   APP_NODE_MARK(i);APP_NODE_SCOPE(node_scope,nodes_us[i]);clock_now++;
-  if(i&1)continue;clock_now+=2;
+  if(i&1)continue;
+  clock_now+=2;
  }
  APP_NODE_HIT();assert(g_render_trace.app_nodes.nodes_mask==UINT32_MAX);
  for(unsigned i=0;i<32;i++)assert(g_render_trace.app_nodes.nodes_us[i]==(i&1?1:3));

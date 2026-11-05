@@ -68,7 +68,8 @@ int main(int argc,char **argv){
  assert(length<=PET_PROGRAM_IMAGE_MAX_BYTES&&quantum>=1&&quantum<=64);
  assert(fread(pp_buffer(),1,length,f)==length);assert(pp_configure(length)==PET_PROGRAM_IMAGE_OK);
  unsigned schema=word(f),revision=word(f),cells=word(f);assert(cells<=64);pp_seed(schema,revision,cells);
- for(unsigned i=0;i<64;i++)pp_seed_cell(i,signed_word(f));for(unsigned i=0;i<8;i++)pp_seed_output(i,signed_word(f));
+ for(unsigned i=0;i<64;i++)pp_seed_cell(i,signed_word(f));
+ for(unsigned i=0;i<8;i++)pp_seed_output(i,signed_word(f));
  unsigned limited=word(f);assert(limited<=1);if(limited)for(unsigned i=0;i<8;i++){int32_t lo=signed_word(f),hi=signed_word(f);assert(pp_limit(i,lo,hi)==1);}
  assert(pp_start(quantum,1)==PET_RUNTIME_OK);unsigned events=word(f);assert(events>=1&&events<=32);printf("{\"reports\":[");
  for(unsigned i=0;i<events;i++){
@@ -80,8 +81,11 @@ int main(int argc,char **argv){
  }
  assert(fgetc(f)==EOF);fclose(f);assert(pp_snapshot()==PET_RUNTIME_OK);
  printf("],\"snapshot\":{\"schema\":%u,\"revision\":%u,\"cells\":%u,\"values\":[",schema,pp_revision(),cells);
- for(unsigned i=0;i<cells;i++)printf("%s%d",i?",":"",pp_cell(i));printf("],\"outputs\":[");
- for(unsigned i=0;i<8;i++)printf("%s%d",i?",":"",pp_output(i));printf("]}}\n");return 0;
+ for(unsigned i=0;i<cells;i++)printf("%s%d",i?",":"",pp_cell(i));
+ printf("],\"outputs\":[");
+ for(unsigned i=0;i<8;i++)printf("%s%d",i?",":"",pp_output(i));
+ printf("]}}\n");
+ return 0;
 }
 '''
     source, executable = tmp_path / 'preview.c', tmp_path / 'preview'

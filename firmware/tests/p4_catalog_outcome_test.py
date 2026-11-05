@@ -24,6 +24,7 @@ def binary(tmp_path_factory,request):
 #define MINIAPP_CATALOG_GENERATION_COUNT 2
 #define MINIAPP_PACKAGE_GENERATION_COUNT 2
 #define MINIAPP_CATALOG_JSON_MAX 16384
+#include <sys/types.h>
 #include <unistd.h>
 #include <errno.h>
 #include "pet_p4_file_read.h"
@@ -153,7 +154,7 @@ int main(int argc,char **argv){
     source=source.replace(main,case,1)
     tmp=tmp_path_factory.mktemp('catalog-outcome');src=tmp/'case.c';src.write_text(source)
     exe=tmp/'case';vendor=ROOT/'tests/vendor/cjson'
-    subprocess.run(['/usr/bin/cc','-std=c11','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-error=deprecated-declarations',
+    subprocess.run(['/usr/bin/cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O1','-g','-Wall','-Wextra','-Werror','-Wno-unused-function','-Wno-error=deprecated-declarations',
       '-fsanitize=address,undefined','-fno-omit-frame-pointer','-I',str(ROOT/'main'),'-I',str(vendor),
       str(src),str(vendor/'cJSON.c'),str(ROOT/'main/pet_p4_storage_lane.c'),'-o',str(exe)],check=True,timeout=60)
     return exe

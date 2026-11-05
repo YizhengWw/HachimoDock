@@ -20,6 +20,7 @@ def _catalog_source(code):
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 #include "cJSON.h"
 #include "pet_p4_file_read.h"
@@ -151,7 +152,7 @@ def test_in_place_catalog_generation_is_self_checked_and_torn_writes_are_rejecte
     for acceptance in (False,True):
         src=tmp_path/f'lean-{int(acceptance)}.c';exe=src.with_suffix('');src.write_text(_catalog_source(code)+MAIN)
         vendor=ROOT/'tests/vendor/cjson'
-        subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-Wno-error=deprecated-declarations','-fsanitize=address,undefined',
+        subprocess.run(['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-Wall','-Wextra','-Werror','-Wno-error=deprecated-declarations','-fsanitize=address,undefined',
             '-DPET_P4_COMMIT_LEAN_IO=1',
             *(['-DPET_COMPONENT_PROGRAM_ENABLED=1','-DPET_COMPONENT_PROGRAM_EXECUTION_REVIEWED=1','-DPET_COMPONENT_BACKGROUND_ENABLED=1',
                '-DPET_COMPONENT_PROGRAM_PARENT_UNIFIED=1','-DPET_PRIVATE_PARENT_CAPACITY_ACCEPTANCE=1'] if acceptance else []),
@@ -183,6 +184,6 @@ def test_sprite_cleanup_memo_is_boot_local_positive_and_commit_order_unchanged(t
             assert not any(v in flags for v in ('TASK_PRIORITY','PROGRAM_EXECUTION','F_CPU','PERIPHERAL','BUDGET_US','SPIFFS_MAX_FILES','AFFINITY'))
         else:assert 'PET_P4_COMMIT_LEAN_IO=1' not in flags
     src=tmp_path/'guard.c';src.write_text('#include "pet_p4_storage_io_trace.h"\nint main(void){return 0;}\n')
-    result=subprocess.run(['cc','-std=c11','-fsyntax-only','-DPET_P4_COMMIT_LEAN_IO=1','-I',str(ROOT/'main'),str(src)],capture_output=True,text=True)
+    result=subprocess.run(['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-fsyntax-only','-DPET_P4_COMMIT_LEAN_IO=1','-I',str(ROOT/'main'),str(src)],capture_output=True,text=True)
     assert result.returncode!=0 and 'Lean commit IO requires' in result.stderr
-    assert subprocess.run(['cc','-std=c11','-fsyntax-only','-I',str(ROOT/'main'),str(src)],capture_output=True,text=True).returncode==0
+    assert subprocess.run(['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-fsyntax-only','-I',str(ROOT/'main'),str(src)],capture_output=True,text=True).returncode==0

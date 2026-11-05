@@ -50,14 +50,16 @@ pet_resource_finish_t probe_real_finish(pet_resource_lease_t);
 uint32_t probe_real_trace_begin(uint32_t);
 pet_resource_result_t pet_resources_device_acquire(pet_resource_owner_t o,pet_resource_kind_t k,uint32_t u,pet_resource_lease_t *out){
     outside();pet_resource_result_t r=probe_real_acquire(o,k,u,out);pause_at(1);
-    if(acquire_audio>=0)atomic_store(&flags[acquire_audio],true);return r;
+    if(acquire_audio>=0)atomic_store(&flags[acquire_audio],true);
+    return r;
 }
 pet_resource_finish_t pet_resources_device_finish(pet_resource_lease_t l){
     outside();atomic_fetch_add(&finish_calls,1);return finish_fail?PET_RESOURCE_FINISH_STALE:probe_real_finish(l);
 }
 uint32_t pet_sched_trace_begin(uint32_t us){
     outside();uint32_t g=begin_fail?0:probe_real_trace_begin(us);
-    if(begin_audio>=0)atomic_store(&flags[begin_audio],true);return g;
+    if(begin_audio>=0)atomic_store(&flags[begin_audio],true);
+    return g;
 }
 typedef struct spiffs_t spiffs;
 void __real_spiffs_api_lock(spiffs *fs){(void)fs;outside();atomic_fetch_add(&physical_calls,1);}

@@ -69,7 +69,8 @@ static void *heap_caps_malloc(size_t n,int cap){(void)cap;return allocation_erro
 static const uint16_t *pet_p4_renderer_logical_framebuffer(int *w,int *h){*w=640;*h=480;return framebuffer;}
 static int write_bytes(const char *p,size_t n){
   if(used>=fail_after){fail_after=SIZE_MAX;return 0;}
-  if(n>17)n=17;if(n>fail_after-used)n=fail_after-used;
+  if(n>17)n=17;
+  if(n>fail_after-used)n=fail_after-used;
   assert(used+n<sizeof(wire));memcpy(wire+used,p,n);used+=n;wire[used]=0;return (int)n;
 }
 static int usb_serial_jtag_write_bytes(const void *p,size_t n,int timeout){(void)timeout;return write_bytes(p,n);}
@@ -146,7 +147,7 @@ int main(void){
   assert(maybe_handle_debug_line(command,&route));assert(g_screenshot.raw==original&&strstr(wire,"snapshot busy"));
   char read[256];snprintf(read,sizeof(read),"{\"topic\":\"debug/screenshot_read\",\"payload\":{\"id\":\"%s\",\"index\":23}}",identity);
   used=0;wire[0]=0;assert(maybe_handle_debug_line(read,&route));assert(strstr(wire,"screenshot_chunk"));
-  char first[5000];snprintf(first,sizeof(first),"%s",wire);
+  char first[5000];size_t first_size=strlen(wire);assert(first_size<sizeof(first));memcpy(first,wire,first_size+1);
   framebuffer[0]^=1;used=0;wire[0]=0;assert(maybe_handle_debug_line(read,&route));assert(!strcmp(first,wire));framebuffer[0]^=1;
   pet_p4_transport_route_t other=PET_P4_TRANSPORT_USB_SERIAL_JTAG;
   used=0;wire[0]=0;assert(maybe_handle_debug_line(read,&other));assert(strstr(wire,"mismatched")&&!strstr(wire,"screenshot_chunk"));

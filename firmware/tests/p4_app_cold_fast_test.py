@@ -46,7 +46,9 @@ int main(void){
     for(int i=0;i<N;i++)a[i]=blend_rgb565(a[i],r,g,bl,al);
     cold_fast_blend_span(b,N,r,g,bl,al);assert(!memcmp(a,b,sizeof(a)));
     /* LUT span: exact against the same reference for every alpha and random colours. */
-    for(int i=0;i<N;i++)b[i]=rnd();memcpy(a,b,sizeof(a));for(int i=0;i<N;i++)a[i]=blend_rgb565(a[i],r,g,bl,al);
+    for(int i=0;i<N;i++)b[i]=rnd();
+    memcpy(a,b,sizeof(a));
+    for(int i=0;i<N;i++)a[i]=blend_rgb565(a[i],r,g,bl,al);
     cold_fast_blend_lut_t lut;cold_fast_blend_lut(&lut,r,g,bl,al);cold_fast_blend_span_lut(b,N,&lut);assert(!memcmp(a,b,sizeof(a)));
   }
   /* used-index opacity: unused non-opaque palette entries must not matter; a used one must. */

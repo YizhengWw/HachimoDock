@@ -66,7 +66,8 @@ int main(void){
   assert(!pet_reset_phase_enter((pet_reset_phase_t)-1).active);
   pet_reset_phase_scope_t stack[8];for(unsigned i=0;i<8;i++){stack[i]=pet_reset_phase_enter(PET_PHASE_FILE_DATA);assert(stack[i].active);}
   assert(!pet_reset_phase_enter(PET_PHASE_FILE_SYNC).active);
-  for(unsigned i=8;i>0;i--)pet_reset_phase_leave(&stack[i-1]);assert(!depths[0]);
+  for(unsigned i=8;i>0;i--)pet_reset_phase_leave(&stack[i-1]);
+  assert(!depths[0]);
   /* Simulate a reset while publication was in progress. No watchdog is fired. */
   pet_reset_phase_scope_t unfinished=pet_reset_phase_enter(PET_PHASE_PROGRAM_PUBLICATION);assert(unfinished.active);
   uint32_t prior_nonce=nonce;reset_dram_only();why=ESP_RST_WDT;pet_reset_phase_boot();

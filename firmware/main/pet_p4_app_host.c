@@ -352,7 +352,18 @@ bool pet_app_host_apply(const cJSON *p,uint64_t now){
     changed|=incoming_collection?memcmp(&collection_view,incoming_collection,sizeof(collection_view))!=0:collection_view.valid;
     if(incoming_collection)collection_view=*incoming_collection;else memset(&collection_view,0,sizeof(collection_view));
 #endif
-    for(int i=0;i<8;i++)snprintf(values[i],sizeof(values[i]),"%s",str(v,names[i]));applied=received;last_reply=now;ui_valid=ui!=NULL;ui_pending=false;ui_mode=mode;ui_count=count;memcpy(ui_actions,actions,sizeof(actions));memcpy(ui_context,context,sizeof(context));if(changed)variable_epoch++;memcpy(variables,incoming,sizeof(variables));variable_count=incoming_count;
+    for(int i=0;i<8;i++)snprintf(values[i],sizeof(values[i]),"%s",str(v,names[i]));
+    applied=received;
+    last_reply=now;
+    ui_valid=ui!=NULL;
+    ui_pending=false;
+    ui_mode=mode;
+    ui_count=count;
+    memcpy(ui_actions,actions,sizeof(actions));
+    memcpy(ui_context,context,sizeof(context));
+    if(changed)variable_epoch++;
+    memcpy(variables,incoming,sizeof(variables));
+    variable_count=incoming_count;
   }
   portEXIT_CRITICAL(&mux);return ok;
 }
@@ -482,13 +493,19 @@ bool pet_app_host_emit(const char *topic,const cJSON *payload){
   /* Refresh has a board binding; notify keeps its existing exact payload. */
   if(!strcmp(topic,"widget/data/refresh")&&!cJSON_AddStringToObject(body,"boardDeviceId",board)){cJSON_Delete(root);return false;}
   char *line=cJSON_PrintUnformatted(root);bool ok=line!=NULL;
-  if(line)send(line,ctx);cJSON_free(line);cJSON_Delete(root);return ok;
+  if(line)send(line,ctx);
+  cJSON_free(line);
+  cJSON_Delete(root);
+  return ok;
 }
 
 #if PET_SERVICE_BRIDGE_ENABLED
 void pet_app_host_tick_bound(const char*id,uint32_t rev,uint8_t page,bool visible,uint64_t now,const char*binding){
   if(!id||!id[0]){pet_app_host_tick(id,rev,page,visible,now);return;}
-  if(!binding)binding="";if(binding[0]){if(strlen(binding)!=64)return;for(const char*c=binding;*c;c++)if(!((*c>='0'&&*c<='9')||(*c>='a'&&*c<='f')))return;}
+  if(!binding)binding="";
+  if(binding[0]){if(strlen(binding)!=64)return;
+  for(const char*c=binding;*c;c++)if(!((*c>='0'&&*c<='9')||(*c>='a'&&*c<='f')))return;
+  }
   (void)request(id,rev,page,"status",now,visible,NULL,0,NULL,NULL,binding);
 }
 bool pet_app_host_observed_value_action(const char*id,uint32_t rev,uint8_t page,const char*action,const char*parameter,int32_t value,const pet_host_observation_t*observed,uint64_t now){
@@ -532,7 +549,9 @@ bool pet_app_host_image_apply(const cJSON*p,uint64_t now){
 bool pet_app_host_image_borrow(const char*id,const char*alias,uint64_t now,pet_bridge_image_lease_t*out){
   portENTER_CRITICAL(&mux);
   bool ok=id&&shown&&!strcmp(id,widget)&&pet_resources_device_view_current(&resource_view)&&last_reply&&now>=last_reply&&now-last_reply<10000&&pet_bridge_image_borrow(&bridge_images,alias,bridge_pixels,out);
-  if(!ok&&out)memset(out,0,sizeof(*out));portEXIT_CRITICAL(&mux);return ok;
+  if(!ok&&out)memset(out,0,sizeof(*out));
+  portEXIT_CRITICAL(&mux);
+  return ok;
 }
 void pet_app_host_image_release(pet_bridge_image_lease_t*lease){portENTER_CRITICAL(&mux);(void)pet_bridge_image_release(&bridge_images,lease);portEXIT_CRITICAL(&mux);}
 #endif
