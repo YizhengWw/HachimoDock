@@ -22,3 +22,9 @@ bool pet_audio_patch_progress(const char *path,uint32_t *index,uint32_t *bytes);
 unsigned pet_audio_patch_file_count(void);
 uint32_t pet_audio_patch_total_bytes(void);
 bool pet_audio_patch_resolve(int slot,const char *pack,const char *family,char *out,size_t capacity);
+
+/* Lock-free admission hints: refreshed before RX tasks at boot and after an
+ * acknowledged global publication. No FS or runtime mutex in enabled(). */
+void pet_audio_patch_global_refresh(void);
+bool pet_audio_patch_global_enabled(const char *family);
+bool pet_audio_patch_global_family_known(const char *family);

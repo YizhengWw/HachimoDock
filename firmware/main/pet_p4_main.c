@@ -1,3 +1,4 @@
+#include "pet_p4_audio_patch.h"
 /*
  * [Input] UART/native USB protocol traffic, display/input state, and assets.
  * [Output] initialized P4 runtime with serialized state access, origin-aware
@@ -1981,6 +1982,8 @@ void app_main(void) {
   // Parse the large appearance manifest before any USB/UART receive task can
   // concurrently parse command JSON during boot.
   pet_p4_load_asset_manifest(&g_state);
+  // Load cue admission metadata before either receive task can publish audio.
+  pet_audio_patch_global_refresh();
   (void)pet_boot_trace_mark(PET_BOOT_MANIFEST_DONE);
   ESP_ERROR_CHECK(init_usb());
   ESP_ERROR_CHECK(init_uart());

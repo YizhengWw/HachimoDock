@@ -4,9 +4,9 @@ import {invoke} from '@tauri-apps/api/core';
 import {Upload,UploadCloud,Trash2,Volume2} from 'lucide-react';
 import {compressWavFileForBoard} from './lib/audio-cue.js';
 import {defaultAudioCueSrcForFamily} from './lib/builtin-appearances.js';
-import {GLOBAL_AUDIO_STATES,globalAudioDirty,markGlobalAudioDirty,migrateBuiltinGlobalAudioCues,readGlobalAudioCue,saveGlobalAudioCue,removeGlobalAudioCue} from './lib/global-audio-cues.js';
+import {GLOBAL_AUDIO_STATES,globalAudioDirty,globalAudioRevision,markGlobalAudioDirty,migrateBuiltinGlobalAudioCues,readGlobalAudioCue,saveGlobalAudioCue,removeGlobalAudioCue} from './lib/global-audio-cues.js';
 import {useExitProtection} from './lib/exit-protection.js';
-const labels={done:'任务完成',waiting_user:'等待操作',error:'出错',welcome:'欢迎',permission_request:'请求审批',permission_approved:'审批通过',permission_denied:'审批拒绝',permission_expired:'审批超时',session_terminated:'会话停止'};
+const labels={idle:'休息',working:'工作',done:'任务完成',waiting_user:'等待操作',error:'出错',welcome:'欢迎',permission_request:'请求审批',permission_approved:'审批通过',permission_denied:'审批拒绝',permission_expired:'审批超时',session_terminated:'会话停止'};
 export default function GlobalAudioCuesPanel({boardDeviceId}){
  const [family,setFamily]=useState('done'),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[url,setUrl]=useState(''),[custom,setCustom]=useState(false),[revision,setRevision]=useState(0),[dirty,setDirty]=useState(globalAudioDirty);
  const id=useId();useExitProtection(busy?'提示音操作尚未完成':'');
@@ -25,8 +25,8 @@ export default function GlobalAudioCuesPanel({boardDeviceId}){
  async function upload(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;
   await change(async()=>{if(!/\.wav$/i.test(file.name))throw new Error('请上传 WAV 格式文件');await saveGlobalAudioCue(family,await compressWavFileForBoard(file));});}
  async function sync(){if(busy)return;setBusy(true);setError('');setMessage('');
-  try{const result=await invoke('usb_sync_appearance',{appearanceId:'global-audio-cues',boardDeviceId,audioOnly:true});
-   if(!result?.ok)throw new Error(result?.error||'设备未确认音效下发');markGlobalAudioDirty(false);setDirty(false);setMessage('全局提示音已下发，适用于所有形象。');}
+  try{const revision=globalAudioRevision();const result=await invoke('usb_sync_appearance',{appearanceId:'global-audio-cues',boardDeviceId,audioOnly:true});
+   if(!result?.ok)throw new Error(result?.error||'设备未确认音效下发');markGlobalAudioDirty(false,revision);setDirty(globalAudioDirty());setMessage('全局提示音已下发，适用于所有形象。');}
   catch(e){setError(String(e?.message||e));}finally{setBusy(false);}}
  return <section className="detail-side-section detail-side-section--audio"><div className="detail-audio-config">
   <div className="detail-audio-config__header"><span><Volume2 size={15}/>全局提示音</span><span className="muted small">所有形象通用</span></div>

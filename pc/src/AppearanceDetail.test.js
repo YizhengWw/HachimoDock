@@ -133,7 +133,7 @@ test("appearance detail uses a preview-first workspace with a unified inspector 
 
 test("global audio downlink is separate from video transfer and has persistent reminders", () => {
  const source=readSource("GlobalAudioCuesPanel.jsx");
- assert.match(source,/globalAudioDirty/);assert.match(source,/markGlobalAudioDirty\(false\)/);
+ assert.match(source,/globalAudioDirty/);assert.match(source,/markGlobalAudioDirty\(false,revision\)/);
  assert.match(source,/audioOnly:true/);assert.match(source,/下发音效/);
  assert.doesNotMatch(source,/prepare_p4_appearance|replaceFamilyVideo/);
 });

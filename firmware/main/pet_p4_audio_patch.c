@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <stdatomic.h>
 #ifndef PET_AUDIO_PATCH_FS_PREFIX
 #define PET_AUDIO_PATCH_FS_PREFIX "/spiffs"
 #endif
@@ -56,6 +57,23 @@ static uint64_t le64(const uint8_t *p){return (uint64_t)le32(p)|(uint64_t)le32(p
 static void put32(uint8_t *p,uint32_t n){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(i*8));}
 static void put64(uint8_t *p,uint64_t n){put32(p,(uint32_t)n);put32(p+4,(uint32_t)(n>>32));}
 static bool hex(const char *p,size_t n){if(!p||strlen(p)!=n)return false;for(size_t i=0;i<n;i++)if(!((p[i]>='0'&&p[i]<='9')||(p[i]>='a'&&p[i]<='f')))return false;return true;}
+static _Atomic uint32_t global_family_mask;
+static uint32_t global_family_bit(const char *family){
+  static const char *const names[]={"welcome","working","idle","done","error","waiting_user",
+    "permission_request","permission_approved","permission_denied","permission_expired","session_terminated",
+    "idle.playing","idle.wandering","idle.default","idle.jumping","working.thinking","working.typing","working.browsing",
+    "touch.lick","touch.what","touch.left","touch.right","idle.begging","idle.daydreaming","idle.eating","idle.reading","idle.traveling"};
+  _Static_assert(sizeof(names)/sizeof(names[0])<=32,"global cue mask bound");
+  if(family)for(unsigned i=0;i<sizeof(names)/sizeof(names[0]);i++)if(!strcmp(family,names[i]))return UINT32_C(1)<<i;
+  return 0;
+}
+bool pet_audio_patch_global_family_known(const char *family){return global_family_bit(family)!=0;}
+bool pet_audio_patch_global_enabled(const char *family){return (atomic_load_explicit(&global_family_mask,memory_order_acquire)&global_family_bit(family))!=0;}
+static uint32_t global_plan_mask(const patch_plan_t *plan){
+  uint32_t mask=0;
+  for(unsigned i=0;i<plan->count;i++)mask|=global_family_bit(plan->files[i].family);
+  return mask;
+}
 static bool family_valid(const char *p){size_t n=p?strlen(p):0;if(!n||n>=48)return false;for(size_t i=0;i<n;i++)if(!((p[i]>='a'&&p[i]<='z')||(p[i]>='0'&&p[i]<='9')||p[i]=='_'||p[i]=='-'||p[i]=='.'))return false;return true;}
 static bool path_valid(const char *p){size_t n=p?strlen(p):0;return n>7&&n<128&&!strncmp(p,"p4/",3)&&!strcmp(p+n-4,".wav")&&!strstr(p,"..")&&!strchr(p,'\\')&&!strchr(p,':');}
 static bool number(const cJSON *o,const char *key,uint32_t max,uint32_t *out){const cJSON *v=cJSON_GetObjectItemCaseSensitive(o,key);if(!cJSON_IsNumber(v)||!isfinite(v->valuedouble)||v->valuedouble<0||v->valuedouble>max||floor(v->valuedouble)!=v->valuedouble)return false;*out=(uint32_t)v->valuedouble;return true;}
@@ -100,6 +118,13 @@ static bool latest(int slot,int *bank,uint32_t *generation){
     if(!found||scratch.generation>best){found=true;best=scratch.generation;selected=b;}
   }
   *bank=selected;*generation=best;return true;
+}
+void pet_audio_patch_global_refresh(void){
+  int bank;uint32_t generation,mask=0;
+  if(latest(PET_AUDIO_PATCH_GLOBAL_SLOT,&bank,&generation)&&bank>=0
+      &&read_index(PET_AUDIO_PATCH_GLOBAL_SLOT,bank,&scratch)==INDEX_VALID
+      &&!strcmp(scratch.pack,PET_AUDIO_PATCH_GLOBAL_PACK))mask=global_plan_mask(&scratch);
+  atomic_store_explicit(&global_family_mask,mask,memory_order_release);
 }
 bool pet_audio_patch_begin(int slot,const char *pack,const cJSON *files,uint32_t total,bool *attempted){
   if(pending.active||slot<0||slot>PET_AUDIO_PATCH_GLOBAL_SLOT||!hex(pack,64)||!cJSON_IsArray(files)||total>PET_AUDIO_PATCH_MAX_BYTES)return false;
@@ -171,7 +196,10 @@ bool pet_audio_patch_commit(bool *attempted,uint32_t *generation){
   pending.publication_attempted=true;
   *attempted=true;FILE *f=fopen(p,"wb");if(!f)return false;bool ok=fwrite(index_bytes,1,n,f)==n;if(!close_written(f))ok=false;
   if(!ok||read_index(pending.slot,pending.bank,&scratch)!=INDEX_VALID||scratch.generation!=pending.generation||strcmp(scratch.pack,pending.pack)||hash(index_bytes,n-8)!=expected_hash)return false;
-  pending.published=true;*generation=pending.generation;return true;
+  pending.published=true;*generation=pending.generation;
+  if(pending.slot==PET_AUDIO_PATCH_GLOBAL_SLOT&&!strcmp(pending.pack,PET_AUDIO_PATCH_GLOBAL_PACK))
+    atomic_store_explicit(&global_family_mask,global_plan_mask(&pending),memory_order_release);
+  return true;
 }
 bool pet_audio_patch_abort(bool *attempted){if(!pending.active||pending.publication_attempted)return false;return clear_bank(pending.slot,pending.bank,attempted);}
 void pet_audio_patch_retire(void){memset(&pending,0,sizeof(pending));}

@@ -32,8 +32,7 @@ static bool audio_patch_families_allowed(const cJSON *files,bool global){
   if(!cJSON_IsArray(files)||cJSON_GetArraySize(files)<0||cJSON_GetArraySize(files)>(int)PET_AUDIO_PATCH_MAX_FILES)return false;
   for(int i=0;i<cJSON_GetArraySize(files);i++){
     const char *family=json_string(cJSON_GetArrayItem(files,i),"family");bool allowed=pet_p4_system_cue_family(family);
-    static const char *const states[]={"working","idle.default","idle.jumping","touch.left","touch.right","welcome","idle.playing","idle.wandering","working.thinking","working.typing","working.browsing","touch.lick","touch.what","idle.begging","idle.daydreaming","idle.eating","idle.reading","idle.traveling"};
-    if(global)for(unsigned j=0;!allowed&&j<sizeof(states)/sizeof(states[0]);j++)allowed=!strcmp(family,states[j]);
+    if(global)allowed=pet_audio_patch_global_family_known(family);
     for(unsigned j=0;!global&&!allowed&&j<g_audio_patch_allowed_count;j++)allowed=!strcmp(family,g_audio_patch_allowed[j]);
     if(!allowed)return false;
   }

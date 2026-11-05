@@ -1,3 +1,4 @@
+#include "pet_p4_audio_patch.h"
 #include "pet_p4_audio.h"
 #include "pet_p4_audio_volume.h"
 #include "pet_p4_fs_activity.h"
@@ -1285,7 +1286,7 @@ void pet_p4_audio_process(
   );
   const pet_p4_asset_entry_t *entry = index >= 0 && index < state->asset_catalog.count
     ? &state->asset_catalog.entries[index] : NULL;
-  const char *family = (pet_p4_system_cue_family(lifecycle) || !strcmp(lifecycle,"welcome") || !strcmp(lifecycle,"working")) ? lifecycle : entry ? entry->family : "";
+  const char *family = (pet_p4_system_cue_family(lifecycle) || pet_audio_patch_global_enabled(lifecycle)) ? lifecycle : entry ? entry->family : "";
   /* Status cues do not depend on a matching animation being installed. */
   if (entry && strcmp(entry->family, family)) entry = NULL;
   bool completion_guarded=!strcmp(family,"done");
@@ -1322,6 +1323,7 @@ void pet_p4_audio_process(
     &g_playback_generation, 1U, memory_order_acq_rel
   ) + 1U;
   if (!family[0]) return;
+  if (!pet_p4_system_cue_family(family) && !pet_audio_patch_global_enabled(family)) return;
 
   pet_p4_audio_playback_request_t request;
   memset(&request, 0, sizeof(request));

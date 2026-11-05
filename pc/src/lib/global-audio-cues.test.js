@@ -38,3 +38,10 @@ test('invalid maps and state names fail before writing',async t=>{
  const f=await fixture(t);await assert.rejects(f.module.saveGlobalAudioCue('../secret',wav));assert.equal(f.calls.length,0);
  f.files.set(mapPath,JSON.stringify({done:'/outside.wav'}));await assert.rejects(f.module.saveGlobalAudioCue('done',wav));assert.equal(f.calls.length,0);
 });
+
+test('an older send acknowledgement cannot clear a newer sound edit',async t=>{
+ const f=await fixture(t);await f.module.saveGlobalAudioCue('done',wav);
+ const revision=f.module.globalAudioRevision();await f.module.saveGlobalAudioCue('error',wav);
+ f.module.markGlobalAudioDirty(false,revision);assert(f.module.globalAudioDirty());
+ f.module.markGlobalAudioDirty(false,f.module.globalAudioRevision());assert(!f.module.globalAudioDirty());
+});

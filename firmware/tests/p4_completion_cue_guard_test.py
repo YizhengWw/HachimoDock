@@ -47,6 +47,8 @@ static const char *pet_p4_state_effective_lifecycle(const pet_p4_runtime_state_t
 static const char *pet_p4_canonical_lifecycle(const char*s){return s;}
 static int pet_p4_behavior_select(int*b,const catalog_t*c,const char*l,unsigned rev,unsigned long long n){(void)b;(void)c;(void)rev;(void)n;return !strcmp(l,"done")?0:-1;}
 static bool pet_p4_system_cue_family(const char*s){return !strcmp(s,"done");}
+static bool global_working_cue;
+static bool pet_audio_patch_global_enabled(const char*s){return global_working_cue&&!strcmp(s,"working");}
 static int xQueueOverwrite(void*q,const void*r){(void)q;attempts++;if(!queue_ok)return 0;pending=*(const pet_p4_audio_playback_request_t*)r;enqueued++;return pdPASS;}
 static pet_resource_result_t pet_resources_device_realtime_begin(pet_resource_realtime_t*t){t->serial=broker_ok?1:0;return broker_ok?PET_RESOURCE_OK:PET_RESOURCE_PROTECTED;}
 '''
@@ -54,7 +56,7 @@ tail=r'''
 static unsigned race_unlocks;
 static void test_after_unlock(void){if(race_unlocks&&!--race_unlocks)completion_cue_cancel_pending(&pending,true);}
 static void reset(void){
- race_unlocks=0;
+ global_working_cue=false;race_unlocks=0;
  memset(&g_completion_cues,0,sizeof(g_completion_cues));memset(&pending,0,sizeof(pending));atomic_store(&g_status_cue_deferred,false);atomic_store(&g_status_cue_recheck,false);atomic_store(&g_playback_generation,0);atomic_store(&g_completion_cue_queued,0);atomic_store(&g_completion_cue_started,0);atomic_store(&g_completion_cue_suppressed,0);g_playback_family[0]=g_playback_session_key[0]=0;g_playback_asset_revision=0;g_playback_session_revision=0;enqueued=started=attempts=0;queue_ok=broker_ok=true;
 }
 static pet_p4_runtime_state_t fixture(void){
@@ -84,7 +86,11 @@ int main(void){
  s=fixture();pet_p4_audio_process(&s,1000);race_unlocks=2;pet_p4_audio_process(&s,1100);assert(race_unlocks==0);
  if(!atomic_load(&g_status_cue_recheck)){puts("PEER171_LOST_RECHECK_RUNTIME_REPRO");return 171;}
  pet_p4_audio_process(&s,1200);start_pending(true);assert(enqueued==2&&started==1);puts("worker_cancel_after_due_unlock_preserves_recheck");
- printf("guard_bytes=%zu\n",sizeof(g_completion_cues));puts("PASS_15_PRODUCTION_PROCESS_CASES");return 0;
+ s=fixture();global_working_cue=true;lifecycle="working";pet_p4_audio_process(&s,1000);
+ assert(enqueued==1&&!pending.completion_guarded);lifecycle="done";pet_p4_audio_process(&s,1100);start_pending(true);
+ pet_p4_audio_process(&s,1200);assert(enqueued==2&&started==1&&atomic_load(&g_completion_cue_queued)==1);
+ puts("configured_global_working_cue_preserves_once_per_task_done");
+ printf("guard_bytes=%zu\n",sizeof(g_completion_cues));puts("PASS_16_PRODUCTION_PROCESS_CASES");return 0;
 }
 '''
 def test_actual_status_emission_per_task_and_prestart_admission(tmp_path):
@@ -92,4 +98,4 @@ def test_actual_status_emission_per_task_and_prestart_admission(tmp_path):
  exe=tmp_path/'process'
  subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-I',str(ROOT/'main'),str(source),'-o',str(exe)],check=True)
  result=subprocess.run([str(exe)],capture_output=True,text=True,check=True)
- assert 'PASS_15_PRODUCTION_PROCESS_CASES' in result.stdout
+ assert 'PASS_16_PRODUCTION_PROCESS_CASES' in result.stdout
