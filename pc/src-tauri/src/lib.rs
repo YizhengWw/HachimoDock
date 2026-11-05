@@ -11427,13 +11427,15 @@ fn frontend_startup_generation(window: tauri::WebviewWindow, supervisor: tauri::
 fn frontend_startup_ready(window: tauri::WebviewWindow, supervisor: tauri::State<'_,startup_supervision::Supervisor>, generation:u64, token:String) -> Result<bool,String> {
     if window.label()!="main" || token.len()>64 {return Err("startup confirmation invalid".into());}
     Ok(supervisor.ready(generation,&token))
+}
+
 #[cfg(target_os = "macos")]
 static APP_NAP_GUARD: std::sync::Mutex<Option<std::process::Child>> =
     std::sync::Mutex::new(None);
 
 #[cfg(target_os = "macos")]
-fn caffeinate_flag(block_sleep: bool) -> &'static str {
-    if block_sleep { "-imsu" } else { "-u" }
+fn caffeinate_flag(block_sleep: bool) -> Option<&'static str> {
+    if block_sleep { Some("-imsu") } else { None }
 }
 
 #[cfg(target_os = "macos")]
@@ -11446,8 +11448,11 @@ fn restart_app_nap_guard(block_sleep: bool) {
         let _ = child.kill();
         let _ = child.wait();
     }
+    // OFF must not launch anything: `caffeinate -u` is still a UserIsActive
+    // assertion and prevents idle system sleep, which made a closed-lid Mac
+    // stay awake and reconnect the P4.
+    let Some(flag) = caffeinate_flag(block_sleep) else { return; };
     let pid = std::process::id().to_string();
-    let flag = caffeinate_flag(block_sleep);
     match std::process::Command::new("/usr/bin/caffeinate")
         .args([flag, "-w", &pid])
         .stdin(std::process::Stdio::null())
@@ -14937,6 +14942,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keep_awake_off_does_not_block_system_sleep() {
+        // OFF must not launch caffeinate: a `-u` user-activity assertion still
+        // blocks idle sleep. ON keeps the explicit sleep-blocking mode.
+        assert_eq!(caffeinate_flag(false), None);
+        assert_eq!(caffeinate_flag(true), Some("-imsu"));
+        // The audio player's own NSActivityOptions must never request idle
+        // system/display sleep; upstream already covers this separately in
+        // realtime_audio_macos::tests.
+        let source = include_str!("realtime_audio_macos.rs");
+        let options = source
+            .split("fn activity_options()")
+            .nth(1)
+            .expect("activity options");
+        let options_body = options.split('}').next().unwrap_or_default();
+        assert!(!options_body.contains("IdleSystemSleepDisabled"));
+    }
     fn build_usb_restore_speech_text_returns_none_without_state_or_text() {
         let payload = serde_json::json!({
             "reason": "heartbeat",
