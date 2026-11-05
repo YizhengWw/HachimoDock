@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
 import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {build} from 'esbuild';
@@ -9,7 +10,7 @@ import {validateSceneViewBindings} from './graphics-scene-view.js';
 import {validateClawpkgManifest} from '../lib/clawpkg-contract.js';
 const fixture=JSON.parse(readFileSync(new URL('../../skills/petui/contracts/graphics-v2.json',import.meta.url)));
 test('actual scene preview renders all eight atlas bindings, including entities beyond the v1 ceiling',async()=>{
-  const result=await build({entryPoints:[new URL('./SceneSurfaceLayer.jsx',import.meta.url).pathname],bundle:true,write:false,platform:'node',format:'cjs',external:['react'],logLevel:'silent'});
+  const result=await build({entryPoints:[fileURLToPath(new URL('./SceneSurfaceLayer.jsx',import.meta.url))],bundle:true,write:false,platform:'node',format:'cjs',external:['react'],logLevel:'silent'});
   const module={exports:{}};new Function('require','module','exports',result.outputFiles[0].text)(createRequire(import.meta.url),module,module.exports);
   const surface=fixture.sceneViewBindings.valid8;
   const frame={width:16,height:12,entities:fixture.runtime.scene.entities.map(e=>({...e,width:1,height:1,tone:1,active:true}))};

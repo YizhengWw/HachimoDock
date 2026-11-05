@@ -30,7 +30,7 @@ def main():
         source = project / "main/pet_p4_storage_io_trace.c"
         matches = [entry for entry in entries if Path(entry["file"]).resolve() == source]
         if len(matches) != 1:
-            raise SystemExit("SDK database must contain the production trace source exactly once")
+            raise SystemExit("ESP-IDF database must contain the production trace source exactly once")
         cc = core / "packages/toolchain-riscv32-esp/bin/riscv32-esp-elf-gcc"
         sdk = core / "packages/framework-espidf"
         if not cc.is_file() or not (sdk / "tools/cmake/version.cmake").is_file():

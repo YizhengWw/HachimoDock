@@ -4,6 +4,8 @@
 # [Sync] If this file changes, update `firmware/.folder.md` and README.md.
 
 cmake_minimum_required(VERSION 3.16)
+# Export the real ESP-IDF compilation context for SDK object checks.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if("$ENV{PET_P4_CHIP_FAMILY}" STREQUAL "v3")
   set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.v3.defaults")
