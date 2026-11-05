@@ -177,4 +177,4 @@ def test_default_off_and_runtime_owner_hooks(tmp_path):
     assert 'static EXT_RAM_BSS_ATTR pet_particles_state_t g_particle_state[PET_SURFACE_PARTICLE_EMITTERS];' in glue
     assert 'pet_particles_draw(&c,&g_particle_state[i],particle_dot,(void*)e)' in glue
     assert 'xTaskCreate' not in glue and 'malloc' not in glue.split('#if PET_P4_PARTICLES')[1]
-    usb=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text();assert 'app_graphics::require_capability(&widget_definition,&self.status().capabilities)' in usb
+    usb=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text();assert 'crate::app_component_program::validate(&widget_definition)?' in usb

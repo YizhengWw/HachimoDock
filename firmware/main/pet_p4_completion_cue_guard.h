@@ -45,7 +45,8 @@ static inline void pet_completion_observe(pet_completion_cue_guard_t *g,const ch
       memcpy(e->agent,agent,strlen(agent)+1);memcpy(e->session,session,strlen(session)+1);break;
     }
   }
-  if(!e)return;e->present=true;
+  if(!e)return;
+  e->present=true;
   if(active) {
     if(e->pending&&(revision>e->pending_revision||(!revision&&!e->active)))e->pending=false;
     if(revision>e->consumed_revision) {e->armed=true;if(revision>e->active_revision)e->active_revision=revision;}

@@ -17,7 +17,7 @@ static size_t used,largest;
 static unsigned char output[8192];
 static bool aligned_control;
 static const void *first_driver_pointer;
-static int uart_write_bytes(int port,const char *data,size_t size) {
+static int uart_write_bytes(int port, const void *data,size_t size) {
   assert(port==0 && size>0);
   calls++; if(!first_driver_pointer) first_driver_pointer=data;
   if(size>largest) largest=size;
@@ -171,6 +171,10 @@ int main(void) {
   full_and_odd_partials(input,size);
   terminal_results_never_replay(input,size);
   queue_and_empty_paths(input,size);
+  reset(FULL,false);uart_audio_queue_all(input,size);
+  assert(used==size&&!memcmp(input,output,size)&&!drains&&!delays);
+  reset(ODD_FIRST,false);uart_audio_queue_all(input,size);
+  assert(used==size&&!memcmp(input,output,size)&&!drains&&!delays);
 #if PET_P4_SERIAL_CONTROL_INTEGRITY
   prefix_debt_and_routes(input,size);
 #endif

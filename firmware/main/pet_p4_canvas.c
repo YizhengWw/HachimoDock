@@ -66,7 +66,8 @@ static unsigned square_root(unsigned n){
 }
 static unsigned emit(const pet_canvas_t *c,pet_canvas_rect_fn rect,void *ctx,int x,int y,int w,int h,uint16_t color){
   if(x<0){w+=x;x=0;}if(y<0){h+=y;y=0;}
-  if(x+w>c->w)w=c->w-x;if(y+h>c->h)h=c->h-y;
+  if(x+w>c->w)w=c->w-x;
+  if(y+h>c->h)h=c->h-y;
   if(w<=0||h<=0)return 0;
   rect(ctx,c->x+x,c->y+y,w,h,color);return 1;
 }

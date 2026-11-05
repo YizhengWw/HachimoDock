@@ -39,8 +39,8 @@ static bool usb_protocol_seen(void){return true;}
 static int xSemaphoreTake(SemaphoreHandle_t m,int timeout){(void)m;(void)timeout;locks++;return pdTRUE;}
 static void xSemaphoreGive(SemaphoreHandle_t m){(void)m;assert(locks==1);locks--;}
 static int write_bytes(const char *data,size_t count);
-static int uart_write_bytes(int port,const char *data,size_t count){(void)port;return write_bytes(data,count);}
-static int usb_serial_jtag_write_bytes(const char *data,size_t count,int timeout){(void)timeout;return write_bytes(data,count);}
+static int uart_write_bytes(int port,const void *data,size_t count){(void)port;return write_bytes(data,count);}
+static int usb_serial_jtag_write_bytes(const void *data,size_t count,int timeout){(void)timeout;return write_bytes(data,count);}
 static int uart_wait_tx_done(int port,int timeout){(void)port;(void)timeout;drains++;return ESP_OK;}
 static int usb_serial_jtag_wait_tx_done(int timeout){(void)timeout;drains++;return ESP_OK;}
 ''' + production + r'''

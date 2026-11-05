@@ -25,6 +25,8 @@ def binary(tmp_path_factory):
 #include <stdatomic.h>
 #include <math.h>
 #include "cJSON.h"
+static void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
+static bool audio_patch_idle_due(uint64_t now){(void)now;return false;}
 #include "pet_p4_appearance_session.h"
 #include "pet_p4_resources.h"
 #include "pet_p4_assets.h"

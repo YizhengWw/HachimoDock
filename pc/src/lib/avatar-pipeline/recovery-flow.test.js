@@ -6,10 +6,10 @@ import {CUSTOM_GENERATION_FAMILIES} from './families.js';
 
 test('fresh distinct-frame pipeline submits its cached action pose, preserves frame metadata, and restart does not charge again',async()=>{
  const old={fetch:globalThis.fetch,Image:globalThis.Image,document:globalThis.document};let imagePosts=0,reviews=0,videoPosts=0;
- class ActionMedia extends EventTarget{duration=5;videoWidth=400;videoHeight=300;load(){if(this.src)queueMicrotask(()=>this.dispatchEvent(new Event('loadeddata')));}set currentTime(_){queueMicrotask(()=>this.dispatchEvent(new Event('seeked')));}removeAttribute(){this.src='';}}
+ class ActionMedia extends EventTarget{style={};setAttribute(){}pause(){}remove(){}duration=5;videoWidth=400;videoHeight=300;load(){if(this.src)queueMicrotask(()=>this.dispatchEvent(new Event('loadeddata')));}set currentTime(_){queueMicrotask(()=>this.dispatchEvent(new Event('seeked')));}removeAttribute(){this.src='';}}
  globalThis.Image=class{naturalWidth=400;naturalHeight=300;set src(_){queueMicrotask(()=>this.onload?.());}};
  const ctx={clearRect(){},fillRect(){},drawImage(){},getImageData:()=>({data:new Uint8Array([255,255,255,255])}),putImageData(){}};
- globalThis.document={createElement:type=>type==='video'?new ActionMedia():{getContext:()=>ctx,toBlob:cb=>cb(new Blob([new Uint8Array([9])])),toDataURL:()=> 'data:image/png;base64,CQ=='}};
+ globalThis.document={body:{appendChild(){}},createElement:type=>type==='video'?new ActionMedia():{getContext:()=>ctx,toBlob:cb=>cb(new Blob([new Uint8Array([9])])),toDataURL:()=> 'data:image/png;base64,CQ=='}};
  globalThis.fetch=async(url,init={})=>{
   if(url.endsWith('/images/generations')){imagePosts++;const b=JSON.parse(init.body);assert.match(b.prompt,/起始关键帧/);assert.equal(b.image[0],'data:image/png;base64,Aw==');return Response.json({data:[{b64_json:'Ag=='}]});}
   if(url.endsWith('/responses')){reviews++;return Response.json({output_text:'{"pass":true,"issues":[]}'});}
@@ -30,12 +30,13 @@ test('a chosen preview is checked in the custom style and reused without a secon
  const old={fetch:globalThis.fetch,Image:globalThis.Image,document:globalThis.document};let calls=0;
  globalThis.Image=class {naturalWidth=256;naturalHeight=256;set src(_){queueMicrotask(()=>this.onload?.());}};
  class PreviewMedia extends EventTarget {
+  style={};setAttribute(){}pause(){}remove(){}
   duration=5;videoWidth=384;videoHeight=288;
   load(){if(this.src)queueMicrotask(()=>this.dispatchEvent(new Event('loadeddata')));}
   set currentTime(_){queueMicrotask(()=>this.dispatchEvent(new Event('seeked')));}
   removeAttribute(){this.src='';}
  }
- globalThis.document={createElement:type=>type==='video'?new PreviewMedia():({getContext:()=>({drawImage(){},getImageData:()=>({data:new Uint8Array([255,255,255,255])})}),toDataURL:()=> 'data:image/png;base64,AQ=='})};
+ globalThis.document={body:{appendChild(){}},createElement:type=>type==='video'?new PreviewMedia():({getContext:()=>({drawImage(){},getImageData:()=>({data:new Uint8Array([255,255,255,255])})}),toDataURL:()=> 'data:image/png;base64,AQ=='})};
  globalThis.fetch=async(url,init)=>{assert.match(url,/responses$/);calls++;assert.match(init.body,/水彩/);return Response.json({output_text:'{"pass":true,"issues":[]}'});};
  const reference={bytes:new Uint8Array([8]),mime:'image/png',dataUrl:'data:image/png;base64,CA==',base64:'CA=='};
  const session={reference,trialApproved:true,actions:{welcome:{videoBytes:new Uint8Array([1]),taskId:'already-known'}},manifest:{entries:[{family:'welcome',prompt:'same reference style'}]}};
@@ -63,13 +64,14 @@ test('completed malformed prompt can be explicitly replaced once; unknown prompt
 test('bad trial JSON retains clip; explicit recovery generates only remaining 10; restart submits nothing',async()=>{
   const old={fetch:globalThis.fetch,document:globalThis.document,Image:globalThis.Image};
   class Media extends EventTarget {
+  style={};setAttribute(){}pause(){}remove(){}
     duration=5;videoWidth=384;videoHeight=288;
     load(){if(this.src)queueMicrotask(()=>this.dispatchEvent(new Event('loadeddata')));}
     set currentTime(_){queueMicrotask(()=>this.dispatchEvent(new Event('seeked')));}
     removeAttribute(){this.src='';}
   }
   const canvas={getContext:()=>({drawImage(){},getImageData:()=>({data:new Uint8Array([255,200,0,255])})}),toDataURL:()=> 'data:image/png;base64,AA=='};
-  globalThis.document={createElement:type=>type==='video'?new Media():{...canvas}};
+  globalThis.document={body:{appendChild(){}},createElement:type=>type==='video'?new Media():{...canvas}};
   globalThis.Image=class {naturalWidth=384;naturalHeight=288;set src(_){queueMicrotask(()=>this.onload?.());}};
   let reviewCalls=0,videoCalls=0;const ids=[];
   globalThis.fetch=async(url,init={})=>{

@@ -39,9 +39,17 @@ static bool parse_viewport(const cJSON *vp,pet_surface_viewport_t *a,bool named)
   if(!keys(vp,named?nk:vk,7))return false;
   if(named){if(!var_name(vp,"id",id)||strlen(id)>15)return false;strcpy(a->id,id);}
   else if(strcmp(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(vp,"engine"))?cJSON_GetObjectItemCaseSensitive(vp,"engine")->valuestring:"","p4-app-viewport-v1"))return false;
-  if(!number(vp,"x",0,639,&v))return false;a->x=v;if(!number(vp,"y",0,479,&v))return false;a->y=v;
-  if(!number(vp,"w",64,640-a->x,&v))return false;a->w=v;if(!number(vp,"h",64,480-a->y,&v))return false;a->h=v;
-  if(!number(vp,"content_height",a->h,2048,&v)||!var_name(vp,"offset_var",a->offset_var))return false;a->content_height=v;a->enabled=true;
+  if(!number(vp,"x",0,639,&v))return false;
+  a->x=v;
+  if(!number(vp,"y",0,479,&v))return false;
+  a->y=v;
+  if(!number(vp,"w",64,640-a->x,&v))return false;
+  a->w=v;
+  if(!number(vp,"h",64,480-a->y,&v))return false;
+  a->h=v;
+  if(!number(vp,"content_height",a->h,2048,&v)||!var_name(vp,"offset_var",a->offset_var))return false;
+  a->content_height=v;
+  a->enabled=true;
   return true;
 }
 /* The two-argument entry keeps the v1 node budget; the bounded runtime passes
@@ -154,10 +162,15 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
     static const char *const gkeys[]={"engine","x","y","w","h"};
     const cJSON *ge=cJSON_GetObjectItemCaseSensitive(game,"engine");
     if(!out->graphics||!keys(game,gkeys,5)||!cJSON_IsString(ge)||strcmp(ge->valuestring,"p4-game-surface-v1"))return false;
-    if(!number(game,"x",0,639,&v))return false;out->game_x=v;
-    if(!number(game,"y",0,479,&v))return false;out->game_y=v;
-    if(!number(game,"w",64,640-out->game_x,&v))return false;out->game_w=v;
-    if(!number(game,"h",64,480-out->game_y,&v))return false;out->game_h=v;out->game_view=true;
+    if(!number(game,"x",0,639,&v))return false;
+    out->game_x=v;
+    if(!number(game,"y",0,479,&v))return false;
+    out->game_y=v;
+    if(!number(game,"w",64,640-out->game_x,&v))return false;
+    out->game_w=v;
+    if(!number(game,"h",64,480-out->game_y,&v))return false;
+    out->game_h=v;
+    out->game_view=true;
   }
   const cJSON *data=cJSON_GetObjectItemCaseSensitive(json,"data_view");
   if(data){
@@ -169,10 +182,14 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
 #if PET_P4_DATA_ROWS
     out->data_view.rows=layout==2;
 #endif
-    if(!number(data,"x",0,639,&v))return false;out->data_view.x=v;
-    if(!number(data,"y",0,479,&v))return false;out->data_view.y=v;
-    if(!number(data,"w",320,640-out->data_view.x,&v))return false;out->data_view.w=v;
-    if(!number(data,"h",300,480-out->data_view.y,&v))return false;out->data_view.h=v;
+    if(!number(data,"x",0,639,&v))return false;
+    out->data_view.x=v;
+    if(!number(data,"y",0,479,&v))return false;
+    out->data_view.y=v;
+    if(!number(data,"w",320,640-out->data_view.x,&v))return false;
+    out->data_view.w=v;
+    if(!number(data,"h",300,480-out->data_view.y,&v))return false;
+    out->data_view.h=v;
     if(!cJSON_IsArray(colors)||cJSON_GetArraySize(colors)!=5)return false;
     for(int i=0;i<5;i++){const cJSON *c=cJSON_GetArrayItem(colors,i);if(!cJSON_IsNumber(c)||!isfinite(c->valuedouble)||c->valuedouble<0||c->valuedouble>65535||c->valuedouble!=(int)c->valuedouble)return false;out->data_view.colors[i]=c->valueint;}
     out->data_view.enabled=true;
@@ -182,10 +199,14 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
     static const char *const sk[]={"engine","x","y","w","h","colors","sprites"};
     const cJSON *se=cJSON_GetObjectItemCaseSensitive(scene,"engine"),*colors=cJSON_GetObjectItemCaseSensitive(scene,"colors");
     if(game||data||!out->graphics||!keys(scene,sk,7)||!cJSON_IsString(se)||strcmp(se->valuestring,"p4-scene-surface-v1"))return false;
-    if(!number(scene,"x",0,639,&v))return false;out->scene_view.x=v;
-    if(!number(scene,"y",0,479,&v))return false;out->scene_view.y=v;
-    if(!number(scene,"w",64,640-out->scene_view.x,&v))return false;out->scene_view.w=v;
-    if(!number(scene,"h",64,480-out->scene_view.y,&v))return false;out->scene_view.h=v;
+    if(!number(scene,"x",0,639,&v))return false;
+    out->scene_view.x=v;
+    if(!number(scene,"y",0,479,&v))return false;
+    out->scene_view.y=v;
+    if(!number(scene,"w",64,640-out->scene_view.x,&v))return false;
+    out->scene_view.w=v;
+    if(!number(scene,"h",64,480-out->scene_view.y,&v))return false;
+    out->scene_view.h=v;
     if(!cJSON_IsArray(colors)||cJSON_GetArraySize(colors)!=5)return false;
     for(int i=0;i<5;i++){const cJSON *c=cJSON_GetArrayItem(colors,i);if(!cJSON_IsNumber(c)||!isfinite(c->valuedouble)||c->valuedouble<0||c->valuedouble>65535||c->valuedouble!=(int)c->valuedouble)return false;out->scene_view.colors[i]=c->valueint;}
     out->scene_view.enabled=true;
@@ -246,7 +267,8 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
 #else
   if(particles)return false;
 #endif
-  if(!PET_SURFACE_ROOT_KEYS(json,root_keys,root_count)||!number(json,"background",0,65535,&v))return false;out->background=v;
+  if(!PET_SURFACE_ROOT_KEYS(json,root_keys,root_count)||!number(json,"background",0,65535,&v))return false;
+  out->background=v;
 
   const cJSON *images=cJSON_GetObjectItemCaseSensitive(json,"images");
   if(images) {
@@ -264,8 +286,10 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
       if(len<12||strncmp(a,"assets/",7)||strcmp(a+len-4,".png"))return false;
       for(size_t k=7;k<len;k++)if(!((a[k]>='a'&&a[k]<='z')||(a[k]>='A'&&a[k]<='Z')||(a[k]>='0'&&a[k]<='9')||a[k]=='-'||a[k]=='_'||a[k]=='.'))return false;
       if(strstr(a,".."))return false;
-      if(!number(im,"frame_width",8,out->image_jpeg[i]?640:512,&v))return false;out->image_w[i]=v;
-      if(!number(im,"frame_height",8,out->image_jpeg[i]?480:240,&v))return false;out->image_h[i]=v;
+      if(!number(im,"frame_width",8,out->image_jpeg[i]?640:512,&v))return false;
+      out->image_w[i]=v;
+      if(!number(im,"frame_height",8,out->image_jpeg[i]?480:240,&v))return false;
+      out->image_h[i]=v;
       if(out->image_jpeg[i]&&(i!=0||out->image_w[i]!=640||out->image_h[i]!=480))return false;
 #if PET_P4_KEYFRAME_BG
       /* p4-keyframe-bg-v1: only the JPEG background may carry 2..4 frames at 1..2 fps. */
@@ -276,7 +300,8 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
       }else
 #endif
       if(!number(im,"frames",1,1,&v)||!number(im,"fps",1,1,&v))return false;
-      if(!out->image_jpeg[i])pixels+=out->image_w[i]*out->image_h[i];if(pixels>max_pixels)return false;
+      if(!out->image_jpeg[i])pixels+=out->image_w[i]*out->image_h[i];
+      if(pixels>max_pixels)return false;
       strcpy(out->image_ids[i],id->valuestring);out->image_count++;
     }
   }
@@ -306,9 +331,12 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
       for(const char *p=entity->valuestring;*p;p++)if(!((*p>='a'&&*p<='z')||(*p>='A'&&*p<='Z')||(*p>='0'&&*p<='9')||*p=='_'||*p=='-'||*p=='.'))return false;
       for(int j=0;j<i;j++)if(!strcmp(out->scene_view.sprites[j].entity,entity->valuestring))return false;
       int at=-1;for(int j=0;j<out->image_count;j++)if(!strcmp(out->image_ids[j],image->valuestring))at=j;
-      if(at<0||out->image_jpeg[at])return false;dst->image=at;
-      if(!number(sp,"columns",1,8,&v)||out->image_w[at]%v||out->image_w[at]/v<8)return false;dst->columns=v;
-      if(!number(sp,"fps",1,20,&v))return false;dst->fps=v;
+      if(at<0||out->image_jpeg[at])return false;
+      dst->image=at;
+      if(!number(sp,"columns",1,8,&v)||out->image_w[at]%v||out->image_w[at]/v<8)return false;
+      dst->columns=v;
+      if(!number(sp,"fps",1,20,&v))return false;
+      dst->fps=v;
       strcpy(dst->entity,entity->valuestring);out->scene_view.count++;
     }
   }
@@ -361,7 +389,8 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
 #if PET_P4_CLIP
     if(type<0&&out->graphics&&out->variable_bindings){const cJSON *tp=cJSON_GetObjectItemCaseSensitive(o,"type");if(cJSON_IsString(tp)&&!strcmp(tp->valuestring,"clip"))type=PET_SURFACE_NODE_CLIP;}
 #endif
-    if(type<0)return false;n->type=type;
+    if(type<0)return false;
+    n->type=type;
     if(type==9&&!PET_P4_CELLS_V1)return false;
     if(out->app&&!PET_SURFACE_EXT_TYPE(type)&&type!=0&&type!=1&&type!=2&&type!=6&&type!=7&&type!=8&&!(PET_P4_CELLS_V1&&type==PET_SURFACE_NODE_CELLS)&&type!=10&&type!=11)return false;
     const cJSON*inside=cJSON_GetObjectItemCaseSensitive(o,"in_view");if(inside){if(!out->viewport.enabled||!cJSON_IsTrue(inside))return false;n->in_view=true;if(cJSON_HasObjectItem(o,"motion"))return false;}
@@ -369,13 +398,24 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
     if(view){
       if(inside||!out->viewport_count||!cJSON_IsString(view)||cJSON_HasObjectItem(o,"motion"))return false;
       int at=-1;for(int j=0;j<out->viewport_count;j++)if(!strcmp(out->viewports[j].id,view->valuestring))at=j;
-      if(at<0)return false;n->view_index=at;n->in_view=true;
+      if(at<0)return false;
+      n->view_index=at;
+      n->in_view=true;
     }
     const pet_surface_viewport_t *nv=pet_surface_node_viewport(out,n);
     int width=nv?nv->w:640,height=nv?nv->content_height:480;
-    if(!number(o,"x",0,width-1,&v))return false;n->x=v;if(!number(o,"y",0,height-1,&v))return false;n->y=v;
-    if(!number(o,"w",1,width-n->x,&v))return false;n->w=v;int mh=height-n->y;if(mh>480)mh=480;if(!number(o,"h",1,mh,&v))return false;n->h=v;
-    if(!number(o,"color",0,65535,&v))return false;n->color=v;
+    if(!number(o,"x",0,width-1,&v))return false;
+    n->x=v;
+    if(!number(o,"y",0,height-1,&v))return false;
+    n->y=v;
+    if(!number(o,"w",1,width-n->x,&v))return false;
+    n->w=v;
+    int mh=height-n->y;
+    if(mh>480)mh=480;
+    if(!number(o,"h",1,mh,&v))return false;
+    n->h=v;
+    if(!number(o,"color",0,65535,&v))return false;
+    n->color=v;
 #if PET_P4_CLIP
     if(type==PET_SURFACE_NODE_CLIP){
       const cJSON *asset=cJSON_GetObjectItemCaseSensitive(o,"asset");
@@ -575,16 +615,21 @@ bool pet_surface_parse_profile(const cJSON *json,pet_surface_t *out,unsigned max
     if(tile){
       static const char *const tk[]={"columns","rows","row","var","max_var"};
       if(!out->interaction||type!=6||!keys(tile,tk,5)||!var_name(tile,"var",n->tile_var))return false;
-      if(!number(tile,"columns",1,8,&v))return false;n->tile_cols=v;
-      if(!number(tile,"rows",1,8,&v))return false;n->tile_rows=v;
-      if(!number(tile,"row",0,n->tile_rows-1,&v))return false;n->tile_row=v;
+      if(!number(tile,"columns",1,8,&v))return false;
+      n->tile_cols=v;
+      if(!number(tile,"rows",1,8,&v))return false;
+      n->tile_rows=v;
+      if(!number(tile,"row",0,n->tile_rows-1,&v))return false;
+      n->tile_row=v;
       if(out->image_w[n->image]%n->tile_cols||out->image_h[n->image]%n->tile_rows||out->image_w[n->image]/n->tile_cols<8||out->image_h[n->image]/n->tile_rows<8)return false;
       if(cJSON_HasObjectItem(tile,"max_var")&&!var_name(tile,"max_var",n->tile_max_var))return false;
     }
     if(show){
       static const char *const sk[]={"var","min","max"};
-      if(!out->interaction||!keys(show,sk,3)||!var_name(show,"var",n->show_var)||!number(show,"min",-1000000000,1000000000,&v))return false;n->show_min=v;
-      if(!number(show,"max",n->show_min,1000000000,&v))return false;n->show_max=v;
+      if(!out->interaction||!keys(show,sk,3)||!var_name(show,"var",n->show_var)||!number(show,"min",-1000000000,1000000000,&v))return false;
+      n->show_min=v;
+      if(!number(show,"max",n->show_min,1000000000,&v))return false;
+      n->show_max=v;
     }
   }
   out->count=count;
@@ -713,7 +758,7 @@ void pet_surface_resolve_rows(pet_surface_t *s,const pet_p4_data_row_t *selected
   if(!s)return;
   for(unsigned i=0;i<s->count;i++){
     pet_surface_node_t *n=&s->nodes[i];if(!n->row_bind)continue;
-    char scratch[4];const char *text=selected?pet_data_row_field(selected,n->row_bind-1,scratch):"";
+    char scratch[5];const char *text=selected?pet_data_row_field(selected,n->row_bind-1,scratch):"";
     strncpy(n->text,text,sizeof(n->text)-1);n->text[sizeof(n->text)-1]=0;
   }
 }
@@ -725,7 +770,10 @@ const pet_surface_viewport_t *pet_surface_node_viewport(const pet_surface_t*s,co
   return s->viewport.enabled?&s->viewport:NULL;
 }
 bool pet_surface_project(const pet_surface_viewport_t*v,const pet_surface_node_t*n,int32_t offset,pet_surface_node_t*out){
-  if(!n||!out)return false;*out=*n;if(!n->in_view)return true;if(!v||!v->enabled)return false;
+  if(!n||!out)return false;
+  *out=*n;
+  if(!n->in_view)return true;
+  if(!v||!v->enabled)return false;
   offset=pet_surface_clamp_offset(v,offset);
   out->x=n->x+v->x;out->y=n->y+v->y-offset;
   return out->x<(int)v->x+v->w&&out->x+out->w>v->x&&out->y<(int)v->y+v->h&&out->y+out->h>v->y;

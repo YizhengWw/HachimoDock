@@ -29,23 +29,25 @@ typedef struct pet_data_rows_config {
 } pet_data_rows_config_t;
 static inline int pet_data_field_index(const char *name){
   static const char *const names[PET_DATA_FIELD_COUNT]={"label","value","detail","meta","tone"};
-  if(!name)return -1;for(int i=0;i<PET_DATA_FIELD_COUNT;i++)if(!strcmp(name,names[i]))return i;return -1;
+  if(!name)return -1;
+  for(int i=0;i<PET_DATA_FIELD_COUNT;i++)if(!strcmp(name,names[i]))return i;
+  return -1;
 }
 /* Field text of a row; tone is rendered as a decimal string into scratch. */
-static inline const char *pet_data_row_field(const pet_p4_data_row_t *row,int field,char scratch[4]){
+static inline const char *pet_data_row_field(const pet_p4_data_row_t *row,int field,char scratch[5]){
   switch(field){
     case PET_DATA_FIELD_LABEL:return row->label;
     case PET_DATA_FIELD_VALUE:return row->value;
     case PET_DATA_FIELD_DETAIL:return row->detail;
     case PET_DATA_FIELD_META:return row->meta;
-    case PET_DATA_FIELD_TONE:snprintf(scratch,4,"%d",(int)row->tone);return scratch;
+    case PET_DATA_FIELD_TONE:snprintf(scratch,5,"%d",(int)row->tone);return scratch;
     default:return "";
   }
 }
 static inline bool pet_data_row_matches(const pet_p4_data_row_t *row,const pet_data_filter_t *f,int32_t value){
   if(value<=0)return true;
   if(value>f->count||f->field>=PET_DATA_FIELD_COUNT)return false;
-  char scratch[4];return !strcmp(pet_data_row_field(row,f->field,scratch),f->values[value-1]);
+  char scratch[5];return !strcmp(pet_data_row_field(row,f->field,scratch),f->values[value-1]);
 }
 /* Indexes of the rows that pass every filter, in source order. filter_values
  * holds the current int value of filters[i].var. Returns the visible count. */
@@ -62,5 +64,7 @@ static inline unsigned pet_data_rows_pages(unsigned visible){unsigned p=(visible
 static inline unsigned pet_data_rows_page(unsigned visible,int32_t page){unsigned pages=pet_data_rows_pages(visible);int64_t p=page%(int64_t)pages;if(p<0)p+=pages;return (unsigned)p;}
 /* Selected visible index: clamped to the filtered list, -1 when it is empty. */
 static inline int pet_data_rows_select(unsigned visible,int32_t select){
-  if(!visible)return -1;if(select<0)return 0;return select>=(int32_t)visible?(int)visible-1:(int)select;
+  if(!visible)return -1;
+  if(select<0)return 0;
+  return select>=(int32_t)visible?(int)visible-1:(int)select;
 }

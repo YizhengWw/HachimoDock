@@ -34,7 +34,8 @@ test("package owns its adapter; UI uses generic host IPC",()=>{
 test("surface preview matches the device's 16px base font and keeps persistent page instructions",()=>{
   const ui=readFileSync(new URL('./MediaSurface.jsx',import.meta.url),'utf8');
   assert(ui.includes('fontSize={16*(n.scale||1)}'));
-  assert(ui.includes('y={n.y+15*(n.scale||1)}'));
+  assert(ui.includes('y={n.action?n.y+n.h/2:n.y+15*(n.scale||1)}'));
+  assert(ui.includes('dominantBaseline={n.action?"central":undefined}'));
   assert(!ui.includes('fontSize={26'));
   const {surface}=JSON.parse(readFileSync(new URL('../../builtin-clawpkgs/city-radio/runtime/widget.json',import.meta.url)));
   for(const page of [0,1]){
@@ -47,6 +48,13 @@ test("surface preview matches the device's 16px base font and keeps persistent p
 test("media worker inherits macOS audio scheduling protection and bounded buffering",()=>{
   const code=readFileSync(new URL('../../src-tauri/src/component_media.rs',import.meta.url),'utf8');
   assert.match(code,/AudioActivity::begin_on_player_thread/);
-  assert.match(code,/sync_channel::<Result<Vec<u8>, String>>\(32\)/);
-  assert.match(code,/pending.len\(\) < 16/);
+  assert.match(code,/sync_channel::<Result<Vec<u8>, String>>\(RADIO_QUEUE_FRAMES\)/);
+  assert.match(code,/pending.len\(\) < RADIO_PREBUFFER_FRAMES/);
+  assert.match(code,/RADIO_PCM_FRAME_BYTES: usize = if cfg!\(target_os = "macos"\) \{ 3840 \} else \{ 7680 \}/);
+  assert.match(code,/RADIO_QUEUE_FRAMES: usize = \(32 \* 7680\) \/ RADIO_PCM_FRAME_BYTES/);
+  assert.match(code,/RADIO_PREBUFFER_FRAMES: usize = \(16 \* 7680\) \/ RADIO_PCM_FRAME_BYTES/);
+  for(const frameBytes of [3840,7680]){
+    assert.equal(((32*7680)/frameBytes)*frameBytes,245760);
+    assert.equal(((16*7680)/frameBytes)*frameBytes,122880);
+  }
 });

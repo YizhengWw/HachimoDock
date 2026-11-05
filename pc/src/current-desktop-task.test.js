@@ -48,7 +48,7 @@ test("Windows current-task lookup rejects ambiguous windows without using launch
 
 test("Windows ChatGPT task clicks the validated button once without an Invoke retry", () => {
   const source = rust("codex_composer.rs");
-  const click = source.split("function Invoke-CodexTaskSubmit")[1].split("function Invoke-SendButton")[0];
+  const click = source.split("function Invoke-CodexTaskSubmit")[1].split(/\nfunction /)[0];
   assert.match(click, /Assert-TargetCurrent \$state \$true/);
   assert.match(click, /Test-CodexSubmitPoint \$state \$button \$x \$y/);
   assert.match(click, /DESKTOP_TASK_READBACK_CHANGED/);
@@ -56,7 +56,7 @@ test("Windows ChatGPT task clicks the validated button once without an Invoke re
   assert.doesNotMatch(click, /\.Invoke\(|PressEnter|catch\s*\{/);
   const submit = source.split("function Invoke-SendButton")[1].split("$state = $null")[0];
   assert.match(submit, /\$nativeTaskClick = \$strictButton -and \$state.CurrentTask -and \$state.Agent -eq 'codex'/);
-  assert.match(submit, /if \(\$nativeTaskClick\) \{\s+Invoke-CodexTaskSubmit \$state \$buttons\[0\]\s+\} else \{\s+\$buttons\[0\].Pattern.Invoke\(\)/);
+  assert.match(submit, /if \(\$nativeTaskClick\) \{\s+Invoke-CodexTaskSubmit \$state \$buttons\[0\]\s+\} else \{[\s\S]*?Assert-NativeVoiceOwnedDraft \$state[\s\S]*?\$buttons\[0\].Pattern.Invoke\(\)/);
   const native = source.split("public static void ClickSubmit")[1].split("// WorkBuddy")[0];
   assert.match(native, /GetForegroundWindow\(\) != window/);
   assert.match(native, /IsOwnedWindow\(window, WindowFromPoint\(point\)\)/);

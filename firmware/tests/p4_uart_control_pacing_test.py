@@ -17,8 +17,8 @@ def test_public_control_pacing_has_fixed_burst_and_keeps_no_drain_path(tmp_path)
     queued = source.split('static void uart_queue_all(', 1)[1].split('static void uart_write_all(', 1)[0]
     assert 'vTaskDelay(' not in queued and 'uart_wait_tx_done(' not in queued
     no_drain = source.split('if (route == PET_P4_TRANSPORT_BROADCAST || route == PET_P4_TRANSPORT_UART)', 1)[1]
-    assert 'uart_queue_all(line, strlen(line), NULL);' in no_drain
-    assert 'uart_queue_all("\\n", 1, NULL);' in no_drain
+    assert 'uart_queue_all(line,strlen(line),NULL);' in ''.join(no_drain.split())
+    assert 'uart_queue_all("\\n",1,NULL);' in ''.join(no_drain.split())
     program = tmp_path / 'policy.c'
     program.write_text('#include "pet_p4_uart_pacing.h"\n'
                        '_Static_assert(PET_P4_UART_PACING_ACTIVE == EXPECTED, "admission");\n'

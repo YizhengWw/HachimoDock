@@ -167,7 +167,7 @@ bool pet_local_tick(const pet_local_config_t *c,pet_local_state_t *s,int32_t v[]
 void pet_local_view(const pet_local_config_t *c,const pet_local_state_t *s,const int32_t v[],uint64_t ms,int64_t now,pet_local_view_t *o){
   memset(o,0,sizeof(*o));if(!c->enabled)return;
   int at=selection(c,v),a=1+2*at,b=a+1;const pet_local_group_t *g=&c->groups[at];o->phase=s->phase;
-  snprintf(o->eyebrow,sizeof(o->eyebrow),"%s",g->title);snprintf(o->badge,sizeof(o->badge),"%d/%d",at+1,c->count);
+  snprintf(o->eyebrow,sizeof(o->eyebrow),"%s",g->title);snprintf(o->badge,sizeof(o->badge),"%u/%u",(unsigned)(uint8_t)(at+1),(unsigned)c->count);
   snprintf(o->note,sizeof(o->note),"%s",c->hint);
   if(!c->countdown){
     snprintf(o->primary,sizeof(o->primary),"%s",s->phase==1?"正在揭晓":"抽取一个");

@@ -1,3 +1,4 @@
+#define DRAM_ATTR
 /* Host-only production TX test. Driver queues are bounded and asynchronously
  * drained; no serial device, production policy change, or wall-time claim. */
 #include <assert.h>
@@ -116,7 +117,7 @@ static int xSemaphoreTake(SemaphoreHandle_t mutex, int wait) {
 }
 static void xSemaphoreGive(SemaphoreHandle_t mutex) { assert(!pthread_mutex_unlock(mutex)); }
 static bool usb_protocol_seen(void) { return true; }
-static int uart_write_bytes(int port, const char *data, size_t n) {
+static int uart_write_bytes(int port, const void *data, size_t n) {
   (void)port; return driver_write(&uart_driver, data, n, 17);
 }
 static int usb_serial_jtag_write_bytes(const char *data, size_t n, int timeout) {

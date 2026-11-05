@@ -160,12 +160,13 @@ def test_form_runtime_and_install_integration():
     assert 'if(r->navigation){' in branch and 'if(!pet_nav_allowed(&r->navigation_history,r->current_page,&rule))return false;' in branch
     frontend_path=ROOT/'pc/src/ComponentCenter.jsx'
     frontend=frontend_path.read_text()
-    delegated=re.search(r"import\s*\{[^}]*\bpreviewFormCapabilityAccepts\b[^}]*\}\s*from\s*['\"]([^'\"]+)['\"]",frontend)
-    assert delegated, 'form installation must import the actual capability gate'
-    helper=(frontend_path.parent/delegated.group(1)).resolve()
-    assert helper==ROOT/'pc/src/component-center/preview-lifecycle.js'
+    # Preview feature checks remain strict; optional hardware adverts no longer
+    # block native installation. Package validation still precedes transport.
+    helper=ROOT/'pc/src/component-center/preview-lifecycle.js'
     assert 'export function previewFormCapabilityAccepts(' in helper.read_text()
-    assert 'if(!previewFormCapabilityAccepts(component.appRuntime.form.engine,usb?.capabilities))' in frontend
+    assert 'if(!previewFormCapabilityAccepts(component.appRuntime.form.engine,usb?.capabilities))' not in frontend
+    native=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text()
+    assert 'crate::app_component_program::validate(&widget_definition)?' in native
     assert 'widgetAppForm' in (ROOT/'pc/skills/petui/scripts/validate_generated_widget.py').read_text()
 
 def test_form_full_python_validation_and_capability(tmp_path):

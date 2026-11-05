@@ -72,8 +72,8 @@ static int write_bytes(const char *p,size_t n){
   if(n>17)n=17;if(n>fail_after-used)n=fail_after-used;
   assert(used+n<sizeof(wire));memcpy(wire+used,p,n);used+=n;wire[used]=0;return (int)n;
 }
-static int usb_serial_jtag_write_bytes(const char *p,size_t n,int timeout){(void)timeout;return write_bytes(p,n);}
-static int uart_write_bytes(int port,const char *p,size_t n){(void)port;return write_bytes(p,n);}
+static int usb_serial_jtag_write_bytes(const void *p,size_t n,int timeout){(void)timeout;return write_bytes(p,n);}
+static int uart_write_bytes(int port,const void *p,size_t n){(void)port;return write_bytes(p,n);}
 static int usb_serial_jtag_wait_tx_done(int timeout){(void)timeout;return drains++==fail_drain?-1:0;}
 static int uart_wait_tx_done(int port,int timeout){(void)port;return usb_serial_jtag_wait_tx_done(timeout);}
 static int mbedtls_base64_encode(unsigned char *out,size_t capacity,size_t *length,const uint8_t *raw,size_t n){

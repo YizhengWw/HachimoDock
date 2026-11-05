@@ -20,7 +20,7 @@ def query_binary(tmp_path_factory):
  code=(FIX/"appearance_query_prefix.inc").read_text()
  a=s.index("typedef struct {\n  bool asset_transfer,raw_receiving");z=s.index("static appearance_io_observation_t appearance_io_observe",a)
  code+=s[a:z]
- names=["json_string","slot_is_valid","pet_p4_appearance_active","pet_p4_appearance_mutation_blocked","send_topic_payload","send_asset_ack_indexed","send_asset_ack","appearance_io_observe","appearance_io_busy","asset_query_refuse","asset_query_modern","asset_query_bound","asset_query_not_proof","send_asset_slot_query_ack"]
+ names=["copy_text","asset_query_snapshot_videos","asset_query_video_proof","json_string","slot_is_valid","pet_p4_appearance_active","pet_p4_appearance_mutation_blocked","send_topic_payload","send_asset_ack_indexed","send_asset_ack","appearance_io_observe","appearance_io_busy","asset_query_refuse","asset_query_modern","asset_query_bound","asset_query_not_proof","send_asset_slot_query_ack"]
  # Negative-control source lacks only the new helpers; keep its real old query.
  for name in names:
   if name.startswith("asset_query_") and name not in ["asset_query_refuse"] and name+"(" not in s:continue

@@ -235,7 +235,9 @@ test("dashboard keeps the client button map authoritative across reconnect and f
   assert.match(dashboard, /boardButtonConfigMatchesClient\(clientConfig, boardConfig, usb\.runtime\)/);
   assert.match(dashboard, /await syncClientConfig\(\)/);
   assert.match(dashboard, /已使用客户端按钮配置覆盖设备/);
-  assert.match(dashboard, /设备配置读取失败，正在直接写入客户端按钮配置/);
+  const queryFailure=dashboard.slice(dashboard.indexOf("} catch (error) {",dashboard.indexOf("const refreshButtonConfigFromBoard")),dashboard.indexOf("}, [",dashboard.indexOf("const refreshButtonConfigFromBoard")));
+  assert.match(queryFailure, /已停止自动写入/);
+  assert.doesNotMatch(queryFailure, /await syncClientConfig/);
   assert.doesNotMatch(dashboard, /saveVoiceConfigToStorage\(persistedNext\)/);
   assert.doesNotMatch(dashboard, /已从板端读取按钮配置并更新客户端缓存/);
   assert.match(dashboard, /buttonConfigHydratedFor !== p4TargetBoardDeviceId/);

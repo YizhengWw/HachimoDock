@@ -61,8 +61,10 @@ int main(int argc,char **argv){
     subprocess.run([str(exe),str(SUITE)],check=True)
 
 def test_navigation_device_and_install_gates():
-    paths=['firmware/main/pet_p4_protocol.c','pc/src/ComponentCenter.jsx','pc/src-tauri/src/usb_serial.rs','pc/skills/petui/scripts/validate_generated_widget.py']
+    paths=['firmware/main/pet_p4_protocol.c','pc/skills/petui/scripts/validate_generated_widget.py']
     assert all('widgetAppNavigation' in (ROOT/p).read_text() for p in paths)
+    native=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text()
+    assert 'crate::app_component_program::validate(&widget_definition)?' in native
     c=(ROOT/'firmware/main/pet_p4_miniapp.c').read_text()
     assert 'pet_nav_parse_rule(runtime->navigation' in c
     branch=function(c,'runtime_transition_branch')

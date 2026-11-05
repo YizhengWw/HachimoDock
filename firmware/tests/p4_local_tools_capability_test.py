@@ -29,9 +29,12 @@ def test_python_actual_target_validator_calls_capability_admission():
 def test_native_install_gate_precedes_sprites_and_first_transport():
     source=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text()
     source=source[source.index('    fn install_widget_clawpkg_mode<F>('):]
-    gate=source.index('require_local_tools_capability(&widget_definition,&install_status.capabilities)?')
-    assert gate<source.index('prepare_p4_widget_sprite_files(widget_dir, widget_source)?')
-    assert gate<source.index('register_widget_ack_waiter(&transfer_id, "begin"')<source.index('send_bound("widget/begin"')
+    compact=''.join(source.split())
+    gate=compact.index('ifextended_local_deck&&install_status.capabilities["widgetLocalToolsMasks"]!="p4-local-masks-v2"')
+    assert 'items.len()>16' in source
+    assert 'crate::app_component_program::validate(&widget_definition)?' in source
+    assert gate<compact.index('prepare_p4_widget_sprite_files(widget_dir,widget_source)?')
+    assert gate<compact.index('register_widget_ack_waiter(&transfer_id,"begin"')<compact.index('send_bound("widget/begin"')
 
 if __name__=='__main__':
     for test in [test_shared_local_masks_capability_vectors,test_python_actual_target_validator_calls_capability_admission,test_native_install_gate_precedes_sprites_and_first_transport]:

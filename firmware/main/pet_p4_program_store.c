@@ -122,7 +122,8 @@ pet_program_store_result_t pet_program_store_encode_text(char *out, size_t capac
   if(result!=PET_PROGRAM_STORE_OK)return result;
   static const char prefix[]="{\"p4s1\":\"",digits[]="0123456789abcdef";
   for(size_t i=size;i>0;i--){uint8_t byte=(uint8_t)out[i-1U];out[9U+(i-1U)*2U]=digits[byte>>4];out[10U+(i-1U)*2U]=digits[byte&15U];}
-  for(size_t i=0;i<sizeof(prefix)-1U;i++)out[i]=prefix[i];out[5]=size==PET_PROGRAM_STORE_V2_BYTES?'2':'1';
+  for(size_t i=0;i<sizeof(prefix)-1U;i++)out[i]=prefix[i];
+  out[5]=size==PET_PROGRAM_STORE_V2_BYTES?'2':'1';
   out[chars-2U]='"';out[chars-1U]='}';out[chars]=0;return PET_PROGRAM_STORE_OK;
 }
 pet_program_store_result_t pet_program_store_decode_text(pet_program_snapshot_t *out,

@@ -46,7 +46,8 @@ static inline bool pet_prefetch_take(pet_prefetch_ticket_t t,uint64_t epoch){
 static inline bool pet_prefetch_release(pet_prefetch_ticket_t t){
   if(!pet_prefetch_exact(t)||t.parent->phase!=PET_PREFETCH_CONSUMING)return false;
   t.parent->phase=t.parent->cancelled?PET_PREFETCH_DISCARDED:PET_PREFETCH_EMPTY;
-  if(!t.parent->cancelled)t.parent->epoch=0;return true;
+  if(!t.parent->cancelled)t.parent->epoch=0;
+  return true;
 }
 static inline bool pet_prefetch_cancel(pet_prefetch_ticket_t t){
   if(!pet_prefetch_exact(t)||t.parent->phase==PET_PREFETCH_EMPTY)return false;

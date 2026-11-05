@@ -41,7 +41,10 @@ static inline bool pet_bridge_image_valid(const pet_bridge_image_ref_t *r){
   return r&&r->alias[0]&&r->key[0]&&r->revision[0]&&r->width>=8&&r->width<=PET_BRIDGE_IMAGE_SIDE&&r->height>=8&&r->height<=PET_BRIDGE_IMAGE_SIDE;
 }
 static inline void pet_bridge_images_clear(pet_bridge_images_t*s){
-  if(!s)return;s->count=0;memset(s->expected,0,sizeof(s->expected));s->epoch++;
+  if(!s)return;
+  s->count=0;
+  memset(s->expected,0,sizeof(s->expected));
+  s->epoch++;
   for(unsigned i=0;i<PET_BRIDGE_IMAGES;i++)for(unsigned b=0;b<2;b++)s->banks[i][b].writing=false;
 }
 static inline bool pet_bridge_images_expect(pet_bridge_images_t*s,const pet_bridge_image_ref_t *refs,unsigned count){
@@ -68,7 +71,9 @@ static inline bool pet_bridge_image_write(pet_bridge_images_t*s,const pet_bridge
   return true;
 }
 static inline bool pet_bridge_image_borrow(pet_bridge_images_t*s,const char *alias,const uint16_t *storage,pet_bridge_image_lease_t*out){
-  if(!out)return false;memset(out,0,sizeof(*out));if(!s||!alias||!storage)return false;
+  if(!out)return false;
+  memset(out,0,sizeof(*out));
+  if(!s||!alias||!storage)return false;
   for(unsigned i=0;i<s->count;i++)if(!strcmp(alias,s->expected[i].alias)){
     unsigned b=s->front[i];pet_bridge_image_bank_t *bank=&s->banks[i][b];
     if(!bank->ready||bank->writing||bank->readers>=8||s->next_token==UINT32_MAX||!pet_bridge_image_same(&bank->ref,&s->expected[i]))return false;

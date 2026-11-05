@@ -42,7 +42,7 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 | --- | --- | --- |
 | 桌面安装包 | **0.1.197**；macOS Apple silicon / Windows x64 | [Release 附件](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197) |
 | 配套设备固件 | **0.7.103-p4-r178**；ESP32-P4 v1 / v3 分别提供 | 同一 Release 的完整烧录包；日常升级使用客户端 |
-| 当前源码 | 客户端版本 0.1.197 / 固件版本 R178，可能包含发布后的修正 | `main`；[PC 构建](pc/README.md)、[固件构建](firmware/BUILD.md) |
+| 当前源码 | 客户端版本 0.1.198 / 固件版本 R179，可能包含发布后的修正 | `main`；[PC 构建](pc/README.md)、[固件构建](firmware/BUILD.md) |
 
 下载时选择 `HachimiDock_0.1.197_macOS-arm64.dmg` 或 `HachimiDock_0.1.197_Windows-x64-setup.exe`。完整烧录包的文件名标注 v1/v3，按实际芯片选择，不能互刷。**源码版本号相同不等于与已发布二进制完全同源**；197 的源码归档对应关系见该 Release 的“源码说明”。
 

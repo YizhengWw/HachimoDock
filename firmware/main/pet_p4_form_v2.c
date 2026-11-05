@@ -87,11 +87,21 @@ bool pet_form2_initialize(const pet_form_t *f,const pet_form_text_config_t *t,pe
   unsigned count;
   if(!committed(f,t,v)||!pet_form_utf8(t->characters[0],4,NULL,&count,NULL)||count!=1||!pet_form_utf8(t->space_label,16,NULL,NULL,NULL))return false;
   pet_form_value_t next[PET_FORM_VARS];memcpy(next,v,sizeof(next));
-  if(!reset(f,t,next))return false;next[f->focus_var].number=0;next[t->index_var].number=0;label(t,next);memcpy(v,next,sizeof(next));return true;
+  if(!reset(f,t,next))return false;
+  next[f->focus_var].number=0;
+  next[t->index_var].number=0;
+  label(t,next);
+  memcpy(v,next,sizeof(next));
+  return true;
 }
 bool pet_form2_cancel(const pet_form_t *f,const pet_form_text_config_t *t,pet_form_value_t v[PET_FORM_VARS]){
-  if(!committed(f,t,v))return false;pet_form_value_t next[PET_FORM_VARS];memcpy(next,v,sizeof(next));
-  if(!reset(f,t,next))return false;bool changed=memcmp(v,next,sizeof(next))!=0;if(changed)memcpy(v,next,sizeof(next));return changed;
+  if(!committed(f,t,v))return false;
+  pet_form_value_t next[PET_FORM_VARS];
+  memcpy(next,v,sizeof(next));
+  if(!reset(f,t,next))return false;
+  bool changed=memcmp(v,next,sizeof(next))!=0;
+  if(changed)memcpy(v,next,sizeof(next));
+  return changed;
 }
 static bool field_valid(const pet_form_t *f,const pet_form_text_config_t *t,const pet_form_value_t v[PET_FORM_VARS],unsigned i){
   const pet_form_field_t *q=&f->fields[i];return t->text_mask&(1U<<i)?pet_form_utf8(v[q->draft_var].text,t->max_bytes[i],NULL,NULL,NULL):pet_form_value_valid(q,v[q->draft_var].number);
@@ -99,7 +109,8 @@ static bool field_valid(const pet_form_t *f,const pet_form_text_config_t *t,cons
 bool pet_form2_allowed(const pet_form_t *f,const pet_form_text_config_t *t,const pet_form_value_t v[PET_FORM_VARS],int page,int op){
   if(!state_valid(f,t,v)||page!=f->page||op<0||op>=PET_FORM_V2_ACTIONS)return false;
   int focus=v[f->focus_var].number;const pet_form_field_t *q=&f->fields[focus];bool active=v[f->active_var].number==1;
-  if(op==PET_FORM_PREVIOUS)return focus>0;if(op==PET_FORM_NEXT)return focus+1<f->count;
+  if(op==PET_FORM_PREVIOUS)return focus>0;
+  if(op==PET_FORM_NEXT)return focus+1<f->count;
   if(op==PET_FORM_CANCEL)return active;
   if(op==PET_FORM_ACCEPT){if(!active)return true;for(unsigned i=0;i<f->count;i++)if(!field_valid(f,t,v,i))return false;return true;}
   if(!active)return false;

@@ -300,8 +300,12 @@ bool pet_cext_big_tile(const uint8_t *d, size_t size, unsigned index, uint32_t *
 unsigned pet_cext_big_visible_tiles(const pet_cext_big_t *big, int32_t ox, int32_t oy, unsigned node_w, unsigned node_h, uint8_t out[PET_CEXT_BIG_MAX_TILES]) {
   if (!big || !big->cols || !big->rows || !big->tile_w || !big->tile_h || !node_w || !node_h) return 0;
   int32_t max_x = (int32_t) big->w - (int32_t) node_w, max_y = (int32_t) big->h - (int32_t) node_h;
-  if (ox < 0) ox = 0; if (max_x > 0 && ox > max_x) ox = max_x; if (max_x <= 0) ox = 0;
-  if (oy < 0) oy = 0; if (max_y > 0 && oy > max_y) oy = max_y; if (max_y <= 0) oy = 0;
+  if (ox < 0) ox = 0;
+   if (max_x > 0 && ox > max_x) ox = max_x;
+  if (max_x <= 0) ox = 0;
+  if (oy < 0) oy = 0;
+   if (max_y > 0 && oy > max_y) oy = max_y;
+  if (max_y <= 0) oy = 0;
   unsigned c0 = (unsigned) ox / big->tile_w, c1 = ((unsigned) ox + node_w - 1) / big->tile_w;
   unsigned r0 = (unsigned) oy / big->tile_h, r1 = ((unsigned) oy + node_h - 1) / big->tile_h;
   if (c1 >= big->cols) c1 = big->cols - 1;

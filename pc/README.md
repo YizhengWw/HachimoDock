@@ -1,6 +1,6 @@
 # PC 客户端 / Desktop client
 
-当前源码版本 **0.1.197**，配套固件版本 **0.7.103-p4-r178**。`main` 可包含安装包发布后的修正；197 源码与二进制的对应关系见 [Release 源码说明](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197)。公开构建不提供服务 Key，运行时凭据由用户在 API 配置中保存。
+当前源码版本 **0.1.198**，配套固件版本 **0.7.103-p4-r179**。`main` 可包含安装包发布后的修正；197 源码与二进制的对应关系见 [Release 源码说明](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197)。公开构建不提供服务 Key，运行时凭据由用户在 API 配置中保存。
 
 Pet Manager 用于连接设备、管理形象和组件，以及将 Agent 状态与语音输入同步到桌面小屏。支持 macOS arm64 与 Windows x64。
 
@@ -119,3 +119,9 @@ macOS 本地包采用 ad-hoc 签名，不等于 Developer ID 签名或公证。W
 旧整数/选择器表单的 PC 预览和 JS 工具复用现有固件 C 核心，固定 64 KiB、零 imports，
 仅表单声明需要时创建并复用实例。存档、实体键位、草稿/确认/取消语义不变，
 不因此开放通用程序或外设能力；见 [表单契约](skills/petui/references/app-form.md)。
+
+### 共享 WASM 运行时
+
+预览运行时由同一份 C 核心生成。重建与 `--check` 使用 LLVM/LLD **20.1.8**，
+通过 `CLANG` 指定 clang；配套 wasm-ld 必须可用。编译器版本会影响输出字节，
+请使用固定工具链保留原有镜像一致性检查。普通客户端开发不需要重建这些已提交产物。

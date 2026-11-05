@@ -13,6 +13,8 @@
 #include "pet_p4_resources.h"
 #include "pet_p4_appearance_session.h"
 #include "cJSON.h"
+#include "pet_p4_assets.h"
+#include "pet_p4_raw_assets.h"
 #include "pet_p4_json_source.h"
 #define PET_P4_PACK_ID_MAX 65
 #define PET_P4_DEVICE_ID_MAX 64
@@ -45,7 +47,7 @@
 #define ESP_LOGE(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
 typedef unsigned TickType_t;typedef int BaseType_t;typedef void*TaskHandle_t;typedef void(*pet_p4_send_line_fn)(const char*,void*);
-typedef struct{unsigned asset_revision;bool asset_transfer_active;char board_device_id[64];}pet_p4_runtime_state_t;
+typedef struct{pet_p4_asset_catalog_t asset_catalog;unsigned asset_revision;bool asset_transfer_active;char board_device_id[64];}pet_p4_runtime_state_t;
 typedef struct{bool(*begin)(void*);void(*end)(void*);bool(*current)(void*);void*context;}pet_appearance_commit_io_t;
 typedef enum{PET_APPEARANCE_COMMIT_FAILED,PET_APPEARANCE_COMMIT_OK,PET_APPEARANCE_COMMIT_UNKNOWN}pet_appearance_commit_result_t;
 typedef struct{bool transfer_active,receiving,worker_pending;uint32_t epoch;}pet_p4_native_io_snapshot_t;
@@ -201,3 +203,14 @@ static unsigned long long native_hash_file(FILE*f,unsigned long long*n);
 /* SDK boundary probe: actual protocol functions below publish the cue gate. */
 static bool cue_deferred;static unsigned cue_true_calls;
 void pet_p4_audio_status_cues_defer(bool busy){cue_deferred=busy;if(busy)cue_true_calls++;}
+
+/* Audio worker is outside this appearance-only fixture. Unexpected audio
+ * mutation paths fail rather than fabricate a receipt. */
+static bool audio_patch_idle_due(uint64_t now){(void)now;return false;}
+static bool audio_patch_protocol_active(void){return false;}
+static void handle_audio_patch_topic(pet_p4_runtime_state_t*s,const char*t,const cJSON*p,pet_p4_send_line_fn send,void*c){(void)s;(void)t;(void)p;(void)send;(void)c;assert(!"audio patch is not an appearance transaction");}
+static void audio_patch_timeout_worker(pet_p4_runtime_state_t*s){(void)s;assert(!"audio patch worker is not active in appearance tests");}
+
+typedef struct {char path[PET_P4_ASSET_PATH_MAX];uint32_t size;} asset_query_video_t;
+static asset_query_video_t g_asset_query_videos[PET_P4_ASSET_CATALOG_MAX_FAMILIES];
+static unsigned g_asset_query_video_count;

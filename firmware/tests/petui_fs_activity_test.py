@@ -109,7 +109,12 @@ def test_all_independent_spiffs_entrypoints_are_observed():
     # New direct file entrypoints require explicit coverage review, not merely
     # retaining an enabled flag. Read helpers inherit the open-file scope.
     assert renderer.count("fopen(")==prepare.count("fopen(")==1
-    assert audio.count("fopen(")==playback.count("fopen(")==1
+    assert audio.count("fopen(")==playback.count("fopen(")==2
+    scope = playback.index("file_activity=pet_fs_activity_begin()")
+    override = playback.index('file=fopen(fs_path,"rb")')
+    fallback = playback.index('file = fopen(fs_path, "rb")')
+    assert scope < override < fallback < playback.index("wav_seek_pcm")
+    assert "if (!file && request.logical_path[0]" in playback
     store=(ROOT/"main/pet_p4_app_store.c").read_text()
     for name,scope in (("read_slot","storage_read"),("write_slot","storage_write")):
         body=function(store,name)
@@ -160,6 +165,9 @@ static FILE*observed_open(const char*p,const char*m){active();if(scenario==1){er
 static size_t observed_read(void*p,size_t n,size_t count,FILE*f){active();if(scenario==4)return 0;return fread(p,n,count,f);}
 static int observed_close(FILE*f){active();return fclose(f);}
 static void observed_rewind(FILE*f){active();rewind(f);}
+static bool pet_p4_asset_audio_override_path(unsigned family,char*out,size_t n){
+ (void)family;if(scenario!=6)return false;snprintf(out,n,"cue.wav");return true;
+}
 static bool pet_p4_asset_fs_path(const char*p,char*out,size_t n){snprintf(out,n,"%s",p);return true;}
 static bool pet_p4_system_cue_family(unsigned f){(void)f;return scenario==3;}
 static uint64_t fnv1a64_update(uint64_t h,const void*p,size_t n){(void)p;return h+n;}
@@ -186,7 +194,7 @@ static void iteration(request_t request){for(unsigned once=0;once<1;once++){
 int main(void){
  FILE*f=fopen("cue.wav","wb");assert(f);fputs("0123456789abcdef",f);fclose(f);
  pet_fs_activity_enable_observation();request_t request={.logical_path="cue.wav"};
- for(scenario=0;scenario<=5;scenario++){
+ for(scenario=0;scenario<=6;scenario++){
   uint64_t before,after;codec_calls=0;assert(pet_fs_activity_idle_epoch(&before));
   iteration(request);assert(pet_fs_activity_idle_epoch(&after)&&after==before+2);
   assert(!atomic_load(&g_playback_active));

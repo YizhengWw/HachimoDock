@@ -1,6 +1,6 @@
 # 固件构建与烧录 / Firmware build and flashing
 
-当前源码版本 **0.7.103-p4-r178**，配套桌面端 **0.1.197**。版本号不是源码完全对应已发布安装包的证明；197 的具体对应关系见 [Release 源码说明](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197)。设备功能、输入、分区和出厂组件见 [固件说明](README.md)，字段契约见 [protocol.md](protocol.md)。
+当前源码版本 **0.7.103-p4-r179**，配套桌面端 **0.1.198**。版本号不是源码完全对应已发布安装包的证明；197 的具体对应关系见 [Release 源码说明](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197)。设备功能、输入、分区和出厂组件见 [固件说明](README.md)，字段契约见 [protocol.md](protocol.md)。
 
 ## 选择构建目标
 
@@ -26,6 +26,7 @@
 python -m pip install platformio==6.1.19 pytest Pillow
 # 仓库根目录
 python firmware/tools/build_builtin_bundle.py --check
+# 完整主机检查还需真实 v1/v3 SDK 编译上下文，见下文。
 python -m pytest firmware/tests
 cd firmware
 python -m platformio run -e esp32_p4_evboard
@@ -73,3 +74,16 @@ node pc/scripts/package-factory-release.mjs \
 - 任何未运行、跳过或缺硬件的项目均不表示通过；不要把诊断配置的单次结果作为默认发布包或全部设备的保证。
 
 修改传输代码时，区分明确拒绝与结果未知。超时不允许自动重放变更、自动清除旧事务或把重新连接当作提交成功；先通过只读状态与身份核对确定后续操作。
+
+## 完整主机检查的 SDK 与 WASM 输入
+
+CI 使用 Python 3.12、Node.js 22、PlatformIO Core 6.1.19，以及 LLVM/LLD **20.1.8**。
+`CLANG` 指定该版本的 clang，配套 wasm-ld 位于其工具目录。生成的 WASM 与技能镜像
+按字节检查，不应使用其他编译器版本重写产物来绕过检查。
+
+完整测试会读取锁定 SDK 的真实源码、目标编译器和每个环境的编译数据库。
+`tools/prepare_ci_sdk.py` 在 GitHub Actions 中分别准备 v1 与 v3 的 PlatformIO core，
+通过 `compiledb` 生成真实上下文，并将路径写入 `GITHUB_ENV`。它不连接或烧录设备。
+本机运行时，同样需要准备两个目标环境，将 `PET_P4_V1_COMPILE_COMMANDS`、
+`PET_P4_V3_COMPILE_COMMANDS` 指向各自的编译数据库，并按测试要求提供对应的 SDK 路径。
+不要用手写数据库或空 SDK 文件替代这些输入。

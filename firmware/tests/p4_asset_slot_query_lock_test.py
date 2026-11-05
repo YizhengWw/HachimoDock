@@ -18,13 +18,15 @@ def test_slot_query_io_and_tx_release_state_lock_with_exact_owner(tmp_path):
 #include <string.h>
 #include <stdatomic.h>
 #include "cJSON.h"
+#include "pet_p4_assets.h"
+#include "pet_p4_raw_assets.h"
 #include "pet_p4_resources.h"
 #include "pet_p4_appearance_session.h"
 #define PET_P4_PACK_ID_MAX 65
 #define PET_P4_ASSET_SLOT_COUNT 2
 #define APPEARANCE_OBSERVATION_SCHEMA "p4-appearance-quiescent-v1"
 typedef void(*pet_p4_send_line_fn)(const char*,void*);
-typedef struct {char board_device_id[64];bool asset_transfer_active;unsigned asset_revision;}pet_p4_runtime_state_t;
+typedef struct {pet_p4_asset_catalog_t asset_catalog;char board_device_id[64];bool asset_transfer_active;unsigned asset_revision;}pet_p4_runtime_state_t;
 typedef struct {bool transfer_active,receiving,worker_pending;uint32_t epoch;}pet_p4_native_io_snapshot_t;
 typedef struct {uint32_t native_epoch;bool asset_transfer,raw_receiving,appearance_owner,file_open,slot_pending,native_transfer,native_receiving,native_pending,worker_pending,storage_pending,firmware_ota,reboot_pending;}appearance_io_observation_t;
 static pet_appearance_session_t g_appearance_session;
@@ -79,9 +81,10 @@ static bool (*g_asset_query_io_begin)(void *);
 static void (*g_asset_query_io_end)(void *);
 static void *g_asset_query_io_context;
 '''
+    code += '\ntypedef struct {char path[PET_P4_ASSET_PATH_MAX];uint32_t size;} asset_query_video_t;\nstatic asset_query_video_t g_asset_query_videos[PET_P4_ASSET_CATALOG_MAX_FAMILIES];\nstatic unsigned g_asset_query_video_count;\n\nvoid pet_p4_audio_status_cues_defer(bool busy){(void)busy;}\nbool pet_p4_raw_assets_stat_for_slot(int slot,const char*pack,const char*path,size_t expected,uint32_t*size,unsigned long long*checksum){(void)slot;(void)pack;(void)path;(void)expected;(void)size;(void)checksum;assert(!"empty catalog video proof");return false;}\n'
     for name in ('asset_query_io_begin','asset_query_io_end'):
         code += function(main,name)+'\n'
-    for name in ('json_string','slot_is_valid','pet_p4_appearance_active','pet_p4_appearance_mutation_blocked',
+    for name in ('copy_text','asset_query_snapshot_videos','asset_query_video_proof','json_string','slot_is_valid','pet_p4_appearance_active','pet_p4_appearance_mutation_blocked',
                  'send_asset_ack_indexed','send_asset_ack','appearance_io_observe','appearance_io_busy',
                  'pet_p4_protocol_asset_query_io_configure','asset_query_refuse','asset_query_modern',
                  'asset_query_bound','asset_query_not_proof','send_asset_slot_query_ack'):

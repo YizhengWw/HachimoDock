@@ -88,10 +88,13 @@ test('particle producer and real core readiness share generation; visibility cle
  assert.match(s,/actions=\{particleActions\} active=\{particleActive\} generation=\{particleGeneration\}/);
  assert.match(layer,/!actions\?\.isCurrent\(emitters,generation\)/);assert.match(layer,/actions\?\.take\(emitters,generation\)/);
 });
-test('capability helper is wired into real install gate with no v1 catchall',()=>{
- const s=src('../ComponentCenter.jsx');assert.match(s,/!previewFormCapabilityAccepts\(component.appRuntime.form.engine,usb\?\.capabilities\)/);
- assert.match(s,/!previewCanvasCapabilityAccepts\(surface.canvas.engine,usb\?\.capabilities\?\.widgetCanvas\)/);
- assert.doesNotMatch(s,/mixed\?"widgetAppFormV2":"widgetAppForm"/);
+test('preview capabilities stay strict without turning optional device support into an install gate',()=>{
+ const s=src('../ComponentCenter.jsx');
+ const start=s.indexOf('function gameInstallBlockedReason('),end=s.indexOf('\nfunction localInstallBlockedReason(',start);
+ const check=new Function(`${s.slice(start,end)};return gameInstallBlockedReason;`)();
+ assert.equal(check({appRuntime:{form:{engine:'p4-app-form-v3'}}},{capabilities:{}}),'');
+ assert.equal(previewFormCapabilityAccepts('p4-app-form-v3',{widgetAppForm:'p4-app-form-v1'}),false);
+ assert.equal(previewCanvasCapabilityAccepts('p4-canvas-v2','p4-canvas-v1'),false);
 });
 test('page visibility reaches mixed/nonmixed previews; readonly journey/default and service lifecycle remain',()=>{
  const center=src('../ComponentCenter.jsx'),modal=src('./ComponentPreviewModal.jsx'),panel=src('./ComponentAppPanel.jsx'),surface=src('./AppSurface.jsx');

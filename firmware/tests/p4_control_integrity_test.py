@@ -78,8 +78,8 @@ static int queue(unsigned route,const char *data,size_t length){
  if(fail_prefix&&length>1){if(!failed_once){length=7;failed_once=true;}else return 0;}
  memcpy(wire[route]+used[route],data,length);used[route]+=length;if(!route)pending_uart+=length;return (int)length;
 }
-static int uart_write_bytes(int port,const char *data,size_t length){assert(port==0);return queue(0,data,length);}
-static int usb_serial_jtag_write_bytes(const char *data,size_t length,unsigned timeout){assert(timeout==20);return queue(1,data,length);}
+static int uart_write_bytes(int port,const void *data,size_t length){assert(port==0);return queue(0,data,length);}
+static int usb_serial_jtag_write_bytes(const void *data,size_t length,unsigned timeout){assert(timeout==20);return queue(1,data,length);}
 static int uart_wait_tx_done(int port,unsigned timeout){assert(port==0&&timeout==100&&locks==1);
 #if PET_P4_UART_PACED_REFERENCE
  assert(pending_uart<=PET_P4_UART_PACED_BYTES);

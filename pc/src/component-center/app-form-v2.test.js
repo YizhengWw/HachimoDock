@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {initialApp,appAction,appNodeValue} from './app-runtime.js';
 import {formInitialize,formCancel,formAllowed,formApply,formContext,formStructuralDisabled} from './app-form.js';
 import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {validateMixedForm,replaceMixedDraft} from './form-v2-core.js';
 const suite=JSON.parse(readFileSync(new URL('../../skills/petui/contracts/app-form-v2.json',import.meta.url))),r=suite.runtime;
 test('mixed form uses native C/WASM for shared typed event vectors',()=>{
@@ -43,7 +44,7 @@ test('one-field and one-character form smoke proves disabled structure instead o
   state=appAction(one.runtime,state,a);
   for(const operation of ['previous','next','decrease','increase'])assert.equal(formAllowed(one.runtime,state,operation),false);
  }
- const invoke=runtime=>{const p=spawnSync(process.execPath,[new URL('../../skills/petui/scripts/form-v2-host.mjs',import.meta.url).pathname],{input:JSON.stringify({mode:'smoke',runtime,buttons:one.buttons}),encoding:'utf8'});assert.equal(p.status,0,p.stderr);return JSON.parse(p.stdout);};
+ const invoke=runtime=>{const p=spawnSync(process.execPath,[fileURLToPath(new URL('../../skills/petui/scripts/form-v2-host.mjs',import.meta.url))],{input:JSON.stringify({mode:'smoke',runtime,buttons:one.buttons}),encoding:'utf8'});assert.equal(p.status,0,p.stderr);return JSON.parse(p.stdout);};
  const report=invoke(one.runtime);assert(report.ok,JSON.stringify(report));assert.deepEqual(report.disabledActions,disabled);
  assert(!report.visibleActions.includes('value.up'));assert(report.visibleActions.includes('text.append'));
  const dead=structuredClone(one.runtime);dead.transitions.push({from:'*',from_page:'home',on:'dead'});dead.surface.elements.push({type:'button',page:1,x:20,y:300,w:180,h:48,color:65535,text:'Dead',action:'dead'});

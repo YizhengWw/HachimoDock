@@ -24,7 +24,8 @@ static inline bool pet_bodies_parse(const cJSON *scene,pet_p4_bounded_game_confi
     const cJSON *field;cJSON_ArrayForEach(field,b)if(!field->string||(strcmp(field->string,"entity")&&strcmp(field->string,"mass")&&strcmp(field->string,"restitution")&&strcmp(field->string,"static")&&strcmp(field->string,"rolling")))return false;
     const cJSON *id=cJSON_GetObjectItemCaseSensitive(b,"entity");if(!cJSON_IsString(id))return false;
     int index=-1;for(unsigned i=0;i<c->entity_count;i++)if(!strcmp(c->entities[i].id,id->valuestring))index=i;
-    if(index<0||seen[index])return false;seen[index]=true;
+    if(index<0||seen[index])return false;
+    seen[index]=true;
     pet_p4_game_entity_t *e=&c->entities[index];e->body=true;e->mass=1;e->restitution=100;
     const cJSON *v=cJSON_GetObjectItemCaseSensitive(b,"mass");if(v){if(!pet_body_number(v,1,64,&n))return false;e->mass=n;}
     v=cJSON_GetObjectItemCaseSensitive(b,"restitution");if(v){if(!pet_body_number(v,0,100,&n))return false;e->restitution=n;}

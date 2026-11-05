@@ -119,6 +119,18 @@ static void test_source_capacity(void) {
   cJSON_Delete(p);
 }
 int main(void) {
+#if PET_P4_DATA_ROWS
+  /* Every signed-byte tone must fit with its terminator and preserve neighbours. */
+  for(int tone=INT8_MIN;tone<=INT8_MAX;tone++){
+    struct {unsigned char before;char text[5];unsigned char after;} output={.before=0xa5,.after=0x5a};
+    pet_p4_data_row_t row={.tone=(int8_t)tone};char expected[16];
+    snprintf(expected,sizeof(expected),"%d",tone);
+    assert(!strcmp(pet_data_row_field(&row,PET_DATA_FIELD_TONE,output.text),expected));
+    assert(output.before==0xa5&&output.after==0x5a);
+    pet_data_filter_t filter={.field=PET_DATA_FIELD_TONE,.count=1};
+    strcpy(filter.values[0],expected);assert(pet_data_row_matches(&row,&filter,1));
+  }
+#endif
   _Static_assert(sizeof(pet_p4_data_paging_t)==2,"eligibility never copies a full row view");
   const char *json = "{\"schema\":1,\"source\":\"test.quotes\",\"ttlMs\":30000,\"status\":\"ok\",\"message\":\"test\",\"rows\":[]}";
   cJSON *p = cJSON_Parse(json), *rows = cJSON_GetObjectItem(p, "rows");

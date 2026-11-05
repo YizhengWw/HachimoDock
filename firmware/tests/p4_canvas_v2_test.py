@@ -254,7 +254,7 @@ def test_flag_default_off_refuses_v2_declarations_and_hello_replaces_the_string(
     assert "canvas_capability_accepts(" in validator
     rust=(ROOT/'pc/src-tauri/src/app_canvas.rs').read_text()
     assert 'ENGINE_V2' in rust and 'fn require_capability' in rust
-    assert 'app_canvas::require_capability(&widget_definition,&self.status().capabilities)' in (ROOT/'pc/src-tauri/src/usb_serial.rs').read_text()
+    assert 'crate::app_component_program::validate(&widget_definition)?' in (ROOT/'pc/src-tauri/src/usb_serial.rs').read_text()
 
 def test_surface_with_v2_canvas_parses_only_with_bindings(native):
     surface={'engine':'p4-app-surface-v1','graphics':'p4-app-graphics-v1','bindings':'p4-variable-bindings-v1','background':0,'canvas':V2['valid'][0],

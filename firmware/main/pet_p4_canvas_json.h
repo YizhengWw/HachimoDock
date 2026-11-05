@@ -27,10 +27,14 @@ static inline bool pet_canvas_parse(const cJSON *j,pet_canvas_t *out){
 #endif
   if(strcmp(engine,"p4-canvas-v1"))return false;
   c.page=4;if(pet_form_get(j,"page")){if(!pet_canvas_number(j,"page",0,4,&n))return false;c.page=(uint8_t)n;}
-  if(!pet_canvas_number(j,"x",0,639,&n))return false;c.x=n;
-  if(!pet_canvas_number(j,"y",0,479,&n))return false;c.y=n;
-  if(!pet_canvas_number(j,"w",1,320,&n))return false;c.w=n;
-  if(!pet_canvas_number(j,"h",1,240,&n))return false;c.h=n;
+  if(!pet_canvas_number(j,"x",0,639,&n))return false;
+  c.x=n;
+  if(!pet_canvas_number(j,"y",0,479,&n))return false;
+  c.y=n;
+  if(!pet_canvas_number(j,"w",1,320,&n))return false;
+  c.w=n;
+  if(!pet_canvas_number(j,"h",1,240,&n))return false;
+  c.h=n;
   const cJSON *commands=pet_form_get(j,"commands");
   if(!cJSON_IsArray(commands)||!cJSON_GetArraySize(commands)||cJSON_GetArraySize(commands)>(int)pet_canvas_command_limit(&c))return false;
   c.count=cJSON_GetArraySize(commands);
@@ -85,5 +89,7 @@ static inline bool pet_canvas_parse(const cJSON *j,pet_canvas_t *out){
     else if(!pet_canvas_operand(pet_form_get(v,p->op==PET_CANVAS_LINE?"x2":"w"),p->op==PET_CANVAS_LINE?0:1,c.w-(p->op==PET_CANVAS_LINE),&c,&p->a)
         ||!pet_canvas_operand(pet_form_get(v,p->op==PET_CANVAS_LINE?"y2":"h"),p->op==PET_CANVAS_LINE?0:1,c.h-(p->op==PET_CANVAS_LINE),&c,&p->b))return false;
   }
-  if(!pet_canvas_valid(&c))return false;*out=c;return true;
+  if(!pet_canvas_valid(&c))return false;
+  *out=c;
+  return true;
 }

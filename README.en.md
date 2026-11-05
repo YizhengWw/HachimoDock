@@ -10,7 +10,7 @@ HachimoDock is a desktop interface for AI Agents. A Windows/macOS manager and an
 | --- | --- | --- |
 | Desktop client | **0.1.197** | Apple silicon macOS / Windows x64 |
 | Device firmware | **0.7.103-p4-r178** | Separate ESP32-P4 v1 and v3 images |
-| Current source | Client 0.1.197 / firmware R178 version identifiers | `main` may contain post-release changes |
+| Current source | Client 0.1.198 / firmware R179 version identifiers | `main` may contain post-release changes |
 
 Use the DMG or Windows x64 installer in [v0.1.197](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197). Verify downloaded files against `SHA256SUMS`. The source-to-binary correspondence for 197 is described in that Release's source notes; matching version numbers alone do not establish an identical build. Intel Mac and Linux installers are not provided.
 

@@ -147,14 +147,17 @@ size_t pet_cev_alarms_serialize(const pet_cev_alarm_set_t *set, uint64_t now_ms,
 bool pet_cev_alarms_restore(pet_cev_alarm_set_t *set, const char *text, uint64_t now_ms) {
   if (!set || !text) return false;
   if (!text[0]) return true;
-  size_t length = strnlen(text, PET_CEV_SAVE_TEXT_MAX);
+  size_t length = 0;
+  while (length < PET_CEV_SAVE_TEXT_MAX && text[length]) length++;
   if (length >= PET_CEV_SAVE_TEXT_MAX || text[0] == ';' || text[length - 1] == ';' || strstr(text, ";;")) return false;
   pet_cev_alarm_set_t restored = *set;
   char copy[PET_CEV_SAVE_TEXT_MAX];
   strcpy(copy, text);
   char ids[PET_CEV_ALARMS][PET_CEV_NAME_MAX] = {{0}}; unsigned seen = 0;
-  char *save = NULL;
-  for (char *item = strtok_r(copy, ";", &save); item; item = strtok_r(NULL, ";", &save)) {
+  char *next = copy;
+  for (char *item = copy; item; item = next) {
+    next = strchr(item, ';');
+    if (next) *next++ = 0;
     char *colon = strchr(item, ':');
     if (!colon) return false;
     *colon = 0;
@@ -222,7 +225,8 @@ void pet_cev_alarms_observe_var_clock(pet_cev_alarm_set_t *set,unsigned index,in
   clock_arm(a,(uint32_t)value,now,c);
 }
 unsigned pet_cev_alarms_tick_clock(pet_cev_alarm_set_t *set,uint64_t now,const pet_cev_clock_snapshot_t *c){
-  if(!set)return 0;unsigned due=0;
+  if(!set)return 0;
+  unsigned due=0;
   for(unsigned i=0;i<set->count&&i<PET_CEV_ALARMS;i++){
     pet_cev_alarm_t *a=&set->items[i];
     if(a->cancelled||(!a->armed&&!a->pending))continue;
@@ -246,7 +250,9 @@ unsigned pet_cev_alarms_tick_clock(pet_cev_alarm_set_t *set,uint64_t now,const p
   return due;
 }
 size_t pet_cev_alarms_serialize_clock(const pet_cev_alarm_set_t *set,uint64_t now,const pet_cev_clock_snapshot_t *c,char *out,size_t cap){
-  if(!set||!out||cap<2)return 0;size_t used=0;out[0]=0;
+  if(!set||!out||cap<2)return 0;
+  size_t used=0;
+  out[0]=0;
   for(unsigned i=0;i<set->count&&i<PET_CEV_ALARMS;i++){
     const pet_cev_alarm_t *a=&set->items[i];
     if(!a->armed&&!a->pending&&!a->cancelled&&a->at_var<0&&a->last_var!=INT32_MIN)continue;
@@ -263,13 +269,18 @@ size_t pet_cev_alarms_serialize_clock(const pet_cev_alarm_set_t *set,uint64_t no
 /* Parse twice from immutable input. Validation completes before the first
  * output store; only a tiny one-record token is automatic, not an alarm set. */
 bool pet_cev_alarms_restore_clock(pet_cev_alarm_set_t *set,const char *text,uint64_t now,const pet_cev_clock_snapshot_t *c){
-  if(!set||!text)return false;size_t length=strnlen(text,PET_CEV_SAVE_TEXT_MAX);if(length>=PET_CEV_SAVE_TEXT_MAX)return false;if(!length)return true;
+  if(!set||!text)return false;
+  size_t length=0;
+  while(length<PET_CEV_SAVE_TEXT_MAX&&text[length])length++;
+  if(length>=PET_CEV_SAVE_TEXT_MAX)return false;
+  if(!length)return true;
   for(unsigned pass=0;pass<2;pass++){
     const char *p=text;char seen[PET_CEV_ALARMS][PET_CEV_NAME_MAX]={{0}};unsigned count=0;
     while(*p){
       char id[PET_CEV_NAME_MAX]={0};unsigned n=0;while(*p&&*p!=':'){if(n+1>=sizeof id)return false;id[n++]=*p++;}
       if(!pet_cev_name_valid(id)||*p++!=':'||*p<'0'||*p>'9'||count>=PET_CEV_ALARMS)return false;
-      for(unsigned i=0;i<count;i++)if(!strcmp(seen[i],id))return false;strcpy(seen[count++],id);
+      for(unsigned i=0;i<count;i++)if(!strcmp(seen[i],id))return false;
+      strcpy(seen[count++],id);
       errno=0;char *end;unsigned long long number=strtoull(p,&end,10);if(errno==ERANGE)return false;p=end;
       bool utc=false,wait=false,pending=false,cancel=false,observed=false;int32_t last=0;
       while(*p==':'){

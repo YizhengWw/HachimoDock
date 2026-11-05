@@ -8,6 +8,8 @@
 #include <stdatomic.h>
 #include <sys/mman.h>
 #include "cJSON.h"
+#include "pet_p4_assets.h"
+#include "pet_p4_raw_assets.h"
 #include "pet_p4_appearance_session.h"
 #define APPEARANCE_OBSERVATION_SCHEMA "p4-appearance-quiescent-v1"
 #define PET_P4_ASSET_SLOT_COUNT 2
@@ -19,7 +21,7 @@
 #define PET_RESOURCE_BUSY 3
 typedef int pet_resource_result_t;
 typedef void (*pet_p4_send_line_fn)(const char*,void*);
-typedef struct { char board_device_id[64];bool asset_transfer_active;unsigned asset_revision;} pet_p4_runtime_state_t;
+typedef struct {pet_p4_asset_catalog_t asset_catalog;char board_device_id[64];bool asset_transfer_active;unsigned asset_revision;} pet_p4_runtime_state_t;
 typedef struct {int id;} pet_resource_owner_t;
 typedef struct {int id;} pet_resource_lease_t;
 typedef struct {bool transfer_active,receiving,worker_pending;uint32_t epoch;}pet_p4_native_io_snapshot_t;
@@ -68,3 +70,12 @@ static void capture(const char*line,void *route){
 static unsigned allocations;static int allocation_budget=-1;
 static void *tracked_alloc(size_t n){if(allocation_budget==0)return NULL;if(allocation_budget>0)allocation_budget--;void*p=malloc(n);if(p)allocations++;return p;}
 static void tracked_free(void *p){if(p){assert(allocations);allocations--;free(p);}}
+
+/* Audio worker is outside this appearance-only fixture. Unexpected audio
+ * mutation paths fail rather than fabricate a receipt. */
+void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
+bool pet_p4_raw_assets_stat_for_slot(int slot,const char*pack,const char*path,size_t expected,uint32_t*size,unsigned long long*checksum){(void)slot;(void)pack;(void)path;(void)expected;(void)size;(void)checksum;assert(!"empty fixture catalog cannot request a video proof");return false;}
+
+typedef struct {char path[PET_P4_ASSET_PATH_MAX];uint32_t size;} asset_query_video_t;
+static asset_query_video_t g_asset_query_videos[PET_P4_ASSET_CATALOG_MAX_FAMILIES];
+static unsigned g_asset_query_video_count;

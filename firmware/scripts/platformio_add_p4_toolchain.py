@@ -7,6 +7,9 @@ import re
 import atexit
 
 project_dir = env.subst("$PROJECT_DIR")
+# Keep exact per-environment SDK compilation contexts available to host checks.
+env.Replace(COMPILATIONDB_INCLUDE_TOOLCHAIN=True,
+            COMPILATIONDB_PATH=os.path.join(env.subst("$BUILD_DIR"), "compile_commands.json"))
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
 env["ENV"]["PET_P4_CHIP_FAMILY"] = env.GetProjectOption("custom_p4_chip_family", "v1")
 env["ENV"]["PET_P4_PROJECT_VER_OVERRIDE"] = env.GetProjectOption(

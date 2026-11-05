@@ -38,7 +38,7 @@ bool pet_side_config_valid(const pet_side_config_t*c){
     if(a->behavior==PET_SIDE_WALKER||a->behavior==PET_SIDE_PLATFORM){
       if(!a->speed||a->speed<-160||a->speed>160||a->range_min>a->range_max)return false;
       unsigned extent=(a->vertical?c->height:c->width)*16,position=a->vertical?a->y:a->x;
-      if(a->range_max+(a->vertical?a->height:a->width)>extent||position<a->range_min||position>a->range_max)return false;
+      if((unsigned)(a->range_max+(a->vertical?a->height:a->width))>extent||position<a->range_min||position>a->range_max)return false;
       if(a->behavior==PET_SIDE_WALKER&&(a->vertical||a->solid))return false;
       if(a->behavior==PET_SIDE_PLATFORM&&(!a->solid||a->contact!=PET_SIDE_NONE))return false;
     }

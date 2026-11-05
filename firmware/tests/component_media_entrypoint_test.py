@@ -236,7 +236,7 @@ def test_actual_render_entry_keeps_polling_and_blocks_main_decoder_on_errors(tmp
 #define ESP_RETURN_ON_ERROR(e,tag,message) do{int err=(e);if(err)return err;}while(0)
 typedef int esp_err_t;
 typedef struct{unsigned session_queue_count;}pet_p4_runtime_state_t;
-typedef struct{const char *page;bool realtime_conversation,component_loading,show_voice_overlay;}pet_p4_view_model_t;
+typedef struct{const char *page;bool realtime_conversation,component_loading,show_voice_overlay,show_bubble,compact_bubble;}pet_p4_view_model_t;
 typedef struct{int unused;}pet_widget_trace_snapshot_t;
 static struct{uint64_t start_us,previous_end_us,gap_us,content_us,common_overlay_us,end_us;int ppa;}g_render_trace;
 static uint16_t outputs[2][1],*g_native_framebuffers[2]={outputs[0],outputs[1]},*g_native_framebuffer=outputs[0];
@@ -263,6 +263,8 @@ static unsigned elapsed_us_clamped(int64_t a,int64_t b){return b-a;}
 #define render_miniapp_page(...) ((void)0)
 static bool render_asset_pet_frame(const pet_p4_runtime_state_t*s,const pet_p4_view_model_t*v,uint64_t n){(void)s;(void)v;(void)n;assert(worker_idle);decoder_starts++;return true;}
 #define draw_standalone_voice_overlay(...) ((void)0)
+#define pet_compact_underlay_forget(...) ((void)0)
+#define main_compact_underlay_prepare(...) ((void)0)
 #define draw_bubble(...) ((void)0)
 #define draw_session_queue(...) ((void)0)
 #define pet_p4_miniapp_media_active(...) false

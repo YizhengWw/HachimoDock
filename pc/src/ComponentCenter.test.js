@@ -17,6 +17,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import {COMPONENT_CONTROL_OPTIONS,componentControlOptionAllowed} from "./component-center/button-config.js";
 import {previewFormCapabilityAccepts,previewCanvasCapabilityAccepts} from "./component-center/preview-lifecycle.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -24,40 +25,42 @@ import { dirname, join } from "node:path";
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 
-test('mixed text form sync requires its own explicit device capability',()=>{
+test('optional form support affects preview compatibility, not installation admission',()=>{
   const source=readSource('ComponentCenter.jsx'),body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
   const component={appRuntime:{form:{engine:'p4-app-form-v2'}}};
-  assert.match(check(component,{capabilities:{widgetAppForm:'p4-app-form-v1'}}),/表单/);
+  assert.equal(previewFormCapabilityAccepts('p4-app-form-v2',{widgetAppForm:'p4-app-form-v1'}),false);
+  assert.equal(previewFormCapabilityAccepts('p4-app-form-v2',{widgetAppFormV2:'p4-app-form-v2'}),true);
+  assert.equal(check(component,{capabilities:{widgetAppForm:'p4-app-form-v1'}}),'');
   assert.equal(check(component,{capabilities:{widgetAppFormV2:'p4-app-form-v2'}}),'');
   assert.equal(check({appRuntime:{form:{engine:'p4-app-form-v1'}}},{capabilities:{widgetAppForm:'p4-app-form-v1'}}),'');
-  assert.match(check({appRuntime:{surface:{canvas:{engine:'p4-canvas-v1'}}}},{capabilities:{}}),/通用绘图/);
+  assert.equal(check({appRuntime:{surface:{canvas:{engine:'p4-canvas-v1'}}}},{capabilities:{}}),'');
   assert.equal(check({appRuntime:{surface:{canvas:{engine:'p4-canvas-v1'}}}},{capabilities:{widgetCanvas:'p4-canvas-v1'}}),'');
-  assert.match(check({appRuntime:{form:{engine:'p4-app-form-v3'}}},{capabilities:{widgetAppForm:'p4-app-form-v1'}}),/表单/);
+  assert.equal(check({appRuntime:{form:{engine:'p4-app-form-v3'}}},{capabilities:{widgetAppForm:'p4-app-form-v1'}}),'');
   assert.equal(check({appRuntime:{form:{engine:'p4-app-form-v3'}}},{capabilities:{widgetAppFormV3:'p4-app-form-v3'}}),'');
-  assert.match(check({appRuntime:{form:{engine:'future'}}},{capabilities:{widgetAppForm:'p4-app-form-v1'}}),/表单/);
+  assert.equal(check({appRuntime:{form:{engine:'future'}}},{capabilities:{widgetAppForm:'p4-app-form-v1'}}),'');
   assert.equal(check({appRuntime:{surface:{canvas:{engine:'p4-canvas-v1'}}}},{capabilities:{widgetCanvas:'p4-canvas-v2'}}),'');
   assert.equal(check({appRuntime:{surface:{canvas:{engine:'p4-canvas-v2'}}}},{capabilities:{widgetCanvas:'p4-canvas-v2'}}),'');
-  assert.match(check({appRuntime:{surface:{canvas:{engine:'future'}}}},{capabilities:{widgetCanvas:'p4-canvas-v2'}}),/通用绘图/);
+  assert.equal(check({appRuntime:{surface:{canvas:{engine:'future'}}}},{capabilities:{widgetCanvas:'p4-canvas-v2'}}),'');
 });
 
 function readSource(fileName) {
   return readFileSync(join(srcDir, fileName), "utf8");
 }
-test('composition v2 requires real host-context support before enabling sync',()=>{
+test('optional host context does not block installation',()=>{
   const source=readSource('ComponentCenter.jsx');const body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
-  assert.match(check({appRuntime:{host_context:'p4-host-context-v1'}},{capabilities:{}}),/宿主动作版本上下文/);
+  assert.equal(check({appRuntime:{host_context:'p4-host-context-v1'}},{capabilities:{}}),'');
   assert.equal(check({appRuntime:{host_context:'p4-host-context-v1'}},{capabilities:{widgetHostContext:'p4-host-context-v1'}}),'');
   const panel=readSource('component-center/ComponentAppPanel.jsx');
   assert.match(panel,/eventId:crypto\.randomUUID\(\),context:data\?\.ui\?\.context/);
 });
-test('named bindings require explicit capability for both library surface shapes',()=>{
+test('named binding packages install independently of optional device adverts',()=>{
   const source=readSource('ComponentCenter.jsx');
   const body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
   for(const component of [{mediaSurface:{bindings:'p4-variable-bindings-v1'}},{appRuntime:{surface:{bindings:'p4-variable-bindings-v1'}}}]){
-    assert.match(check(component,{capabilities:{}}),/通用变量绑定/);
+    assert.equal(check(component,{capabilities:{}}),'');
     assert.equal(check(component,{capabilities:{widgetVariableBindings:'p4-variable-bindings-v1'}}),'');
   }
   assert.equal(check({mediaSurface:{}},{capabilities:{}}),'');
@@ -65,20 +68,20 @@ test('named bindings require explicit capability for both library surface shapes
 
 // ── Unified library + modal layout ────────────────────────────────────────────
 
-test('App viewport installation requires its explicit capability, not a version guess',()=>{
+test('optional viewport support is not inferred from version or used to reject installation',()=>{
   const source=readSource('ComponentCenter.jsx'),body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
   for(const component of [{mediaSurface:{viewport:{engine:'p4-app-viewport-v1'}}},{appRuntime:{surface:{viewport:{engine:'p4-app-viewport-v1'}}}}]){
-    assert.match(check(component,{firmware:'9.9.9',capabilities:{}}),/滚动视口/);
+    assert.equal(check(component,{firmware:'9.9.9',capabilities:{}}),'');
     assert.equal(check(component,{capabilities:{widgetAppViewport:'p4-app-viewport-v1'}}),'');
   }
 });
 
-test('independent App viewports cannot install against legacy-only viewport firmware',()=>{
+test('independent viewport packages remain installable on legacy-only firmware',()=>{
   const source=readSource('ComponentCenter.jsx'),body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
   for(const component of [{mediaSurface:{viewports:{engine:'p4-app-viewports-v1'}}},{appRuntime:{surface:{viewports:{engine:'p4-app-viewports-v1'}}}}]){
-    assert.match(check(component,{capabilities:{widgetAppViewport:'p4-app-viewport-v1'}}),/多个独立滚动视口/);
+    assert.equal(check(component,{capabilities:{widgetAppViewport:'p4-app-viewport-v1'}}),'');
     assert.equal(check(component,{capabilities:{widgetAppViewports:'p4-app-viewports-v1'}}),'');
   }
 });
@@ -89,11 +92,11 @@ test('durable workflow actions send unique identity and current host context',()
   assert.match(panel,/eventId:crypto\.randomUUID\(\),context:data\?\.ui\?\.context/);
 });
 
-test('side scene installation requires the explicit new capability',()=>{
+test('side scene packages remain installable without optional motion capability',()=>{
   const source=readSource('ComponentCenter.jsx'),body=source.slice(source.indexOf('function gameInstallBlockedReason('),source.indexOf('\nfunction localInstallBlockedReason('));
   const check=new Function("previewFormCapabilityAccepts","previewCanvasCapabilityAccepts",`${body};return gameInstallBlockedReason;`)(previewFormCapabilityAccepts,previewCanvasCapabilityAccepts);
   for(const c of [{scene:{engine:'p4-side-scene-v1'}},{appRuntime:{scene:{engine:'p4-side-scene-v1'}}}]){
-    assert.match(check(c,{capabilities:{widgetMotion:'p4-motion-v1',widgetPlatformTrack:'p4-platform-track-v1'}}),/横版场景/);
+    assert.equal(check(c,{capabilities:{widgetMotion:'p4-motion-v1',widgetPlatformTrack:'p4-platform-track-v1'}}),'');
     assert.equal(check(c,{capabilities:{widgetSideScene:'p4-side-scene-v1'}}),'');
   }
 });
@@ -302,12 +305,14 @@ test("per-component button choices persist and the preview editor shows resolved
   assert.match(component, /onClick=\{\(\) => openComponent\(item\)\}/);
 });
 
-test("component button editor only offers screen gestures to a touch-ready device", () => {
+test("component button editor keeps screen gestures configurable independently of readiness", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /function deviceTouchReady\(usb\)/);
-  assert.match(component, /option\.event\.startsWith\("screen\."\)/);
-  assert.match(component, /当前设备未报告触屏可用/);
-  assert.match(component, /请改为未被全局退出占用的按键或摇杆/);
+  assert.doesNotMatch(component, /function deviceTouchReady\(usb\)/);
+  assert.doesNotMatch(component, /当前设备未报告触屏可用/);
+  assert.match(component, /componentControlOptionAllowed/);
+  const gestures=COMPONENT_CONTROL_OPTIONS.filter(option=>option.event.startsWith("screen."));
+  assert(gestures.length>0);
+  for(const option of gestures)assert.equal(componentControlOptionAllowed(option,{action:"game.tap"},{}),true);
 });
 
 test("USB preflight trusts the shared DeviceContext USB state", () => {

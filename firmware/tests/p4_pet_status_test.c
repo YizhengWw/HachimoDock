@@ -18,14 +18,17 @@ int main(void) {
     for(unsigned n=0;n<sizeof(life)/sizeof(*life);n++) {
       prepare(agents[a],life[n],"");pet_p4_runtime_state_t before=state;
       pet_p4_build_view_model(&state,&v);
-      assert(v.show_bubble&&v.compact_bubble&&!v.realtime_conversation);
-      assert(!v.title[0]&&!strcmp(v.body,label[n]));
+      assert(v.compact_bubble&&!v.realtime_conversation);
+      assert(!v.title[0]);
+      if(!strcmp(life[n],"done"))assert(!v.show_bubble&&!v.body[0]);
+      else assert(v.show_bubble&&!strcmp(v.body,label[n]));
       assert(!strcmp(v.agent,agents[a])&&!memcmp(&state,&before,sizeof(state)));
       /* A title without content is metadata; a real nonempty body remains
        * real text even if its value happens to equal a provider name. */
       strcpy(state.current_title,"ProviderIdentity");
       pet_p4_build_view_model(&state,&v);assert(v.compact_bubble);
-      assert(!v.title[0]&&!strcmp(v.body,label[n]));
+      if(!strcmp(life[n],"done"))assert(!v.show_bubble&&!v.title[0]&&!v.body[0]);
+      else assert(!v.title[0]&&!strcmp(v.body,label[n]));
       strcpy(state.current_speech,"DeepSeek Harness");
       pet_p4_build_view_model(&state,&v);
       assert(!strcmp(v.body,"DeepSeek Harness"));

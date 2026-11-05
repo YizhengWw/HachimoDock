@@ -25,6 +25,7 @@ def test_native_reused_transfer_id_closes_gate_before_storage_mutations(tmp_path
     end=native.index('native_phase_ack_t;')+len('native_phase_ack_t;')
     reply_type=native[native.rfind('typedef struct',0,end):end]
     declarations=phase_type+reply_type+r'''
+void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
 static native_phase_ack_t *g_native_phase_reply;
 static bool g_native_write_attempted;
 static _Atomic bool g_native_cleanup_due;
@@ -51,7 +52,7 @@ static void send_topic_payload(const char*t,cJSON*p){
     # native_harness already extracts both actual native route helpers once.
     for name in ('native_route_context','pet_p4_native_usb_route_current'):
         assert code.count(function(native,name))==1
-    extra='\n'.join(function(protocol,n) for n in ['pet_p4_appearance_phase_begin','pet_p4_appearance_phase_end'])
+    extra='\n'.join(function(protocol,n) for n in ['appearance_phase_try_begin','pet_p4_appearance_phase_begin','pet_p4_appearance_phase_end'])
     code=code.replace(function(code,'clear_slot_files'),extra+'\n'+function(code,'clear_slot_files'),1)
     at=code.index('static const unsigned char data[]=')
     extra='\n'.join(function(native,n) for n in ['native_failure_locked','handle_json_frame','handle_complete_frame'])

@@ -28,6 +28,7 @@ def test_real_transport_queues_logs_behind_complete_frames(tmp_path):
 #include <pthread.h>
 #include <sched.h>
 #include "pet_p4_transport_audit.h"
+#define DRAM_ATTR
 #define PET_P4_UART_NUM 0
 #define portMAX_DELAY 0
 #define pdMS_TO_TICKS(ms) (ms)
@@ -45,11 +46,11 @@ static bool usb_seen = true;
 static void xSemaphoreTake(SemaphoreHandle_t m, int wait) {(void)wait;assert(!pthread_mutex_lock(m));}
 static void xSemaphoreGive(SemaphoreHandle_t m) {assert(!pthread_mutex_unlock(m));}
 static bool usb_protocol_seen(void) {return usb_seen;}
-static int usb_serial_jtag_write_bytes(const char *p,size_t n,int timeout) {
+static int usb_serial_jtag_write_bytes(const void *p,size_t n,int timeout) {
   (void)timeout;if(n>7)n=7;assert(usb_used+n<sizeof(usb_queue));
   memcpy(usb_queue+usb_used,p,n);usb_used+=n;sched_yield();return (int)n;
 }
-static int uart_write_bytes(int port,const char *p,size_t n) {
+static int uart_write_bytes(int port,const void *p,size_t n) {
   (void)port;if(n>11)n=11;assert(uart_used+n<sizeof(uart_queue));
   memcpy(uart_queue+uart_used,p,n);uart_used+=n;sched_yield();return (int)n;
 }

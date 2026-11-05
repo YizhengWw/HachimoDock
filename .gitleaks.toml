@@ -1,0 +1,14 @@
+title = "HachimoDock source scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Numeric keyboard alphabet, not a credential; exact file and assignment only"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''^pc/skills/petui/scripts/app_form_v3\.py$''']
+  regexes = ['''^NUMERIC_KEYS='0123456789\.-'$''']

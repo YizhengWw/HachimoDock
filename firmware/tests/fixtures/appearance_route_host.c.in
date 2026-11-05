@@ -8,6 +8,8 @@
 #include "pet_p4_appearance_session.h"
 #include "pet_p4_resources.h"
 #include "pet_p4_assets.h"
+/* Speaker worker is an isolated SDK boundary in route tests. */
+void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
 #define PET_P4_PACK_ID_MAX 65
 #define PET_P4_ASSET_MANIFEST_MAX 65536
 #define PET_P4_RAW_APPEARANCE_SLOT 1

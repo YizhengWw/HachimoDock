@@ -128,11 +128,15 @@ bool pet_audio_patch_chunk(const char *path,uint32_t index,uint32_t offset,const
   char p[64];if(!file_path(pending.slot,pending.bank,at,p,sizeof(p)))return false;
   *attempted=true;FILE *f=fopen(p,offset?"ab":"wb");if(!f)return false;
   bool ok=fseek(f,0,SEEK_END)==0&&ftell(f)==(long)offset;
-  if(ok)ok=fwrite(bytes,1,n,f)==n;if(!close_written(f))ok=false;if(!ok)return false;
+  if(ok)ok=fwrite(bytes,1,n,f)==n;
+  if(!close_written(f))ok=false;
+  if(!ok)return false;
   f=fopen(p,"rb");if(!f)return false;
   uint8_t check[512];size_t read=0;ok=fseek(f,(long)offset,SEEK_SET)==0;
   while(ok&&read<n){size_t take=n-read<sizeof(check)?n-read:sizeof(check);ok=fread(check,1,take,f)==take&&!memcmp(check,bytes+read,take);read+=take;}
-  if(ok)ok=fgetc(f)==EOF&&!ferror(f);if(fclose(f)!=0)ok=false;if(!ok)return false;
+  if(ok)ok=fgetc(f)==EOF&&!ferror(f);
+  if(fclose(f)!=0)ok=false;
+  if(!ok)return false;
   entry->received_hash=hash_update(entry->received_hash,bytes,n);entry->received+=(uint32_t)n;entry->index++;return true;
 }
 static bool wav_exact(const char *path,const patch_file_t *entry){
@@ -154,7 +158,8 @@ static bool wav_exact(const char *path,const patch_file_t *entry){
   ok=ok&&format&&data&&offset==entry->size;if(fclose(f)!=0)ok=false;return ok;
 }
 bool pet_audio_patch_commit(bool *attempted,uint32_t *generation){
-  if(!pending.active||pending.publication_attempted)return false;char p[64];
+  if(!pending.active||pending.publication_attempted)return false;
+  char p[64];
   for(unsigned i=0;i<pending.count;i++){
     patch_file_t *entry=&pending.files[i];
     if(entry->received!=entry->size||entry->received_hash!=entry->checksum||!file_path(pending.slot,pending.bank,i,p,sizeof(p))||!wav_exact(p,entry))return false;

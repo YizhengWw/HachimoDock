@@ -29,7 +29,7 @@ test("Windows cancellation joins only its own operation before releasing buffers
 test("CH343 live audio retains 64-byte bursts and never drains or pauses RX", () => {
   const source = rust("usb_serial.rs");
   assert.match(source, /P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64/);
-  assert.match(source, /write_serial_live_frame\(conn.writer.as_mut\(\), bytes,\s*paced_slice_bytes.unwrap_or\(bytes.len\(\)\), P4_CH343_SERIAL_WRITE_GAP\)/);
+  assert.match(source, /write_serial_live_frame\(conn.writer.as_mut\(\), bytes,\s*paced_slice_bytes.unwrap_or\(bytes.len\(\)\), live_audio_pacing::serial_frame_gap\(topic, P4_CH343_SERIAL_WRITE_GAP\)\)/);
   const live = rust("usb_serial/live_audio_pacing.rs").split("#[cfg(test)]\nmod tests")[0];
   assert.doesNotMatch(live, /writer\.flush\(/);
   assert.match(source, /let audio_frame = topic.starts_with\("audio\/"\) \|\| topic.starts_with\("media\/"\) \|\| topic == "ui\/conversation";/);

@@ -82,7 +82,7 @@ test("Windows WorkBuddy requires writable owned editors and rejects ambiguity", 
   const owner = source.split("function Test-ComposerElementOwner(")[1].split("\nfunction ")[0];
   assert.match(owner, /if \(\$element -is \[WorkBuddyUiaElement\]\) \{ return Test-WorkBuddyElementOwner/);
   assert.match(filter, /searchbox/);
-  assert.match(filter, /-not \$documentHint\) \{ continue \}/);
+  assert.match(filter, /-not \$documentHint\) \{\s*Record-ComposerReject 'semantic';\s*continue \}/);
   const select = source.split("function Select-WorkBuddyComposer(")[1].split("function Get-WorkBuddyTarget(")[0];
   assert.match(select, /Get-ElementRuntimeId/);
   assert.match(select, /\$distinct.Count -gt 1/);
@@ -100,7 +100,7 @@ test("Windows WorkBuddy checks semantic keyboard focus before bounded tree and p
   const points = native.split("public static WorkBuddyUiaElement[] FindAtPoints(")[1];
   assert.match(points, /clock.ElapsedMilliseconds >= budgetMs/);
   assert.match(points, /depth < 16/);
-  assert.match(source, /composer_startup_timeout_message\(agent, stage\)/);
+  assert.match(source, /composer_startup_timeout_message\(agent,\s*stage\)/);
   assert.match(source, /read_windows_composer_response\(&mut stdout/);
 });
 

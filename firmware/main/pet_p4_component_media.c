@@ -130,7 +130,7 @@ bool pet_cmedia_stage_matches(const pet_cext_runtime_t *r, char *error, size_t s
     const cmedia_file_t *f = staged(PET_CEXT_MEDIA_BIG, r->bigs[i].id); pet_cext_big_t meta;
     if (!f || !pet_cext_big_header(g_stage.arena + f->offset, f->size, &meta) || meta.w != r->bigs[i].w || meta.h != r->bigs[i].h) { fail(error, size, "declared big image is missing or malformed"); return false; }
   }
-  if (g_stage.count != r->sample_count + r->clip_count + r->big_count) { fail(error, size, "undeclared component media file"); return false; }
+  if (g_stage.count != (unsigned)r->sample_count + r->clip_count + r->big_count) { fail(error, size, "undeclared component media file"); return false; }
   return true;
 }
 static bool write_atomic(const char *tmp, const char *final, const uint8_t *data, size_t len) {
@@ -320,7 +320,8 @@ bool pet_cmedia_prepare(size_t slot, uint8_t generation, const pet_cext_runtime_
           ok=ok&&fseek(file,(long)o,SEEK_SET)==0&&fread(tile,1,bytes,file)==bytes
             &&pet_cext_big_image_valid(tile,bytes,ew,eh);
         }
-        if(file&&fclose(file)!=0)ok=false;free(tile);
+        if(file&&fclose(file)!=0)ok=false;
+        free(tile);
       }
       if (ok) { g_active.big_meta[i] = r->bigs[i]; g_active.big_meta[i].tile_w = tw; g_active.big_meta[i].tile_h = th; g_active.big_meta[i].cols = header[4]; g_active.big_meta[i].rows = header[5]; g_active.big_meta[i].bytes = (uint32_t) total; g_active.big_count++; }
     }

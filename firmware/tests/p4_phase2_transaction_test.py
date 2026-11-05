@@ -38,6 +38,8 @@ COMMON=r"""
 #include <stdatomic.h>
 #include <math.h>
 #include "cJSON.h"
+static void pet_p4_audio_status_cues_defer(bool busy){(void)busy;}
+static bool audio_patch_idle_due(uint64_t now){(void)now;return false;}
 """
 @pytest.fixture(scope='module',params=[0,1])
 def begin_binary(tmp_path_factory,request):

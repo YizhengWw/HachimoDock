@@ -2123,7 +2123,8 @@ def test_p4_raw_asset_chunks_bypass_base64_with_bounded_ram_and_checksum_ack():
     assert "PET_P4_RAW_ASSET_CHUNK_LIMIT (64 * 1024)" in protocol
     topic = ''.join(function(protocol, "handle_asset_topic").split())
     assert 'raw=!strcmp(topic,"asset/raw-chunk")' in topic
-    assert 'elseif(raw)(void)begin_raw_asset_chunk(NULL,payload,asset_phase_capture,&reply);' in topic
+    assert 'elseif(raw){boolprepared=begin_raw_asset_chunk(NULL,payload,asset_phase_capture,&reply,&reply.error_code);' in topic
+    assert 'finish_unpublished_raw_header(&op,state,slot,payload,new_raw_buffer,&reply,g_asset_phase_write_attempted)' in topic
     assert 'g_raw_asset_chunk.active&&!abort' in topic
     assert 'pet_p4_appearance_phase_end(&op,state,slot,ok,g_asset_phase_write_attempted)' in topic
     assert "pet_p4_consume_raw_asset_bytes" in protocol
@@ -2783,76 +2784,6 @@ def test_p4_dsh_approval_modal_is_single_shot_and_bounded():
     assert "PET_P4_APPROVAL_MAX_HOLD_MS" in doc
 
 
-if __name__ == "__main__":
-    tests = [
-        test_protocol_doc_declares_usb_only_p4_runtime,
-        test_windows_tooling_forces_utf8_and_ascii_paths,
-        test_p4_native_usb_vendor_bulk_contract_is_declared,
-        test_pc_p4_sync_prefers_native_usb_bulk_transport,
-        test_firmware_contract_accepts_p4_assets_and_rejects_linux_mp4_ota,
-        test_p4_bounded_miniapp_contract_is_explicit_and_heap_safe,
-        test_p4_token_widget_uses_bounded_stats_instead_of_host_readers,
-        test_builtin_tool_widgets_declare_bounded_completion_cycles,
-        test_builtin_tool_widgets_use_global_exit_and_fit_p4_limits,
-        test_p4_widget_delete_clears_persistence_and_returns_to_main,
-        test_p4_widget_inventory_is_request_matched_and_capacity_bounded,
-        test_p4_component_packages_commit_through_validated_ab_catalog_snapshots,
-        test_p4_ab_firmware_embeds_and_migrates_all_builtin_components,
-        test_builtin_pixel_games_use_bounded_native_game_presets,
-        test_generic_scene_runtime_is_shared_by_games_and_tools,
-        test_p4_identity_and_protocol_nack_are_explicit,
-        test_p4_diagnostics_are_persisted_and_asset_safe,
-        test_platformio_board_metadata_matches_actual_p4_hardware,
-        test_firmware_contract_accepts_speech_card_and_stats_snapshot,
-        test_p4_conversation_queue_is_synced_and_rendered_with_pixel_ellipsis,
-        test_p4_stats_model_feeds_widgets_without_a_fixed_stats_page,
-        test_view_model_is_part_of_p4_component,
-        test_p4_runtime_supports_native_usb_and_usb_uart_bridge,
-        test_p4_protocol_replies_are_routed_back_to_the_command_origin,
-        test_p4_runtime_serializes_state_and_defers_native_usb_callback_work,
-        test_p4_protocol_executor_and_lcd_handoff_do_not_share_mutable_render_state,
-        test_p4_normal_boot_never_auto_formats_spiffs,
-        test_pc_uses_high_baud_for_p4_ch343_usb_uart,
-        test_p4_runtime_initializes_waveshare_lcd_bsp,
-        test_p4_lcd_matches_wlk2802_st7701s_panel_geometry,
-        test_dsi_clock_uses_sdk_revision_specific_default,
-        test_v3_dpi_clock_keeps_compensated_front_porch_positive,
-        test_p4_lcd_write_only_command_link_cannot_wait_for_ack_or_id,
-        test_p4_asset_commit_loads_manifest_state,
-        test_p4_runtime_renders_pet_frames_to_lcd,
-        test_p4_behavior_rotates_native_families_without_per_frame_manifest_parsing,
-        test_p4_mjpeg_prefers_hardware_decoder_with_software_fallback,
-        test_p4_h264_uses_the_v9_single_slice_full_duration_aspect_fit_contract,
-        test_saved_and_codex_imported_appearances_are_prepared_before_sync,
-        test_p4_15fps_h264_assets_use_rgb565_and_ppa_render_scheduler,
-        test_p4_rgb565_output_uses_matching_rgb_panel_order,
-        test_p4_renderer_keeps_screen_visible_when_assets_are_unusable,
-        test_p4_renderer_boot_diagnostic_is_visible_on_black_screen_failures,
-        test_p4_flash_layout_allocates_dual_10m_appearance_slots_on_32m_flash,
-        test_p4_ab_firmware_ota_is_verified_acknowledged_and_exposed_by_pc,
-        test_pc_and_p4_build_identity_share_protocol_schema_and_diagnostics,
-        test_p4_runtime_shows_a_lightweight_screen_during_bulk_transfers,
-        test_p4_asset_checksum_failure_cleans_staged_file,
-        test_p4_asset_chunks_are_acknowledged_for_pacing,
-        test_p4_asset_chunks_keep_staged_file_open_between_acks,
-        test_p4_asset_transfer_prepares_spiffs_and_raw_slot_without_rereads,
-        test_p4_raw_asset_chunks_bypass_base64_with_bounded_ram_and_checksum_ack,
-        test_p4_serial_asset_sync_uses_replaceable_slot_until_commit,
-        test_p4_inactive_slot_cleanup_restarts_after_each_spiffs_delete,
-        test_p4_native_usb_does_not_leave_a_serial_raw_transfer_open,
-        test_p4_pre_marker_pack_migration_preserves_the_builtin_slot,
-        test_p4_appearance_slots_can_reactivate_an_exact_cached_pack,
-        test_p4_appearance_slots_require_transaction_ready_markers,
-        test_p4_asset_chunks_carry_decoded_size_guard,
-        test_p4_hardware_inputs_are_debounced_persistent_and_configurable,
-        test_p4_device_ptt_stream_is_validated_and_relayed_by_pc,
-        test_p4_gt911_touch_and_local_lifecycle_are_product_integrated,
-        test_p4_dsh_state_is_not_replaced_by_session_card_fallback,
-        test_p4_dsh_approval_modal_is_single_shot_and_bounded,
-    ]
-    for test in tests:
-        test()
-        print(f"ok {test.__name__}")
 
 
 def test_p4_realtime_stream_ring_is_allocated_in_psram_not_static_internal_ram():
@@ -2888,3 +2819,12 @@ def test_realtime_speaker_uses_full_scale_and_reports_readback():
 
 
 assert "dsh_interrupt" in (ROOT / "main/pet_p4_input.c").read_text()
+
+if __name__ == "__main__":
+    # Match pytest discovery after every contract has been defined; a renamed
+    # test must not leave this standalone CI entry point with a stale list.
+    tests = sorted((name, value) for name, value in globals().items()
+                   if name.startswith("test_") and callable(value))
+    for name, test in tests:
+        test()
+        print(f"ok {name}")

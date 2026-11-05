@@ -588,7 +588,7 @@ test("desktop avatar generation requests use flattened Rust bridge arguments bef
 
   assert.match(http, /invoke\("http_request_text"/);
   assert.match(http, /headersJson: JSON\.stringify\(normalizeHeaders\(init\.headers\)\)/);
-  assert.match(http, /timeoutMs: typeof init\?\.timeoutMs === "number" \? init\.timeoutMs : undefined/);
+  assert.match(http, /timeoutMs: generationRequestTimeoutMs\(init\)/);
   assert.doesNotMatch(http, /input:\s*\{/);
   assert.match(http, /http_request_text unavailable, falling back/);
 

@@ -117,8 +117,8 @@ static int write_bytes(const char *p,size_t n){
  if(mode==1&&calls==1)n/=2;
  assert(used+n<=sizeof(output));memcpy(output+used,p,n);used+=(unsigned)n;return (int)n;
 }
-static int uart_write_bytes(int p,const char *b,size_t n){assert(!p);return write_bytes(b,n);}
-static int usb_serial_jtag_write_bytes(const char *b,size_t n,unsigned timeout){assert(timeout==20);return write_bytes(b,n);}
+static int uart_write_bytes(int p,const void *b,size_t n){assert(!p);return write_bytes(b,n);}
+static int usb_serial_jtag_write_bytes(const void *b,size_t n,unsigned timeout){assert(timeout==20);return write_bytes(b,n);}
 '''+source+r'''
 static void reset(unsigned m){ticks=calls=drains=delays=used=largest=0;audio=revoked=false;mode=m;g_screenshot.raw=(void*)1;g_screenshot_tx=(pet_screenshot_tx_observation_t){0};}
 int main(void){

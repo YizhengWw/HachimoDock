@@ -10,7 +10,8 @@ class Env(dict):
     def __init__(self,root,family):
         super().__init__({'ENV':{}});self.root=str(root);self.family=family;self.post=[]
     def subst(self,value):
-        assert value=='$PROJECT_DIR';return self.root
+        assert value in ('$PROJECT_DIR','$BUILD_DIR');return self.root if value=='$PROJECT_DIR' else str(Path(self.root)/'.pio/build/test')
+    def Replace(self,**values):self.update(values)
     def GetProjectOption(self,key,default):
         return self.family if key=='custom_p4_chip_family' else default
     def AddPostAction(self,target,action):

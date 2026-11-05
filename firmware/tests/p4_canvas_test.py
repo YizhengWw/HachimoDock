@@ -109,7 +109,7 @@ console.log(spans.length,hash);
 def test_canvas_stays_default_off():
     header=(ROOT/'firmware/main/pet_p4_canvas.h').read_text();assert '#define PET_CANVAS_ENABLED 0' in header
     protocol=(ROOT/'firmware/main/pet_p4_protocol.c').read_text();assert '#if PET_CANVAS_ENABLED\n  cJSON_AddStringToObject(capabilities,"widgetCanvas","p4-canvas-v1");\n#endif' in protocol
-    usb=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text();assert 'app_canvas::require_capability(&widget_definition,&self.status().capabilities)' in usb
+    usb=(ROOT/'pc/src-tauri/src/usb_serial.rs').read_text();assert 'crate::app_component_program::validate(&widget_definition)?' in usb
 
 def test_default_surface_rejects_canvas_without_changing_legacy(tmp_path):
     source=tmp_path/'default.c';binary=tmp_path/'default'

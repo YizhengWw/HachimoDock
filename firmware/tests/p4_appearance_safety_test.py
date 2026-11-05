@@ -47,7 +47,7 @@ def test_jtag_real_queue_never_offers_more_than_ring_and_keeps_exact_bytes(tmp_p
 #include <string.h>
 #define pdMS_TO_TICKS(x) (x)
 static unsigned calls,mode;static size_t used;static char sent[40000];
-static int usb_serial_jtag_write_bytes(const char*p,size_t n,int timeout){
+static int usb_serial_jtag_write_bytes(const void *p,size_t n,int timeout){
  assert(n&&n<=4096&&timeout==20);calls++;
  if(mode==1)return 0;if(mode==2)return (int)n+1;
  if(mode==3&&calls==2)return 0;
