@@ -54,7 +54,7 @@ Resources are stored in ordinary Git; Git LFS is not required. Preserve dependen
 
 We thank the following projects and communities for their code, tools and foundational capabilities:
 
-- **Xiaomi MiLoCo and MiSans**: smart-home protocol adaptation references and device display fonts.
+- **[Xiaomi MiLoCo](https://github.com/XiaoMi/xiaomi-miloco) and [MiSans](https://hyperos.mi.com/font/zh/)**: smart-home protocol adaptation references and device display fonts.
 - **Espressif and Waveshare**: device development frameworks, board drivers and speech-processing capabilities.
 - **Tauri, React, Node.js, FFmpeg and Lucide**: foundations for the desktop application, audiovisual processing and user interface.
 - **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)**: portions of the Agent state-monitoring and Hook bridge code.

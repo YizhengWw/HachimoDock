@@ -201,7 +201,7 @@ flowchart LR
 
 感谢以下项目与社区提供的代码、工具及基础能力：
 
-- **Xiaomi MiLoCo、MiSans**：智能家居协议适配参考与设备显示字体。
+- **[Xiaomi MiLoCo](https://github.com/XiaoMi/xiaomi-miloco)、[MiSans](https://hyperos.mi.com/font/zh/)**：智能家居协议适配参考与设备显示字体。
 - **Espressif、Waveshare**：设备开发框架、板级驱动与语音处理能力。
 - **Tauri、React、Node.js、FFmpeg、Lucide**：桌面应用、音视频处理及界面基础。
 - **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)**：部分 Agent 状态监控与 Hook 桥接代码。
