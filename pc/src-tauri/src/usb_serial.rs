@@ -1160,7 +1160,7 @@ fn p4_audio_patch_byte_count(files: &[P4AudioPatchFile]) -> Result<u64, String> 
     let mut total = 0u64;
     for file in files {
         if file.family.is_empty() || file.family.len() > 32
-            || !file.family.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            || !file.family.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_' || c == b'.')
             || file.path != format!("p4/audio/{}.wav", file.family)
             || !paths.insert(file.path.as_str()) || !families.insert(file.family.as_str()) {
             return Err("audio-only requires unique bounded family WAV paths".into());
@@ -1254,7 +1254,7 @@ fn load_p4_audio_patch_files(
             }
             for (family, relative) in overrides {
                 if family.is_empty() || family.len() > 32
-                    || !family.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
+                    || !family.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_' || c == b'.') {
                     return Err("audio-only invalid family".into());
                 }
                 let rel = Path::new(&relative);
@@ -1293,14 +1293,14 @@ fn load_p4_audio_patch_files(
 
 impl UsbSerialManager {
     pub fn sync_appearance_audio_only_p4<F>(
-        &self, appearance_dir: &Path, app_data_dir: &Path,
-        expected_board_device_id: &str, builtin: bool, on_progress: F,
+        &self, _appearance_dir: &Path, app_data_dir: &Path,
+        expected_board_device_id: &str, _builtin: bool, on_progress: F,
     ) -> Result<(u32, u64, bool), String>
     where F: Fn(u32, u32, u64, u64) {
         let guard = self.asset_transfer_guard.lock().map_err(|_| "audio-only owner unavailable")?;
         self.with_appearance_user_intent(expected_board_device_id, &guard, || {
             let (status, generation) = self.connected_board_snapshot(expected_board_device_id)?;
-            if status.capabilities["appearanceAudioPatch"].as_str() != Some(P4_AUDIO_PATCH_CONTRACT) {
+            if status.capabilities["globalAudioCues"].as_str() != Some("p4-global-audio-cues-v1") {
                 return Err("设备固件不支持安全的独立音效更新，请升级固件；未下发视频或切换形象。".into());
             }
             let boot = status.boot_id.clone();
@@ -1340,29 +1340,19 @@ impl UsbSerialManager {
             }
             let slots = parse_p4_appearance_slot_state(&state)?;
             let active = slots.active_slot.and_then(|slot| slots.slots.iter().find(|s| s.slot==slot)).ok_or("audio-only current slot unavailable")?;
-            let slot = p4_audio_patch_target(builtin, state["builtinProtected"]==true, slots.active_slot,
-                &active.pack_id, status.capabilities["appearanceAudioPatch"].as_str())?;
-            let (files, videos) = load_p4_audio_patch_files(appearance_dir, app_data_dir, builtin)?;
-            let total = p4_audio_patch_byte_count(&files)?;
-            if !builtin {
-                // An exact prepared pack match proves video identity too. If
-                // audio changed its pack ID, optional real raw/video metadata
-                // must prove the same videos; absence is a safe rejection.
-                let assets = load_prepared_p4_appearance_pack(appearance_dir)?;
-                let local_pack = p4_pack_id_from_assets(&assets)?;
-                if local_pack != active.pack_id {
-                    let remote = state["videos"].as_array().ok_or("无法证明当前视频与本地形象一致，请单独完成形象同步；未自动完整上传。")?;
-                    if videos.is_empty() || remote.len()!=videos.len() || videos.iter().any(|v| {
-                        remote.iter().filter(|r| r["path"].as_str()==Some(v.device_path.as_str())
-                            && r["size"].as_u64()==Some(v.size) && r["checksum"].as_str()==Some(v.checksum.as_str())).count()!=1
-                    }) { return Err("设备当前视频与本地形象不一致，请单独完成形象同步；未自动完整上传。".into()); }
-                }
+            // The active slot is readonly transport authority, not cue storage identity.
+            let slot=slots.active_slot.filter(|n| *n<=1).ok_or("audio-only current slot unavailable")?;
+            if active.pack_id.len()!=64 || !active.pack_id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)) {
+                return Err("audio-only current identity unavailable".into());
             }
+            let global_dir=app_data_dir.join("global-audio-cues");
+            let (files, _) = load_p4_audio_patch_files(&global_dir, app_data_dir, true)?;
+            let total = p4_audio_patch_byte_count(&files)?;
             let metadata = files.iter().map(|f| serde_json::json!({"family":f.family,"path":f.path,
                 "size":f.bytes.len(),"checksum":asset_checksum_hex(&f.bytes)})).collect::<Vec<_>>();
             let binding = || serde_json::json!({"transferId":id,
                 "boardDeviceId":expected_board_device_id,"bootId":boot,"slot":slot,
-                "packId":active.pack_id});
+                "packId":active.pack_id,"scope":"global"});
             let mut begin = binding();
             begin["files"] = serde_json::json!(metadata);
             begin["totalBytes"] = serde_json::json!(total);

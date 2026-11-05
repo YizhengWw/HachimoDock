@@ -646,6 +646,7 @@ int pet_p4_asset_inactive_slot(void) {
 }
 
 static bool clear_slot_files(int slot) {
+  if (!slot_is_valid(slot)) return false;
   pet_p4_renderer_set_asset_preparation_suspended(true);
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "s%d_", slot);
@@ -657,7 +658,11 @@ static bool clear_slot_files(int slot) {
     if (!dir) return false;
     while ((entry = readdir(dir)) != NULL) {
       if (strncmp(entry->d_name, prefix, strlen(prefix)) != 0) continue;
-      snprintf(fs_path, sizeof(fs_path), PET_P4_SPIFFS_PREFIX "/%s", entry->d_name);
+      size_t name_size = strlen(entry->d_name);
+      const char base[] = PET_P4_SPIFFS_PREFIX "/";
+      if (name_size >= sizeof(fs_path) - (sizeof(base)-1U)) { closedir(dir); return false; }
+      memcpy(fs_path, base, sizeof(base)-1U);
+      memcpy(fs_path+sizeof(base)-1U, entry->d_name, name_size+1U);
       found = true;
       break;
     }
@@ -3372,6 +3377,7 @@ void pet_p4_send_hello_for_board(const char *board_id, pet_p4_send_line_fn send_
   cJSON_AddBoolToObject(appearance, "systemCues", true);
   if(g_asset_query_io_begin&&g_asset_query_io_end&&g_asset_query_pending){
     cJSON_AddStringToObject(capabilities,"appearanceAudioPatch","p4-audio-patch-v1");
+    cJSON_AddStringToObject(capabilities,"globalAudioCues","p4-global-audio-cues-v1");
     cJSON_AddNumberToObject(capabilities,"appearanceAudioPatchMaxBytes",PET_AUDIO_PATCH_MAX_BYTES);
     cJSON_AddNumberToObject(capabilities,"appearanceAudioPatchChunkBytes",PET_AUDIO_PATCH_CHUNK_BYTES);
   }

@@ -269,6 +269,7 @@ static void send_asset_ack(const char *transfer_id, const char *phase, const cha
 
 static bool clear_slot_files(int slot) {
   pet_p4_renderer_set_asset_preparation_suspended(true);
+  if (slot < 0 || slot > 1) return false;
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "s%d_", slot);
   while (true) {
@@ -279,7 +280,11 @@ static bool clear_slot_files(int slot) {
     if (!dir) return false;
     while ((entry = readdir(dir)) != NULL) {
       if (strncmp(entry->d_name, prefix, strlen(prefix)) != 0) continue;
-      snprintf(fs_path, sizeof(fs_path), "/spiffs/%s", entry->d_name);
+      size_t name_size = strlen(entry->d_name);
+      const char base[] = "/spiffs" "/";
+      if (name_size >= sizeof(fs_path) - (sizeof(base)-1U)) { closedir(dir); return false; }
+      memcpy(fs_path, base, sizeof(base)-1U);
+      memcpy(fs_path+sizeof(base)-1U, entry->d_name, name_size+1U);
       found = true;
       break;
     }

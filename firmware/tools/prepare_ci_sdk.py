@@ -24,7 +24,7 @@ def main():
         target = "esp32_p4_program_public_candidate" + ("_v3" if family == "v3" else "")
         env = {**os.environ, "PLATFORMIO_CORE_DIR": str(core)}
         subprocess.run([sys.executable, "-m", "platformio", "run", "--project-dir", str(project),
-                        "--environment", target, "--target", "compiledb"], env=env, check=True)
+                        "--environment", target, "--target", "compiledb", "--disable-auto-clean"], env=env, check=True)
         database = project / ".pio/build" / target / "compile_commands.json"
         entries = json.loads(database.read_text())
         source = project / "main/pet_p4_storage_io_trace.c"
@@ -40,6 +40,10 @@ def main():
         exports[f"PET_{family.upper()}_SDK_CC"] = str(cc)
         if family == "v3":
             exports["PET_P4_V3_IDF_PATH"] = str(sdk)
+    for family in cores:
+        database = Path(exports[f"PET_P4_{family.upper()}_COMPILE_COMMANDS"])
+        if not database.is_file() or not json.loads(database.read_text()):
+            raise SystemExit("Both SDK compilation databases must survive preparation")
     github_env = os.environ.get("GITHUB_ENV")
     if not github_env:
         raise SystemExit("GITHUB_ENV is required; SDK inputs prepared but test environment not exported")

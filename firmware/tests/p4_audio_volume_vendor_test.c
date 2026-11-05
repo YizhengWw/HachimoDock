@@ -35,12 +35,15 @@ esp_err_t i2c_master_bus_rm_device(void *dev){assert(dev==regs);return 0;}
 esp_err_t i2c_master_transmit_receive(void *dev,const uint8_t *tx,size_t tn,uint8_t *rx,size_t rn,int ms){
   assert(dev==regs && tn==1 && rn==1 && ms>0);reads++;last_timeout=ms;
   if(cost_us>ms*1000){now+=ms*1000;return ESP_ERR_TIMEOUT;}now+=cost_us;
-  if(tx[0]==fail_read)return ESP_FAIL;*rx=regs[tx[0]];return 0;
+  if(tx[0]==fail_read)return ESP_FAIL;
+  *rx=regs[tx[0]];return 0;
 }
 esp_err_t i2c_master_transmit(void *dev,const uint8_t *tx,size_t n,int ms){
   assert(dev==regs && n==2 && ms>0);writes++;last_timeout=ms;
   if(cost_us>ms*1000){now+=ms*1000;return ESP_ERR_TIMEOUT;}now+=cost_us;
-  if(tx[0]==fail_write)return ESP_FAIL;if(tx[0]!=ignore_write)regs[tx[0]]=tx[1];return 0;
+  if(tx[0]==fail_write)return ESP_FAIL;
+  if(tx[0]!=ignore_write)regs[tx[0]]=tx[1];
+  return 0;
 }
 const audio_codec_vol_if_t *audio_codec_new_sw_vol(void){assert(0);return NULL;}
 static bool data_open(const audio_codec_data_if_t *h){(void)h;return true;}

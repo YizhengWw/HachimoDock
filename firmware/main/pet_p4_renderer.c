@@ -5807,7 +5807,7 @@ static void draw_app_body(const pet_p4_game_entity_t *e,const pet_surface_scene_
   if(left<v->x)left=v->x;if(top<v->y)top=v->y;if(right>v->x+v->w)right=v->x+v->w;if(bottom>v->y+v->h)bottom=v->y+v->h;
   const pet_p4_miniapp_sprite_t *im=NULL;int iw=0,frame=0;
   if(sprite){
-    if(sprite->image<0||sprite->image>=g_surface_images.count||!sprite->columns)return;
+    if(sprite->image>=g_surface_images.count||!sprite->columns)return;
     im=&g_surface_images.items[sprite->image];if(im->fps||im->frame_width%sprite->columns)return;
     iw=im->frame_width/sprite->columns;frame=(now*sprite->fps/1000)%sprite->columns;
   }

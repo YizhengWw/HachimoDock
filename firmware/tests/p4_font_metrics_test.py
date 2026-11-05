@@ -60,7 +60,10 @@ tinfl_status tinfl_decompress(tinfl_decompressor*r,const unsigned char*src,size_
  *in=z.total_in;*length=z.total_out;r->m_check_adler32=(unsigned)z.adler;assert(inflateEnd(&z)==Z_OK);
  if(mode==5&&calls==1)return -1;
  if(calls==2){
-  if(mode==1)return -1;if(mode==2)--*in;if(mode==3)--*length;if(mode==4)r->m_check_adler32++;
+  if(mode==1)return -1;
+  if(mode==2)--*in;
+  if(mode==3)--*length;
+  if(mode==4)r->m_check_adler32++;
   if(mode==6){out[0]=out[1]=out[2]=out[3]=255;}
   if(mode==7){uint32_t index=554080;for(unsigned i=0;i<4;i++)out[i]=(uint8_t)(index>>(i*8));out[4]=out[5]=255;}
  }

@@ -904,16 +904,14 @@ static void playback_task(void *arg) {
     const uint8_t *shared_pcm = NULL;
     size_t shared_size = 0;
     /* The existing realtime ticket excludes appearance storage IO. Resolve an
-     * independently persisted override for the actual active pack first. */
+     * independently persisted global override, shared by every appearance. */
     file_activity=pet_fs_activity_begin();
     if (pet_p4_asset_audio_override_path(request.family,fs_path,sizeof(fs_path))) {
       file=fopen(fs_path,"rb");
       if(file)request.audio_custom=true;
     }
-    if (!file && request.logical_path[0]
-        && pet_p4_asset_fs_path(request.logical_path, fs_path, sizeof(fs_path))) {
-      file = fopen(fs_path, "rb");
-    }
+    /* Status cues use the global bank or immutable system defaults. Video
+     * manifests and appearance-local WAV files do not select these sounds. */
     /* Existing packs may still contain shipped defaults. Migrate by content,
      * never by filename: an uploaded custom WAV can use that same filename. */
     if (file && !request.audio_custom && pet_p4_system_cue_family(request.family)) {
@@ -1287,7 +1285,7 @@ void pet_p4_audio_process(
   );
   const pet_p4_asset_entry_t *entry = index >= 0 && index < state->asset_catalog.count
     ? &state->asset_catalog.entries[index] : NULL;
-  const char *family = pet_p4_system_cue_family(lifecycle) ? lifecycle : entry ? entry->family : "";
+  const char *family = (pet_p4_system_cue_family(lifecycle) || !strcmp(lifecycle,"welcome") || !strcmp(lifecycle,"working")) ? lifecycle : entry ? entry->family : "";
   /* Status cues do not depend on a matching animation being installed. */
   if (entry && strcmp(entry->family, family)) entry = NULL;
   bool completion_guarded=!strcmp(family,"done");
@@ -1323,7 +1321,7 @@ void pet_p4_audio_process(
   unsigned int generation = atomic_fetch_add_explicit(
     &g_playback_generation, 1U, memory_order_acq_rel
   ) + 1U;
-  if ((!entry || !entry->audio_path[0]) && !pet_p4_system_cue_family(family)) return;
+  if (!family[0]) return;
 
   pet_p4_audio_playback_request_t request;
   memset(&request, 0, sizeof(request));

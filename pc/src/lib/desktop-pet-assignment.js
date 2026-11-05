@@ -254,6 +254,12 @@ export async function applyDesktopPetAssignment({
       if (!unknown && detail.includes(APPEARANCE_SYNC_CANCELLED_MESSAGE)) {
         throw new Error(APPEARANCE_SYNC_CANCELLED_MESSAGE);
       }
+      if (notSubmitted && /^APPEARANCE_NOT_SUBMITTED:\s*P4 appearance videos require \d{1,12} bytes but the custom slot only has \d{1,12} bytes$/.test(detail)) {
+        const error = new Error("形象视频超出设备可用空间，尚未传输。请确认设备分区和形象素材大小。");
+        error.code = "appearance-capacity-exceeded";
+        error.outcome = "not_submitted";
+        throw error;
+      }
       // The durable unknown latch may predate this click. Do not claim this
       // request uploaded anything, expose native codes, or infer old image state.
       throw appearanceConfirmationRequired(notSubmitted);

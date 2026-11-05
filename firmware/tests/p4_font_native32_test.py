@@ -87,7 +87,7 @@ int main(int argc,char**argv){
  }assert(fgetc(f)==EOF&&!fclose(f));
  assert(pet_p4_font_cn_32.line_height==36&&pet_p4_font_cn_32.base_line==6&&font_dsc.bpp==2);
  for(uint32_t cp=0;cp<65536;cp++){
-  bool wanted=false;for(unsigned i=0;i<199;i++)if(cp==32+unicode_list_0[i])wanted=true;
+  bool wanted=false;for(unsigned i=0;i<199;i++)if(cp==32U+(uint32_t)unicode_list_0[i])wanted=true;
   assert(pet_p4_font_native32_has_glyph(cp)==wanted);
  }
  pet_p4_font_native32_clear();assert(!pet_p4_font_native32_prepare(&inflater)&&calls==count);return 0;

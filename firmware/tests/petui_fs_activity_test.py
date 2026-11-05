@@ -109,12 +109,11 @@ def test_all_independent_spiffs_entrypoints_are_observed():
     # New direct file entrypoints require explicit coverage review, not merely
     # retaining an enabled flag. Read helpers inherit the open-file scope.
     assert renderer.count("fopen(")==prepare.count("fopen(")==1
-    assert audio.count("fopen(")==playback.count("fopen(")==2
+    assert audio.count("fopen(")==playback.count("fopen(")==1
     scope = playback.index("file_activity=pet_fs_activity_begin()")
     override = playback.index('file=fopen(fs_path,"rb")')
-    fallback = playback.index('file = fopen(fs_path, "rb")')
-    assert scope < override < fallback < playback.index("wav_seek_pcm")
-    assert "if (!file && request.logical_path[0]" in playback
+    assert scope < override < playback.index("wav_seek_pcm")
+    assert "pet_p4_asset_fs_path(request.logical_path" not in playback
     store=(ROOT/"main/pet_p4_app_store.c").read_text()
     for name,scope in (("read_slot","storage_read"),("write_slot","storage_write")):
         body=function(store,name)
@@ -166,9 +165,8 @@ static size_t observed_read(void*p,size_t n,size_t count,FILE*f){active();if(sce
 static int observed_close(FILE*f){active();return fclose(f);}
 static void observed_rewind(FILE*f){active();rewind(f);}
 static bool pet_p4_asset_audio_override_path(unsigned family,char*out,size_t n){
- (void)family;if(scenario!=6)return false;snprintf(out,n,"cue.wav");return true;
+ (void)family;if(scenario==3)return false;snprintf(out,n,"cue.wav");return true;
 }
-static bool pet_p4_asset_fs_path(const char*p,char*out,size_t n){snprintf(out,n,"%s",p);return true;}
 static bool pet_p4_system_cue_family(unsigned f){(void)f;return scenario==3;}
 static uint64_t fnv1a64_update(uint64_t h,const void*p,size_t n){(void)p;return h+n;}
 static bool pet_p4_system_cue_legacy(unsigned f,uint64_t h){(void)f;(void)h;return scenario==3;}

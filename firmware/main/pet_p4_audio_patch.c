@@ -56,11 +56,11 @@ static uint64_t le64(const uint8_t *p){return (uint64_t)le32(p)|(uint64_t)le32(p
 static void put32(uint8_t *p,uint32_t n){for(unsigned i=0;i<4;i++)p[i]=(uint8_t)(n>>(i*8));}
 static void put64(uint8_t *p,uint64_t n){put32(p,(uint32_t)n);put32(p+4,(uint32_t)(n>>32));}
 static bool hex(const char *p,size_t n){if(!p||strlen(p)!=n)return false;for(size_t i=0;i<n;i++)if(!((p[i]>='0'&&p[i]<='9')||(p[i]>='a'&&p[i]<='f')))return false;return true;}
-static bool family_valid(const char *p){size_t n=p?strlen(p):0;if(!n||n>=48)return false;for(size_t i=0;i<n;i++)if(!((p[i]>='a'&&p[i]<='z')||(p[i]>='0'&&p[i]<='9')||p[i]=='_'||p[i]=='-'))return false;return true;}
+static bool family_valid(const char *p){size_t n=p?strlen(p):0;if(!n||n>=48)return false;for(size_t i=0;i<n;i++)if(!((p[i]>='a'&&p[i]<='z')||(p[i]>='0'&&p[i]<='9')||p[i]=='_'||p[i]=='-'||p[i]=='.'))return false;return true;}
 static bool path_valid(const char *p){size_t n=p?strlen(p):0;return n>7&&n<128&&!strncmp(p,"p4/",3)&&!strcmp(p+n-4,".wav")&&!strstr(p,"..")&&!strchr(p,'\\')&&!strchr(p,':');}
 static bool number(const cJSON *o,const char *key,uint32_t max,uint32_t *out){const cJSON *v=cJSON_GetObjectItemCaseSensitive(o,key);if(!cJSON_IsNumber(v)||!isfinite(v->valuedouble)||v->valuedouble<0||v->valuedouble>max||floor(v->valuedouble)!=v->valuedouble)return false;*out=(uint32_t)v->valuedouble;return true;}
 static const char *string(const cJSON *o,const char *key){const cJSON *v=cJSON_GetObjectItemCaseSensitive(o,key);return cJSON_IsString(v)?v->valuestring:"";}
-static bool file_path(int slot,int bank,unsigned file,char *out,size_t n){if(slot<0||slot>1||bank<0||bank>1||file>=PET_AUDIO_PATCH_MAX_FILES)return false;int used=snprintf(out,n,PET_AUDIO_PATCH_FS_PREFIX "/ov%d_%d_%u.wav",slot,bank,file);return used>0&&(size_t)used<n;}
+static bool file_path(int slot,int bank,unsigned file,char *out,size_t n){if(slot<0||slot>PET_AUDIO_PATCH_GLOBAL_SLOT||bank<0||bank>1||file>=PET_AUDIO_PATCH_MAX_FILES)return false;int used=snprintf(out,n,PET_AUDIO_PATCH_FS_PREFIX "/ov%d_%d_%u.wav",slot,bank,file);return used>0&&(size_t)used<n;}
 static bool index_path(int slot,int bank,char *out,size_t n){int used=snprintf(out,n,PET_AUDIO_PATCH_FS_PREFIX "/ov%d_%d.idx",slot,bank);return used>0&&(size_t)used<n;}
 static bool close_written(FILE *f){bool ok=fflush(f)==0;if(ok&&PET_AUDIO_PATCH_SYNC(fileno(f))!=0)ok=false;if(fclose(f)!=0)ok=false;return ok;}
 static bool remove_one(const char *p,bool *attempted){*attempted=true;errno=0;return PET_AUDIO_PATCH_REMOVE(p)==0||errno==ENOENT;}
@@ -102,7 +102,7 @@ static bool latest(int slot,int *bank,uint32_t *generation){
   *bank=selected;*generation=best;return true;
 }
 bool pet_audio_patch_begin(int slot,const char *pack,const cJSON *files,uint32_t total,bool *attempted){
-  if(pending.active||slot<0||slot>1||!hex(pack,64)||!cJSON_IsArray(files)||total>PET_AUDIO_PATCH_MAX_BYTES)return false;
+  if(pending.active||slot<0||slot>PET_AUDIO_PATCH_GLOBAL_SLOT||!hex(pack,64)||!cJSON_IsArray(files)||total>PET_AUDIO_PATCH_MAX_BYTES)return false;
   int count=cJSON_GetArraySize(files);if(count<0||count>(int)PET_AUDIO_PATCH_MAX_FILES)return false;
   memset(&pending,0,sizeof(pending));pending.slot=slot;pending.count=(uint32_t)count;memcpy(pending.pack,pack,65);
   for(unsigned i=0;i<pending.count;i++){
@@ -179,7 +179,7 @@ bool pet_audio_patch_progress(const char *path,uint32_t *index,uint32_t *bytes){
 unsigned pet_audio_patch_file_count(void){return pending.count;}
 uint32_t pet_audio_patch_total_bytes(void){return pending.total;}
 bool pet_audio_patch_resolve(int slot,const char *pack,const char *family,char *out,size_t n){
-  if(slot<0||slot>1||!hex(pack,64)||!family_valid(family)||!out||n<32)return false;
+  if(slot<0||slot>PET_AUDIO_PATCH_GLOBAL_SLOT||!hex(pack,64)||!family_valid(family)||!out||n<32)return false;
   int bank;uint32_t generation;if(!latest(slot,&bank,&generation)||bank<0||read_index(slot,bank,&scratch)!=INDEX_VALID||strcmp(scratch.pack,pack))return false;
   for(unsigned i=0;i<scratch.count;i++)if(!strcmp(scratch.files[i].family,family))return file_path(slot,bank,i,out,n);
   return false;

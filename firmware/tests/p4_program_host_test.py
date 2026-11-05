@@ -25,8 +25,9 @@ CASES = ["owned_staging_quantum", "report_backpressure_restart", "audio_cancel",
 
 
 def run(command):
-    result = subprocess.run([str(p) for p in command], check=True, text=True,
+    result = subprocess.run([str(p) for p in command], check=False, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert result.returncode == 0, result.stdout + result.stderr
     assert not result.stderr, result.stderr
     return result.stdout
 

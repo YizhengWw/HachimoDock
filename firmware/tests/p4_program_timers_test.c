@@ -99,7 +99,7 @@ static int fuzz(void){
       CHECK(d.accepted&&d.timer_id>=1&&d.timer_id<=8&&m.seen.words[0]==d.timer_id-1&&t.deadlines[d.timer_id-1]>now);
       CHECK(d.coalesced==(now-deadlines[d.timer_id-1])/specs[d.timer_id-1].interval_ms);
     }else CHECK(r==PET_TIMERS_BACKPRESSURE||r==PET_TIMERS_IDLE);
-    for(unsigned j=0;j<8;j++)if(!d.accepted||j!=d.timer_id-1)CHECK(t.deadlines[j]==deadlines[j]);
+    for(unsigned j=0;j<8;j++)if(!d.accepted||j!=(unsigned)d.timer_id-1U)CHECK(t.deadlines[j]==deadlines[j]);
   }return 0;
 }
 static int copied_instance(void){

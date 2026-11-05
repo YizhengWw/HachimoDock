@@ -74,7 +74,10 @@ def test_playback_is_not_conditioned_on_matching_animation():
     source = (ROOT / "main/pet_p4_audio.c").read_text()
     process = source.split("void pet_p4_audio_process(", 1)[1].split("esp_err_t pet_p4_audio_set_enabled", 1)[0]
     assert "pet_p4_canonical_lifecycle" in process
-    assert "pet_p4_system_cue_family(lifecycle) ? lifecycle" in process
+    assert "pet_p4_system_cue_family(lifecycle)" in process
+    assert '!strcmp(lifecycle,"welcome")' in process
+    assert 'if (!family[0]) return;' in process
+    assert "if ((!entry || !entry->audio_path[0])" not in process
     assert "if (index < 0 || index >= state->asset_catalog.count) return" not in process
     assert "pet_p4_audio_conversation_active()" in process
     assert "!request.audio_custom" in source

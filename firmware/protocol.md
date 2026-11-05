@@ -2337,3 +2337,8 @@ size/FNV are then checked against the exact ready pack's committed raw header.
 No video payload is read. Missing, ambiguous, wrong-pack or mutating header
 proof is omitted and cannot authorize a custom audio-only pack-ID mismatch.
 The original before/after epoch/revision/lease checks still gate the response.
+
+### 全局状态提示音
+
+`globalAudioCues: "p4-global-audio-cues-v1"` 表示支持跨形象共用的提示音设置。
+音频专用 `asset/audio-*` 请求增加 `scope: "global"`。请求仍绑定当前设备、启动身份、当前物理形象槽及其 packId，以验证传输权限；持久化身份独立于视频包和形象槽。每阶段必须保持 scope 一致。仅 WAV 数据进入独立音频双银行，提交后对所有形象生效，空集合提交恢复默认提示音。上传、删除和下发均不准备、重传、清空或激活视频。旧 `p4-audio-patch-v1` 保留兼容，新的客户端要求全局能力后才下发全局音效，不回退到完整形象同步。

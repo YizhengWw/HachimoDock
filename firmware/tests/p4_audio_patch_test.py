@@ -103,3 +103,34 @@ def test_actual_custom_video_header_proof_and_existing_cache_races(tmp_path):
     assert query.index("if(!g_asset_query_io_begin(g_asset_query_io_context))") < query.index("asset_query_video_proof") < query.index("g_asset_query_io_end(g_asset_query_io_context);")
     assert 'cJSON_AddItemToObject(payload,"videos",videos)' in query
     assert "state->asset_revision==revision" in query and "pet_resources_device_current(lease)" in query
+
+
+def test_actual_global_audio_phases_survive_appearance_changes(tmp_path):
+    source=(ROOT/"main/pet_p4_protocol.c").read_text()
+    production="\n".join(function(source,n) for n in FUNCTIONS)
+    production+='\n#include "pet_p4_protocol_audio_patch.inc"\n'
+    fixture=(TESTS/"p4_audio_patch_protocol_test.c.in").read_text()
+    fixture=fixture[:fixture.index('int main(void)')]+r'''
+int main(void){
+ strcpy(state.board_device_id,"fixture-board");
+ cJSON *begin=begin_request();cJSON_AddStringToObject(begin,"scope","global");dispatch("asset/audio-begin",begin);
+ assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));
+ cJSON *chunk=request();cJSON_AddStringToObject(chunk,"scope","global");cJSON_AddStringToObject(chunk,"path","p4/audio/done.wav");
+ cJSON_AddNumberToObject(chunk,"index",0);cJSON_AddNumberToObject(chunk,"offset",0);
+ cJSON_AddStringToObject(chunk,"data","UklGRiYAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQIAAAABAA==");dispatch("asset/audio-chunk",chunk);
+ assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));
+ cJSON *commit=request();cJSON_AddStringToObject(commit,"scope","global");dispatch("asset/audio-commit",commit);
+ assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok"))&&!audio_patch_protocol_active());
+ char first[64],second[64];assert(pet_p4_asset_audio_override_path("done",first,sizeof(first)));
+ unsigned reads=ready_reads;atomic_store(&g_asset_active_slot,1);
+ assert(pet_p4_asset_audio_override_path("done",second,sizeof(second))&&!strcmp(first,second));
+ assert(ready_reads==reads&&strstr(second,"ov2_"));
+ // Scope changes are rejected, never reinterpreted as a different storage namespace.
+ atomic_store(&g_asset_active_slot,0);begin=begin_request();cJSON_AddStringToObject(begin,"scope","global");dispatch("asset/audio-begin",begin);
+ dispatch("asset/audio-commit",request());assert(cJSON_IsFalse(cJSON_GetObjectItem(last_ack,"ok"))&&audio_patch_protocol_active());
+ cJSON *abort=request();cJSON_AddStringToObject(abort,"scope","global");dispatch("asset/audio-abort",abort);
+ assert(cJSON_IsTrue(cJSON_GetObjectItem(last_ack,"ok")));assert(pet_p4_asset_audio_override_path("done",second,sizeof(second))&&!strcmp(first,second));
+ audio_patch_timeout_worker(&state);cJSON_Delete(last_ack);return 0;
+}
+'''
+    compile_run(tmp_path,fixture.replace("/* PRODUCTION_PROTOCOL */",production),["main/pet_p4_audio_patch.c","main/pet_p4_resources.c"])

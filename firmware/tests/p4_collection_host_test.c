@@ -205,7 +205,8 @@ static void test_cached_paint_never_reads_dataset_text_or_rows(void){
 static void test_maximum_text_is_owned_and_display_only_truncated(void){
   uint64_t g=init(0);source(128,0);
   memset(keys[0],'k',63);keys[0][63]=0;
-  for(unsigned i=0;i<128;i++)memcpy(labels[0]+i*4,"\xf0\x9f\x90\xbe",4);labels[0][512]=0;
+  for(unsigned i=0;i<128;i++)memcpy(labels[0]+i*4,"\xf0\x9f\x90\xbe",4);
+  labels[0][512]=0;
   assert(pet_collection_dataset_prepare(&banks[0],identity,1,rows,128,&work)==PET_COLLECTION_HOST_OK);
   strcpy(seed.selected,keys[0]);assert(pet_collection_host_publish(&hosts[0],g,&banks[0],&seed,8,&work)==PET_COLLECTION_HOST_OK);
   observed=read(0);assert(view.rows[0].truncated&&strlen(view.rows[0].label)==60&&strlen(view.rows[0].key)==63);

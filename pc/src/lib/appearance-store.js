@@ -11,6 +11,7 @@
  * [Sync] If this file changes, update this header and any UI components that consume the appearance manifest shape.
  */
 
+import {saveGlobalAudioCue,removeGlobalAudioCue} from "./global-audio-cues.js";
 import {
   BaseDirectory,
   exists,
@@ -516,68 +517,15 @@ export async function replaceFamilyVideo({ appearanceId, family, videoBytes, tas
   return toRecord(manifest, await absolutePathFor(dir), await getRoot());
 }
 
+// Compatibility callers also save global cues; these operations never prepare
+// or modify a video's manifest or ready pack.
 export async function replaceFamilyAudioCue({ appearanceId, family, audioBytes }) {
-  if (appearanceId === BUILTIN_TERRIER_APPEARANCE_ID) {
-    const dir = await ensureBuiltinOverrideDir();
-    const audioRel = `${dir}/${family}.wav`;
-    await writeFile(audioRel, audioBytes, { baseDir: BaseDirectory.AppLocalData });
-    const overrides = await readBuiltinAudioOverrides();
-    overrides[family] = audioRel;
-    await writeBuiltinAudioOverrides(overrides);
-    await prepareP4Appearance(appearanceId);
-    invalidateAppearanceCache();
-    return getBuiltinTerrierAppearance();
-  }
-
-  const dir = await ensureAppearanceDir(appearanceId);
-  const audioRel = `${dir}/${VIDEO_DIR}/${family}.wav`;
-  await writeFile(audioRel, audioBytes, { baseDir: BaseDirectory.AppLocalData });
-
-  const manifest = JSON.parse(
-    await readTextFile(`${dir}/${MANIFEST_FILE}`, { baseDir: BaseDirectory.AppLocalData }),
-  );
-  const idx = manifest.families.findIndex((f) => f.family === family);
-  if (idx < 0) throw new Error(`未找到状态素材: ${family}`);
-  manifest.families[idx] = { ...manifest.families[idx], audioPath: audioRel, audioSource: "custom" };
-  await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
-  await prepareP4Appearance(appearanceId);
-  invalidateAppearanceCache();
-  return toRecord(manifest, await absolutePathFor(dir), await getRoot());
+  await saveGlobalAudioCue(family,audioBytes);
+  return getAppearance(appearanceId);
 }
-
 export async function removeFamilyAudioCue({ appearanceId, family }) {
-  if (appearanceId === BUILTIN_TERRIER_APPEARANCE_ID) {
-    const overrides = await readBuiltinAudioOverrides();
-    if (overrides[family]) {
-      await remove(overrides[family], { baseDir: BaseDirectory.AppLocalData }).catch(() => {});
-      delete overrides[family];
-      await writeBuiltinAudioOverrides(overrides);
-    }
-    await prepareP4Appearance(appearanceId);
-    invalidateAppearanceCache();
-    return getBuiltinTerrierAppearance();
-  }
-
-  const dir = `${ROOT_DIR}/${appearanceId}`;
-  const manifest = JSON.parse(
-    await readTextFile(`${dir}/${MANIFEST_FILE}`, { baseDir: BaseDirectory.AppLocalData }),
-  );
-  const idx = manifest.families.findIndex((f) => f.family === family);
-  if (idx < 0) throw new Error(`未找到状态素材: ${family}`);
-  if (manifest.families[idx].audioPath) {
-    await remove(manifest.families[idx].audioPath, { baseDir: BaseDirectory.AppLocalData }).catch(() => {});
-  }
-  delete manifest.families[idx].audioPath;
-  delete manifest.families[idx].audioSource;
-  delete manifest.families[idx].audioSrc;
-  await writeTextFile(`${dir}/${MANIFEST_FILE}`, JSON.stringify(manifest, null, 2), {
-    baseDir: BaseDirectory.AppLocalData,
-  });
-  await prepareP4Appearance(appearanceId);
-  invalidateAppearanceCache();
-  return toRecord(manifest, await absolutePathFor(dir), await getRoot());
+  await removeGlobalAudioCue(family);
+  return getAppearance(appearanceId);
 }
 
 /**

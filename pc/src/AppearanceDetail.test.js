@@ -73,28 +73,14 @@ test("appearance USB transfers expose a real shared-button cancel action", () =>
   assert.match(source, /中断传输/);
 });
 
-test("appearance detail lets users configure a WAV cue for each generated state", () => {
-  const source = readSource("AppearanceDetail.jsx");
-  const css = readSource("styles.css");
-
-  assert.match(source, /replaceFamilyAudioCue/);
-  assert.match(source, /removeFamilyAudioCue/);
-  assert.match(source, /readAudioAsBlobUrl/);
-  assert.match(source, /compressWavFileForBoard/);
-  assert.match(source, /const \[audioUrl, setAudioUrl\] = useState\(""\);/);
-  assert.match(source, /accept="audio\/wav,audio\/x-wav,\.wav"/);
-  assert.match(source, /状态提示音/);
-  assert.match(source, /上传 WAV/);
-  assert.match(source, /移除提示音/);
-  assert.match(source, /const canEditAudio = activeRecord\?\.ok;/);
-  assert.doesNotMatch(source, /const canEditAudio = !isBuiltin && activeRecord\?\.ok;/);
-  assert.match(source, /const audioFamilyNames = useMemo/);
-  assert.match(source, /当前状态 \{activeRecord\.family\} 还没有提示音/);
-  assert.ok(source.includes('已有提示音: ${audioFamilyNames.join(" / ")}'));
-  assert.match(source, /familyRecord\.audioPath \|\| familyRecord\.audioSrc/);
-  assert.match(source, /const audioBytes = await compressWavFileForBoard\(file\);/);
-  assert.match(css, /\.detail-audio-config\s*\{/);
-  assert.match(css, /\.state-card__sound\s*\{/);
+test("appearance detail offers global cues independently of a generated video", () => {
+ const source=readSource("AppearanceDetail.jsx");
+ const panel=readSource("GlobalAudioCuesPanel.jsx");
+ assert.match(source,/<GlobalAudioCuesPanel boardDeviceId=\{boardDeviceId\}/);
+ assert.match(panel,/全局提示音/);assert.match(panel,/所有形象通用/);
+ assert.match(panel,/上传 WAV/);assert.match(panel,/恢复默认/);assert.match(panel,/下发音效/);
+ assert.match(panel,/audioOnly:true/);assert.match(panel,/appearanceId:'global-audio-cues'/);
+ assert.doesNotMatch(panel,/prepare_p4_appearance|singleStateBusy|stateVideoBusy|activeRecord/);
 });
 
 test("appearance detail lets users upload an MP4 to replace the selected state video", () => {
@@ -128,7 +114,7 @@ test("appearance detail uses a preview-first workspace with a unified inspector 
   assert.match(source, /detail-context-drawer/);
   assert.match(source, /detail-state-rail/);
   assert.match(source, /detail-summary-card/);
-  assert.match(source, /detail-side-section detail-side-section--audio/);
+  assert.match(source, /<GlobalAudioCuesPanel/);
   assert.match(source, /detail-side-section detail-side-section--regenerate/);
   assert.match(source, /detail-summary-card__description/);
   assert.match(source, /detail-summary-card__meta/);
@@ -145,28 +131,11 @@ test("appearance detail uses a preview-first workspace with a unified inspector 
   assert.doesNotMatch(audioRule, /padding-top:\s*12px;/);
 });
 
-test("appearance detail persists audio OTA reminders and exposes the sound downlink action", () => {
-  const source = readSource("AppearanceDetail.jsx");
-  const css = readSource("styles.css");
-
-  assert.match(source, /AUDIO_SYNC_DIRTY_PREFIX/);
-  assert.match(source, /readAudioSyncDirty/);
-  assert.match(source, /writeAudioSyncDirty/);
-  assert.match(source, /markAudioSyncDirty/);
-  assert.match(source, /usb_sync_appearance/);
-  assert.match(source, /AppearanceDetail\(\{ appearanceId, boardDeviceId = ""/);
-  assert.match(
-    source,
-    /invoke\("usb_sync_appearance", \{[\s\S]*appearanceId: record\.id,[\s\S]*boardDeviceId/,
-  );
-  assert.match(source, /下发音效/);
-  assert.match(source, /下方的“下发音效”/);
-  assert.match(source, /已更新 \$\{activeFamily\} 的提示音，点击下方的“下发音效”同步到设备。/);
-  assert.match(source, /已移除 \$\{activeFamily\} 的提示音，点击下方的“下发音效”同步到设备。/);
-  assert.match(source, /detail-audio-sync-btn/);
-  assert.match(source, /detail-audio-sync-message/);
-  assert.match(css, /\.detail-audio-sync-btn\s*\{/);
-  assert.match(css, /\.detail-audio-sync-message\s*\{/);
+test("global audio downlink is separate from video transfer and has persistent reminders", () => {
+ const source=readSource("GlobalAudioCuesPanel.jsx");
+ assert.match(source,/globalAudioDirty/);assert.match(source,/markGlobalAudioDirty\(false\)/);
+ assert.match(source,/audioOnly:true/);assert.match(source,/下发音效/);
+ assert.doesNotMatch(source,/prepare_p4_appearance|replaceFamilyVideo/);
 });
 
 test("appearance detail can regenerate one selected state and replace it on the board", () => {

@@ -7971,6 +7971,14 @@ fn validate_appearance_id(appearance_id: &str) -> Result<&str, String> {
     Ok(appearance_id)
 }
 
+// Following a protected built-in selects the device slot. Local cue edits
+// belong to the explicit audio-only route, never a replacement video upload.
+fn prefer_device_builtin_for_follow(
+    appearance_id: &str, is_p4: bool, serial_connected: bool, builtin_protected: bool,
+) -> bool {
+    appearance_id == "builtin-terrier" && is_p4 && (!serial_connected || builtin_protected)
+}
+
 fn builtin_terrier_has_audio_overrides(local_dir: &Path) -> Result<bool, String> {
     let path = local_dir.join("audio-overrides.json");
     match fs::read(&path) {
@@ -8244,20 +8252,17 @@ async fn usb_sync_appearance(
         .resource_dir()
         .map_err(|error| format!("无法解析 resource 目录: {error}"))?;
     let clips_dir = resource_dir.join("terrier-clips");
-    let appearance_dir = if appearance_id == "builtin-terrier" {
+    let protected_builtin = prefer_device_builtin_for_follow(
+        &appearance_id, matches!(sync_runtime, UsbAppearanceSyncRuntime::EspP4),
+        serial_connected, status.capabilities["appearance"]["builtinProtected"] == true,
+    );
+    let appearance_dir = if protected_builtin {
+        clips_dir.clone()
+    } else if appearance_id == "builtin-terrier" {
         let local_dir = app_local_data_dir
             .join("custom-appearances")
             .join("builtin-terrier");
-        let has_overrides = builtin_terrier_has_audio_overrides(&local_dir)?;
         match sync_runtime {
-            UsbAppearanceSyncRuntime::EspP4
-                if has_overrides && usb_serial::inspect_prepared_p4_appearance(&local_dir).is_ok() =>
-            {
-                local_dir
-            }
-            UsbAppearanceSyncRuntime::EspP4 if has_overrides => {
-                return Err("专属音效素材尚未准备好，请重新保存音效后再切换。".into());
-            }
             UsbAppearanceSyncRuntime::EspP4 => clips_dir.clone(),
             UsbAppearanceSyncRuntime::Linux => {
                 ensure_builtin_terrier_source(&app_local_data_dir, &clips_dir, true)?
@@ -13795,6 +13800,15 @@ mod tests {
         fs::write(appearance.join("videos/done.wav"), b"user uploaded cue").unwrap();
         ensure_default_appearance_audio_cues(&appearance, &clips).unwrap();
         assert_eq!(fs::read(appearance.join("videos/done.wav")).unwrap(), b"user uploaded cue");
+    }
+
+    #[test]
+    fn protected_builtin_follow_selects_device_assets_without_audio_dependency() {
+        assert!(prefer_device_builtin_for_follow("builtin-terrier",true,true,true));
+        assert!(prefer_device_builtin_for_follow("builtin-terrier",true,false,false));
+        assert!(!prefer_device_builtin_for_follow("builtin-terrier",true,true,false));
+        assert!(!prefer_device_builtin_for_follow("custom-avatar",true,true,true));
+        assert!(!prefer_device_builtin_for_follow("builtin-terrier",false,true,true));
     }
 
     #[test]

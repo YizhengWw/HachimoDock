@@ -1,3 +1,4 @@
+import GlobalAudioCuesPanel from '../GlobalAudioCuesPanel.jsx';
 import React,{useEffect,useMemo,useState} from 'react';
 import {invoke} from '@tauri-apps/api/core';
 import {RefreshCw,Volume2,VolumeX} from 'lucide-react';
@@ -16,7 +17,7 @@ export default function DeviceVolumePanel({usb,active=true}) {
   useEffect(()=>{if(!active)return;const timer=setInterval(()=>{const s=control.getSnapshot();if(s.known&&s.draft===s.value&&!s.persisted&&!s.busy)void control.refresh();},5000);return()=>clearInterval(timer);},[active,control]);
   useExitProtection(state.busy ? "设备音量请求尚未完成" : "");
   const disabled=!state.available||!state.known||state.busy;
-  return <div className="device-volume">
+  return <><div className="device-volume">
     <div className="device-volume__level">
       {state.known&&state.value===0?<VolumeX size={22}/>:<Volume2 size={22}/>}
       <input type="range" min="0" max="100" step="1" value={state.draft??0} disabled={disabled}
@@ -35,5 +36,5 @@ export default function DeviceVolumePanel({usb,active=true}) {
       {state.error || (!state.available ? state.reason : state.loading ? '正在读取设备音量…' : state.busy ? '正在应用，请等待设备确认…'
         : !state.known ? '请先读取设备音量' : !state.persisted ? (state.savePending===false ? '当前音量已应用，但尚未保存到设备；重启后可能恢复原值。' : '已应用，等待设备空闲后保存。') : state.value===0 ? '设备已静音。' : '音量已保存到设备。')}
     </p>
-  </div>;
+  </div><GlobalAudioCuesPanel boardDeviceId={usb?.connected?usb?.boardDeviceId:undefined}/></>;
 }

@@ -49,19 +49,9 @@ test("appearance store can persist an uploaded MP4 as a custom appearance with r
   assert.match(source, /error: "尚未上传状态视频"/);
 });
 
-test("appearance store persists and clears per-family WAV cues in the manifest", () => {
-  const source = readFileSync(join(libDir, "appearance-store.js"), "utf8");
-
-  assert.match(source, /BUILTIN_AUDIO_OVERRIDE_FILE = "audio-overrides\.json"/);
-  assert.match(source, /BUILTIN_AUDIO_OVERRIDE_DIR = `\$\{ROOT_DIR\}\/\$\{BUILTIN_TERRIER_APPEARANCE_ID\}\/audio-overrides`/);
-  assert.match(source, /if \(appearanceId === BUILTIN_TERRIER_APPEARANCE_ID\)/);
-  assert.match(source, /defaultAudioCueSrcForFamily/);
-  assert.match(source, /export async function replaceFamilyAudioCue/);
-  assert.match(source, /const audioRel = `\$\{dir\}\/\$\{VIDEO_DIR\}\/\$\{family\}\.wav`;/);
-  assert.match(source, /await writeFile\(audioRel, audioBytes, \{ baseDir: BaseDirectory\.AppLocalData \}\);/);
-  assert.match(source, /manifest\.families\[idx\] = \{ \.\.\.manifest\.families\[idx\], audioPath: audioRel, audioSource: "custom" \};/);
-  assert.match(source, /export async function removeFamilyAudioCue/);
-  assert.match(source, /delete manifest\.families\[idx\]\.audioPath;/);
-  assert.match(source, /export async function readAudioAsBlobUrl\(audioPath\)/);
-  assert.match(source, /return readAppearanceFileAsBlobUrl\(audioPath, "audio\/wav"\);/);
+test("legacy audio entry points save global cues without preparing a video pack", () => {
+ const source=readFileSync(join(libDir,"appearance-store.js"),"utf8");
+ const edits=source.slice(source.indexOf('export async function replaceFamilyAudioCue'),source.indexOf('/**',source.indexOf('export async function removeFamilyAudioCue')));
+ assert.match(edits,/saveGlobalAudioCue/);assert.match(edits,/removeGlobalAudioCue/);
+ assert.doesNotMatch(edits,/prepareP4Appearance|manifest|writeFile|videos/);
 });

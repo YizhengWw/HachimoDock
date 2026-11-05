@@ -388,3 +388,10 @@ test("persisted unknown cancellation remains unknown rather than asserting stopp
  const f=fixture(t,{sync:{ok:false,error:"APPEARANCE_RESULT_UNKNOWN: "+APPEARANCE_SYNC_CANCELLED_MESSAGE}});
  await assert.rejects(()=>f.run(),e=>e.outcome==="unknown" && e.message!==APPEARANCE_SYNC_CANCELLED_MESSAGE);noCommit(f);assert.equal(f.count("usb_sync_appearance"),1);
 });
+
+
+test("video capacity refusal is explicit and cannot commit a follow switch",async t=>{
+ const f=fixture(t,{sync:{ok:false,error:"APPEARANCE_NOT_SUBMITTED: P4 appearance videos require 17972330 bytes but the custom slot only has 10481664 bytes"}});
+ await assert.rejects(f.run(),e=>e.code==='appearance-capacity-exceeded'&&e.outcome==='not_submitted'&&e.message.includes('可用空间'));
+ assert.equal(f.count('usb_sync_appearance'),1);noCommit(f);
+});

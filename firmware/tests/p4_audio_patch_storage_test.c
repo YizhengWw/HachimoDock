@@ -87,5 +87,21 @@ int main(void){
   assert(!pet_audio_patch_resolve(slot,identity,"done",path,sizeof(path)));original_files(false);
  }
  cJSON_Delete(empty);puts("PASS builtin/custom empty remove snapshots persist; original WAV/video/raw/default29 unchanged");
+
+ /* Global audio has a separate durable namespace, independent of both video packs. */
+ pet_audio_patch_retire();
+ cJSON *global_files=files();
+ assert(pet_audio_patch_begin(PET_AUDIO_PATCH_GLOBAL_SLOT,PET_AUDIO_PATCH_GLOBAL_PACK,global_files,sizeof(wave),&attempted));
+ assert(pet_audio_patch_chunk("p4/audio/done.wav",0,0,wave,sizeof(wave),&attempted));
+ assert(pet_audio_patch_commit(&attempted,&generation));pet_audio_patch_retire();
+ assert(pet_audio_patch_resolve(PET_AUDIO_PATCH_GLOBAL_SLOT,PET_AUDIO_PATCH_GLOBAL_PACK,"done",path,sizeof(path)));
+ assert(strstr(path,"ov2_")!=NULL);read_exact(path,original);assert(!memcmp(original,wave,sizeof(wave)));
+ assert(!pet_audio_patch_resolve(PET_AUDIO_PATCH_GLOBAL_SLOT,pack1,"done",path,sizeof(path)));
+ cJSON *empty_global=cJSON_CreateArray();
+ assert(pet_audio_patch_begin(PET_AUDIO_PATCH_GLOBAL_SLOT,PET_AUDIO_PATCH_GLOBAL_PACK,empty_global,0,&attempted));
+ assert(pet_audio_patch_commit(&attempted,&generation));pet_audio_patch_retire();
+ assert(!pet_audio_patch_resolve(PET_AUDIO_PATCH_GLOBAL_SLOT,PET_AUDIO_PATCH_GLOBAL_PACK,"done",path,sizeof(path)));
+ original_files(false);cJSON_Delete(global_files);cJSON_Delete(empty_global);
+ puts("PASS global cue storage and empty restore independent of both video slots");
  cJSON_Delete(a);return 0;
 }

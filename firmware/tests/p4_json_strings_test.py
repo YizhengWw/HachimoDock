@@ -127,7 +127,8 @@ int main(int argc,char**argv){
  }
  cJSON_ArrayForEach(c,cJSON_GetObjectItemCaseSensitive(suite,"byteCases")){
   const char*s=cJSON_GetObjectItemCaseSensitive(c,"hex")->valuestring;size_t size=strlen(s)/2;unsigned char source[256];assert(size<sizeof(source));
-  for(size_t i=0;i<size;i++)source[i]=(unsigned char)((hex((unsigned char)s[i*2])<<4)|hex((unsigned char)s[i*2+1]));source[size]=0;
+  for(size_t i=0;i<size;i++)source[i]=(unsigned char)((hex((unsigned char)s[i*2])<<4)|hex((unsigned char)s[i*2+1]));
+  source[size]=0;
   bool expected=cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(c,"allowed"));
   assert(pet_json_source_text_bytes(source,size)==expected);
   if(expected){cJSON*value=cJSON_ParseWithOpts((const char*)source,NULL,true);assert(value);cJSON_Delete(value);}

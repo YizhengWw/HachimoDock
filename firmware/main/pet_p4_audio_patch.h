@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "cJSON.h"
+/* Namespace 2 is global audio storage, never a physical appearance slot. */
+#define PET_AUDIO_PATCH_GLOBAL_SLOT 2
+#define PET_AUDIO_PATCH_GLOBAL_PACK "0000000000000000000000000000000000000000000000000000000000000001"
 #define PET_AUDIO_PATCH_MAX_FILES 24U
 #define PET_AUDIO_PATCH_MAX_BYTES (2U*1024U*1024U)
 #define PET_AUDIO_PATCH_MAX_FILE (1024U*1024U+4096U)

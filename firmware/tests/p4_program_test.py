@@ -23,8 +23,9 @@ FREESTANDING = ["-ffreestanding", "-fno-builtin"]
 
 
 def run(command):
-    result = subprocess.run([str(x) for x in command], check=True, text=True,
+    result = subprocess.run([str(x) for x in command], check=False, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert result.returncode == 0, result.stdout + result.stderr
     # UBSan can continue with exit code zero, and caller-owned sanitizer options
     # can also change error exit codes. Diagnostics are never a successful run.
     assert not any(marker in result.stderr for marker in (
