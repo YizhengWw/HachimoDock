@@ -1,6 +1,6 @@
 # PC 客户端 / Desktop client
 
-当前源码版本 **0.1.198**，配套固件版本 **0.7.103-p4-r179**。`main` 可包含安装包发布后的修正；197 源码与二进制的对应关系见 [Release 源码说明](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197)。公开构建不提供服务 Key，运行时凭据由用户在 API 配置中保存。
+当前源码版本 **0.1.199**，配套固件版本 **0.7.103-p4-r179**。`main` 可包含安装包发布后的修正；安装包与源码归档见 [0.1.199 Release](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.199)。该归档对应 `v0.1.199` 标签。公开构建不提供服务 Key，运行时凭据由用户在 API 配置中保存。
 
 Pet Manager 用于连接设备、管理形象和组件，以及将 Agent 状态与语音输入同步到桌面小屏。支持 macOS arm64 与 Windows x64。
 

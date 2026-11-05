@@ -8,11 +8,13 @@ HachimoDock is a desktop interface for AI Agents. A Windows/macOS manager and an
 
 | Component | Current release | Platform |
 | --- | --- | --- |
-| Desktop client | **0.1.197** | Apple silicon macOS / Windows x64 |
-| Device firmware | **0.7.103-p4-r178** | Separate ESP32-P4 v1 and v3 images |
-| Current source | Client 0.1.198 / firmware R179 version identifiers | `main` may contain post-release changes |
+| Desktop client | **0.1.199** | Apple silicon macOS / Windows x64 |
+| Device firmware | **0.7.103-p4-r179** | Separate ESP32-P4 v1 and v3 images |
+| Current source | Client 0.1.199 / firmware R179 version identifiers | `main` may contain post-release changes |
 
-Use the DMG or Windows x64 installer in [v0.1.197](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.197). Verify downloaded files against `SHA256SUMS`. The source-to-binary correspondence for 197 is described in that Release's source notes; matching version numbers alone do not establish an identical build. Intel Mac and Linux installers are not provided.
+[Download Mac 0.1.199 (Apple silicon)](https://github.com/YizhengWw/HachimoDock/releases/download/v0.1.199/HachimiDock_0.1.199_macOS-arm64.dmg) · [Download Windows 0.1.199 (x64)](https://github.com/YizhengWw/HachimoDock/releases/download/v0.1.199/HachimiDock_0.1.199_Windows-x64-setup.exe)
+
+See [v0.1.199](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.199) for all assets and verify downloads against `SHA256SUMS`. The source archive matches that release tag. Version 0.1.199 updates only the desktop client and continues to use R179 firmware; devices already running R179 do not need another firmware update. Intel Mac and Linux installers are not provided.
 
 Complete flashing kits are for first installation or factory recovery. Choose the kit for the actual chip revision: **v1 and v3 are not interchangeable**. A complete flash erases settings, appearances and components. Routine client OTA updates only the application and does not repartition existing devices. See [firmware build and flashing](firmware/BUILD.md).
 

@@ -40,11 +40,13 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 
 | 项目 | 版本 / 平台 | 获取方式 |
 | --- | --- | --- |
-| 桌面安装包 | **0.1.198**；macOS Apple silicon / Windows x64 | [Release 附件](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.198) |
+| 桌面安装包 | **0.1.199**；macOS Apple silicon / Windows x64 | [Release 附件](https://github.com/YizhengWw/HachimoDock/releases/tag/v0.1.199) |
 | 配套设备固件 | **0.7.103-p4-r179**；ESP32-P4 v1 / v3 分别提供 | 同一 Release 的完整烧录包；日常升级使用客户端 |
-| 当前源码 | 客户端版本 0.1.198 / 固件版本 R179，可能包含发布后的修正 | `main`；[PC 构建](pc/README.md)、[固件构建](firmware/BUILD.md) |
+| 当前源码 | 客户端版本 0.1.199 / 固件版本 R179，可能包含发布后的修正 | `main`；[PC 构建](pc/README.md)、[固件构建](firmware/BUILD.md) |
 
-下载时选择 `HachimiDock_0.1.198_macOS-arm64.dmg` 或 `HachimiDock_0.1.198_Windows-x64-setup.exe`。完整烧录包的文件名标注 v1/v3，按实际芯片选择，不能互刷。桌面安装包、配套固件及源码归档的版本对应关系见该 Release 的更新说明。
+[下载 Mac 0.1.199（Apple silicon）](https://github.com/YizhengWw/HachimoDock/releases/download/v0.1.199/HachimiDock_0.1.199_macOS-arm64.dmg) · [下载 Windows 0.1.199（x64）](https://github.com/YizhengWw/HachimoDock/releases/download/v0.1.199/HachimiDock_0.1.199_Windows-x64-setup.exe)
+
+完整烧录包的文件名标注 v1/v3，按实际芯片选择，不能互刷。0.1.199 仅更新客户端，继续使用 R179 固件；已安装 R179 的设备无需重复升级。桌面安装包、配套固件及源码归档的版本对应关系见该 Release 的更新说明。
 
 当前预编译桌面包覆盖 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 包未经过 Apple 公证，Windows 安装器未做发行者签名。下载后先按 `SHA256SUMS` 核对完整性；不要关闭系统安全检查来运行来源不明的副本。
 
