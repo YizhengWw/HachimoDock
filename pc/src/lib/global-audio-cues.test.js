@@ -45,3 +45,10 @@ test('an older send acknowledgement cannot clear a newer sound edit',async t=>{
  f.module.markGlobalAudioDirty(false,revision);assert(f.module.globalAudioDirty());
  f.module.markGlobalAudioDirty(false,f.module.globalAudioRevision());assert(!f.module.globalAudioDirty());
 });
+
+test('sound edits also work when a webview lacks randomUUID',async t=>{
+ const previous=Object.getOwnPropertyDescriptor(globalThis,'crypto');
+ Object.defineProperty(globalThis,'crypto',{configurable:true,value:{}});
+ t.after(()=>{if(previous)Object.defineProperty(globalThis,'crypto',previous);else delete globalThis.crypto;});
+ const f=await fixture(t);await f.module.saveGlobalAudioCue('done',wav);assert(f.module.globalAudioDirty());
+});

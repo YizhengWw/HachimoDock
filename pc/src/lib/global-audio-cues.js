@@ -27,7 +27,7 @@ export async function readGlobalAudioCues(){
 }
 export function globalAudioRevision(){return globalThis.localStorage?.getItem(dirtyKey)||'';}
 export function globalAudioDirty(){return Boolean(globalAudioRevision());}
-export function markGlobalAudioDirty(dirty,expected){if(dirty)globalThis.localStorage?.setItem(dirtyKey,globalThis.crypto.randomUUID());else if(expected===undefined||expected===globalAudioRevision())globalThis.localStorage?.removeItem(dirtyKey);}
+export function markGlobalAudioDirty(dirty,expected){if(dirty)globalThis.localStorage?.setItem(dirtyKey,(globalThis.crypto?.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`));else if(expected===undefined||expected===globalAudioRevision())globalThis.localStorage?.removeItem(dirtyKey);}
 async function saveCue(family,bytes){
   familyCheck(family);
   if(!(bytes instanceof Uint8Array)||bytes.length<44||bytes.length>1048576+4096)throw new Error('提示音大小不符合要求');

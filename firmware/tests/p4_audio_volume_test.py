@@ -49,7 +49,7 @@ def test_actual_vendor_errors_cache_and_task_scoped_total_deadline(tmp_path):
         subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-sign-compare", "-Wno-unused-parameter", "-Wno-deprecated-declarations",
                         "-fsanitize=address,undefined", "-pthread", "-DCONFIG_CODEC_ES8311_SUPPORT=1",
                         f"-DESP_IDF_VERSION={sdk}", *[arg for p in includes for arg in ("-I", str(p))],
-                        *map(str, sources), "-o", str(exe)], check=True)
+                        *map(str, sources), "-lm", "-o", str(exe)], check=True)
         subprocess.run([str(exe)], check=True, timeout=20)
         subprocess.run([str(exe), "corrupt"], check=True, timeout=20)
         subprocess.run([str(exe), "out-of-range"], check=True, timeout=20)
