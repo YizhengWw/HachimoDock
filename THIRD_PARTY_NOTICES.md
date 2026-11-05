@@ -88,12 +88,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## GD 音乐台在线服务
-
-随身听的在线搜索及音源解析使用 [GD 音乐台 API](https://music-api.gdstudio.xyz/api.php)，来源标识为 [GD音乐台](https://music.gdstudio.xyz/)。服务文档标注 CC BY-NC 4.0，并说明仅供学习参考，禁止下载、传播或商用；具体服务限制以提供方说明为准。
-
-本项目不打包歌曲、不提供歌曲下载/导出，也不绕过登录、付费或 DRM。用户选择播放时仅进行受限流式解码与设备播放；本地音频由用户自行提供。服务可访问不代表已取得相关音乐作品的使用或再分发许可。
-
 ## unescaper 0.1.8 — MIT alternative
 
 This distribution elects the MIT alternative offered by the upstream

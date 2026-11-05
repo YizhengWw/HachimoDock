@@ -199,12 +199,14 @@ flowchart LR
 
 ## 致谢 / Acknowledgements
 
-HachimoDock 的实现参考、借鉴并集成了以下开源项目，特此致谢：
+感谢以下项目与社区提供的代码、工具及基础能力：
 
-- [Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk) — 开源项目致谢；第三方版权与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-- [OpenClaw](https://github.com/openclaw/openclaw)（MIT）— CLI Agent 运行时与插件 SDK。
-- [Claude Code](https://github.com/anthropics/claude-code) — 主力 coding agent 与 hook 状态协议。
-- [Codex](https://github.com/openai/codex) — Agent 会话与桌面输入适配。
+- **Xiaomi MiLoCo、MiSans**：智能家居协议适配参考与设备显示字体。
+- **Espressif、Waveshare**：设备开发框架、板级驱动与语音处理能力。
+- **Tauri、React、Node.js、FFmpeg、Lucide**：桌面应用、音视频处理及界面基础。
+- **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)**：部分 Agent 状态监控与 Hook 桥接代码。
+
+同时感谢参与开发、测试、反馈和组件创作的贡献者。第三方版权与许可详见 [第三方声明](THIRD_PARTY_NOTICES.md)。
 
 ## 作者 / Author
 

@@ -50,6 +50,17 @@ The paired hardware uses ESP32-P4, 32 MiB Flash, 32 MiB PSRAM and a 480×640 MIP
 
 Resources are stored in ordinary Git; Git LFS is not required. Preserve dependency locks and choose the correct target configuration. Published binaries retain their original build contents even when `main` changes.
 
+## Acknowledgements
+
+We thank the following projects and communities for their code, tools and foundational capabilities:
+
+- **Xiaomi MiLoCo and MiSans**: smart-home protocol adaptation references and device display fonts.
+- **Espressif and Waveshare**: device development frameworks, board drivers and speech-processing capabilities.
+- **Tauri, React, Node.js, FFmpeg and Lucide**: foundations for the desktop application, audiovisual processing and user interface.
+- **[Clawd on Desk](https://github.com/rullerzhou-afk/clawd-on-desk)**: portions of the Agent state-monitoring and Hook bridge code.
+
+We also thank everyone who contributed development, testing, feedback and community components. See [Third-Party Notices](THIRD_PARTY_NOTICES.md) for third-party copyrights and licenses.
+
 ## License and feedback
 
 **Non-commercial source available.** The [project license](LICENSE) permits use, modification and component creation within its stated scope. Commercial use and independent products require prior written permission. Third-party software and materials retain their [own licenses](THIRD_PARTY_NOTICES.md); earlier releases retain their accompanying terms.
