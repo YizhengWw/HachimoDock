@@ -12,6 +12,8 @@ import {
   saveAgentAppearanceMap,
   saveEnabledAgents,
 } from "./agent-appearance-config.js";
+import { hasFixedDeviceAppearance } from "./device-capabilities.js";
+import { BUILTIN_TERRIER_APPEARANCE_ID } from "./builtin-appearances.js";
 
 export const ACTIVE_APPEARANCE_KEY = "pet-manager:active-appearance-id";
 export const APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE =
@@ -158,6 +160,10 @@ export async function applyDesktopPetAssignment({
   }
   const shouldSyncOverUsb = Boolean(usbStatus?.connected);
   const targetBoardDeviceId = boardDeviceId || usbStatus?.boardDeviceId || "";
+  const fixedAppearance = hasFixedDeviceAppearance(usbStatus);
+  if (fixedAppearance && appearance.id !== BUILTIN_TERRIER_APPEARANCE_ID) {
+    throw new Error("当前 StopWatch 版本使用内置宠物，请选择内置西高地后切换 Agent。");
+  }
 
   if (appearanceChanged && !shouldSyncOverUsb) {
     throw new Error(APPEARANCE_CHANGE_USB_REQUIRED_MESSAGE);
@@ -175,8 +181,10 @@ export async function applyDesktopPetAssignment({
   // unresolved transfer without resending it; only then begin this click's
   // normal native sync, which creates its own fresh mutation Attempt UUID.
   onProgress?.({ stage: "confirming", text: "正在确认…", indeterminate: true, followOnly: true });
-  await reconcileDesktopPetAppearance({ invoke, boardDeviceId: targetBoardDeviceId, usbScope: usbStatus,
-    onProgress, isCurrent: () => isCurrent(followIntentId) });
+  if (!fixedAppearance) {
+    await reconcileDesktopPetAppearance({ invoke, boardDeviceId: targetBoardDeviceId, usbScope: usbStatus,
+      onProgress, isCurrent: () => isCurrent(followIntentId) });
+  }
   requireCurrent();
   const confirmedUsb = await invoke("usb_get_status");
   const bootId = (status) => status?.bootId || status?.capabilities?.debugBootId || "";
@@ -205,7 +213,7 @@ export async function applyDesktopPetAssignment({
   // fingerprint/cache selection and metadata ACK; never force an upload or use a
   // local appearance ID as evidence. Any new unknown stops this intent;
   // neither observation nor mutation is automatically repeated from catch.
-  {
+  if (!fixedAppearance) {
     const unlisten = listen
       ? await listen("usb-sync-progress", (event) => {
         if (!isCurrent(followIntentId)) return;

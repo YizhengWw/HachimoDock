@@ -33,6 +33,7 @@ import { resolveDashboardPreviewMedia } from "../lib/appearance-preview.js";
 import { useDeviceContext } from "../shell/DeviceContext.jsx";
 import Button from "../shell/Button.jsx";
 import { useToast } from "../shell/ToastStack.jsx";
+import { hasFixedDeviceAppearance } from "../lib/device-capabilities.js";
 
 const AGENT_ICONS = {
   "claude-code": Code,
@@ -109,13 +110,15 @@ export default function ChannelMatrixCard() {
 
   const visibleAgents = useMemo(() => agentOptions.filter((agent) => agent?.id), [agentOptions]);
   const activeAgentId = currentDisplay.agentId;
+  const fixedAppearance = hasFixedDeviceAppearance(usb);
 
   const appearanceForAgent = useCallback(
     (agentId) => {
-      const appearanceId = agentAppearanceMap[agentId] || BUILTIN_TERRIER_APPEARANCE_ID;
+      const appearanceId = fixedAppearance ? BUILTIN_TERRIER_APPEARANCE_ID
+        : agentAppearanceMap[agentId] || BUILTIN_TERRIER_APPEARANCE_ID;
       return appearanceById(appearances, appearanceId) || appearanceById(appearances, BUILTIN_TERRIER_APPEARANCE_ID) || appearances[0] || null;
     },
-    [agentAppearanceMap, appearances],
+    [agentAppearanceMap, appearances, fixedAppearance],
   );
 
   useEffect(() => {
@@ -342,7 +345,7 @@ export default function ChannelMatrixCard() {
                   <div className="channel-row__formosa-meta">
                     <div className="channel-row__formosa-title">
                       <strong>{appearance?.name || "西高地小狗"}</strong>
-                      <button
+                      {!fixedAppearance && <button
                         type="button"
                         className="btn-secondary btn-sm channel-row__change-inline"
                         onClick={() => openPicker(agent.id)}
@@ -350,7 +353,7 @@ export default function ChannelMatrixCard() {
                         title={!isDetected ? "安装对应客户端或 CLI 后重新扫描" : ""}
                       >
                         <ChevronDown size={14} /> 更换形象
-                      </button>
+                      </button>}
                       {agent.id === "deepseek-harness" && (
                         <label className="channel-row__approval-timeout">
                           <span>超时时间</span>

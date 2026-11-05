@@ -63,6 +63,7 @@ import { useAgentSessionFeed } from "./dashboard/useAgentSessionFeed.js";
 import { useDeviceVoiceRouter } from "./dashboard/useDeviceVoiceRouter.js";
 import { subscribeAsrCredentialUpdates } from "./dashboard/voice-credential-events.js";
 import { useP4SessionSync } from "./dashboard/useP4SessionSync.js";
+import { supportsDeviceSessions, isStopwatchDevice } from "./lib/device-capabilities.js";
 import DashboardActionsMenu from "./dashboard/DashboardActionsMenu.jsx";
 import FirmwareUpdateModal from "./dashboard/FirmwareUpdateModal.jsx";
 import DeviceDiagnosticsModal from "./dashboard/DeviceDiagnosticsModal.jsx";
@@ -817,6 +818,8 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const buttonConfigRevisionRef = useRef(0);
   const buttonConfigQueryTokenRef = useRef(0);
   const isP4Runtime = String(usb.runtime || "").toLowerCase() === P4_RUNTIME_ID;
+  const isStopwatch = isStopwatchDevice(usb);
+  const hasSessionSync = supportsDeviceSessions(usb);
   const hasKnownRuntime = buttonControlRowsForRuntime(usb.runtime).length > 0;
   const voiceTarget = voiceRuntimeTarget(usb, selectedAgentId);
   const voiceTargetKeyRef = useRef(voiceTarget.key);
@@ -1003,7 +1006,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     if (shouldAutoOpenOnboarding(ONBOARDING_PAGE_IDS.DEVICE)) setGuideOpen(true);
   }, [active, binding, hasKnownRuntime]);
 
-  const p4TargetBoardDeviceId = isP4Runtime
+  const p4TargetBoardDeviceId = hasSessionSync
     ? (usb.boardDeviceId || onlineBoardDeviceId || binding?.boardDeviceId || "")
     : "";
 
@@ -1016,7 +1019,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
     dismissedSessions: dismissedP4Sessions,
   });
   const p4SessionSync = useP4SessionSync({
-    enabled: isP4Runtime,
+    enabled: hasSessionSync,
     boardDeviceId: p4TargetBoardDeviceId,
     agentId: selectedAgentId,
     usbConnected: usb.connected,
@@ -1513,9 +1516,9 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onSendTest={onSendTest}
           onCopyDesktopId={onCopyDesktopId}
           onUnbind={onUnbindClick}
-          onDeviceReturnHome={onDeviceReturnHome}
-          onForceSyncAppearance={onForceSyncAppearance}
-          onReconcileAppearance={onReconcileAppearance}
+          onDeviceReturnHome={isStopwatch ? undefined : onDeviceReturnHome}
+          onForceSyncAppearance={isStopwatch ? undefined : onForceSyncAppearance}
+          onReconcileAppearance={isStopwatch ? undefined : onReconcileAppearance}
           canReconcileAppearance={usb.connected === true && Boolean(usb.boardDeviceId) && !appearanceSync?.pending && !appearanceObservationBusy}
           onUpdateFirmware={usb.connected && usb.runtime === P4_RUNTIME_ID
             ? () => {
@@ -1535,6 +1538,11 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
       <Card>
         <DeviceStatusBar />
       </Card>
+
+      {isStopwatch && <Card title="M5Stack StopWatch">
+        <p>黄色键切换到下一个会话，蓝色键切换到上一个会话，也可以左右滑动圆屏。长按黄色键调亮，长按蓝色键调暗。</p>
+        <p>当前版本使用内置宠物，支持 Agent 状态、会话切换和震动提醒。语音、自定义形象、小组件及客户端固件升级暂未开放。</p>
+      </Card>}
 
       {realtimeChat?.error && !isRecoveringAsr(realtimeChat) && <div role="alert" className="message-banner message-banner--error">
         实时对话失败：{realtimeChat.error}。详情与诊断日志见下方「实时对话」。
@@ -1560,7 +1568,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         <ChannelMatrixCard />
       </Card>
 
-      <Card>
+      {!isStopwatch && <Card>
         <BoardButtonPanel
           selectedAgentId={selectedAgentId}
           voiceConfig={runtimeVoiceConfig}
@@ -1575,9 +1583,9 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onVoiceConfigChange={updateVoiceConfig}
           onApplyVoiceConfig={applyVoiceConfigOverUsb}
         />
-      </Card>
+      </Card>}
 
-      <Card.Collapsible
+      {!isStopwatch && <><Card.Collapsible
         title="语音输入"
         summary={buildVoiceSummary(runtimeVoiceConfig, selectedVoiceTrigger)}
         defaultOpen
@@ -1621,7 +1629,7 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         defaultOpen
       >
         <RealtimeChatPanel keyBound={realtimeChatKeyBound} onOpenApiSettings={onOpenApiSettings} onOpenGallery={onOpenGallery} onOpenPersona={() => setEditingPersona(currentDisplay?.appearance)} />
-      </Card.Collapsible>
+      </Card.Collapsible></>}
 
       <DeviceGuideModal
         isOpen={guideOpen}

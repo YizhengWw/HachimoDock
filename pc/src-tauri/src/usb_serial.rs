@@ -803,6 +803,7 @@ fn serial_baud_candidates_for_device(device: Option<&UsbDeviceInfo>) -> Vec<u32>
 fn canonical_runtime_id(runtime: &str) -> String {
     match runtime.trim().to_ascii_lowercase().as_str() {
         "esp-p4" | "esp32-p4" | "esp32_p4" | "p4" => "esp-p4".to_string(),
+        "esp-s3" | "esp32-s3" | "esp32_s3" => "esp-s3".to_string(),
         "linux" | "linux-board" | "board-runtime" | "board-server-c" | "pet-screen"
         | "raspberry-pi" | "raspberry" | "radxa" => "linux".to_string(),
         other => other.to_string(),
@@ -813,7 +814,7 @@ fn runtime_from_hello_payload(payload: &serde_json::Value) -> String {
     let explicit = first_json_string(payload, &["runtime", "runtimeKind", "deviceRuntime"]);
     if !explicit.is_empty() {
         let runtime = canonical_runtime_id(&explicit);
-        if matches!(runtime.as_str(), "esp-p4" | "linux") {
+        if matches!(runtime.as_str(), "esp-p4" | "esp-s3" | "linux") {
             return runtime;
         }
     }
@@ -927,7 +928,7 @@ fn validate_hello_message(message: &mut SerialMessage) -> Result<(), String> {
         return Err("hello did not include a board device id".to_string());
     }
     let runtime = runtime_from_hello_payload(&message.payload);
-    if !matches!(runtime.as_str(), "esp-p4" | "linux") {
+    if !matches!(runtime.as_str(), "esp-p4" | "esp-s3" | "linux") {
         return Err("hello did not identify a supported device runtime".to_string());
     }
     if let Some(object) = message.payload.as_object_mut() {
@@ -7754,6 +7755,20 @@ mod tests {
         assert_ne!(third,build(custom,"fourth"));
     }
     use super::*;
+
+    #[test]
+    fn stopwatch_hello_keeps_s3_identity_and_disabled_p4_features() {
+        let mut message = parse_serial_message(r#"{"topic":"hello","payload":{
+            "boardDeviceId":"stopwatch-test","runtime":"esp32-s3",
+            "deviceModel":"M5Stack StopWatch v1.0","capabilities":{
+                "boardId":"m5stack-stopwatch","sessionSync":true,
+                "firmwareOta":false,"widgets":false,"audio":false
+            }}}"#).unwrap();
+        validate_hello_message(&mut message).unwrap();
+        assert_eq!(message.payload["runtime"], "esp-s3");
+        assert_eq!(message.payload["capabilities"]["firmwareOta"], false);
+        assert_eq!(message.payload["capabilities"]["widgets"], false);
+    }
 
     fn background_test_manager(mode:usize)->(UsbSerialManager,Arc<Mutex<Vec<String>>>){
         struct ReplyWriter{pending:Vec<u8>,waiters:Arc<Mutex<Vec<DeviceResponseWaiter>>>,topics:Arc<Mutex<Vec<String>>>,mode:usize,running:bool}

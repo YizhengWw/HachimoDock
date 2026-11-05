@@ -1,0 +1,26 @@
+name: StopWatch firmware
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.5.4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install factory media converter
+        run: apt-get update && apt-get install -y --no-install-recommends ffmpeg
+      - name: Build isolated ESP32-S3 target
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware
+          idf.py -B build/stopwatch -DHACHIMO_BOARD=m5stack_stopwatch_v1 -DSDKCONFIG=build/stopwatch/sdkconfig build
+      - name: Verify P4 dependency isolation
+        run: git diff --exit-code -- firmware/dependencies.lock firmware/dependencies.v3.lock

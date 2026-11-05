@@ -4189,7 +4189,7 @@ fn follow_connection_generation(
         .ok_or_else(|| "follow connection identity missing; not submitted".to_string())?;
     if !status.connected || status.board_device_id != board
         || status.connection_id != generation.to_string() || status.boot_id != expected_boot
-        || (status.runtime.eq_ignore_ascii_case("esp-p4") && expected_boot.is_empty())
+        || (matches!(status.runtime.as_str(), "esp-p4" | "esp-s3") && expected_boot.is_empty())
     { return Err("follow USB scope changed; not submitted".into()); }
     Ok(generation)
 }
@@ -4294,7 +4294,8 @@ async fn dispatch_remote_cli_binding(
         })).map_err(|_| "跟随已提交，但新渠道状态尚未确认；请检查连接，不要重复发送。".to_string())?;
 
         let mut sessions_reset = false;
-        if usb_status.runtime.eq_ignore_ascii_case("esp-p4") {
+        if usb_status.runtime.eq_ignore_ascii_case("esp-p4")
+            || (usb_status.runtime == "esp-s3" && usb_status.capabilities["sessionSync"] == true) {
             sessions_reset = reset_p4_session_binding_after_send(
                 p4_session_binding(), &board_device_id, &target_source, || {
                     usb_manager.send_session_current_for_connection(

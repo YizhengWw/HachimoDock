@@ -5,6 +5,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { BUILTIN_TERRIER_APPEARANCE_ID } from "./builtin-appearances.js";
 import { AGENT_APPEARANCE_MAP_STORAGE_KEY, ENABLED_AGENTS_STORAGE_KEY } from "./agent-appearance-config.js";
 import {
   ACTIVE_APPEARANCE_KEY,
@@ -102,6 +103,25 @@ function confirmationRequired(error) {
   assert.equal(error.message, APPEARANCE_CONFIRMATION_REQUIRED_MESSAGE);
   return true;
 }
+
+test("StopWatch follows through the same scoped binding without P4 asset mutations", async t => {
+  const status = {...USB,runtime:"esp-s3",capabilities:{boardId:"m5stack-stopwatch",maxAppearanceSlots:0}};
+  const f = fixture(t,{statuses:[status,status]});
+  const result = await f.run({appearance:{id:BUILTIN_TERRIER_APPEARANCE_ID,name:"西高地"}});
+  assert.ok(result.nextMap);
+  assert.equal(f.count("usb_sync_appearance"),0);
+  assert.equal(f.count("usb_reconcile_appearance_unknown"),0);
+  assert.equal(f.count("dispatch_remote_cli_binding"),1);
+  assert.equal(f.count("save_bridge_profile"),1);
+});
+
+test("StopWatch rejects unavailable custom media before changing follow ownership", async t => {
+  const status = {...USB,runtime:"esp-s3",capabilities:{boardId:"m5stack-stopwatch",maxAppearanceSlots:0}};
+  const f = fixture(t,{statuses:[status]});
+  await assert.rejects(f.run(),/StopWatch/);
+  noCommit(f);
+  assert.equal(f.count("usb_sync_appearance"),0);
+});
 
 test("no pending observation precedes one fresh sync, exact dispatch, then one profile commit", async t => {
   const f = fixture(t);

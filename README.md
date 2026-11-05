@@ -139,6 +139,11 @@ v3 的 24 MHz 显示修复已在实机确认恢复宠物动画；本版本按键
 
 ## 硬件方案
 
+新增实验性 [M5Stack StopWatch v1.0 适配](docs/hardware/m5stack-stopwatch.md)：
+ESP32-S3 圆屏目标与现有 P4 目标共用仓库和桌面端，沿用 ESP-IDF、自研 RGB565
+渲染、LVGL 字体及 JSONL 协议。当前实现内置宠物、状态/会话跟随、按键/触摸和震动；
+语音、自定义形象、PetUI 和客户端 OTA 尚未开放，实机验收待完成。
+
 本仓库给出软件和固件配套；PCB、BOM、硬件装配和复刻资料请看：
 [OSHWHub 硬件端页面](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB)。
 
