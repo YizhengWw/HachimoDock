@@ -35,7 +35,7 @@ Public installers do not supply service API keys. Enter your own credentials in 
 
 ## Installation and default controls
 
-The macOS package is not Apple-notarized; the Windows installer is not publisher-signed. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
+The macOS release package is Developer ID-signed and Apple-notarized; the Windows installer is not publisher-signed. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
 
 SW1 short press and joystick centre confirm; SW2 short press switches pet/component views; SW3 returns. Joystick directions select sessions/components or perform component actions. These defaults can be changed in the manager. Confirming voice input is separate from approving an Agent's tool permissions.
 

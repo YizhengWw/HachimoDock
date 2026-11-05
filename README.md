@@ -48,7 +48,7 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 
 完整烧录包的文件名标注 v1/v3，按实际芯片选择，不能互刷。0.1.199 仅更新客户端，继续使用 R179 固件；已安装 R179 的设备无需重复升级。桌面安装包、配套固件及源码归档的版本对应关系见该 Release 的更新说明。
 
-当前预编译桌面包覆盖 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 包未经过 Apple 公证，Windows 安装器未做发行者签名。下载后先按 `SHA256SUMS` 核对完整性；不要关闭系统安全检查来运行来源不明的副本。
+当前预编译桌面包覆盖 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 包已使用 Developer ID 签名并通过 Apple 公证，Windows 安装器未做发行者签名。下载后先按 `SHA256SUMS` 核对完整性；不要关闭系统安全检查来运行来源不明的副本。
 
 ## 核心能力
 
