@@ -3,8 +3,8 @@
   "purpose": "Unchanged upstream license/notice texts, not first-party relicensing",
   "selection": "Cargo normal dependency graph excluding build/dev, with direct proc-macro grants labeled separately; npm production-declaration superset (not a claim all packages enter frontend bundle). Original alternative grants are retained; recipients retain upstream rights.",
   "lockfiles": {
-    "pc/package-lock.json": "8d9339e86fb1cf8a9915464fd3cca9964e5d8f4569c7fc06b3e249f0f413322b",
-    "pc/src-tauri/Cargo.lock": "55245f0bca811e9a9441861cd9513e4ed68920ba5d8ebfea5de5b090032500b8",
+    "pc/package-lock.json": "10b4dfa5365341f794e1d35b8e3a829ddf7f35fcc027cf29c1d676b6e1bc53d3",
+    "pc/src-tauri/Cargo.lock": "79193fce4e3d7e25ed9987aa8ebed3694c7a3e6df75dfdb30861358b48e3b2aa",
     "pc/src-tauri/bridge/packages/clawd-backend-service/package-lock.json": "ac690b1de03c3f9606dd10eee99cea6c9118713fa20c43cff7afa1906b42d894"
   },
   "packages": 451,

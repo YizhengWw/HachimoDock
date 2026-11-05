@@ -870,7 +870,7 @@ export default function AppearanceDetail({ appearanceId, boardDeviceId = "", onB
               </div>
             </section>
           )}
-          <GlobalAudioCuesPanel boardDeviceId={boardDeviceId}/>
+          <GlobalAudioCuesPanel boardDeviceId={boardDeviceId} currentFamily={activeFamily}/>
 
           {activeRecord?.ok && (
             <section className="detail-side-section detail-side-section--regenerate">
