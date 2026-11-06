@@ -273,7 +273,8 @@ class AgentSessionBus {
       const id = typeof value === "string" ? value.trim() : "";
       return id.startsWith(agentPrefix) ? id.slice(agentPrefix.length) : id;
     };
-    if (probe.ready || agentId === "claude-code") {
+    // Codex Desktop history is available without a CLI for launching turns.
+    if (probe.ready || agentId === "claude-code" || agentId === "codex") {
       try {
         sessions = await adapter.listSessions({ limit: safeLimit });
       } catch (error) {

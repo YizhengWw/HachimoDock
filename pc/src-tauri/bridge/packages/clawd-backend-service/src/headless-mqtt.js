@@ -32,7 +32,7 @@ const APP_VERSION = "0.1.0";
 const PROTOCOL_VERSION_FALLBACK = 3;
 const SPEECH_EXPIRES_MS = 30000;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-const STATUS_VALUES = new Set(["idle", "working", "speaking", "done", "error", "waiting_user"]);
+const STATUS_VALUES = new Set(["idle", "working", "speaking", "done", "reply_complete", "error", "waiting_user"]);
 const LEGACY_WORKING_STATUS_VALUES = new Set(["thinking", "tool_running"]);
 const KNOWN_AGENT_SOURCES = ["codex", "claude-code", "openclaw", "mimocode", "workbuddy"];
 
@@ -110,6 +110,11 @@ function normalizeStatus(value) {
   const normalized = value.trim().toLowerCase();
   if (LEGACY_WORKING_STATUS_VALUES.has(normalized)) return "working";
   return STATUS_VALUES.has(normalized) ? normalized : "";
+}
+
+function mapCodexStateToStatus(state, event, completedWork) {
+  if (state === "attention" && completedWork !== true) return "reply_complete";
+  return mapClawdStateToStatus(state, event) || "idle";
 }
 
 function normalizeAgentId(value) {
@@ -1920,9 +1925,7 @@ function startCodexMonitor(config) {
     monitor = startAgentLogMonitorWorker("codex", (sessionId, state, event, extra) => {
       if (!allowedCodexEvents.has(event)) return;
       const isVisibleEvent = visibleCodexEvents.has(event);
-      const normalized = state === "codex-permission"
-        ? "waiting_user"
-        : mapClawdStateToStatus(state, event) || "idle";
+      const normalized = mapCodexStateToStatus(state, event, extra?.turn?.completedWork);
 
       const out = {
         source: "codex",
@@ -1952,13 +1955,16 @@ function startCodexMonitor(config) {
       };
 
       const enriched = enrichPayloadMetrics(config.metricsTracker, out);
-      config.publisher.publishSource(enriched);
+      // A reply ends the turn in the session bus, but the P4 transport only
+      // receives a completion state when that turn has evidence of task work.
+      const deviceState = enriched.state === "reply_complete" ? "idle" : enriched.state;
+      config.publisher.publishSource({ ...enriched, state: deviceState });
       if (speechCodexEvents.has(event) && enriched.display && (enriched.display.title || enriched.display.content)) {
         const speechSignature = JSON.stringify({
           sessionId: sessionId || "",
           title: enriched.display.title || "",
           content: enriched.display.content || "",
-          status: normalized,
+          status: deviceState,
         });
         const speechKey = sessionId || "codex:session:auto";
         if (speechSignature !== lastSpeechSignatureBySession.get(speechKey)) {
@@ -1966,7 +1972,7 @@ function startCodexMonitor(config) {
           config.publisher.publishSpeech("codex", {
             displayTitle: enriched.display.title || "",
             displayContent: enriched.display.content || "",
-            status: normalized,
+            status: deviceState,
             event: event || undefined,
             sessionId,
             sessionTitle: enriched.sessionTitle,
@@ -2490,6 +2496,7 @@ module.exports = {
   HookHttpServer,
   startParentProcessWatchdog,
   mapClawdStateToStatus,
+  mapCodexStateToStatus,
   normalizeStatus,
   resolveMockButtonInjectRequest,
   injectViaAgentBus,

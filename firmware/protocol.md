@@ -956,7 +956,8 @@ PC to board:
   lifecycle states. Historical `done`, `error`, and `idle` Sessions remain in
   the independent desktop routing list and never enter the device queue.
   A Session that was active in the immediately preceding visible queue may
-  transition to `done` or `error` and remain for exactly 60 seconds. Ordered
+  transition to `done`, `reply_complete`, or `error` and remain for exactly 60 seconds.
+  `reply_complete` retains the reply card without triggering lifecycle audio. Ordered
   lifecycle events may omit unrelated active Sessions, but each periodic full
   Agent scan is authoritative: an active Session missing from that snapshot is
   removed instead of being retained indefinitely. An explicit `idle` transition

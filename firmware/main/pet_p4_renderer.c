@@ -3833,7 +3833,8 @@ static uint16_t miniapp_state_color(const char *state) {
 }
 
 static uint16_t session_status_color(const char *status) {
-  if (status && strcmp(status, "done") == 0) return view_status_color(PET_P4_VIEW_STATUS_DONE);
+  if (status && (!strcmp(status, "done") || !strcmp(status, "reply_complete")))
+    return view_status_color(PET_P4_VIEW_STATUS_DONE);
   if (status && strcmp(status, "error") == 0) return view_status_color(PET_P4_VIEW_STATUS_ERROR);
   if (status && strcmp(status, "stopped") == 0) return view_status_color(PET_P4_VIEW_STATUS_STOPPED);
   if (status && strcmp(status, "waiting_user") == 0) return view_status_color(PET_P4_VIEW_STATUS_WAITING);
@@ -3843,7 +3844,8 @@ static uint16_t session_status_color(const char *status) {
 }
 
 static pet_p4_view_status_t session_view_status(const char *status) {
-  if (status && strcmp(status, "done") == 0) return PET_P4_VIEW_STATUS_DONE;
+  if (status && (!strcmp(status, "done") || !strcmp(status, "reply_complete")))
+    return PET_P4_VIEW_STATUS_DONE;
   if (status && strcmp(status, "error") == 0) return PET_P4_VIEW_STATUS_ERROR;
   if (status && strcmp(status, "stopped") == 0) return PET_P4_VIEW_STATUS_STOPPED;
   if (status && strcmp(status, "waiting_user") == 0) return PET_P4_VIEW_STATUS_WAITING;

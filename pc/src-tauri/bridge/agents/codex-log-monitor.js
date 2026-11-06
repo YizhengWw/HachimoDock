@@ -373,6 +373,14 @@ function desktopLogTurnId(body) {
     || "";
 }
 
+function completedTaskItem(item) {
+  if (item?.status !== "completed") return false;
+  if (item.type === "fileChange") return Array.isArray(item.changes) && item.changes.length > 0;
+  if (item.type === "imageGeneration") return true;
+  return item.type === "mcpToolCall" && item.readOnlyHint === false
+    && !item.error && !item.result?.isError;
+}
+
 function parseDesktopLogSignal(row) {
   const threadId = typeof row?.thread_id === "string" ? row.thread_id.trim() : "";
   const target = typeof row?.target === "string" ? row.target : "";
@@ -475,6 +483,11 @@ class CodexLogMonitor {
     this.desktopLogDb = null;
     this.desktopLogDbOwned = false;
     this.desktopLogInitialized = false;
+    if (this.desktopHistoryDb) {
+      try { this.desktopHistoryDb.close(); } catch {}
+      this.desktopHistoryDb = null;
+      this.desktopTaskItems = null;
+    }
   }
 
   desktopLogDbPath() {
@@ -497,6 +510,29 @@ class CodexLogMonitor {
       return this.desktopLogDb;
     } catch {
       return null;
+    }
+  }
+
+  desktopTurnCompletedWork(sessionId, turnId) {
+    if (!turnId || !this.config.SESSION_DIR) return false;
+    const dbPath = path.join(path.dirname(this.config.SESSION_DIR), "thread_history_1.sqlite");
+    try {
+      if (!this.desktopHistoryDb) {
+        if (!fs.existsSync(dbPath)) return false;
+        const { DatabaseSync } = require("node:sqlite");
+        this.desktopHistoryDb = new DatabaseSync(dbPath, { readOnly: true });
+      }
+      this.desktopTaskItems ??= this.desktopHistoryDb.prepare(`
+        SELECT item_json FROM thread_items
+        WHERE thread_id = ? AND turn_id = ?
+          AND item_type IN ('fileChange', 'imageGeneration', 'mcpToolCall')
+          AND length(item_json) <= 262144
+        ORDER BY rollout_ordinal DESC LIMIT 128
+      `);
+      const rows = this.desktopTaskItems.all(stripCodexPrefix(sessionId), turnId);
+      return rows.some(row => completedTaskItem(JSON.parse(row.item_json)));
+    } catch {
+      return false;
     }
   }
 
@@ -564,6 +600,8 @@ class CodexLogMonitor {
       }
     }
     if (indexedTitle) entry.sessionTitle = indexedTitle;
+    entry.completedWork = signal.event === "event_msg:task_complete"
+      && this.desktopTurnCompletedWork(signal.sessionId, signal.turnId);
     entry.turnId = signal.turnId || entry.turnId;
     entry.lastState = signal.state;
     entry.lastEvent = signal.event;
@@ -789,6 +827,7 @@ class CodexLogMonitor {
         timeToFirstTokenMs: entry.timeToFirstTokenMs || undefined,
         modelContextWindow: entry.modelContextWindow || undefined,
         collaborationModeKind: entry.collaborationModeKind || "",
+        completedWork: entry.completedWork === true,
       },
       // Correlate voice delegation without exporting the full user request.
       taskCorrelation: {
@@ -818,6 +857,7 @@ class CodexLogMonitor {
       event,
       display: extra.display,
       taskCorrelation: extra.taskCorrelation,
+      completedWork: extra.turn.completedWork,
       final: extra.messages.lastFinal,
       tokenUsage: extra.tokenUsage && {
         totalTokens: extra.tokenUsage.totalTokens,
@@ -906,7 +946,13 @@ class CodexLogMonitor {
       }
     }
 
+    if (key === "event_msg:item_completed" && entry.turnActive
+        && payload?.turn_id === entry.turnId && completedTaskItem(payload.item)) {
+      entry.completedWork = true;
+    }
+
     if (key === "event_msg:task_started" && payload) {
+      entry.completedWork = false;
       entry.pendingAssistantMessages = [];
       if (!entry.userAwaitingStart) {
         entry.pendingUserMessages = [];
@@ -964,6 +1010,11 @@ class CodexLogMonitor {
     }
 
     if (key === "event_msg:task_complete" && payload) {
+      const completedTurnId = typeof payload.turn_id === "string" ? payload.turn_id : "";
+      entry.completedWork = (entry.turnActive && entry.turnId === completedTurnId
+        && entry.completedWork === true)
+        || this.desktopTurnCompletedWork(entry.sessionId, completedTurnId);
+
       entry.turnActive = false;
       entry.userAwaitingStart = false;
       const message = wrapDisplayBody(payload.last_agent_message || "");

@@ -9,7 +9,7 @@
 const crypto = require("crypto");
 
 const ACTIVE_TURN_STATES = new Set(["working", "thinking", "tool_running", "speaking", "waiting_user"]);
-const TERMINAL_TURN_STATES = new Set(["done", "error"]);
+const TERMINAL_TURN_STATES = new Set(["done", "reply_complete", "error"]);
 const DEFAULT_SESSION_EVENT_LIMIT = 512;
 const TOOL_START_EVENTS = new Set([
   "PreToolUse",
@@ -242,7 +242,7 @@ class SessionMetricsTracker {
     const contextUsagePct = calculateContextUsagePct(tokenUsage);
     let metrics = this._buildMetrics(record, contextUsagePct, nowMs);
 
-    if (record.turn && (state === "done" || state === "error")) {
+    if (record.turn && TERMINAL_TURN_STATES.has(state)) {
       const finalTurn = record.turn;
       if (finalTurn.waitingUserSinceMs !== undefined) {
         finalTurn.waitingUserMs += Math.max(0, nowMs - finalTurn.waitingUserSinceMs);

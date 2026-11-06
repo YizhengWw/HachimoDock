@@ -645,7 +645,7 @@ fn validate_p4_session_transition_metadata(
     }
     let terminal = matches!(
         state,
-        "done" | "error" | "failed" | "complete" | "completed"
+        "done" | "reply_complete" | "error" | "failed" | "complete" | "completed"
     );
     if terminal_remaining_ms > 0 && !terminal {
         return Err("非终态设备会话不能携带终态保留时间".to_string());

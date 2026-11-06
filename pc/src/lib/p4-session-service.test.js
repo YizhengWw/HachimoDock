@@ -198,3 +198,17 @@ for (const merge of [mergeP4SessionSnapshot, mergeP4SessionEvent]) {
     assert.equal(merge([result], merge === mergeP4SessionSnapshot ? [terminal] : terminal)[0].state, "done");
   });
 }
+
+test("a silent completed reply retains its card until the original deadline", () => {
+  const active = buildP4ConversationQueue(
+    [{ id: "chat", name: "Question", state: "working", statusUpdatedAt: 1000 }],
+    [], 1000,
+  );
+  const reply = { id: "chat", name: "Question", state: "reply_complete",
+    statusUpdatedAt: 1500, displayContent: "Answer" };
+  const completed = buildP4ConversationQueue([reply], active, 1500);
+  assert.equal(completed[0]?.state, "reply_complete");
+  assert.equal(completed[0]?.displayContent, "Answer");
+  assert.equal(buildP4ConversationQueue([reply], completed, 61_499).length, 1);
+  assert.deepEqual(buildP4ConversationQueue([reply], completed, 61_500), []);
+});

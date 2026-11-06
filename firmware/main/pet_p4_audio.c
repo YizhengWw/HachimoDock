@@ -1260,6 +1260,7 @@ void pet_p4_audio_process(
    * inferred lifecycle cue while the event cue is still playing. */
   if (pet_p4_audio_playback_active()) return;
   const char *lifecycle = pet_p4_canonical_lifecycle(pet_p4_state_effective_lifecycle(state, now_ms));
+  if (strcmp(lifecycle, "reply_complete") == 0) return;
   const pet_p4_session_queue_item_t *current_session = NULL;
   for (unsigned i = 0; i < state->session_queue_count && i < PET_P4_SESSION_QUEUE_MAX; i += 1) {
     if (state->current_session_id[0]

@@ -824,3 +824,28 @@ test("SSE inject response carries CORS headers", async () => {
     await bus.stop();
   }
 });
+
+test("Codex Desktop lists and merges multiple live sessions without a CLI", async () => {
+  const adapter = new MockAdapter({ agentId: "codex" });
+  adapter.isAvailable = async () => ({ ready: false, reason: "CLI unavailable" });
+  adapter.listSessions = async () => [
+    { id: "thread-a", name: "First Desktop task" },
+    { id: "thread-b", name: "Second Desktop task" },
+  ];
+  const { bus, port } = await startBus({
+    adapter,
+    sessionStatusProvider: () => [
+      { id: "codex:thread-a", state: "working", updatedAt: 10 },
+      { id: "codex:thread-b", state: "speaking", updatedAt: 11 },
+    ],
+  });
+  try {
+    const { body } = await jsonRequest(port, "GET", "/agent/sessions?agentId=codex");
+    assert.deepEqual(body.sessions.map(({ id, state }) => [id, state]), [
+      ["thread-b", "speaking"],
+      ["thread-a", "working"],
+    ]);
+  } finally {
+    await bus.stop();
+  }
+});

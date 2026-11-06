@@ -6,6 +6,7 @@
  */
 
 import { useEffect, useReducer, useRef } from "react";
+import { isTerminalDeviceSession } from "../lib/session-display.js";
 import {
   fetchAgentSessionEvents,
   fetchAgentSessions,
@@ -21,14 +22,6 @@ export const P4_SESSION_EVENT_POLL_MS = 750;
 export const P4_SESSION_SNAPSHOT_POLL_MS = 5000;
 export const P4_SESSION_EVENT_DISPATCH_GAP_MS = 25;
 
-const TERMINAL_SESSION_STATES = new Set([
-  "done",
-  "error",
-  "failed",
-  "complete",
-  "completed",
-  "stopped",
-]);
 const EMPTY_SESSIONS = Object.freeze([]);
 
 export const AGENT_SESSION_FEED_INITIAL_STATE = Object.freeze({
@@ -127,9 +120,7 @@ export function useAgentSessionFeed({ agentId, displayEnabled, dismissedSessions
   const routingSessions = matchesAgent ? state.routingSessions : EMPTY_SESSIONS;
   const loaded = matchesAgent && state.loaded;
 
-  terminalQueuePendingRef.current = sessions.some((session) => (
-    TERMINAL_SESSION_STATES.has(normalizeText(session?.state).toLowerCase())
-  ));
+  terminalQueuePendingRef.current = sessions.some(isTerminalDeviceSession);
 
   useEffect(() => {
     if (previousAgentIdRef.current === agentId) return;

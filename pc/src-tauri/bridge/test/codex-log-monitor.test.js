@@ -825,3 +825,33 @@ test("CodexLogMonitor does not restore stale active events from a freshly touche
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("only successful work belonging to the completed turn makes it audible", () => {
+  const { mapCodexStateToStatus } = require("../packages/clawd-backend-service/src/headless-mqtt");
+  const states = [];
+  const monitor = new CodexLogMonitor({ ...codexDefaults, SESSION_DIR: "", SESSION_INDEX_PATH: "" },
+    (_id, state, event, extra) => {
+      if (event === "event_msg:task_complete") {
+        states.push(mapCodexStateToStatus(state, event, extra.turn.completedWork));
+      }
+    });
+  const entry = monitor.createEntry("codex:turn-scope", 0, false);
+  const push = (type, turn_id, item) =>
+    monitor.processLine(JSON.stringify({ type: "event_msg", payload: { type, turn_id, item } }), entry);
+  const edit = { type: "fileChange", status: "completed", changes: [{ kind: "update" }] };
+
+  push("task_started", "question");
+  push("item_completed", "question", { type: "mcpToolCall", status: "completed", readOnlyHint: true });
+  push("item_completed", "earlier", edit);
+  push("task_complete", "question");
+
+  push("task_started", "task");
+  push("item_completed", "task", edit);
+  push("task_complete", "task");
+
+  push("task_started", "next-question");
+  push("item_completed", "next-question", { ...edit, status: "failed" });
+  push("task_complete", "next-question");
+
+  assert.deepEqual(states, ["reply_complete", "done", "reply_complete"]);
+});
