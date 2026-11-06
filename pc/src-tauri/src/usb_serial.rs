@@ -1020,7 +1020,7 @@ fn probe_serial_port(
     p4_bridge: bool,
 ) -> Result<ProbedSerialPort, String> {
     probe_serial_port_with(port_name, baud_candidates, desktop_device_id, probe_timeout,
-        p4_bridge, open_serial_pair_with_retry)
+        p4_bridge, open_serial_pair_with_retry, |port, baud| port.set_baud_rate(baud))
 }
 
 fn probe_serial_port_with(
@@ -1030,30 +1030,29 @@ fn probe_serial_port_with(
     probe_timeout: Duration,
     p4_bridge: bool,
     mut open: impl FnMut(&str, u32) -> connection_handle::SerialPortPairResult,
+    mut change_baud: impl FnMut(&mut dyn serialport::SerialPort, u32) -> serialport::Result<()>,
 ) -> Result<ProbedSerialPort, String> {
+    if baud_candidates.is_empty() {
+        return Err("no baud candidates for serial probe".into());
+    }
+    // Open once at a supported baseline. Drivers may reject 4 Mbaud after
+    // opening the physical port; test high rates on the same live handles.
+    let (mut writer, reader) = open(port_name, LEGACY_USB_SERIAL_BAUD)?;
+    let mut reader = BufReader::new(reader);
+    let mut configured_baud = Some(LEGACY_USB_SERIAL_BAUD);
     let mut failures = Vec::new();
-    let mut reusable_pair: Option<connection_handle::SerialPortPair> = None;
     let mut first = true;
     for baud in baud_candidates.iter().copied() {
-        let (mut writer, reader) = if let Some((mut writer, reader)) = reusable_pair.take() {
-            if let Err(error) = writer.set_baud_rate(baud) {
+        if configured_baud != Some(baud) {
+            configured_baud = None;
+            if let Err(error) = change_baud(writer.as_mut(), baud) {
                 failures.push(format!("{baud} baud: {error}"));
-                reusable_pair = Some((writer, reader));
                 continue;
             }
+            configured_baud = Some(baud);
+            reader = BufReader::new(reader.into_inner());
             let _ = writer.clear(serialport::ClearBuffer::Input);
-            (writer, reader)
-        } else {
-            // An unsupported initial baud can fail before a usable handle
-            // exists. Once opened, keep the same physical port on every OS.
-            match open(port_name, baud) {
-                Ok(pair) => pair,
-                Err(error) => {
-                    failures.push(error);
-                    continue;
-                }
-            }
-        };
+        }
 
         let attempt_timeout = serial_probe_attempt_timeout(first, baud, probe_timeout, p4_bridge);
         first = false;
@@ -1070,7 +1069,6 @@ fn probe_serial_port_with(
 
         let started = Instant::now();
         let mut next_handshake_at = started + SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL;
-        let mut reader = BufReader::new(reader);
         let mut line_buffer = Vec::with_capacity(32 * 1024);
         let mut rejections = receive_diagnostics::Rejections::default();
         let mut integrity_rejections=[0u64;6];
@@ -1116,7 +1114,6 @@ fn probe_serial_port_with(
             return Ok(ProbedSerialPort::from_verified_reader(writer, reader, baud, message));
         }
         failures.push(format!("{baud} baud: no valid protocol hello"));
-        reusable_pair = Some((writer, reader.into_inner()));
     }
 
     Err(format!(
@@ -8849,10 +8846,21 @@ manager.activate_memory_test_connection();
             }
             panic!("fallback handshake did not arrive");
         });
-        let mut probed = probe_serial_port_with("test-pty", &[9_600, 19_200], "desktop-1",
-            Duration::from_millis(250), false, |_, _| {
+        let mut changed = Vec::new();
+        let mut probed = probe_serial_port_with("test-pty", &[4_000_000, 9_600, 19_200], "desktop-1",
+            Duration::from_millis(250), false, |_, baud| {
+                assert_eq!(baud, LEGACY_USB_SERIAL_BAUD);
                 Ok(handles.take().expect("a fallback must never reopen the port"))
+            }, |_, baud| {
+                // A PTY carries the real handshake bytes but has no hardware baud control.
+                changed.push(baud);
+                if baud == 4_000_000 {
+                    return Err(serialport::Error::new(serialport::ErrorKind::InvalidInput,
+                        "test driver does not support this rate"));
+                }
+                Ok(())
             }).expect("fallback hello");
+        assert_eq!(changed, [4_000_000, 9_600, 19_200]);
         assert_eq!(probed.baud, 19_200);
         let _board = peer.join().unwrap();
         let frame = read_serial_frame(&mut probed.reader, &mut Vec::new()).unwrap().unwrap();
