@@ -4,7 +4,7 @@
   "selection": "Cargo normal dependency graph excluding build/dev, with direct proc-macro grants labeled separately; npm production-declaration superset (not a claim all packages enter frontend bundle). Original alternative grants are retained; recipients retain upstream rights.",
   "lockfiles": {
     "pc/package-lock.json": "c17b7235716e4569a359849e1fcad0464fe87ae8f9d98c04915fc93a7344f0b7",
-    "pc/src-tauri/Cargo.lock": "12f0944730b799005aaa45c01bb5fe59d3f9103a23ae84f52703c9736a377375",
+    "pc/src-tauri/Cargo.lock": "0d43c9397f26af62a8d2e680af7b3a7d8aff94ee23ee2733b69084a5403b2bc1",
     "pc/src-tauri/bridge/packages/clawd-backend-service/package-lock.json": "ac690b1de03c3f9606dd10eee99cea6c9118713fa20c43cff7afa1906b42d894"
   },
   "packages": 451,

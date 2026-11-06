@@ -1532,6 +1532,22 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
         />
       }
     >
+      {usb.boardWedged && (
+        <div
+          role="alert"
+          style={{
+            margin: "10px 16px",
+            padding: "10px 14px",
+            borderRadius: 8,
+            background: "#7f1d1d",
+            color: "#fff",
+            fontSize: 13,
+            lineHeight: 1.5,
+          }}
+        >
+          设备已挂死（板端死锁）：请重插 USB 线恢复，应用会自动重连。
+        </div>
+      )}
       <Card>
         <DeviceStatusBar />
       </Card>

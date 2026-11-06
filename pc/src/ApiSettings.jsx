@@ -77,6 +77,8 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
   const [providerPending, setProviderPending] = useState({});
   const [savedLlm, setSavedLlm] = useState(null);
   const [asrApiKey, setAsrApiKey] = useState("");
+  const [asrProvider, setAsrProvider] = useState("volcengine");
+  const [speechCustom, setSpeechCustom] = useState({ baseUrl: "", asrModel: "", ttsModel: "", ttsVoice: "" });
   const [asrState, setAsrState] = useState({
     loading: true,
     pending: false,
@@ -154,6 +156,15 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
     let cancelled = false;
     invoke("load_voice_chat_settings")
       .then((status) => {
+        if (status?.ttsProvider === "openai") {
+          setAsrProvider("openai");
+          setSpeechCustom((current) => ({
+            ...current,
+            baseUrl: status?.ttsBaseUrl || current.baseUrl,
+            ttsModel: status?.ttsModel || "",
+            ttsVoice: status?.ttsVoice || "",
+          }));
+        }
         if (!cancelled) applyVoiceChatStatus(status, {
           llmTone: status?.llmConfigured ? "success" : "muted",
           llmMessage: status?.llmConfigured ? "对话大模型已配置" : "选一家大模型，填入 API Key 即可",
@@ -167,12 +178,21 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
     invoke("load_device_asr_settings")
       .then((status) => {
         if (cancelled) return;
+        const provider = status?.provider === "openai" ? "openai" : "volcengine";
+        setAsrProvider(provider);
+        if (provider === "openai") {
+          setSpeechCustom((current) => ({
+            ...current,
+            baseUrl: status?.baseUrl || "",
+            asrModel: status?.model || "",
+          }));
+        }
         setAsrState({
           loading: false,
           pending: false,
           configured: status?.configured === true,
           tone: status?.configured ? "success" : "muted",
-          message: status?.message || "尚未配置火山引擎语音识别 API Key",
+          message: status?.message || "尚未配置语音识别服务",
         });
       })
       .catch((error) => {
@@ -256,11 +276,12 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
   };
 
   const saveAndTestAsr = async () => {
+    const isCustom = asrProvider === "openai";
     if (!asrState.configured && !asrApiKey.trim()) {
       setAsrState((current) => ({
         ...current,
         tone: "warning",
-        message: "请填写火山引擎语音识别 API Key。",
+        message: isCustom ? "请填写自定义端点的 API Key。" : "请填写火山引擎语音识别 API Key。",
       }));
       return;
     }
@@ -275,8 +296,21 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
       saved = await invoke("save_device_asr_settings", {
         input: {
           apiKey: asrApiKey.trim() || null,
+          provider: isCustom ? "openai" : null,
+          baseUrl: isCustom ? speechCustom.baseUrl.trim() : null,
+          model: isCustom ? speechCustom.asrModel.trim() : null,
         },
       });
+      if (isCustom) {
+        await invoke("save_voice_chat_settings", {
+          input: {
+            ttsProvider: "openai",
+            ttsBaseUrl: speechCustom.baseUrl.trim(),
+            ttsModel: speechCustom.ttsModel.trim() || null,
+            ttsVoice: speechCustom.ttsVoice.trim() || null,
+          },
+        });
+      }
       emitApiConfigurationUpdated({
         providerId: "volcengine-asr",
         configured: saved?.configured === true,
@@ -371,6 +405,80 @@ export default function ApiSettings({ onBack, configReadError = "", active = tru
           {usageHelp.pending && <p className="usage-help__notice">按键配置有修改，请先同步到设备。</p>}
           <details><summary>使用前需要什么</summary><p>请保持设备连接电脑，并让 Pet Manager 持续运行。默认使用豆包 ASR 2.0 和 TTS 2.0，请为该 Key 开通对应服务。</p></details>
         </div>
+        <div className="api-settings__presets" role="radiogroup" aria-label="语音服务提供方">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={asrProvider === "volcengine"}
+            className={"btn-ghost btn-sm api-settings__preset" + (asrProvider === "volcengine" ? " is-active" : "")}
+            onClick={() => setAsrProvider("volcengine")}
+            disabled={asrState.pending || asrState.loading}
+          >
+            火山引擎
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={asrProvider === "openai"}
+            className={"btn-ghost btn-sm api-settings__preset" + (asrProvider === "openai" ? " is-active" : "")}
+            onClick={() => setAsrProvider("openai")}
+            disabled={asrState.pending || asrState.loading}
+          >
+            自定义端点（GPUStack 等）
+          </button>
+        </div>
+        {asrProvider === "openai" && (
+          <div className="api-settings__form api-settings__form--speech">
+            <label className="ui-field" htmlFor="api-settings-speech-url">
+              <span className="ui-field__label">接口地址（OpenAI 兼容，识别与合成共用）</span>
+              <input
+                id="api-settings-speech-url"
+                className="ui-control"
+                type="text"
+                value={speechCustom.baseUrl}
+                onChange={(event) => setSpeechCustom((c) => ({ ...c, baseUrl: event.target.value }))}
+                placeholder="http://172.25.70.26"
+                disabled={asrState.pending || asrState.loading}
+              />
+            </label>
+            <label className="ui-field" htmlFor="api-settings-asr-model">
+              <span className="ui-field__label">语音识别模型（ASR）</span>
+              <input
+                id="api-settings-asr-model"
+                className="ui-control"
+                type="text"
+                value={speechCustom.asrModel}
+                onChange={(event) => setSpeechCustom((c) => ({ ...c, asrModel: event.target.value }))}
+                placeholder="faster-whisper-large-v3"
+                disabled={asrState.pending || asrState.loading}
+              />
+            </label>
+            <label className="ui-field" htmlFor="api-settings-tts-model">
+              <span className="ui-field__label">语音合成模型（TTS）</span>
+              <input
+                id="api-settings-tts-model"
+                className="ui-control"
+                type="text"
+                value={speechCustom.ttsModel}
+                onChange={(event) => setSpeechCustom((c) => ({ ...c, ttsModel: event.target.value }))}
+                placeholder="cosyvoice-300m-sft"
+                disabled={asrState.pending || asrState.loading}
+              />
+            </label>
+            <label className="ui-field" htmlFor="api-settings-tts-voice">
+              <span className="ui-field__label">合成音色（voice）</span>
+              <input
+                id="api-settings-tts-voice"
+                className="ui-control"
+                type="text"
+                value={speechCustom.ttsVoice}
+                onChange={(event) => setSpeechCustom((c) => ({ ...c, ttsVoice: event.target.value }))}
+                placeholder="Chinese Female"
+                disabled={asrState.pending || asrState.loading}
+              />
+            </label>
+          </div>
+        )}
         <div className="api-settings__form api-settings__form--speech">
           <label className="ui-field" htmlFor="api-settings-asr-key">
             <span className="ui-field__label">语音 API Key（识别与合成共用）</span>

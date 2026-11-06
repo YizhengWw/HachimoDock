@@ -78,12 +78,23 @@ struct StoredAsrConfig {
     version: u32,
     api_key: String,
     resource_id: String,
+    #[serde(default = "default_asr_provider")]
+    provider: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    model: String,
 }
+
+fn default_asr_provider() -> String { "volcengine".into() }
 
 #[derive(Debug, Clone)]
 struct RuntimeAsrConfig {
     api_key: String,
     resource_id: String,
+    provider: String,
+    base_url: String,
+    model: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +102,9 @@ struct RuntimeAsrConfig {
 pub struct DeviceAsrSettingsInput {
     pub api_key: Option<String>,
     pub resource_id: Option<String>,
+    pub provider: Option<String>,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,10 +112,12 @@ pub struct DeviceAsrSettingsInput {
 pub struct DeviceAsrSettingsStatus {
     pub configured: bool,
     pub deferred: bool,
-    pub provider: &'static str,
+    pub provider: String,
     pub mode: &'static str,
-    pub endpoint: &'static str,
+    pub endpoint: String,
     pub resource_id: String,
+    pub base_url: String,
+    pub model: String,
     pub credential_source: &'static str,
     pub message: String,
 }
@@ -110,7 +126,7 @@ pub struct DeviceAsrSettingsStatus {
 #[serde(rename_all = "camelCase")]
 pub struct DeviceAsrProbeStatus {
     pub ok: bool,
-    pub provider: &'static str,
+    pub provider: String,
     pub resource_id: String,
     pub latency_ms: u128,
     pub log_id: String,
@@ -475,7 +491,7 @@ impl StreamingSpeechRecognizer {
             let result = tokio::select! {
                 biased;
                 _ = stopped => Ok(()),
-                result = run_streaming_session(
+                result = run_asr_session(
                 config,
                 receiver,
                 worker_callback,
@@ -588,6 +604,17 @@ pub fn settings_status() -> Result<DeviceAsrSettingsStatus, String> {
     }
 
     if let Some(config) = read_stored_config()? {
+        if config.provider.trim() == "openai" && !config.base_url.trim().is_empty() {
+            return Ok(public_status_full(
+                true,
+                String::new(),
+                credential_source_name(),
+                "自定义语音识别端点已配置",
+                "openai",
+                config.base_url.trim().trim_end_matches('/').into(),
+                config.model.trim().into(),
+            ));
+        }
         if !config.api_key.trim().is_empty() {
             return Ok(public_status(
                 true,
@@ -612,38 +639,119 @@ pub fn settings_status_for_automatic_restore() -> Result<DeviceAsrSettingsStatus
 
 pub fn save_settings(input: DeviceAsrSettingsInput) -> Result<DeviceAsrSettingsStatus, String> {
     let existing = read_stored_config()?;
+    let existing = existing.unwrap_or_else(|| StoredAsrConfig {
+        version: 1, api_key: String::new(), resource_id: DEFAULT_RESOURCE_ID.into(),
+        provider: "volcengine".into(), base_url: String::new(), model: String::new(),
+    });
+    let provider = input
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| if value == "openai" { "openai".to_string() } else { "volcengine".to_string() })
+        .unwrap_or_else(|| if existing.provider.trim() == "openai" { "openai".into() } else { "volcengine".into() });
     let api_key = input
         .api_key
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| existing.as_ref().map(|value| value.api_key.clone()))
-        .ok_or_else(|| "请填写火山引擎语音识别 API Key".to_string())?;
+        .unwrap_or_else(|| existing.api_key.clone());
     let resource_id = input
         .resource_id
         .as_deref()
-        .or_else(|| existing.as_ref().map(|value| value.resource_id.as_str()))
-        .unwrap_or(DEFAULT_RESOURCE_ID);
-    let resource_id = normalize_resource_id(resource_id)?;
+        .unwrap_or(existing.resource_id.as_str());
+    let base_url = input
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| existing.base_url.trim().trim_end_matches('/').to_string());
+    let model = input
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| existing.model.trim().to_string());
 
+    if provider == "volcengine" {
+        let resource_id = normalize_resource_id(resource_id)?;
+        write_stored_config(&StoredAsrConfig {
+            version: 1,
+            api_key,
+            resource_id: resource_id.clone(),
+            provider,
+            base_url,
+            model,
+        })?;
+        return Ok(public_status(
+            true,
+            resource_id,
+            credential_source_name(),
+            credential_saved_message(),
+        ));
+    }
+    if base_url.is_empty() {
+        return Err("自定义语音识别端点需要填写 base URL".to_string());
+    }
     write_stored_config(&StoredAsrConfig {
         version: 1,
         api_key,
-        resource_id: resource_id.clone(),
+        resource_id: String::new(),
+        provider,
+        base_url: base_url.clone(),
+        model: model.clone(),
     })?;
-
-    Ok(public_status(
+    Ok(public_status_full(
         true,
-        resource_id,
+        String::new(),
         credential_source_name(),
         credential_saved_message(),
+        "openai",
+        base_url,
+        model,
     ))
 }
 
 pub async fn probe_saved_settings() -> Result<DeviceAsrProbeStatus, String> {
     let config = load_runtime_config()?;
     let started = Instant::now();
+    if config.provider == "openai" {
+        let url = format!("{}/v1/models", config.base_url.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .map_err(|e| format!("无法创建探测客户端: {e}"))?;
+        let mut req = client.get(&url);
+        if !config.api_key.trim().is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", config.api_key.trim()));
+        }
+        let resp = req.send().await.map_err(|e| format!("探测请求失败: {e}"))?;
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Ok(DeviceAsrProbeStatus {
+                ok: false, provider: config.provider, resource_id: config.resource_id,
+                latency_ms: started.elapsed().as_millis(), log_id: String::new(),
+                message: format!("自定义端点返回 HTTP {status}: {}", body.chars().take(200).collect::<String>()),
+            });
+        }
+        let model_ok = config.model.trim().is_empty() || body.contains(&config.model);
+        return Ok(DeviceAsrProbeStatus {
+            ok: model_ok,
+            provider: config.provider.clone(),
+            resource_id: config.model.clone(),
+            latency_ms: started.elapsed().as_millis(),
+            log_id: String::new(),
+            message: if model_ok {
+                "自定义语音识别端点可达".to_string()
+            } else {
+                format!("端点可达，但模型列表中没有 {}", config.model)
+            },
+        });
+    }
     let (mut socket, log_id) = connect_cloud_socket(&config).await?;
     let deadline = TokioInstant::now() + PROBE_TIMEOUT;
     // One original 8 s budget covers writes, reads, Ping/Pong and best-effort
@@ -671,7 +779,7 @@ pub async fn probe_saved_settings() -> Result<DeviceAsrProbeStatus, String> {
                         validate_response_payload(&frame.payload, &log_id, None)?;
                         if !frame.is_final() { continue; }
                         return Ok(DeviceAsrProbeStatus {
-                            ok: true, provider: "volcengine", resource_id: config.resource_id,
+                            ok: true, provider: config.provider.clone(), resource_id: config.resource_id.clone(),
                             latency_ms: started.elapsed().as_millis(), log_id,
                             message: "语音识别探测已收到服务端最终响应".to_string(),
                         });
@@ -697,13 +805,27 @@ fn public_status(
     credential_source: &'static str,
     message: impl Into<String>,
 ) -> DeviceAsrSettingsStatus {
+    public_status_full(configured, resource_id, credential_source, message, "volcengine", String::new(), String::new())
+}
+
+fn public_status_full(
+    configured: bool,
+    resource_id: String,
+    credential_source: &'static str,
+    message: impl Into<String>,
+    provider: &str,
+    base_url: String,
+    model: String,
+) -> DeviceAsrSettingsStatus {
     DeviceAsrSettingsStatus {
         configured,
         deferred: false,
-        provider: "volcengine",
+        provider: provider.to_string(),
         mode: "bigmodel-async-device-pcm",
-        endpoint: DEFAULT_ENDPOINT,
+        endpoint: if provider == "volcengine" { DEFAULT_ENDPOINT.to_string() } else { base_url.clone() },
         resource_id,
+        base_url,
+        model,
         credential_source,
         message: message.into(),
     }
@@ -722,6 +844,17 @@ fn normalize_resource_id(value: &str) -> Result<String, String> {
 }
 
 fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
+    if env::var("HACHIMO_ASR_PROVIDER").ok().as_deref() == Some("openai") {
+        let base_url = env::var("HACHIMO_ASR_BASE_URL").unwrap_or_default();
+        if base_url.trim().is_empty() { return None; }
+        return Some(RuntimeAsrConfig {
+            api_key: env::var("HACHIMO_ASR_API_KEY").unwrap_or_default(),
+            resource_id: String::new(),
+            provider: "openai".into(),
+            base_url: base_url.trim().trim_end_matches('/').into(),
+            model: env::var("HACHIMO_ASR_MODEL").unwrap_or_default(),
+        });
+    }
     let api_key = env::var("VOLCENGINE_ASR_API_KEY").ok()?;
     let api_key = api_key.trim();
     if api_key.is_empty() {
@@ -734,6 +867,9 @@ fn runtime_config_from_env() -> Option<RuntimeAsrConfig> {
     Some(RuntimeAsrConfig {
         api_key: api_key.to_string(),
         resource_id,
+        provider: "volcengine".into(),
+        base_url: String::new(),
+        model: String::new(),
     })
 }
 
@@ -748,11 +884,28 @@ fn load_runtime_config() -> Result<RuntimeAsrConfig, String> {
         return Ok(config);
     }
     if let Some(config) = read_stored_config()? {
+        let provider = if config.provider.trim() == "openai" { "openai".to_string() } else { "volcengine".to_string() };
+        if provider == "openai" {
+            let base_url = config.base_url.trim().trim_end_matches('/');
+            if !base_url.is_empty() {
+                return Ok(RuntimeAsrConfig {
+                    api_key: config.api_key.trim().to_string(),
+                    resource_id: String::new(),
+                    provider,
+                    base_url: base_url.to_string(),
+                    model: config.model.trim().to_string(),
+                });
+            }
+            return Err("自定义语音识别端点未配置（需要 base URL）".to_string());
+        }
         let api_key = config.api_key.trim();
         if !api_key.is_empty() {
             return Ok(RuntimeAsrConfig {
                 api_key: api_key.to_string(),
                 resource_id: normalize_resource_id(&config.resource_id)?,
+                provider: "volcengine".into(),
+                base_url: String::new(),
+                model: String::new(),
             });
         }
     }
@@ -908,6 +1061,124 @@ fn credential_saved_message() -> &'static str {
 #[cfg(not(target_os = "macos"))]
 fn credential_saved_message() -> &'static str {
     "火山引擎云端 ASR 配置已安全保存"
+}
+
+async fn run_asr_session(
+    config: RuntimeAsrConfig,
+    receiver: mpsc::UnboundedReceiver<StreamingSpeechCommand>,
+    callback: SpeechCallback,
+    cancelled: Arc<AtomicBool>,
+    round: Arc<SpeechRound>,
+) -> Result<(), String> {
+    if config.provider == "openai" {
+        return run_openai_asr_session(config, receiver, callback, cancelled, round).await;
+    }
+    run_streaming_session(config, receiver, callback, cancelled, round).await
+}
+
+/// One-shot OpenAI-compatible ASR session: buffer all microphone PCM until
+/// Finish, upload as 16 kHz WAV, emit the transcript as a single Final event.
+async fn run_openai_asr_session(
+    config: RuntimeAsrConfig,
+    mut receiver: mpsc::UnboundedReceiver<StreamingSpeechCommand>,
+    callback: SpeechCallback,
+    cancelled: Arc<AtomicBool>,
+    round: Arc<SpeechRound>,
+) -> Result<(), String> {
+    let model = config.model.trim().to_string();
+    if model.is_empty() {
+        return Err(round.fail_at("config", "自定义语音识别未配置模型名称".to_string()));
+    }
+    let base_url = config.base_url.trim().trim_end_matches('/');
+    if base_url.is_empty() {
+        return Err(round.fail_at("config", "自定义语音识别未配置 base URL".to_string()));
+    }
+    round.set_stage("first_pcm_wait");
+    let mut pending = Vec::new();
+    let started = std::time::Instant::now();
+    const MAX_RECORD: std::time::Duration = std::time::Duration::from_secs(120);
+    let finished = loop {
+        if cancelled.load(Ordering::SeqCst) { return Ok(()); }
+        if started.elapsed() > MAX_RECORD {
+            return Err(round.fail_at("upload", "录音超过 120 秒上限，已停止".to_string()));
+        }
+        match tokio::time::timeout(std::time::Duration::from_millis(100), receiver.recv()).await {
+            Err(_) => continue,
+            Ok(None) => { cancelled.store(true, Ordering::SeqCst); return Ok(()); }
+            Ok(Some(cmd)) => match cmd {
+                StreamingSpeechCommand::Pcm(pcm) => {
+                    let bytes = pcm.into_pcm();
+                    pending.extend_from_slice(&bytes);
+                }
+                StreamingSpeechCommand::Finish => break true,
+                StreamingSpeechCommand::Cancel | _ => {
+                    cancelled.store(true, Ordering::SeqCst);
+                    return Ok(());
+                }
+            },
+        }
+    };
+    if !finished { return Ok(()); }
+    if pending.is_empty() {
+        return Err(round.fail_at("first_pcm_empty", "未收到足够的真实麦克风 PCM".to_string()));
+    }
+    round.set_stage("openai_upload");
+    let wav = build_wav_16k_mono(&pending);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| round.fail_at("upload", format!("无法创建识别客户端: {e}")))?;
+    let mut form = reqwest::multipart::Form::new()
+        .part("file", reqwest::multipart::Part::bytes(wav).file_name("audio.wav"))
+        .text("model", model.clone());
+    let mut req = client
+        .post(format!("{}/v1/audio/transcriptions", base_url))
+        .multipart(form);
+    if !config.api_key.trim().is_empty() {
+        req = req.header("Authorization", format!("Bearer {}", config.api_key.trim()));
+    }
+    let resp = req.send().await.map_err(|e| round.fail_at("upload", format!("语音识别请求失败: {e}")))?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(round.fail_at("upload", format!("语音识别服务返回错误 (HTTP {status}): {}", body.chars().take(300).collect::<String>())));
+    }
+    let text: String = match serde_json::from_str::<serde_json::Value>(&body) {
+        Ok(v) => v.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        Err(_) => body.chars().take(500).collect(),
+    };
+    if text.trim().is_empty() {
+        callback(StreamingSpeechEvent::Ready);
+        return Err(round.fail_at("transcript", "未识别到语音内容".to_string()));
+    }
+    callback(StreamingSpeechEvent::Ready);
+    callback(StreamingSpeechEvent::Final {
+        revision: 1,
+        text: text.trim().to_string(),
+        confidence: None,
+    });
+    Ok(())
+}
+
+/// Wrap raw 16 kHz mono 16-bit little-endian PCM in a minimal WAV container.
+fn build_wav_16k_mono(pcm: &[u8]) -> Vec<u8> {
+    let data_len = pcm.len() as u32;
+    let mut v = Vec::with_capacity(44 + pcm.len());
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + data_len).to_le_bytes());
+    v.extend_from_slice(b"WAVE");
+    v.extend_from_slice(b"fmt ");
+    v.extend_from_slice(&16u32.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&16000u32.to_le_bytes());
+    v.extend_from_slice(&32000u32.to_le_bytes());
+    v.extend_from_slice(&2u16.to_le_bytes());
+    v.extend_from_slice(&16u16.to_le_bytes());
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&data_len.to_le_bytes());
+    v.extend_from_slice(pcm);
+    v
 }
 
 async fn run_streaming_session(

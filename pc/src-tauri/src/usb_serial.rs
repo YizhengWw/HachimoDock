@@ -203,6 +203,8 @@ pub struct UsbConnectionStatus {
     pub protocol_schema: u32,
     pub wire_protocol: String,
     pub capabilities: serde_json::Value,
+    #[serde(default)]
+    pub board_wedged: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -686,6 +688,46 @@ fn flush_serial_writer<W: Write + ?Sized>(writer: &mut W) -> std::io::Result<()>
     { writer.flush() }
 }
 
+// The P4 stalls UART RX for 1s+ during flash operations (boot media load,
+// widget media decode, state writes); the WCH driver then accepts no further
+// bytes until the board drains, so a single write call times out mid-frame.
+// Resume from the last accepted offset instead of dropping the frame: an
+// O_NONBLOCK TTY write that errors accepted zero bytes, and Ok(n) reports
+// exactly what was accepted, so no byte is ever replayed.
+fn write_chunk_resilient(writer: &mut dyn Write, chunk: &[u8], deadline: Duration) -> std::io::Result<()> {
+    let started = Instant::now();
+    let mut offset = 0usize;
+    while offset < chunk.len() {
+        if started.elapsed() > deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("serial write chunk deadline ({deadline:?})"),
+            ));
+        }
+        match writer.write(&chunk[offset..]) {
+            Ok(0) => thread::sleep(Duration::from_millis(50)),
+            Ok(n) => offset += n,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+// 5s per chunk: the P4's boot media load stalls UART RX for minutes, so a
+// write landing in that window fails quickly instead of blocking the writer
+// thread; the frame is re-sent once the board drains again.
+const P4_WRITE_CHUNK_DEADLINE: Duration = Duration::from_secs(5);
+
 fn write_serial_bytes_paced(
     writer: &mut dyn Write,
     bytes: &[u8],
@@ -698,7 +740,7 @@ fn write_serial_bytes_paced(
         let chunks = bytes.chunks(slice_bytes);
         let chunk_count = chunks.len();
         for (index, chunk) in chunks.enumerate() {
-            writer.write_all(chunk)?;
+            write_chunk_resilient(writer, chunk, P4_WRITE_CHUNK_DEADLINE)?;
             // TTYPort::flush calls tcdrain on macOS. WCH drivers can block
             // there indefinitely, ignoring the configured write timeout and
             // wedging the port even after disconnect. Pace bounded writes;
@@ -1689,6 +1731,11 @@ pub struct UsbSerialManager {
     appearance_sync_active: Arc<AtomicBool>,
     appearance_sync_cancel_requested: Arc<AtomicBool>,
     serial_body_write_active: Arc<AtomicBool>,
+    // Board wedge (deadlock) detector: set by the heartbeat monitor when the
+    // board stops answering (writes fail AND RX is silent); all senders fail
+    // fast instead of parking threads inside the serial driver.
+    board_wedged: Arc<AtomicBool>,
+    last_rx_activity_ms: Arc<AtomicU64>,
     next_connection_id: Arc<AtomicU64>,
     asset_ack_waiters: Arc<Mutex<Vec<AssetAckWaiter>>>,
     widget_ack_waiters: Arc<Mutex<Vec<WidgetAckWaiter>>>,
@@ -2108,6 +2155,8 @@ impl UsbSerialManager {
             appearance_sync_active: Arc::new(AtomicBool::new(false)),
             appearance_sync_cancel_requested: Arc::new(AtomicBool::new(false)),
             serial_body_write_active: Arc::new(AtomicBool::new(false)),
+            board_wedged: Arc::new(AtomicBool::new(false)),
+            last_rx_activity_ms: Arc::new(AtomicU64::new(0)),
             next_connection_id: Arc::new(AtomicU64::new(0)),
             asset_ack_waiters: Arc::new(Mutex::new(Vec::new())),
             widget_ack_waiters: Arc::new(Mutex::new(Vec::new())),
@@ -2432,7 +2481,14 @@ impl UsbSerialManager {
                     continue;
                 }
                 let frame = match read_serial_frame(&mut reader, &mut line_buffer) {
-                    Ok(Some(line)) => line,
+                    Ok(Some(line)) => {
+                        let rx_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|t| t.as_millis() as u64)
+                            .unwrap_or(0);
+                        self.last_rx_activity_ms.store(rx_ms, std::sync::atomic::Ordering::Relaxed);
+                        line
+                    },
                     Ok(None) => { read_failure=Some(("read_eof","end_of_stream",None)); break; },
                     Err(e) if serial_read_recovery_delay(&e).is_some() => {
                         if cancel_reader.load(Ordering::SeqCst) {
@@ -2987,6 +3043,9 @@ impl UsbSerialManager {
             (None,wire,self.connection.lock().map_err(|e|e.to_string())?)
         };
         let conn = connection_guard.as_mut().ok_or("Not connected")?;
+        if self.board_wedged.load(Ordering::Acquire) {
+            return Err("board wedged: re-plug the USB cable to recover".into());
+        }
         self.refresh_pending_hello(conn);
         if conn.cancel_reader.load(Ordering::Acquire) || !self.inbound_owner.is_current(conn.connection_id) {
             return Err("USB connection retired; request not submitted".into());
@@ -3132,7 +3191,8 @@ impl UsbSerialManager {
                 if bounded_frame {
                     let started=Instant::now();
                     let result=write_serial_live_frame(conn.writer.as_mut(), bytes,
-                        paced_slice_bytes.unwrap_or(bytes.len()), live_audio_pacing::serial_frame_gap(topic, P4_CH343_SERIAL_WRITE_GAP));
+                        paced_slice_bytes.unwrap_or(bytes.len()), live_audio_pacing::serial_frame_gap(topic, P4_CH343_SERIAL_WRITE_GAP),
+                        if audio_frame { live_audio_pacing::RECOVERY_DEADLINE } else { live_audio_pacing::LIVE_FRAME_RECOVERY_DEADLINE });
                     let report=match &result {Ok(report)=>report,Err(error)=>&error.report};
                     if result.is_err() {
                         failure_progress = Some((report.bytes_written, report.retries, report.error_kind, report.os_error));
@@ -3157,16 +3217,32 @@ impl UsbSerialManager {
                     return result.map(|_|()).map_err(|error| format!("Live serial write failed: {error}"));
                 }
                 if let Some(write_slice_bytes) = paced_slice_bytes {
-                    write_serial_bytes_paced(
+                    match write_serial_bytes_paced(
                         conn.writer.as_mut(),
                         bytes,
                         write_slice_bytes,
                         P4_CH343_SERIAL_WRITE_GAP,
-                    )
-                    .map_err(|error| format!("Paced serial write failed: {error}"))
+                    ) {
+                        Ok(()) => Ok(()),
+                        Err(error) => {
+                            // The paced path has no per-byte progress report;
+                            // classify the driver error kind so a transient
+                            // timeout keeps the connection (the frame is
+                            // re-sent once the board drains), while hard IO
+                            // errors still invalidate it.
+                            failure_progress = Some((0, 0,
+                                match error.kind() {
+                                    std::io::ErrorKind::TimedOut => Some("timeout"),
+                                    std::io::ErrorKind::WouldBlock => Some("would_block"),
+                                    std::io::ErrorKind::Interrupted => Some("interrupted"),
+                                    _ => None,
+                                },
+                                error.raw_os_error()));
+                            Err(format!("Paced serial write failed: {error}"))
+                        }
+                    }
                 } else {
-                    conn.writer
-                        .write_all(bytes)
+                    write_chunk_resilient(conn.writer.as_mut(), bytes, P4_WRITE_CHUNK_DEADLINE)
                         .map_err(|error| format!("Write failed: {error}"))?;
                     if flush {
                         flush_serial_writer(conn.writer.as_mut())
@@ -3178,11 +3254,14 @@ impl UsbSerialManager {
         };
         if let Err(error) = write_result {
             if let Some(attempt)=&appearance { attempt.uncertain(); }
-            // Only a classified zero-progress transient leaves framing intact.
-            // Partial/unknown writes and hard IO errors still invalidate the
-            // connection; never replay a failed logical frame or fake an ACK.
-            let keep_connection = failure_progress.is_some_and(|(written, _, kind, _)|
-                written == 0 && matches!(kind, Some("timeout" | "would_block" | "interrupted")));
+            // A classified timeout (zero or partial progress) never kills the
+            // connection: the board either accepted nothing (frame lost, the
+            // periodic frames re-send it once the board drains) or a truncated
+            // JSONL line (the line-based parser drops it; the board cannot
+            // execute a partial line, and we never replay a frame or fake an
+            // ACK). Only hard IO errors - a real disconnect - invalidate.
+            let keep_connection = failure_progress.is_some_and(|(_, _, kind, _)|
+                matches!(kind, Some("timeout" | "would_block" | "interrupted")));
             let details = serde_json::json!({
                 "stage": if topic == "system/heartbeat" {"heartbeat"} else if live_frame {"live"} else if bulk_frame {"bulk"} else {"control"},
                 "generation": conn.connection_id, "bytes": bytes.len(),
@@ -6170,20 +6249,39 @@ impl UsbSerialManager {
     pub fn status(&self) -> UsbConnectionStatus {
         if let Ok(mut connection) = self.connection.try_lock() {
             if let Some(c) = connection.as_mut() { self.refresh_pending_hello(c); }
-            let snapshot = connection
+            let mut snapshot = connection
                 .as_ref()
                 .map(usb_connection_status)
                 .unwrap_or_else(disconnected_usb_status);
+            snapshot.board_wedged = self.board_wedged.load(Ordering::Acquire);
             if let Ok(mut cached) = self.status_snapshot.lock() {
                 *cached = snapshot.clone();
             }
             return snapshot;
         }
 
-        self.status_snapshot
+        let mut snapshot = self.status_snapshot
             .lock()
             .map(|snapshot| snapshot.clone())
-            .unwrap_or_else(|_| disconnected_usb_status())
+            .unwrap_or_else(|_| disconnected_usb_status());
+        snapshot.board_wedged = self.board_wedged.load(Ordering::Acquire);
+        snapshot
+    }
+
+    pub fn board_wedged(&self) -> bool {
+        self.board_wedged.load(Ordering::Acquire)
+    }
+
+    pub fn mark_board_wedged(&self) {
+        self.board_wedged.store(true, Ordering::Release);
+    }
+
+    pub fn clear_board_wedged(&self) {
+        self.board_wedged.store(false, Ordering::Release);
+    }
+
+    pub fn last_rx_activity_ms(&self) -> u64 {
+        self.last_rx_activity_ms.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -6191,6 +6289,7 @@ fn usb_connection_status(connection: &UsbConnection) -> UsbConnectionStatus {
     let connected = connection.connected && !connection.cancel_reader.load(Ordering::Acquire);
     UsbConnectionStatus {
         connected,
+        board_wedged: false,
         connection_id: if connected&&connection.connection_id!=0{connection.connection_id.to_string()}else{String::new()},
         boot_id: if connected{connection.capabilities["debugBootId"].as_str()
             .filter(|s|s.len()==16&&s.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)))
@@ -6239,6 +6338,7 @@ fn disconnected_usb_status() -> UsbConnectionStatus {
         protocol_schema: 0,
         wire_protocol: String::new(),
         capabilities: serde_json::Value::Null,
+        board_wedged: false,
     }
 }
 
