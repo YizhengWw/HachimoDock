@@ -125,7 +125,18 @@ pub struct VoiceChatSettings {
     pub llm_web_search: Option<bool>,
     pub tts_api_key: String,
     pub tts_resource_id: String,
+    /// "volcengine" (built-in) or "openai" (custom OpenAI-compatible endpoint).
+    #[serde(default = "default_tts_provider")]
+    pub tts_provider: String,
+    #[serde(default)]
+    pub tts_base_url: String,
+    #[serde(default)]
+    pub tts_model: String,
+    #[serde(default)]
+    pub tts_voice: String,
 }
+
+fn default_tts_provider() -> String { "volcengine".into() }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -137,6 +148,10 @@ pub struct VoiceChatSettingsInput {
     pub llm_web_search: Option<bool>,
     pub tts_api_key: Option<String>,
     pub tts_resource_id: Option<String>,
+    pub tts_provider: Option<String>,
+    pub tts_base_url: Option<String>,
+    pub tts_model: Option<String>,
+    pub tts_voice: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,6 +170,10 @@ pub struct VoiceChatSettingsStatus {
     pub llm_custom_base_url: String,
     pub tts_api_key_masked: String,
     pub tts_resource_id: String,
+    pub tts_provider: String,
+    pub tts_base_url: String,
+    pub tts_model: String,
+    pub tts_voice: String,
     pub credential_source: &'static str,
 }
 
@@ -265,6 +284,7 @@ pub fn migrate_shared_speech_key() -> Result<(), String> {
     migrate_shared_speech_key_at(&settings_path()?, asr.configured, &effective.tts_api_key, |key| {
         crate::volcengine_asr::save_settings(crate::volcengine_asr::DeviceAsrSettingsInput {
             api_key: Some(key.to_string()), resource_id: None,
+            provider: None, base_url: None, model: None,
         }).map(|_| ())
     })
 }
@@ -302,6 +322,10 @@ pub fn status() -> Result<VoiceChatSettingsStatus, String> {
         llm_custom_base_url: settings.llm_custom_base_url.clone(),
         tts_api_key_masked: mask_secret(&tts_key),
         tts_resource_id: settings.tts_resource_id.clone(),
+        tts_provider: settings.tts_provider.clone(),
+        tts_base_url: settings.tts_base_url.clone(),
+        tts_model: settings.tts_model.clone(),
+        tts_voice: settings.tts_voice.clone(),
         credential_source: source,
     })
 }
@@ -380,6 +404,19 @@ fn merge_settings(mut settings: VoiceChatSettings, input: VoiceChatSettingsInput
     }
     if let Some(value) = input.tts_resource_id {
         settings.tts_resource_id = value.trim().to_string();
+    }
+    if let Some(value) = input.tts_provider {
+        let v = value.trim();
+        settings.tts_provider = if v == "openai" { "openai".into() } else { "volcengine".into() };
+    }
+    if let Some(value) = input.tts_base_url {
+        settings.tts_base_url = value.trim().to_string();
+    }
+    if let Some(value) = input.tts_model {
+        settings.tts_model = value.trim().to_string();
+    }
+    if let Some(value) = input.tts_voice {
+        settings.tts_voice = value.trim().to_string();
     }
     remember_active_key(&mut settings);
     settings
@@ -486,13 +523,27 @@ pub fn tts_config(speaker: &str, clone_speaker_id: &str, speed: f32) -> Result<D
     migrate_shared_speech_key()?;
     let (settings, _) = load()?;
     let (tts_key, _) = resolve_tts_key(&settings);
-    Ok(DoubaoTtsConfig::new(
+    let mut cfg = DoubaoTtsConfig::new(
         &tts_key,
         speaker,
         clone_speaker_id,
         speed,
         &settings.tts_resource_id,
-    ))
+    );
+    // Test override: HACHIMO_TTS_PROVIDER=openai skips the encrypted settings file.
+    if std::env::var("HACHIMO_TTS_PROVIDER").ok().as_deref() == Some("openai") {
+        cfg.tts_provider = "openai".into();
+        cfg.tts_base_url = std::env::var("HACHIMO_TTS_BASE_URL").unwrap_or_default();
+        cfg.tts_model = std::env::var("HACHIMO_TTS_MODEL").unwrap_or_default();
+        cfg.tts_voice = std::env::var("HACHIMO_TTS_VOICE").unwrap_or_else(|_| "Chinese Female".into());
+        if let Ok(k) = std::env::var("HACHIMO_TTS_API_KEY") { cfg.api_key = k; }
+    } else {
+        cfg.tts_provider = settings.tts_provider.clone();
+        cfg.tts_base_url = settings.tts_base_url.clone();
+        cfg.tts_model = settings.tts_model.clone();
+        cfg.tts_voice = if settings.tts_voice.trim().is_empty() { "Chinese Female".into() } else { settings.tts_voice.trim().into() };
+    }
+    Ok(cfg)
 }
 
 #[cfg(test)]

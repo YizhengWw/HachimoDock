@@ -13,7 +13,14 @@ pub(super) fn serial_frame_gap(topic: &str, ordinary_gap: Duration) -> Duration 
 }
 
 const MAX_RECOVERY_RETRIES: usize = 3;
-const RECOVERY_DEADLINE: Duration = Duration::from_millis(350);
+// Audio live frames fail fast: a P4 stalled on flash ops cannot consume PCM
+// in real time, so keep the original short budget. Non-audio live frames
+// (widget snapshots, app snapshots, heartbeats) use a 5s budget: the P4's
+// boot media load stalls UART RX for minutes (observed: 4+ minutes), so a
+// stalled write fails quickly and is re-sent by the periodic frames once
+// the board drains again. A dropped frame never kills the connection.
+pub(super) const RECOVERY_DEADLINE: Duration = Duration::from_millis(350);
+pub(super) const LIVE_FRAME_RECOVERY_DEADLINE: Duration = Duration::from_secs(5);
 const RETRY_BACKOFF: Duration = Duration::from_millis(2);
 
 // Failed Windows overlapped completion can have unknown partial progress.
@@ -71,15 +78,20 @@ impl std::fmt::Display for LiveWriteFailure {
     }
 }
 
-fn can_retry(error: &io::Error, retries: usize, elapsed: Duration) -> bool {
+fn can_retry(error: &io::Error, retries: usize, elapsed: Duration, deadline: Duration, max_retries: usize) -> bool {
     matches!(error.kind(),io::ErrorKind::TimedOut|io::ErrorKind::WouldBlock|io::ErrorKind::Interrupted)
-        && retries < MAX_RECOVERY_RETRIES && elapsed < RECOVERY_DEADLINE
+        && retries < max_retries && elapsed < deadline
         && !error.get_ref().is_some_and(|e|e.is::<UncertainWrite>())
 }
 
-pub(super) fn write_serial_live_frame(writer: &mut dyn Write, bytes: &[u8], slice_bytes: usize, gap: Duration) -> Result<LiveWriteReport,LiveWriteFailure> {
+pub(super) fn write_serial_live_frame(writer: &mut dyn Write, bytes: &[u8], slice_bytes: usize, gap: Duration, recovery_deadline: Duration) -> Result<LiveWriteReport,LiveWriteFailure> {
     let started=Instant::now();
     let mut report=LiveWriteReport::default();
+    // Retry budget scales with the deadline (~100ms per attempt: the driver
+    // call itself blocks up to the port timeout), so the 350ms audio budget
+    // keeps the original 3-retry behavior while the 10s frame budget rides
+    // out long flash-operation stalls.
+    let max_retries = (recovery_deadline.as_millis() as usize / 100).max(MAX_RECOVERY_RETRIES);
     let chunks = bytes.chunks(slice_bytes.max(1));
     let count = chunks.len();
     for (index, chunk) in chunks.enumerate() {
@@ -87,7 +99,7 @@ pub(super) fn write_serial_live_frame(writer: &mut dyn Write, bytes: &[u8], slic
         while offset < chunk.len() {
             // Bound the WHOLE frame recovery, not a fresh budget per slice.
             // Driver calls retain their own timeout; this is not cancellation.
-            if report.retries > 0 && started.elapsed() >= RECOVERY_DEADLINE {
+            if report.retries > 0 && started.elapsed() >= recovery_deadline {
                 let error=io::Error::new(io::ErrorKind::TimedOut,"live frame recovery deadline");
                 report.observe(&error);
                 return Err(LiveWriteFailure{report,error});
@@ -101,7 +113,7 @@ pub(super) fn write_serial_live_frame(writer: &mut dyn Write, bytes: &[u8], slic
                 Err(error)=>error,
             };
             report.observe(&error);
-            if !can_retry(&error,report.retries,started.elapsed()) {
+            if !can_retry(&error,report.retries,started.elapsed(),recovery_deadline,max_retries) {
                 return Err(LiveWriteFailure{report,error});
             }
             report.retries+=1;
@@ -152,7 +164,7 @@ mod tests {
         for kind in [io::ErrorKind::TimedOut,io::ErrorKind::WouldBlock,io::ErrorKind::Interrupted] {
             for offset in [0,7,63,64,129] {
                 let mut writer=flaky(vec![(offset,kind)]);
-                let report=write_serial_live_frame(&mut writer,&bytes,64,Duration::ZERO).unwrap();
+                let report=write_serial_live_frame(&mut writer,&bytes,64,Duration::ZERO,RECOVERY_DEADLINE).unwrap();
                 assert_eq!(writer.bytes,bytes,"must not duplicate a partially sent frame");
                 assert_eq!(report.bytes_written,bytes.len()); assert_eq!(report.retries,1);
             }
@@ -163,7 +175,7 @@ mod tests {
         let mut writer=flaky(vec![(7,io::ErrorKind::TimedOut),(70,io::ErrorKind::WouldBlock),
             (130,io::ErrorKind::Interrupted),(200,io::ErrorKind::TimedOut)]);
         let bytes:Vec<_>=(0..256).map(|i|i as u8).collect();
-        let failure=write_serial_live_frame(&mut writer,&bytes,64,Duration::ZERO).unwrap_err();
+        let failure=write_serial_live_frame(&mut writer,&bytes,64,Duration::ZERO,RECOVERY_DEADLINE).unwrap_err();
         assert_eq!(failure.report.retries,3);
         assert_eq!(failure.report.bytes_written,writer.bytes.len());
         assert_eq!(writer.bytes,bytes[..writer.bytes.len()]);
@@ -172,22 +184,22 @@ mod tests {
     #[test]
     fn no_progress_and_recovery_deadline_have_finite_bounds() {
         let mut writer=flaky(vec![(0,io::ErrorKind::Interrupted);100]);
-        let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO).unwrap_err();
+        let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO,RECOVERY_DEADLINE).unwrap_err();
         assert_eq!(writer.attempts,4); assert_eq!(failure.report.bytes_written,0);
         let timeout=io::Error::new(io::ErrorKind::TimedOut,"timeout");
-        assert!(can_retry(&timeout,2,RECOVERY_DEADLINE-Duration::from_millis(1)));
-        assert!(!can_retry(&timeout,2,RECOVERY_DEADLINE));
-        assert!(!can_retry(&timeout,3,Duration::ZERO));
+        assert!(can_retry(&timeout,2,RECOVERY_DEADLINE-Duration::from_millis(1),RECOVERY_DEADLINE,MAX_RECOVERY_RETRIES));
+        assert!(!can_retry(&timeout,2,RECOVERY_DEADLINE,RECOVERY_DEADLINE,MAX_RECOVERY_RETRIES));
+        assert!(!can_retry(&timeout,3,Duration::ZERO,RECOVERY_DEADLINE,MAX_RECOVERY_RETRIES));
     }
     #[test]
     fn permanent_and_uncertain_errors_never_retry() {
         for kind in [io::ErrorKind::BrokenPipe,io::ErrorKind::PermissionDenied,io::ErrorKind::NotConnected] {
             let mut writer=flaky(vec![(0,kind)]);
-            let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO).unwrap_err();
+            let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO,RECOVERY_DEADLINE).unwrap_err();
             assert_eq!(writer.attempts,1); assert_eq!(failure.report.retries,0);
         }
         let error=uncertain_write_error(io::Error::from_raw_os_error(995));
-        assert!(!can_retry(&error,0,Duration::ZERO));
+        assert!(!can_retry(&error,0,Duration::ZERO,RECOVERY_DEADLINE,MAX_RECOVERY_RETRIES));
         let mut report=LiveWriteReport::default(); report.observe(&error);
         assert_eq!(report.error_kind,Some("write_progress_unknown"));
         assert_eq!(report.os_error,Some(995));
@@ -196,7 +208,7 @@ mod tests {
             fn write(&mut self,_:&[u8])->io::Result<usize>{Err(uncertain_write_error(io::Error::new(io::ErrorKind::TimedOut,"private driver text")))}
             fn flush(&mut self)->io::Result<()>{panic!("no drain")}
         }
-        let failure=write_serial_live_frame(&mut Unknown,b"frame\n",64,Duration::ZERO).unwrap_err();
+        let failure=write_serial_live_frame(&mut Unknown,b"frame\n",64,Duration::ZERO,RECOVERY_DEADLINE).unwrap_err();
         assert_eq!(failure.report.retries,0);
         assert!(!failure.to_string().contains("private"));
         assert!(failure.to_string().contains("write_progress_unknown"));
@@ -204,7 +216,7 @@ mod tests {
     #[test]
     fn zero_byte_write_stops_without_spinning() {
         let mut writer=capture(0);
-        let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO).unwrap_err();
+        let failure=write_serial_live_frame(&mut writer,b"frame\n",64,Duration::ZERO,RECOVERY_DEADLINE).unwrap_err();
         assert_eq!(failure.kind(),io::ErrorKind::WriteZero);
         assert_eq!(writer.calls.len(),1);
     }
@@ -221,7 +233,7 @@ mod tests {
                 let started = std::time::Instant::now();
                 for _ in 0..frames {
                     let mut writer = capture(usize::MAX);
-                    write_serial_live_frame(&mut writer, &[1; 4400], 64, Duration::from_micros(250)).unwrap();
+                    write_serial_live_frame(&mut writer, &[1; 4400], 64, Duration::from_micros(250),RECOVERY_DEADLINE).unwrap();
                     assert_eq!(writer.bytes.len(), 4400);
                     assert_eq!(writer.calls.len(), 69);
                 }
@@ -252,7 +264,7 @@ mod tests {
     fn preserves_frames_in_64_byte_bursts_without_flush() {
         let bytes: Vec<u8> = (0..4400).map(|n| (n % 251) as u8).collect();
         let mut writer = capture(usize::MAX);
-        write_serial_live_frame(&mut writer, &bytes, 64, Duration::ZERO).unwrap();
+        write_serial_live_frame(&mut writer, &bytes, 64, Duration::ZERO, RECOVERY_DEADLINE).unwrap();
         assert_eq!(writer.bytes, bytes);
         assert_eq!(writer.calls.len(), 69);
         assert!(writer.calls.iter().all(|n| *n <= 64));
@@ -261,7 +273,7 @@ mod tests {
     fn partial_writes_are_completed_in_order() {
         let bytes: Vec<u8> = (0..4400).map(|n| (n % 251) as u8).collect();
         let mut writer = capture(7);
-        write_serial_live_frame(&mut writer, &bytes, 64, Duration::ZERO).unwrap();
+        write_serial_live_frame(&mut writer, &bytes, 64, Duration::ZERO, RECOVERY_DEADLINE).unwrap();
         assert_eq!(writer.bytes, bytes);
         assert!(writer.calls.iter().all(|n| *n <= 64));
     }
@@ -269,16 +281,16 @@ mod tests {
     fn write_failure_stops_the_frame() {
         let mut writer = capture(64);
         writer.fail_after = 128;
-        let error = write_serial_live_frame(&mut writer, &[1; 4400], 64, Duration::ZERO).unwrap_err();
+        let error = write_serial_live_frame(&mut writer, &[1; 4400], 64, Duration::ZERO, RECOVERY_DEADLINE).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
         assert_eq!(writer.bytes.len(), 128);
     }
     #[test]
     fn empty_and_zero_slice_inputs_are_safe() {
         let mut writer = capture(64);
-        write_serial_live_frame(&mut writer, &[], 64, Duration::ZERO).unwrap();
+        write_serial_live_frame(&mut writer, &[], 64, Duration::ZERO, RECOVERY_DEADLINE).unwrap();
         assert!(writer.calls.is_empty());
-        write_serial_live_frame(&mut writer, &[1, 2, 3], 0, Duration::ZERO).unwrap();
+        write_serial_live_frame(&mut writer, &[1, 2, 3], 0, Duration::ZERO, RECOVERY_DEADLINE).unwrap();
         assert_eq!(writer.calls, vec![1, 1, 1]);
         assert_eq!(writer.bytes, vec![1, 2, 3]);
     }

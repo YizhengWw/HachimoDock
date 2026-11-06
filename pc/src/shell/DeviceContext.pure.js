@@ -67,6 +67,7 @@ export function normalizeUsbStatusPayload(status) {
     connectionId,
     bootId,
     connected: !!status?.connected,
+    boardWedged: !!status?.boardWedged,
     portName: status?.portName || "",
     baudRate: Number(status?.baudRate) || 0,
     boardDeviceId: status?.connected ? status?.boardDeviceId || "" : "",
@@ -86,6 +87,7 @@ export function usbStatusSnapshotsEqual(left, right) {
   if (left === right) return true;
   if (!left || !right) return false;
   return left.connected === right.connected
+    && (left.boardWedged ?? false) === (right.boardWedged ?? false)
     && left.portName === right.portName
     && left.baudRate === right.baudRate
     && left.boardDeviceId === right.boardDeviceId

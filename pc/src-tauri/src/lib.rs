@@ -121,6 +121,7 @@ mod desktop_window;
 mod community;
 mod community_credentials;
 mod doubao_tts;
+mod openai_tts;
 mod pc_audio;
 mod pc_playback;
 mod persona_llm;
@@ -10941,17 +10942,42 @@ fn forward_usb_speech_updates(
 
 /// Keep the board's host lease alive independently from state and speech scans.
 fn start_usb_host_heartbeat(usb_manager: usb_serial::UsbSerialManager) {
-    thread::spawn(move || loop {
-        thread::sleep(Duration::from_secs(2));
-        retire_changed_device_voice_transport(&usb_manager);
-        if !usb_manager.status().connected {
-            continue;
-        }
-        if let Err(error) = usb_manager.send(
-            "system/heartbeat",
-            &serde_json::json!({ "tsMs": current_timestamp_ms() }),
-        ) {
-            eprintln!("[usb-heartbeat] send failed: {}", error);
+    thread::spawn(move || {
+        let mut fail_streak = 0u64;
+        loop {
+            thread::sleep(Duration::from_secs(2));
+            retire_changed_device_voice_transport(&usb_manager);
+            if !usb_manager.status().connected {
+                fail_streak = 0;
+                continue;
+            }
+            match usb_manager.send(
+                "system/heartbeat",
+                &serde_json::json!({ "tsMs": current_timestamp_ms() }),
+            ) {
+                Ok(()) => {
+                    fail_streak = 0;
+                    usb_manager.clear_board_wedged();
+                }
+                Err(error) => {
+                    fail_streak += 1;
+                    // Wedge detection: repeated write failures combined with a
+                    // fully silent RX path mean the board (or its UART bridge)
+                    // is deadlocked. Stop touching the port; the reader will
+                    // retire the dead connection and auto-reconnect reopens it.
+                    let rx_age_ms =
+                        current_timestamp_ms().saturating_sub(usb_manager.last_rx_activity_ms());
+                    if !usb_manager.board_wedged() && fail_streak >= 5 && rx_age_ms >= 30_000 {
+                        usb_manager.mark_board_wedged();
+                        eprintln!(
+                            "[usb-heartbeat] board wedged: {} consecutive failed heartbeats, RX silent {}ms; writes stopped, re-plug USB to recover",
+                            fail_streak, rx_age_ms
+                        );
+                    } else {
+                        eprintln!("[usb-heartbeat] send failed: {}", error);
+                    }
+                }
+            }
         }
     });
 }
@@ -11559,6 +11585,54 @@ pub fn run() {
             // `ensure_voice_runtime` itself once detect_local_agents has
             // settled and a non-empty selection is persisted in
             // pet-bridge.json — see DeviceDashboard.jsx.
+                        // Interpose SIGTERM/SIGINT (kill, Activity Monitor Force Quit,
+            // launchctl): default termination skips RunEvent::Exit cleanup
+            // and orphans the Node bridge, wedging the appearance safety
+            // lock. Route the signal through the graceful exit path.
+            #[cfg(unix)]
+            {
+                static SIGNAL_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if SIGNAL_READY.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                    static SIGNAL_PIPE_WRITE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+                    let mut fds: [libc::c_int; 2] = [0; 2];
+                    if unsafe { libc::pipe(fds.as_mut_ptr()) } == 0 {
+                        let signal_pipe_read = fds[0];
+                        SIGNAL_PIPE_WRITE.store(fds[1], Ordering::SeqCst);
+                        extern "C" fn on_signal(_sig: libc::c_int) {
+                            let mut byte: u8 = 1;
+                            let write_fd = SIGNAL_PIPE_WRITE.load(Ordering::SeqCst);
+                            if write_fd >= 0 {
+                                let _ = unsafe {
+                                    libc::write(write_fd, &byte as *const u8 as *const libc::c_void, 1)
+                                };
+                            }
+                        }
+                        let mut act: libc::sigaction = unsafe { std::mem::zeroed() };
+                        act.sa_sigaction = on_signal as usize;
+                        unsafe {
+                            libc::sigemptyset(&mut act.sa_mask);
+                            libc::sigaction(libc::SIGTERM, &act, std::ptr::null_mut());
+                            libc::sigaction(libc::SIGINT, &act, std::ptr::null_mut());
+                        }
+                        let handle = app.handle().clone();
+                        thread::spawn(move || {
+                            loop {
+                                let mut byte = [0u8; 1];
+                                let n = unsafe {
+                                    libc::read(signal_pipe_read, byte.as_mut_ptr() as *mut libc::c_void, 1)
+                                };
+                                if n == 1 {
+                                    desktop_window::approve_exit_for_signal();
+                                    handle.exit(0);
+                                    thread::sleep(Duration::from_millis(500));
+                                }
+                            }
+                        });
+                    } else {
+                        eprintln!("[signal] pipe setup failed: {}", std::io::Error::last_os_error());
+                    }
+                }
+            }
             Ok(())
         })
         .manage(usb_manager)
