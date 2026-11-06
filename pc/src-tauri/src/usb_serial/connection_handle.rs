@@ -29,8 +29,8 @@ impl<W, R: Read> ProbedSerialPort<W, R> {
 }
 
 type SerialPortHandle = Box<dyn serialport::SerialPort>;
-type SerialPortPair = (SerialPortHandle, SerialPortHandle);
-type SerialPortPairResult = Result<SerialPortPair, String>;
+pub(super) type SerialPortPair = (SerialPortHandle, SerialPortHandle);
+pub(super) type SerialPortPairResult = Result<SerialPortPair, String>;
 
 #[cfg(windows)]
 const SERIAL_IO_TIMEOUT: Duration = Duration::from_millis(20);

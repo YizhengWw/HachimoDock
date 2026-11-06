@@ -223,16 +223,11 @@ const P4_USB_UART_BAUD: u32 = 2_000_000;
 #[cfg(not(windows))]
 const P4_USB_UART_BAUD: u32 = 4_000_000;
 const P4_USB_UART_TRANSITION_BAUD: u32 = 3_000_000;
-// Linux board-runtime emits hello every three seconds until acknowledged, and
-// opening the CH343 can cold-boot P4 for roughly five seconds before its first
-// protocol frame. The first host write can also be lost while the adapter or
-// UART0 settles, so keep requesting identity throughout the probe window.
-const SERIAL_PROBE_TIMEOUT: Duration = Duration::from_millis(8_000);
-// Background fallback baud rates share a short window on every platform.
-// serial_probe_attempt_timeout retains eight seconds for the first P4 probe
-// and every first Unix probe (including cold-boot Linux board runtimes).
-// Manual connect still passes SERIAL_PROBE_TIMEOUT for every baud.
+// Keep legacy discovery bounded. A recognized P4 serial bridge may reset the
+// board at open and a full catalog restore can delay HELLO for over 27 seconds.
+const SERIAL_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const SERIAL_AUTO_PROBE_TIMEOUT: Duration = Duration::from_millis(1_500);
+const SERIAL_P4_COLD_BOOT_TIMEOUT: Duration = Duration::from_secs(40);
 const SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL: Duration = Duration::from_millis(750);
 const APPEARANCE_ASSET_CHUNK_DELAY_FLOOR_MS: u64 = 35;
 const APPEARANCE_ASSET_CHUNK_DELAY_MARGIN_MS: u64 = 25;
@@ -779,6 +774,18 @@ fn usb_serial_device_prefers_high_speed(device: &UsbDeviceInfo) -> bool {
     .any(|token| identity.contains(token))
 }
 
+fn usb_serial_device_may_need_p4_boot_window(device: &UsbDeviceInfo) -> bool {
+    if device.vid == 0x303a || matches!((device.vid, device.pid), (0x1a86, 0x55d3 | 0x55d4)) {
+        return true;
+    }
+    let product = device.product.to_ascii_lowercase();
+    let port = device.port_name.to_ascii_lowercase();
+    // macOS WCH drivers sometimes expose a port name without VID/PID.
+    product.contains("ch343")
+        || (device.vid == 0
+            && (port.contains("wchusbserial") || port.contains("usb-enhanced-serial")))
+}
+
 fn serial_baud_candidates_for_device(device: Option<&UsbDeviceInfo>) -> Vec<u32> {
     let high_speed_first = device.is_some_and(usb_serial_device_prefers_high_speed);
     if high_speed_first {
@@ -982,8 +989,10 @@ fn send_serial_probe_handshakes(
         .map_err(|error| format!("serial handshake flush failed: {error}"))
 }
 
-fn serial_probe_attempt_timeout(index: usize, baud: u32, timeout: Duration) -> Duration {
-    if index == 0 && (matches!(baud, P4_UNIFIED_UART_BAUD | P4_COMPAT_UART_BAUD) || !cfg!(windows)) {
+fn serial_probe_attempt_timeout(first: bool, baud: u32, timeout: Duration, p4_bridge: bool) -> Duration {
+    if p4_bridge {
+        if first { timeout.max(SERIAL_P4_COLD_BOOT_TIMEOUT) } else { SERIAL_AUTO_PROBE_TIMEOUT }
+    } else if first && (matches!(baud, P4_UNIFIED_UART_BAUD | P4_COMPAT_UART_BAUD) || !cfg!(windows)) {
         timeout.max(SERIAL_PROBE_TIMEOUT)
     } else {
         timeout
@@ -1008,37 +1017,46 @@ fn probe_serial_port(
     baud_candidates: &[u32],
     desktop_device_id: &str,
     probe_timeout: Duration,
+    p4_bridge: bool,
+) -> Result<ProbedSerialPort, String> {
+    probe_serial_port_with(port_name, baud_candidates, desktop_device_id, probe_timeout,
+        p4_bridge, open_serial_pair_with_retry)
+}
+
+fn probe_serial_port_with(
+    port_name: &str,
+    baud_candidates: &[u32],
+    desktop_device_id: &str,
+    probe_timeout: Duration,
+    p4_bridge: bool,
+    mut open: impl FnMut(&str, u32) -> connection_handle::SerialPortPairResult,
 ) -> Result<ProbedSerialPort, String> {
     let mut failures = Vec::new();
-    let mut reusable_pair: Option<(
-        Box<dyn serialport::SerialPort>,
-        Box<dyn serialport::SerialPort>,
-    )> = None;
-    for (index, baud) in baud_candidates.iter().copied().enumerate() {
-        let pair = if let Some((mut writer, reader)) = reusable_pair.take() {
-            match writer.set_baud_rate(baud) {
-                Ok(()) => {
-                    let _ = writer.clear(serialport::ClearBuffer::Input);
-                    Ok((writer, reader))
-                }
-                Err(error) => Err(error.to_string()),
-            }
-        } else {
-            open_serial_pair_with_retry(port_name, baud)
-        };
-        let (mut writer, reader) = match pair {
-            Ok(ports) => ports,
-            Err(error) => {
-                failures.push(error);
+    let mut reusable_pair: Option<connection_handle::SerialPortPair> = None;
+    let mut first = true;
+    for baud in baud_candidates.iter().copied() {
+        let (mut writer, reader) = if let Some((mut writer, reader)) = reusable_pair.take() {
+            if let Err(error) = writer.set_baud_rate(baud) {
+                failures.push(format!("{baud} baud: {error}"));
+                reusable_pair = Some((writer, reader));
                 continue;
+            }
+            let _ = writer.clear(serialport::ClearBuffer::Input);
+            (writer, reader)
+        } else {
+            // An unsupported initial baud can fail before a usable handle
+            // exists. Once opened, keep the same physical port on every OS.
+            match open(port_name, baud) {
+                Ok(pair) => pair,
+                Err(error) => {
+                    failures.push(error);
+                    continue;
+                }
             }
         };
 
-        // Runtime connections must not assert boot/reset control lines on
-        // any platform. Firmware flashing keeps its separate esptool path.
-        let _ = writer.write_data_terminal_ready(false);
-        let _ = writer.write_request_to_send(false);
-        let attempt_timeout = serial_probe_attempt_timeout(index, baud, probe_timeout);
+        let attempt_timeout = serial_probe_attempt_timeout(first, baud, probe_timeout, p4_bridge);
+        first = false;
         transfer_log::record(
             "connection",
             "probe",
@@ -1047,10 +1065,8 @@ fn probe_serial_port(
             }),
         );
         let control_nonce=uuid::Uuid::new_v4().simple().to_string();
-        if let Err(error) = send_serial_probe_handshakes(writer.as_mut(), desktop_device_id,&control_nonce) {
-            failures.push(format!("{baud} baud: {error}"));
-            continue;
-        }
+        send_serial_probe_handshakes(writer.as_mut(), desktop_device_id, &control_nonce)
+            .map_err(|error| format!("{baud} baud: {error}"))?;
 
         let started = Instant::now();
         let mut next_handshake_at = started + SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL;
@@ -1062,22 +1078,20 @@ fn probe_serial_port(
             if Instant::now() >= next_handshake_at {
                 if let Err(error) = send_serial_probe_handshakes(writer.as_mut(), desktop_device_id,&control_nonce)
                 {
-                    failures.push(format!("{baud} baud handshake retry failed: {error}"));
-                    break;
+                    return Err(format!("{baud} baud handshake retry failed: {error}"));
                 }
                 next_handshake_at = Instant::now() + SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL;
             }
             let frame = match read_serial_frame(&mut reader, &mut line_buffer) {
                 Ok(Some(line)) => line,
-                Ok(None) => break,
+                Ok(None) => return Err(format!("{baud} baud: serial port closed during probe")),
                 Err(error) if serial_read_recovery_delay(&error).is_some() => {
                     let delay = serial_read_recovery_delay(&error).unwrap();
                     if !delay.is_zero() { thread::sleep(delay); }
                     continue;
                 }
                 Err(error) => {
-                    failures.push(format!("{baud} baud read failed: {error}"));
-                    break;
+                    return Err(format!("{baud} baud read failed: {error}"));
                 }
             };
             let line = &frame.text;
@@ -1102,9 +1116,7 @@ fn probe_serial_port(
             return Ok(ProbedSerialPort::from_verified_reader(writer, reader, baud, message));
         }
         failures.push(format!("{baud} baud: no valid protocol hello"));
-        if cfg!(windows) {
-            reusable_pair = Some((writer, reader.into_inner()));
-        }
+        reusable_pair = Some((writer, reader.into_inner()));
     }
 
     Err(format!(
@@ -2282,6 +2294,9 @@ impl UsbSerialManager {
                 )
             })
             .unwrap_or_else(|| port_name.to_string());
+        let p4_bridge = detected_device
+            .as_ref()
+            .is_some_and(usb_serial_device_may_need_p4_boot_window);
         let mut baud_candidates = serial_baud_candidates_for_device(detected_device.as_ref());
         if let Ok(cached) = self.last_serial_baud.lock() {
             if let Some((key, baud)) = cached.as_ref().filter(|(key, _)| key == &probe_key) {
@@ -2296,7 +2311,7 @@ impl UsbSerialManager {
             .map(|value| value.clone())
             .unwrap_or_default();
         let probed =
-            match probe_serial_port(port_name, &baud_candidates, &desktop_id, probe_timeout) {
+            match probe_serial_port(port_name, &baud_candidates, &desktop_id, probe_timeout, p4_bridge) {
                 Ok(probed) => probed,
                 Err(error) => {
                     transfer_log::record(
@@ -8745,8 +8760,8 @@ manager.activate_memory_test_connection();
         assert!(SERIAL_PROBE_TIMEOUT >= Duration::from_secs(8));
         assert_eq!(SERIAL_AUTO_PROBE_TIMEOUT, Duration::from_millis(1500));
         assert!(SERIAL_AUTO_PROBE_TIMEOUT < SERIAL_PROBE_TIMEOUT);
-        assert_eq!(serial_probe_attempt_timeout(0, P4_UNIFIED_UART_BAUD,
-            SERIAL_AUTO_PROBE_TIMEOUT), SERIAL_PROBE_TIMEOUT);
+        assert_eq!(serial_probe_attempt_timeout(true, P4_UNIFIED_UART_BAUD,
+            SERIAL_AUTO_PROBE_TIMEOUT, false), SERIAL_PROBE_TIMEOUT);
         assert!(SERIAL_PROBE_HANDSHAKE_RETRY_INTERVAL <= Duration::from_secs(1));
         assert_eq!(messages[0]["topic"], "bind");
         assert_eq!(messages[0]["payload"]["desktopDeviceId"], "desktop-1");
@@ -8755,41 +8770,93 @@ manager.activate_memory_test_connection();
     }
 
     #[test]
-    fn first_p4_probe_covers_boot_without_lengthening_every_unknown_port() {
-        let short = Duration::from_millis(1500);
-        for baud in [P4_UNIFIED_UART_BAUD, P4_COMPAT_UART_BAUD] {
-            assert!(serial_probe_attempt_timeout(0, baud, short) >= Duration::from_secs(8));
-            assert_eq!(serial_probe_attempt_timeout(1, baud, short), short);
-            assert_eq!(serial_probe_attempt_timeout(0, baud, Duration::from_secs(12)), Duration::from_secs(12));
+    fn known_bridge_waits_for_cold_boot_at_first_usable_baud_only() {
+        for first_baud in [P4_UNIFIED_UART_BAUD, P4_COMPAT_UART_BAUD, DEFAULT_USB_SERIAL_BAUD] {
+            for mode in [SERIAL_AUTO_PROBE_TIMEOUT, SERIAL_PROBE_TIMEOUT] {
+                assert_eq!(serial_probe_attempt_timeout(true, first_baud, mode, true),
+                    Duration::from_secs(40));
+                assert_eq!(serial_probe_attempt_timeout(false, first_baud, mode, true),
+                    Duration::from_millis(1500));
+            }
         }
-        let first_unknown = if cfg!(windows) { short } else { SERIAL_PROBE_TIMEOUT };
+    }
+
+    #[test]
+    fn unknown_ports_keep_legacy_probe_budgets() {
+        let first_auto = if cfg!(windows) { SERIAL_AUTO_PROBE_TIMEOUT } else { SERIAL_PROBE_TIMEOUT };
         for baud in [DEFAULT_USB_SERIAL_BAUD, LEGACY_USB_SERIAL_BAUD] {
-            assert_eq!(serial_probe_attempt_timeout(0, baud, short), first_unknown);
-            assert_eq!(serial_probe_attempt_timeout(1, baud, short), short);
+            assert_eq!(serial_probe_attempt_timeout(true, baud, SERIAL_AUTO_PROBE_TIMEOUT, false), first_auto);
+            assert_eq!(serial_probe_attempt_timeout(false, baud, SERIAL_AUTO_PROBE_TIMEOUT, false),
+                SERIAL_AUTO_PROBE_TIMEOUT);
+            assert_eq!(serial_probe_attempt_timeout(false, baud, SERIAL_PROBE_TIMEOUT, false),
+                SERIAL_PROBE_TIMEOUT);
         }
     }
 
     #[test]
-    fn auto_probe_retains_boot_window_and_bounds_fallback_bauds_on_all_platforms() {
-        for first in [P4_UNIFIED_UART_BAUD, P4_COMPAT_UART_BAUD] {
-            let candidates = [first, P4_USB_UART_TRANSITION_BAUD,
-                DEFAULT_USB_SERIAL_BAUD, LEGACY_USB_SERIAL_BAUD, first];
-            let windows: Vec<_> = candidates.iter().enumerate().map(|(index, baud)|
-                serial_probe_attempt_timeout(index, *baud, SERIAL_AUTO_PROBE_TIMEOUT)).collect();
-            assert_eq!(windows[0], Duration::from_secs(8));
-            assert!(windows[1..].iter().all(|window| *window == Duration::from_millis(1500)));
-            assert_eq!(windows.into_iter().sum::<Duration>(), Duration::from_secs(14));
-        }
+    fn cold_boot_budget_is_limited_to_recognized_serial_bridges() {
+        let mut device = UsbDeviceInfo {
+            port_name: "/dev/cu.wchusbserial1420".into(),
+            vid: 0x1a86,
+            pid: 0x55d3,
+            serial_number: String::new(),
+            manufacturer: String::new(),
+            product: String::new(),
+        };
+        assert!(usb_serial_device_may_need_p4_boot_window(&device));
+        device.vid = 0;
+        assert!(usb_serial_device_may_need_p4_boot_window(&device));
+        device.vid = 0x1a86;
+        device.pid = 0x7523;
+        assert!(!usb_serial_device_may_need_p4_boot_window(&device));
     }
 
+    #[cfg(unix)]
     #[test]
-    fn manual_probe_preserves_full_window_for_every_legacy_fallback() {
-        for (index, baud) in [P4_UNIFIED_UART_BAUD, P4_COMPAT_UART_BAUD,
-            P4_USB_UART_TRANSITION_BAUD, DEFAULT_USB_SERIAL_BAUD,
-            LEGACY_USB_SERIAL_BAUD].iter().enumerate() {
-            assert_eq!(serial_probe_attempt_timeout(index, *baud, SERIAL_PROBE_TIMEOUT),
-                Duration::from_secs(8));
-        }
+    fn fallback_baud_keeps_the_same_open_port_and_buffered_tail() {
+        use serialport::SerialPort;
+        let (mut host, mut board) = serialport::TTYPort::pair().expect("create test PTY");
+        host.set_timeout(Duration::from_millis(20)).unwrap();
+        board.set_timeout(Duration::from_millis(20)).unwrap();
+        let mut handles = Some((Box::new(host.try_clone_native().unwrap()) as Box<dyn SerialPort>,
+            Box::new(host) as Box<dyn SerialPort>));
+        let peer = thread::spawn(move || {
+            let mut first_nonce = None;
+            let deadline = Instant::now() + Duration::from_secs(12);
+            let mut reader = BufReader::new(&mut board);
+            let mut pending = Vec::new();
+            while Instant::now() < deadline {
+                match read_serial_frame(&mut reader, &mut pending) {
+                    Ok(Some(frame)) => {
+                        let Some(message) = parse_serial_frame(&frame) else { continue };
+                        if message.topic != "bind" { continue; }
+                        let nonce = message.payload["serialControl"]["nonce"].as_str().unwrap();
+                        match &first_nonce {
+                            None => first_nonce = Some(nonce.to_owned()),
+                            Some(first) if first != nonce => {
+                                reader.get_mut().write_all(concat!(
+                                    r#"{"topic":"hello","payload":{"runtime":"esp-p4","boardDeviceId":"pty-board"}}"#, "\n",
+                                    r#"{"topic":"debug/test","payload":{}}"#, "\n"
+                                ).as_bytes()).unwrap();
+                                return board;
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(error) if serial_read_recovery_delay(&error).is_some() => {}
+                    other => panic!("test board read failed: {}", other.is_ok()),
+                }
+            }
+            panic!("fallback handshake did not arrive");
+        });
+        let mut probed = probe_serial_port_with("test-pty", &[9_600, 19_200], "desktop-1",
+            Duration::from_millis(250), false, |_, _| {
+                Ok(handles.take().expect("a fallback must never reopen the port"))
+            }).expect("fallback hello");
+        assert_eq!(probed.baud, 19_200);
+        let _board = peer.join().unwrap();
+        let frame = read_serial_frame(&mut probed.reader, &mut Vec::new()).unwrap().unwrap();
+        assert_eq!(parse_serial_frame(&frame).unwrap().topic, "debug/test");
     }
 
     #[test]

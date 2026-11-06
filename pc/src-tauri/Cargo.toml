@@ -1,6 +1,6 @@
 [package]
 name = "pet-manager-tauri"
-version = "0.1.199"
+version = "0.1.200"
 description = "pet-manager Tauri client"
 authors = ["pet-manager contributors"]
 license-file = "../../LICENSE"
