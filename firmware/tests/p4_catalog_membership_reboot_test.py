@@ -116,7 +116,7 @@ static struct{bool active;char widget_id[48];} g_runtime,g_staging;
     for name in ['safe_widget_id', 'copy_utf8', 'parse_checksum_hex', 'miniapp_checksum', 'catalog_find', 'catalog_item_visible', 'catalog_entry_visible', 'catalog_visible_index','catalog_visible_preferred_in','catalog_visible_preferred']:
         body += function(code, name)
     body += r'''
-static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *s){s->valid=true;for(size_t i=0;i<s->count;i++)s->items[i].resource_state=1;return true;}
+static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *s,const miniapp_catalog_snapshot_t *prior,unsigned *loads){(void)prior;(void)loads;s->valid=true;for(size_t i=0;i<s->count;i++)s->items[i].resource_state=1;return true;}
 '''
     body += '#define MINIAPP_CATALOG_CHECK_KEY "\\\"check\\\":\\\""\n'
     for name in ['catalog_hex_digit', 'catalog_check_digits', 'catalog_check_value', 'catalog_check_seal', 'catalog_check_verify']:
@@ -203,7 +203,7 @@ static void reset(void){
  assert(pet_storage_lane_configure(&lane,lane_unlock,lane_lock,lane_owner,NULL));
  assert(pet_p4_miniapp_catalog_cursor_configure(enqueue_cursor,NULL));
 }
-static void readback(miniapp_catalog_snapshot_t *s){assert(load_catalog_snapshot((uint8_t)g_catalog_file_generation,s));assert(s->valid);}
+static void readback(miniapp_catalog_snapshot_t *s){assert(load_catalog_snapshot((uint8_t)g_catalog_file_generation,s,NULL));assert(s->valid);}
 int main(int argc,char **argv){
  assert(argc==2);reset();char err[160]={0};const char *test=argv[1];
  if(!strcmp(test,"atomic")){
@@ -300,7 +300,7 @@ int main(int argc,char **argv){
    if(gen==1)cJSON_ReplaceItemInObjectCaseSensitive(p,"version",cJSON_CreateNumber(2));
    char *json=cJSON_PrintUnformatted(p);assert(write_bytes(path,json,strlen(json)));cJSON_free(json);cJSON_Delete(p);
   }
-  miniapp_catalog_snapshot_t a,b;assert(load_catalog_snapshot(0,&a)&&load_catalog_snapshot(1,&b));
+  miniapp_catalog_snapshot_t a,b;assert(load_catalog_snapshot(0,&a,NULL)&&load_catalog_snapshot(1,&b,NULL));
   uint32_t seq=0;miniapp_catalog_snapshot_t *latest=catalog_latest_snapshot(&a,&b,&seq);assert(seq==42&&latest->count==17&&!latest->seed_pending);
   assert(catalog_cursor_write(seq,g_catalog[7].widget_id));
   char active[48],cursor[48];bool exists;catalog_restore_navigation(latest,active,cursor,&exists);
@@ -337,7 +337,7 @@ int main(int argc,char **argv){
   cJSON *p=cJSON_Parse(raw);cJSON_DeleteItemFromObjectCaseSensitive(p,"seedPending");cJSON_DeleteItemFromObjectCaseSensitive(p,"selectedWidgetId");cJSON_DeleteItemFromObjectCaseSensitive(p,"check");
   char *s=cJSON_PrintUnformatted(p);assert(write_bytes(path,s,strlen(s)));cJSON_free(s);cJSON_Delete(p);
   miniapp_catalog_snapshot_t loaded;readback(&loaded);assert(!loaded.seed_pending&&!loaded.selected_widget_id[0]);
-  p=cJSON_Parse(raw);cJSON_DeleteItemFromObjectCaseSensitive(p,"check");cJSON_ReplaceItemInObjectCaseSensitive(p,"seedPending",cJSON_CreateString("true"));s=cJSON_PrintUnformatted(p);assert(write_bytes(path,s,strlen(s)));cJSON_free(s);cJSON_Delete(p);assert(!load_catalog_snapshot((uint8_t)g_catalog_file_generation,&loaded));
+  p=cJSON_Parse(raw);cJSON_DeleteItemFromObjectCaseSensitive(p,"check");cJSON_ReplaceItemInObjectCaseSensitive(p,"seedPending",cJSON_CreateString("true"));s=cJSON_PrintUnformatted(p);assert(write_bytes(path,s,strlen(s)));cJSON_free(s);cJSON_Delete(p);assert(!load_catalog_snapshot((uint8_t)g_catalog_file_generation,&loaded,NULL));
  }else if(!strcmp(test,"empty")){
   g_catalog_count=0;g_catalog_selected=0;g_runtime.active=false;assert(persist_catalog_snapshot(g_catalog,0,NULL));miniapp_catalog_snapshot_t s;readback(&s);assert(!s.seed_pending&&!s.count);
   assert(pet_p4_miniapp_sync_builtins()==ESP_OK&&materialized==0&&g_catalog_count==0);

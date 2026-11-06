@@ -11,7 +11,7 @@ def test_restore_preserves_existing_values_and_rejects_corruption(tmp_path,typed
     begin=code.index('static bool restore_app_runtime_buffer(')
     end=code.index('\nstatic bool sync_side_runtime(',begin)
     helpers=''.join(function(code,n)for n in ['form3_owns','form3_string_limit','runtime_string_limit'])
-    merge=code[code.index('static void merge_live_persistent_runtime('):code.index('\nstatic bool parse_runtime(')]
+    merge=code[code.index('static void merge_live_persistent_runtime('):code.index('\nstatic bool parse_runtime_impl(')]
     harness=r'''
 #include <stdbool.h>
 #include <stdint.h>

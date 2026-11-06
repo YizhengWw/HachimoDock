@@ -1,6 +1,7 @@
 """Real cold package loader/read adapters reject partial I/O and revocation."""
 from pathlib import Path
 import subprocess
+from p4_render_trace_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -9,8 +10,7 @@ def test_actual_loader_preserves_input_metadata_on_io_and_checksum_errors(tmp_pa
     code = (ROOT / "main/pet_p4_miniapp.c").read_text()
     reads = code[code.index("static bool read_file_kind("):
                  code.index("bool pet_p4_miniapp_installed_id(")]
-    loader = code[code.index("static bool load_catalog_runtime_item("):
-                  code.index("static bool validate_catalog_snapshot(")]
+    loader = function(code, "load_catalog_runtime_item_impl") + function(code, "load_catalog_runtime_item")
     src = r'''
 #include <assert.h>
 #include <errno.h>
@@ -29,7 +29,7 @@ def test_actual_loader_preserves_input_metadata_on_io_and_checksum_errors(tmp_pa
 #define pet_widget_trace_scope_end(p) ((void)(p))
 typedef struct {uint8_t count;size_t size;uint8_t bytes[128];} pet_p4_miniapp_sprite_pack_t;
 typedef struct {char widget_id[48];unsigned slot,package_generation,widget_checksum,buttons_checksum,sprites_checksum,resource_state,image_count;} miniapp_catalog_item_t;
-typedef struct {char widget_id[48];bool active;} miniapp_runtime_t;
+typedef struct {char widget_id[48];bool active;pet_p4_miniapp_sprite_pack_t sprites;} miniapp_runtime_t;
 static bool current=true,error_read,parse_fail;
 static unsigned opens,reads_count,closes,alloc_count,alloc_live,fail_alloc;
 static unsigned fault_file,fault_kind;
@@ -68,10 +68,12 @@ static bool load_sprite_pack(const char *json,size_t slot,uint8_t generation,pet
  if(!read_binary_file("sprite.bin",out->bytes,sizeof(out->bytes),&out->size))return false;
  out->count=1;return true;
 }
-static bool parse_runtime(miniapp_runtime_t *out,const char *id,const char *widget,const char *buttons,
- const pet_p4_miniapp_sprite_pack_t *sprites,char *error,size_t n){
+static bool parse_runtime_impl(miniapp_runtime_t *out,const char *id,const char *widget,const char *buttons,
+ const pet_p4_miniapp_sprite_pack_t *sprites,bool private_scratch,char *error,size_t n){
+ assert(private_scratch==(sprites==&out->sprites));
  (void)error;(void)n;if(parse_fail)return false;
  assert(!strcmp(widget,"WIDGET")&&!strcmp(buttons,"BUTTONS")&&sprites->size==5);
+ if(!private_scratch)out->sprites=*sprites;
  strcpy(out->widget_id,id);out->active=true;return true;
 }
 static bool pet_p4_builtin_is_bootstrap(const char *id,uint32_t sum){(void)id;(void)sum;return false;}
@@ -102,6 +104,21 @@ int main(void){
  reset();parse_fail=true;copy=item;assert(!load_catalog_runtime_item(&copy,&next,false,error,sizeof(error))&&!memcmp(&copy,&item,sizeof(item)));
  reset();current=false;copy=item;assert(!load_catalog_runtime_item(&copy,&next,false,error,sizeof(error))&&opens==0&&alloc_live==0);
  reset();copy=item;assert(load_catalog_runtime_item(&copy,&next,false,error,sizeof(error))&&next.active&&alloc_live==0);
+ /* A single factory snapshot also saves the separate sprite allocation.
+  * Its verification still consumes and checks all three physical files. */
+ reset();miniapp_runtime_t scratch={0};copy=item;
+ assert(load_catalog_runtime_item_impl(&copy,&scratch,false,true,error,sizeof(error)));
+ assert(alloc_count+1==max_alloc&&alloc_live==0&&opens==3&&closes==3);
+ assert(!memcmp(&scratch,&next,sizeof(scratch))&&!memcmp(&copy,&item,sizeof(item)));
+ for(unsigned file=1;file<=3;file++){
+  reset();memset(&scratch,0,sizeof(scratch));fault_file=file;fault_kind=2;copy=item;
+  assert(!load_catalog_runtime_item_impl(&copy,&scratch,false,true,error,sizeof(error)));
+  assert(alloc_live==0&&opens==file&&closes==opens&&!memcmp(&copy,&item,sizeof(item)));
+ }
+ reset();memset(&scratch,0,sizeof(scratch));copy=item;copy.sprites_checksum++;
+ assert(!load_catalog_runtime_item_impl(&copy,&scratch,false,true,error,sizeof(error))&&!scratch.active);
+ reset();memset(&scratch,0,sizeof(scratch));copy=item;parse_fail=true;
+ assert(!load_catalog_runtime_item_impl(&copy,&scratch,false,true,error,sizeof(error))&&!scratch.active);
  /* Raw/encoded NUL in JSON cannot be hidden by strlen or accepted checksums.
   * Old identity text and arbitrary binary asset bytes retain their semantics. */
  reset();FILE *bad=fopen("widget.json","wb");assert(bad);const char hidden[]={ 'W','I','D','G','E','T',0,'x' };assert(fwrite(hidden,1,sizeof(hidden),bad)==sizeof(hidden));fclose(bad);

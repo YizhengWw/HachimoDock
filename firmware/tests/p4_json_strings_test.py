@@ -283,7 +283,7 @@ int main(void){
     run([binary])
 
 def test_runtime_guard_precedes_parse_allocation_and_keeps_legacy_text_readers_separate():
-    source=(ROOT/'firmware/main/pet_p4_miniapp.c').read_text();runtime=function(source,'parse_runtime')
+    source=(ROOT/'firmware/main/pet_p4_miniapp.c').read_text();runtime=function(source,'parse_runtime_impl')
     assert runtime.index('pet_json_source_bounded_text(widget_json)')<runtime.index('root = cJSON_ParseWithOpts(widget_json,NULL,true);')<runtime.index('calloc(')
     assert 'pet_json_source_bounded_text(buttons_json?buttons_json:"[]")' in runtime
     assert 'read_json_file(widget_path, widget_json' in source and 'read_json_file(buttons_path, buttons_json' in source

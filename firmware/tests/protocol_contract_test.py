@@ -695,8 +695,8 @@ def test_p4_component_packages_commit_through_validated_ab_catalog_snapshots():
     assert '"widgetChecksum"' in miniapp
     assert '"buttonsChecksum"' in miniapp
     assert '"spritesChecksum"' in miniapp
-    assert "load_catalog_snapshot(0, snapshot0)" in miniapp
-    assert "load_catalog_snapshot(1, snapshot1)" in miniapp
+    assert "load_catalog_snapshot(0, snapshot0, NULL)" in miniapp
+    assert "load_catalog_snapshot(1, snapshot1, snapshot0)" in miniapp
     assert 'recovered ? " after per-component recovery" : ""' in miniapp
     assert 'recover_catalog_items(selected, selected == snapshot0 ? snapshot1 : snapshot0)' in miniapp
     assert "package_generation = (uint8_t) (1 - next_catalog[catalog_index].package_generation)" in commit

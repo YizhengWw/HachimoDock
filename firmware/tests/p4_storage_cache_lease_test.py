@@ -26,7 +26,7 @@ def test_boot_cache_is_per_physical_item_not_a_skipped_validation_or_private_sav
     from p4_render_trace_test import function
     code=(ROOT/'main/pet_p4_miniapp.c').read_text()
     validate=function(code,'validate_catalog_snapshot')
-    assert validate.index('for (size_t i')<validate.index('pet_storage_cache_work_begin(')<validate.index('load_catalog_runtime_item(')
+    assert validate.index('for (size_t i')<validate.index('pet_storage_cache_work_begin(')<validate.index('load_catalog_runtime_item_impl(')
     assert 'snapshot->items[i].resource_state = 3' in validate and 'complete = false' in validate
     boot_activate=function(code,'activate_catalog_index_in_memory')
     assert boot_activate.index('pet_storage_cache_work_begin(')<boot_activate.index('load_catalog_runtime(')<boot_activate.index('if(!loaded)')<boot_activate.index('restore_component_runtime(')

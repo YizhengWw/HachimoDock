@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_real_schema_gate_rejects_narrowing_before_concurrent_value_projection(tmp_path):
     code = (ROOT / 'main/pet_p4_miniapp.c').read_text()
     gate = code[code.index('static bool hot_update_save_compatible('):code.index('static bool resource_repair_package_matches(')]
-    merge = code[code.index('static void merge_live_persistent_runtime('):code.index('\nstatic bool parse_runtime(')]
+    merge = code[code.index('static void merge_live_persistent_runtime('):code.index('\nstatic bool parse_runtime_impl(')]
     helpers=''.join(function(code,n)for n in ['form3_owns','form3_string_limit','runtime_string_limit'])
     source = r'''
 #include <assert.h>

@@ -61,13 +61,16 @@ static void catalog_snapshot_path(uint8_t generation,bool tmp,char*out,size_t n)
 #undef ftruncate
 #undef remove
 #undef rename
+#undef ESP_LOGI
+#define ESP_LOGI(tag,...) do { if (0) fprintf(stderr,__VA_ARGS__); } while (0)
+static int64_t esp_timer_get_time(void){return 0;}
 typedef struct {
  bool parsed,valid,needs_upgrade;uint8_t file_generation;uint32_t sequence;
  char active_widget_id[48],selected_widget_id[48];bool seed_pending;
  miniapp_catalog_item_t items[PET_P4_MINIAPP_CATALOG_MAX];size_t count;
 } miniapp_catalog_snapshot_t;
 static bool read_json_file(const char*p,char*out,size_t n){FILE*f=fopen(p,"rb");if(!f)return false;size_t got=fread(out,1,n-1,f);bool ok=got&&fgetc(f)==EOF&&!ferror(f);out[got]=0;if(fclose(f))ok=false;return ok;}
-static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t*s){s->valid=true;return true;} /* Package materialization adapter only. */
+static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t*s,const miniapp_catalog_snapshot_t *prior,unsigned *loads){(void)prior;(void)loads;s->valid=true;return true;} /* Package materialization adapter only. */
 """
     prefix+='\n'.join(function(code,n) for n in ['parse_checksum_hex','load_catalog_snapshot','catalog_latest_snapshot'])
     source=source.replace(stub,prefix,1)
@@ -130,7 +133,7 @@ int main(int argc,char **argv){
   * selector, NOT the failed API result/RAM catalog to infer durable outcome. */
  work_current=true;catalog_fault=0;
  miniapp_catalog_snapshot_t a={0},b={0};uint32_t sequence=0;
- (void)load_catalog_snapshot(0,&a);(void)load_catalog_snapshot(1,&b);
+ (void)load_catalog_snapshot(0,&a,NULL);(void)load_catalog_snapshot(1,&b,NULL);
  miniapp_catalog_snapshot_t *picked=catalog_latest_snapshot(&a,&b,&sequence);
  assert(picked&&sequence>=20&&sequence<=21);
  /* Fault5 now fails the initial truncate0: no new JSON was written.

@@ -96,7 +96,7 @@ int main(void){
     subprocess.run([str(exe)],check=True)
     # Production hook runs after complete program/form declarations and before
     # publication/refresh, so no first-render derived mutation can bypass it.
-    parse=code[code.index('static bool parse_runtime('):code.index('static bool apply_effects(')]
+    parse=code[code.index('static bool parse_runtime_impl('):code.index('static bool apply_effects(')]
     assert parse.index('pet_component_program_parse(root,')<parse.index('if(!longtext_writers_valid(parsed))')<parse.index('parsed->active = true;')
 
 
