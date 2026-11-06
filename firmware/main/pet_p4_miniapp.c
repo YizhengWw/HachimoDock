@@ -3093,12 +3093,13 @@ static bool longtext_writers_valid(const miniapp_runtime_t *r){
 }
 #endif
 
-static bool parse_runtime(
+static bool parse_runtime_impl(
   miniapp_runtime_t *runtime,
   const char *widget_id,
   const char *widget_json,
   const char *buttons_json,
   const pet_p4_miniapp_sprite_pack_t *sprites,
+  bool private_scratch,
   char *error,
   size_t error_size
 ) {
@@ -3143,7 +3144,9 @@ static bool parse_runtime(
     set_error(error, error_size, "widget.json is invalid or contains unsupported fields");
     return false;
   }
-  parsed = (miniapp_runtime_t *) calloc(1, sizeof(*parsed));
+  /* Boot validation owns a cleared, unpublished scratch runtime and may
+   * discard a partial parse. Other callers retain publish-on-success. */
+  parsed = private_scratch ? runtime : (miniapp_runtime_t *) calloc(1, sizeof(*parsed));
   if (!parsed) {
     cJSON_Delete(root);
     set_error(error, error_size, "not enough memory for mini-app");
@@ -3548,7 +3551,7 @@ static bool parse_runtime(
   }
 #endif
   if (!parse_game(parsed, legacy_game, error, error_size)) goto fail;
-  if (sprites) parsed->sprites = *sprites;
+  if (sprites && sprites != &parsed->sprites) parsed->sprites = *sprites;
   if(parsed->surface.image_count){
     unsigned extra=0;
 #if PET_P4_KEYFRAME_BG
@@ -3640,15 +3643,30 @@ static bool parse_runtime(
 #endif
   parsed->active = true;
   refresh_view(parsed);
-  *runtime = *parsed;
-  free(parsed);
+  if (!private_scratch) {
+    *runtime = *parsed;
+    free(parsed);
+  }
   cJSON_Delete(root);
   return true;
 
 fail:
-  free(parsed);
+  if (!private_scratch) free(parsed);
   cJSON_Delete(root);
   return false;
+}
+
+static bool parse_runtime(
+  miniapp_runtime_t *runtime,
+  const char *widget_id,
+  const char *widget_json,
+  const char *buttons_json,
+  const pet_p4_miniapp_sprite_pack_t *sprites,
+  char *error,
+  size_t error_size
+) {
+  return parse_runtime_impl(runtime, widget_id, widget_json, buttons_json, sprites,
+    false, error, error_size);
 }
 
 /* Invalidates immediately, including a scroll-away-and-back before the next
@@ -6060,10 +6078,11 @@ static bool persist_catalog_snapshot(const miniapp_catalog_item_t *catalog,
   g_catalog_file_generation=commit.generation;g_catalog_sequence=commit.sequence;return true;
 }
 
-static bool load_catalog_runtime_item(
+static bool load_catalog_runtime_item_impl(
   miniapp_catalog_item_t *item,
   miniapp_runtime_t *runtime,
   bool allow_missing_checksums,
+  bool private_scratch,
   char *error,
   size_t error_size
 ) {
@@ -6083,7 +6102,8 @@ static bool load_catalog_runtime_item(
   PET_WIDGET_TRACE_SCOPE(trace_alloc, PET_WTRACE_ALLOC);
   widget_json = (char *) calloc(1, MINIAPP_WIDGET_JSON_MAX);
   buttons_json = (char *) calloc(1, MINIAPP_BUTTONS_JSON_MAX);
-  sprites = (pet_p4_miniapp_sprite_pack_t *) calloc(1, sizeof(*sprites));
+  sprites = private_scratch ? &runtime->sprites
+    : (pet_p4_miniapp_sprite_pack_t *) calloc(1, sizeof(*sprites));
   pet_widget_trace_scope_end(&trace_alloc);
   if (!widget_json || !buttons_json || !sprites) {
     set_error(error, error_size, "not enough memory to open component");
@@ -6141,12 +6161,13 @@ static bool load_catalog_runtime_item(
     item->buttons_checksum = buttons_checksum;
     item->sprites_checksum = sprites_checksum;
   }
-  ok = parse_runtime(
+  ok = parse_runtime_impl(
     runtime,
     item->widget_id,
     widget_json,
     buttons_json,
     sprites,
+    private_scratch,
     error,
     error_size
   );
@@ -6158,11 +6179,41 @@ static bool load_catalog_runtime_item(
 done:
   free(widget_json);
   free(buttons_json);
-  free(sprites);
+  if (!private_scratch) free(sprites);
   return ok;
 }
 
-static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
+static bool load_catalog_runtime_item(
+  miniapp_catalog_item_t *item,
+  miniapp_runtime_t *runtime,
+  bool allow_missing_checksums,
+  char *error,
+  size_t error_size
+) {
+  return load_catalog_runtime_item_impl(item, runtime, allow_missing_checksums,
+    false, error, error_size);
+}
+
+static bool catalog_reuse_verified_item(miniapp_catalog_item_t *item,
+    const miniapp_catalog_snapshot_t *verified) {
+  if (!verified || !verified->parsed || !item->widget_checksum || !item->buttons_checksum)
+    return false;
+  int index = catalog_find(verified->items, verified->count, item->widget_id);
+  if (index < 0) return false;
+  const miniapp_catalog_item_t *prior = &verified->items[index];
+  if ((prior->resource_state != 1 && prior->resource_state != 2)
+      || prior->slot != item->slot || prior->package_generation != item->package_generation
+      || prior->widget_checksum != item->widget_checksum
+      || prior->buttons_checksum != item->buttons_checksum
+      || prior->sprites_checksum != item->sprites_checksum)
+    return false;
+  item->resource_state = prior->resource_state;
+  item->image_count = prior->image_count;
+  return true;
+}
+
+static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot,
+    const miniapp_catalog_snapshot_t *verified, unsigned *physical_loads) {
   miniapp_runtime_t *runtime;
   char error[128] = {0};
   if (!snapshot) return false;
@@ -6170,6 +6221,11 @@ static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
   if (!runtime) return false;
   bool complete = true;
   for (size_t i = 0; i < snapshot->count; i += 1) {
+    /* Only share a successful validation from this boot before any catalog
+     * writes or protocol input. Failed reads and missing checksums still take
+     * the original path. Keep each snapshot's own metadata and membership. */
+    if (catalog_reuse_verified_item(&snapshot->items[i], verified)) continue;
+    if (physical_loads) ++*physical_loads;
     /* Boot-only package boundary: finish native IO and its cache lease before
      * blocking main so CPU0 idle can run. Never yield from cache-off/IRAM IO. */
     {
@@ -6187,10 +6243,11 @@ static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
         || snapshot->items[i].buttons_checksum == 0;
       memset(runtime, 0, sizeof(*runtime));
       error[0] = '\0';
-      if (!load_catalog_runtime_item(
+      if (!load_catalog_runtime_item_impl(
             &snapshot->items[i],
             runtime,
             missing_checksums,
+            true,
             error,
             sizeof(error)
           )) {
@@ -6217,8 +6274,10 @@ static bool validate_catalog_snapshot(miniapp_catalog_snapshot_t *snapshot) {
 
 static bool load_catalog_snapshot(
   uint8_t file_generation,
-  miniapp_catalog_snapshot_t *snapshot
+  miniapp_catalog_snapshot_t *snapshot,
+  const miniapp_catalog_snapshot_t *verified
 ) {
+  int64_t started_us = esp_timer_get_time();
   char *json = (char *) calloc(1, MINIAPP_CATALOG_JSON_MAX);
   cJSON *root = NULL;
   const cJSON *items;
@@ -6343,7 +6402,12 @@ static bool load_catalog_snapshot(
     snapshot->needs_upgrade = true;
   }
   snapshot->parsed = true;
-  (void) validate_catalog_snapshot(snapshot);
+  int64_t parsed_us = esp_timer_get_time();
+  unsigned physical_loads = 0;
+  (void) validate_catalog_snapshot(snapshot, verified, &physical_loads);
+  ESP_LOGI(TAG, "catalog boot generation=%u items=%u checked=%u read_parse_us=%lld validate_us=%lld",
+    (unsigned)file_generation, (unsigned)count, physical_loads,
+    (long long)(parsed_us - started_us), (long long)(esp_timer_get_time() - parsed_us));
   cJSON_Delete(root);
   free(json);
   return true;
@@ -7313,7 +7377,7 @@ static bool load_legacy_catalog(miniapp_catalog_snapshot_t *snapshot) {
       );
     }
   }
-  if (!validate_catalog_snapshot(snapshot)) goto fail;
+  if (!validate_catalog_snapshot(snapshot, NULL, NULL)) goto fail;
   cJSON_Delete(root);
   free(json);
   return true;
@@ -7749,14 +7813,6 @@ esp_err_t pet_p4_miniapp_init(void) {
   g_catalog_sequence = 0;
   g_catalog_recovery_blocked = false;
   g_catalog_seed_pending = false;
-  struct stat catalog_stat;
-  char catalog_path[48];
-  bool catalog_files_present = false;
-  for (uint8_t i = 0; i < MINIAPP_CATALOG_GENERATION_COUNT; ++i) {
-    catalog_snapshot_path(i, false, catalog_path, sizeof(catalog_path));
-    if (stat(catalog_path, &catalog_stat) == 0 || errno != ENOENT) catalog_files_present = true;
-  }
-
   snapshot0 = (miniapp_catalog_snapshot_t *) calloc(1, sizeof(*snapshot0));
   snapshot1 = (miniapp_catalog_snapshot_t *) calloc(1, sizeof(*snapshot1));
   if (!snapshot0 || !snapshot1) {
@@ -7765,8 +7821,8 @@ esp_err_t pet_p4_miniapp_init(void) {
     free(snapshot1);
     return ESP_ERR_NO_MEM;
   }
-  (void) load_catalog_snapshot(0, snapshot0);
-  (void) load_catalog_snapshot(1, snapshot1);
+  (void) load_catalog_snapshot(0, snapshot0, NULL);
+  (void) load_catalog_snapshot(1, snapshot1, snapshot0);
   selected=catalog_latest_snapshot(snapshot0,snapshot1,&highest_seen_sequence);
 
   if (selected) {
@@ -7813,6 +7869,15 @@ esp_err_t pet_p4_miniapp_init(void) {
     return activated ? ESP_OK : ESP_ERR_INVALID_STATE;
   }
 
+  /* Only the legacy/seed decision needs a second filesystem lookup. A parsed
+   * modern snapshot already settles that decision, including damaged items. */
+  struct stat catalog_stat;
+  char catalog_path[48];
+  bool catalog_files_present = false;
+  for (uint8_t i = 0; i < MINIAPP_CATALOG_GENERATION_COUNT; ++i) {
+    catalog_snapshot_path(i, false, catalog_path, sizeof(catalog_path));
+    if (stat(catalog_path, &catalog_stat) == 0 || errno != ENOENT) catalog_files_present = true;
+  }
   if (catalog_files_present) {
     /* Do not overwrite unrecognized/corrupt modern directories with legacy or
      * bootstrap data. Leave every file/save intact for explicit recovery. */
