@@ -201,12 +201,13 @@ pub(super) fn configure(app_data:&Path)->Result<(),String>{
     let journal=Arc::new(Journal::open(&app_data.join("usb-appearance-safety"))?);
     JOURNAL.set(journal).map_err(|_|ERROR.to_owned())
 }
-pub(super) struct Attempt {pub(super) board:String,pub(super) generation:u64,id:String,journal:Arc<Journal>,cancel:Arc<AtomicBool>,submitted:AtomicBool,unknown:AtomicBool,activation:Mutex<Option<super::appearance_activation_evidence::Evidence>>}
+pub(super) struct Attempt {pub(super) board:String,pub(super) generation:u64,id:String,journal:Arc<Journal>,cancel:Arc<AtomicBool>,submitted:AtomicBool,unknown:AtomicBool,activation:Mutex<Option<super::appearance_activation_evidence::Evidence>>,
+    exit_activity:Arc<AtomicUsize>,exit_guard:OnceLock<super::write_activity::WriteGuard>}
 impl Attempt {
-    fn new(board:&str,generation:u64,journal:Arc<Journal>,cancel:Arc<AtomicBool>)->Result<Self,String>{
+    fn new(board:&str,generation:u64,journal:Arc<Journal>,cancel:Arc<AtomicBool>,exit_activity:Arc<AtomicUsize>)->Result<Self,String>{
         if !valid_board(board)||generation==0{return Err("appearance_owner_unverified".into());}
         journal.available(board)?;
-        Ok(Self{board:board.into(),generation,id:uuid::Uuid::new_v4().to_string(),journal,cancel,submitted:AtomicBool::new(false),unknown:AtomicBool::new(false),activation:Mutex::new(None)})
+        Ok(Self{board:board.into(),generation,id:uuid::Uuid::new_v4().to_string(),journal,cancel,submitted:AtomicBool::new(false),unknown:AtomicBool::new(false),activation:Mutex::new(None),exit_activity,exit_guard:OnceLock::new()})
     }
     pub(super) fn check(&self,board:&str,generation:u64)->Result<(),String>{
         if self.cancel.load(Ordering::Acquire){return Err("appearance_connection_retired_no_replay".into());}
@@ -216,7 +217,11 @@ impl Attempt {
     pub(super) fn before_mutation(&self,phase:&str,transfer_id:&str)->Result<(),String>{
         if self.unknown.load(Ordering::Acquire){return Err(UNKNOWN.into());}
         if !valid_transfer_id(transfer_id){return Err("invalid appearance transferId".into());}
-        self.journal.begin(self,phase,transfer_id)?;self.submitted.store(true,Ordering::Release);Ok(())
+        self.journal.begin(self,phase,transfer_id)?;
+        // Slot/stat cache reads alone must not claim a write. Both serial and
+        // native USB pass this boundary before their first possible mutation.
+        self.exit_guard.get_or_init(||super::write_activity::WriteGuard::new(self.exit_activity.clone()));
+        self.submitted.store(true,Ordering::Release);Ok(())
     }
     pub(super) fn raw_intent(&self,port:&str,identity:Option<UsbIdentity>)->Result<(),String>{self.journal.raw_intent(self,port,identity)}
     pub(super) fn raw_confirmed(&self)->Result<(),String>{self.journal.raw_confirmed(self)}
@@ -371,7 +376,7 @@ impl UsbSerialManager {
         };
         #[cfg(test)] let journal=self.appearance_journal.clone();
         #[cfg(not(test))] let journal=JOURNAL.get().cloned().ok_or(ERROR)?;
-        let attempt=Arc::new(Attempt::new(board,generation,journal,cancel)?);
+        let attempt=Arc::new(Attempt::new(board,generation,journal,cancel,self.protected_write_count.clone())?);
         {let mut slot=self.appearance_attempt.lock().map_err(|_|ERROR)?;
             if slot.is_some(){return Err("appearance attempt already active".into());}*slot=Some(attempt.clone());}
         struct Clear<'a>(&'a UsbSerialManager);

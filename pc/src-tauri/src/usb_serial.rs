@@ -65,6 +65,7 @@ mod connection_handle;
 mod live_audio_pacing;
 mod media_arbitration;
 mod master_volume;
+mod write_activity;
 use live_audio_pacing::write_serial_live_frame;
 #[cfg(windows)]
 mod windows_serial;
@@ -1677,6 +1678,7 @@ pub struct UsbSerialManager {
     #[cfg(test)]
     appearance_journal: Arc<appearance_safety::Journal>,
     asset_transfer_guard: Arc<Mutex<()>>,
+    protected_write_count: Arc<AtomicUsize>,
     media_requests_pending: Arc<AtomicUsize>,
     appearance_sync_active: Arc<AtomicBool>,
     appearance_sync_cancel_requested: Arc<AtomicBool>,
@@ -2096,6 +2098,7 @@ impl UsbSerialManager {
             #[cfg(test)]
             appearance_journal: Arc::new(appearance_safety::Journal::memory()),
             asset_transfer_guard: Arc::new(Mutex::new(())),
+            protected_write_count: Arc::new(AtomicUsize::new(0)),
             media_requests_pending: Arc::new(AtomicUsize::new(0)),
             appearance_sync_active: Arc::new(AtomicBool::new(false)),
             appearance_sync_cancel_requested: Arc::new(AtomicBool::new(false)),
@@ -3272,7 +3275,9 @@ impl UsbSerialManager {
     }
 
     pub(crate) fn transfer_in_progress(&self) -> bool {
-        self.asset_transfer_guard.try_lock().is_err()
+        // Exit protection follows actual writing workflows, not contention:
+        // inventory, configuration and media queries also need the USB mutex.
+        self.protected_write_count.load(Ordering::Acquire) != 0
     }
 
     pub(crate) fn with_asset_transfer_guard<T>(
@@ -3650,6 +3655,7 @@ impl UsbSerialManager {
                 "bytes": total_bytes,
             }),
         );
+        let _exit_write = self.protect_device_write();
         on_progress(0, total_bytes, "begin");
 
         let begin_payload = serde_json::json!({
@@ -5052,6 +5058,7 @@ impl UsbSerialManager {
         let (status,connection_id) = self.connected_board_snapshot(expected_board_device_id)?;
         ensure_widget_delete_supported(&status)?;
         if preserve_save&&status.capabilities["widgetDeletePreserveSave"]!=true{return Err("设备不支持保留存档卸载；未删除组件".into());}
+        let _exit_write = self.protect_device_write();
         let transfer_id = format!("widget-delete-{}", uuid::Uuid::new_v4());
         let receiver = self.register_widget_ack_waiter(&transfer_id, "delete", None, None)?;
         let payload = serde_json::json!({
@@ -5264,6 +5271,7 @@ impl UsbSerialManager {
             crate::component_extension::app_form::validate_bindings(&widget_definition,&buttons)?;
         }
 
+        let _exit_write = self.protect_device_write();
         // 3) begin - register ack waiter BEFORE sending so we don't miss
         //    a very-fast reply on a healthy board (~50ms).
         // The same connection snapshot that binds every send negotiates this
@@ -7674,6 +7682,7 @@ fn canonical_binding_for_control(control: &str) -> Option<(&'static str, &'stati
 
 #[cfg(test)]
 mod tests {
+    include!("usb_serial/exit_protection_tests.rs");
     #[test]
     fn component_sync_ended_music_retains_lease_until_owner_releases_it(){
         for state in ["playing","buffering","preparing","paused","ended"]{assert!(super::component_sync_media_blocks(state),"{state}");}

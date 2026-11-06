@@ -5149,6 +5149,7 @@ async fn button_config_signal(
     let fallback_binding_count = normalized_bindings.len();
     let (ack_payload, binding_count) = tauri::async_runtime::spawn_blocking(move || {
         manager.with_asset_transfer_guard(|| {
+            let _exit_write = manager.protect_device_write();
             match send_button_config_and_wait_for_ack(
                 &manager,
                 &wait_board_device_id,

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const BOARD: &str = "sync-safety-board";
-const WIDGET: &str = "sync-safety-fixture";
+pub(super) const WIDGET: &str = "sync-safety-fixture";
 #[derive(Clone, Copy)]
 enum Mode {
     Audio { playback: bool, state: &'static str },
@@ -187,7 +187,7 @@ fn production_audio_reply_after_connection_generation_change_is_rejected() {
     assert_eq!(topics(&trace),["diagnostics/query","media/query"]);
     assert!(manager.device_response_waiters.lock().unwrap().is_empty());
 }
-fn minimal_widget() -> tempfile::TempDir {
+pub(super) fn minimal_widget() -> tempfile::TempDir {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("runtime")).unwrap();
     std::fs::create_dir(directory.path().join("assets")).unwrap();

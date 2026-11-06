@@ -56,6 +56,7 @@ impl UsbSerialManager{
                 ||!self.connection.lock().map_err(|_|"catalog_connection_unavailable")?.as_ref().is_some_and(|c|c.connection_id==generation&&!c.capture_active.load(Ordering::Acquire)){
                 return Err("catalog_owner_changed".into());
             }
+            let _exit_write = self.protect_device_write();
             self.catalog_response(board,generation,"widget/catalog_reconcile","widget/catalog_reconcile_result",request_id,&payload)
         })
     }

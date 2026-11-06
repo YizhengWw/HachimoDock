@@ -275,6 +275,7 @@ impl UsbSerialManager {
             (connection.connection_id, connection.cancel_reader.clone())
         };
         let request = format!("volume-{}", uuid::Uuid::new_v4());
+        let _exit_write = volume.map(|_| self.protect_device_write());
         let mut payload = serde_json::json!({"operation":if volume.is_some(){"set"}else{"query"},
             "requestId":request,"expectedBoardDeviceId":board});
         if let Some(volume) = volume {
