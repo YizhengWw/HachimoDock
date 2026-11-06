@@ -20,6 +20,7 @@
  */
 
 #include "pet_p4_input.h"
+#include "pet_p4_wdt_deadlock.h"
 #include "pet_p4_audio.h"
 #include "pet_p4_conversation.h"
 
@@ -842,7 +843,9 @@ static void input_task(void *arg) {
   );
   last_wake = xTaskGetTickCount();
 
+  pet_p4_wdt_deadlock_track();
   while (true) {
+    pet_p4_wdt_deadlock_feed();
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i += 1) {
       uint8_t flags = pet_p4_button_decoder_update(
         &buttons[i].decoder,

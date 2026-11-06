@@ -50,6 +50,7 @@
 #include "pet_p4_system_cues.h"
 #include "pet_p4_audio_frontend.h"
 #include "pet_p4_diagnostics.h"
+#include "pet_p4_wdt_deadlock.h"
 #include "pet_p4_input.h"
 #include "pet_p4_miniapp.h"
 #include "pet_p4_media.h"
@@ -1810,7 +1811,9 @@ static void usb_rx_task(void *arg) {
   (void) arg;
   uint8_t buf[512];
   bool raw_mode = false;
+  pet_p4_wdt_deadlock_track();
   while (true) {
+    pet_p4_wdt_deadlock_feed();
     int len = usb_serial_jtag_read_bytes(buf, sizeof(buf), pdMS_TO_TICKS(20));
     if (len >= 0) mark_rx_healthy(true);
     if (len > 0) {
@@ -1835,7 +1838,9 @@ static void uart_rx_task(void *arg) {
 #endif
   uint8_t buf[PET_P4_UART_READ_CHUNK_BYTES];
   bool raw_mode = false;
+  pet_p4_wdt_deadlock_track();
   while (true) {
+    pet_p4_wdt_deadlock_feed();
 #if PET_P4_RESET_PHASE_TRACE
     PET_RESET_PHASE_SCOPE(rx_phase,PET_PHASE_RX_WAIT);
 #endif
@@ -2102,7 +2107,9 @@ void app_main(void) {
 #if PET_P4_RESET_PHASE_TRACE
   pet_reset_phase_set(PET_PHASE_IDLE);
 #endif
+  if (pet_p4_wdt_deadlock_init(30)) pet_p4_wdt_deadlock_track();
   while (true) {
+    pet_p4_wdt_deadlock_feed();
     bool render_frame = false;
     bool render_transfer_frame = false;
     bool firmware_transfer_active = false;

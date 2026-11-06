@@ -1,5 +1,6 @@
 #include "pet_p4_audio_patch.h"
 #include "pet_p4_audio.h"
+#include "pet_p4_wdt_deadlock.h"
 #include "pet_p4_audio_volume.h"
 #include "pet_p4_fs_activity.h"
 #include "pet_p4_instrument_core.h"
@@ -871,7 +872,9 @@ static void playback_task(void *arg) {
   uint8_t pcm[PET_P4_AUDIO_PLAYBACK_BUFFER_BYTES];
   pet_p4_audio_playback_request_t request;
   pet_instrument_reset(&g_instrument_core);
+  pet_p4_wdt_deadlock_track();
   while (true) {
+    pet_p4_wdt_deadlock_feed();
     if(fruit_drain_step(pcm)) {vTaskDelay(1);continue;}
     if(sfx_drain_step(pcm)) {vTaskDelay(1);continue;}
     if(instrument_drain_step(pcm)) {vTaskDelay(1);continue;}
