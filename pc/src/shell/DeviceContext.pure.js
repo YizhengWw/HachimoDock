@@ -23,6 +23,7 @@ export function deriveCurrentDisplay(agentAppearanceMap, enabledAgents, appearan
 export function resolveUsbRuntime(status) {
   const explicit = String(status?.runtime || "").trim().toLowerCase();
   if (["esp-p4", "esp32-p4", "esp32_p4", "p4"].includes(explicit)) return "esp-p4";
+  if (["esp-s3", "esp32-s3", "esp32_s3"].includes(explicit)) return "esp-s3";
   if (["linux", "linux-board", "raspberry-pi", "raspberry", "radxa"].includes(explicit)) return "linux";
   if (explicit) return explicit;
 

@@ -7,6 +7,21 @@ cmake_minimum_required(VERSION 3.16)
 # Export the real ESP-IDF compilation context for SDK object checks.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# A separate main component keeps the P4 BSP, codec patches and dependency
+# graph out of S3 builds. Existing P4 entry points remain unchanged.
+if(HACHIMO_BOARD STREQUAL "m5stack_stopwatch_v1")
+  set(IDF_TARGET esp32s3)
+  set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/profiles/m5stack_stopwatch_v1/sdkconfig.defaults")
+  set(COMPONENT_DIRS "$ENV{IDF_PATH}/components"
+      "${CMAKE_CURRENT_LIST_DIR}/targets/stopwatch/main"
+      "${CMAKE_CURRENT_LIST_DIR}/targets/stopwatch/components/board_stopwatch")
+  include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+  idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_LIST_DIR}/dependencies.stopwatch.lock")
+  set(PROJECT_VER "0.1.1-stopwatch-dev")
+  project(hachimo_stopwatch)
+  return()
+endif()
+
 if("$ENV{PET_P4_CHIP_FAMILY}" STREQUAL "v3")
   set(SDKCONFIG_DEFAULTS "sdkconfig.defaults;sdkconfig.v3.defaults")
 endif()

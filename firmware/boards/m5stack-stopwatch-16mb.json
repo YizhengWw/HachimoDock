@@ -1,0 +1,23 @@
+{
+  "build": {
+    "core": "esp32",
+    "mcu": "esp32s3",
+    "variant": "esp32s3",
+    "f_cpu": "240000000L",
+    "f_flash": "80000000L",
+    "flash_mode": "qio",
+    "extra_flags": ["-DBOARD_HAS_PSRAM"],
+    "cmake_extra_args": "-DHACHIMO_BOARD=m5stack_stopwatch_v1"
+  },
+  "frameworks": ["espidf"],
+  "name": "M5Stack StopWatch v1.0 (16MB Flash / 8MB OPI PSRAM)",
+  "upload": {
+    "flash_size": "16MB",
+    "maximum_ram_size": 327680,
+    "maximum_size": 3145728,
+    "require_upload_port": true,
+    "speed": 921600
+  },
+  "vendor": "M5Stack",
+  "url": "https://docs.m5stack.com/zh_CN/core/StopWatch"
+}

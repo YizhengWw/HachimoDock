@@ -4,6 +4,10 @@
 
 ## 选择构建目标
 
+StopWatch v1.0 使用独立的 m5stack_stopwatch_v1 环境及 S3 分区/依赖。
+构建、备份、烧录与已实现范围见 [StopWatch 指南](../docs/hardware/m5stack-stopwatch.md)。
+下列 P4 芯片修订版、镜像、补丁和打包步骤只适用于现有 P4 硬件。
+
 | 环境 | 芯片修订范围 | 日常串口 |
 | --- | --- | --- |
 | `esp32_p4_evboard` | 0.1–1.99 | 4 Mbaud |

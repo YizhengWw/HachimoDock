@@ -1,4 +1,5 @@
 #include "pet_p4_behavior.h"
+#include "pet_device_lifecycle.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -8,14 +9,7 @@
 #define PET_P4_WELCOME_MIN_MS 1200ULL
 
 const char *pet_p4_canonical_lifecycle(const char *lifecycle) {
-  if (!lifecycle || !lifecycle[0]) return "idle";
-  if (!strcmp(lifecycle, "active") || !strcmp(lifecycle, "thinking") || !strcmp(lifecycle, "tool_running")) {
-    return "working";
-  }
-  if (!strcmp(lifecycle, "notification")) return "waiting_user";
-  if (!strcmp(lifecycle, "complete") || !strcmp(lifecycle, "completed")) return "done";
-  if (!strcmp(lifecycle, "failed")) return "error";
-  return lifecycle;
+  return pet_device_canonical_lifecycle(lifecycle);
 }
 
 static uint64_t asset_duration_ms(

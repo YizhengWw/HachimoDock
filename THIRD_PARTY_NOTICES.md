@@ -16,6 +16,19 @@ HachimoDock's non-commercial license applies only to its own materials. It does 
 
 `firmware/main/pet_p4_font_cn.c` (16px/1bpp) and `firmware/main/pet_p4_font_cn_32.c` (32px/2bpp, 199 glyphs) embed glyph data rendered from MiSans Medium. MiSans is provided by Xiaomi under the [MiSans Font Intellectual Property License Agreement](https://hyperos.mi.com/font-download/MiSans%E5%AD%97%E4%BD%93%E7%9F%A5%E8%AF%86%E4%BA%A7%E6%9D%83%E8%AE%B8%E5%8F%AF%E5%8D%8F%E8%AE%AE.pdf), not the HachimoDock license. Original font files are not distributed here. See the [official embedding FAQ](https://hyperos.mi.com/font/zh/faq/). Do not extract and redistribute the font as a standalone font product. The unchanged [official Agreement](licenses/MiSans-Font-License-Agreement.pdf) and [embedded-font notice for both sizes](licenses/MiSans-Embedded-Fonts-NOTICE.txt) accompany distributions.
 
+## M5Stack StopWatch board drivers
+
+The StopWatch v1.0 BSP references the power, IO and panel initialization from
+[M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo),
+[M5IOE1](https://github.com/m5stack/M5IOE1) and
+[M5PM1](https://github.com/m5stack/M5PM1), Copyright (c) 2025 and 2026 M5Stack
+Technology CO LTD, under MIT. Both original copyright years are retained in
+[M5Stack StopWatch MIT License](licenses/M5Stack-StopWatch-MIT.txt).
+The ESP-IDF CO5300 component retains Espressif's Apache-2.0 license in the
+resolved dependency. StopWatch reuses the existing MiSans glyphs and project
+factory terrier videos under their existing licenses; no new media rights are
+granted. Its exact component versions are in firmware/dependencies.stopwatch.lock.
+
 ## ESP32-P4 board drivers and build dependencies
 
 The duplex audio frontend uses ESP-SR 2.5.3 AEC, noise suppression and VAD on

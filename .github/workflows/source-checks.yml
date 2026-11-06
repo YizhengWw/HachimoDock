@@ -24,6 +24,7 @@ jobs:
           cache-dependency-path: pc/package-lock.json
       - run: node pc/scripts/check-source-safety.mjs
       - run: node --test pc/scripts/check-source-safety.test.mjs
+      - run: node --test pc/scripts/firmware-source-version.test.mjs
       - run: npm ci
         working-directory: pc
       - run: npm test

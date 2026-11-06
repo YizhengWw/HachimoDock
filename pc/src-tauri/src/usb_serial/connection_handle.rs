@@ -104,12 +104,14 @@ fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
 fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
     let mut port = serialport::new(port_name, baud)
         .timeout(SERIAL_IO_TIMEOUT)
-        .dtr_on_open(false)
+        .preserve_dtr_on_open()
         .open()
         .map_err(|error| error.to_string())?;
-    // Runtime discovery is not a flashing/reset operation. Best effort keeps
-    // CDC drivers without modem-line ioctls compatible; do this before clone.
+    // On native ESP USB Serial/JTAG, clearing DTR while RTS is asserted resets
+    // the SoC. OS open may assert both lines: preserve DTR until RTS is low.
+    // Best effort also supports CDC drivers without modem-line ioctls.
     let _ = port.write_request_to_send(false);
+    let _ = port.write_data_terminal_ready(false);
     let reader = port.try_clone().map_err(|error| error.to_string())?;
     Ok((port, reader))
 }

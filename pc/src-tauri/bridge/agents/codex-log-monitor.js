@@ -12,6 +12,7 @@ const { createHash } = require("node:crypto");
 const { requestText } = require("./codex-request-text");
 const path = require("path");
 const defaults = require("./codex");
+const { CodexUserInputTracker } = require("./codex-user-input");
 const {
   isInternalCodexReviewText,
   isInternalCodexSession,
@@ -715,12 +716,12 @@ class CodexLogMonitor {
   }
 
   ensureTitle(entry) {
-    if (entry.sessionTitle) return entry.sessionTitle;
     const indexed = this.getIndexedTitle(entry.sessionId);
     if (indexed) {
       entry.sessionTitle = indexed;
       return indexed;
     }
+    if (entry.sessionTitle) return entry.sessionTitle;
     const fallback = firstLine(entry.firstUserMessage || entry.lastUserMessage || TEXT_SESSION_FALLBACK, 28);
     entry.sessionTitle = fallback || TEXT_SESSION_FALLBACK;
     return entry.sessionTitle;
@@ -732,7 +733,11 @@ class CodexLogMonitor {
     const finalAgentMessage = entry.lastTaskCompleteMessage || entry.lastAgentMessage || "";
 
     let content = "";
-    if (event === "event_msg:task_started") {
+    if (state === "error") {
+      content = TEXT_ERROR;
+    } else if (state === "notification") {
+      content = "等待你的确认";
+    } else if (event === "event_msg:task_started") {
       content = TEXT_THINKING;
     } else if (event === "event_msg:agent_message" || event === "response_item:assistant_message") {
       content = latestAgentMessage || TEXT_REPLYING;
@@ -812,6 +817,11 @@ class CodexLogMonitor {
 
   emit(entry, state, event) {
     if (entry.suppressEmit || entry.internalSession) return;
+    if (["attention", "error", "idle"].includes(state)) entry.userInputTracker?.clear();
+    if (entry.userInputTracker?.waiting && ["thinking", "working", "speaking"].includes(state)) {
+      state = "notification";
+      entry.lastState = state;
+    }
     const extra = this.buildExtra(entry, state, event);
     const fingerprint = JSON.stringify({
       state,
@@ -864,6 +874,15 @@ class CodexLogMonitor {
       if (!message) return;
       payload = { type: "user_message", message };
       key = "event_msg:user_message";
+    }
+    entry.userInputTracker ||= new CodexUserInputTracker();
+    const inputChanged = entry.userInputTracker.observe(key, payload);
+    if (inputChanged && !["event_msg:task_complete", "event_msg:turn_aborted"].includes(key)) {
+      entry.lastState = entry.userInputTracker.waiting ? "notification" : "thinking";
+      entry.lastEvent = entry.userInputTracker.waiting ? "user_input:pending" : "user_input:answered";
+      entry.lastEventTime = Date.now();
+      entry.lastSourceEventTime = sourceEventTime;
+      this.emit(entry, entry.lastState, entry.lastEvent);
     }
 
     if (key === "response_item:message" && payload?.role === "assistant") {
@@ -993,7 +1012,11 @@ class CodexLogMonitor {
       entry.lastDisplayContent = entry.lastAgentMessage || toolDisplayContent(key, payload);
     }
 
-    const state = this.config.LOG_EVENT_MAP[key];
+    // Modern Codex rollouts encode a failed turn as task_complete.error.
+    // A completed tool invocation is not itself a failed turn.
+    const failedTurn = key === "event_msg:task_complete"
+      && payload?.error !== null && typeof payload?.error === "object";
+    const state = failedTurn ? "error" : this.config.LOG_EVENT_MAP[key];
     if (key === "event_msg:turn_aborted") { entry.turnActive = false; entry.userAwaitingStart = false; }
     if (typeof state !== "string" || !state) return;
 
@@ -1076,6 +1099,7 @@ class CodexLogMonitor {
       lastSourceEventTime: 0,
       suppressEmit: false,
       internalSession: false,
+      userInputTracker: new CodexUserInputTracker(),
       sessionStartDayKey: "",
       dailyUsageDayKey: "",
       dailyBaselineTokenUsage: null,

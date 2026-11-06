@@ -41,6 +41,14 @@ SW1 short press and joystick centre confirm; SW2 short press switches pet/compon
 
 ## Hardware and development
 
+Experimental [M5Stack StopWatch v1.0 support](docs/hardware/m5stack-stopwatch.md)
+adds an isolated ESP32-S3 round-screen target using the existing ESP-IDF,
+RGB565 renderer, LVGL fonts and JSONL protocol. Built-in pet animations, Agent
+states, session switching, buttons, touch and vibration have been verified on
+one v1.0 device. Voice, custom appearance transfer, PetUI and desktop OTA remain
+unavailable. See the [hardware acceptance record](docs/hardware/m5stack-stopwatch-hil-2026-11-05.md)
+and [native desktop/Codex verification](docs/hardware/m5stack-stopwatch-e2e-2026-11-05.md).
+
 The paired hardware uses ESP32-P4, 32 MiB Flash, 32 MiB PSRAM and a 480×640 MIPI-DSI panel. Components use a rotated 640×480 logical canvas. Connect the display to **DSI**, not CSI, with power disconnected. Consult the [hardware project](https://oshwhub.com/eda_gqvzlprk/project_cnbmkbjc#3-%E7%A1%AC%E4%BB%B6%E5%A4%8D%E5%88%BB) before substituting parts.
 
 - [Desktop source and build guide](pc/README.md)
