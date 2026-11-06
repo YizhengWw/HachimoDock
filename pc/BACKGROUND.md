@@ -49,3 +49,6 @@ cargo test --lib --locked exit_protection
 - `phase3_retirement_after_ready_never_writes_the_prepared_raw_body`
 - `app_form_transfer_rejects_old_capability_and_bad_overrides_before_any_write`
 - `local_extended_deck_rejects_historical_quota_before_transport_or_repair`
+
+上游兼容性收尾又对未修改的 upstream main `5e2dbda` 做了独立对照：274 项通过、
+33 项忽略，同样的 4 项失败，确认这些失败并非此次 StopWatch 适配引入。

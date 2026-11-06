@@ -21,8 +21,8 @@ HachimoDock's non-commercial license applies only to its own materials. It does 
 The StopWatch v1.0 BSP references the power, IO and panel initialization from
 [M5StopWatch-UserDemo](https://github.com/m5stack/M5StopWatch-UserDemo),
 [M5IOE1](https://github.com/m5stack/M5IOE1) and
-[M5PM1](https://github.com/m5stack/M5PM1), Copyright (c) 2026 M5Stack Technology
-CO LTD, under MIT. Its notice is retained in
+[M5PM1](https://github.com/m5stack/M5PM1), Copyright (c) 2025 and 2026 M5Stack
+Technology CO LTD, under MIT. Both original copyright years are retained in
 [M5Stack StopWatch MIT License](licenses/M5Stack-StopWatch-MIT.txt).
 The ESP-IDF CO5300 component retains Espressif's Apache-2.0 license in the
 resolved dependency. StopWatch reuses the existing MiSans glyphs and project

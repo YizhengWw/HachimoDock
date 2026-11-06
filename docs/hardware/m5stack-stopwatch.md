@@ -130,6 +130,23 @@ Manufacturer references: [hardware documentation](https://docs.m5stack.com/zh_CN
 [M5IOE1](https://github.com/m5stack/M5IOE1),
 [M5PM1](https://github.com/m5stack/M5PM1).
 
+## Upstream compatibility check — 2026-11-06
+
+The adaptation was checked against upstream main at `5e2dbdacb7beda88843b2182ae98c7f0c5060721`.
+The existing P4 environments were built in an isolated checkout with separate
+PlatformIO cores, using their unchanged platform/SDK selections:
+
+| Environment | Platform release | ESP-IDF | Result |
+| --- | --- | --- | --- |
+| esp32_p4_evboard | 55.03.32 | 5.5.1 | Full build passed; app fits the 3 MiB partition |
+| esp32_p4_evboard_v3 | 55.03.38-1 | 5.5.4 | Full build passed; app fits the 3 MiB partition |
+
+Neither P4 dependency lockfile changed. Generated P4 binaries are not part of
+the contribution. These are build compatibility results, not additional P4
+physical-device acceptance. StopWatch hardware and native macOS/Codex results
+are recorded separately above. The added S3 workflow uses ESP-IDF 5.5.4;
+the existing macOS/Windows source-check jobs remain in place.
+
 ## Verification
 
 ~~~sh
@@ -171,26 +188,25 @@ Before declaring hardware support verified, record:
 7. One vibration per lifecycle transition; motor off after 120 ms.
 8. Battery reading, USB power transitions and 24-hour heap/stability observations.
 
-No physical board was connected during initial source/build verification.
-Subsequent on-board verification and fixes are recorded separately below.
-
-## Initial verification record — 2026-11-05
-
-The following record predates connecting the physical board; see the subsequent
-0.1.1 on-board record for the four completed peripheral checks.
+## Verification summary — 2026-11-06
 
 - StopWatch native ESP-IDF 5.5.5 build: passed.
 - StopWatch PlatformIO / ESP-IDF 5.5.4 build and merged factory image: passed.
-- Existing P4-v3 PlatformIO build and image-budget gates: passed.
-- P4-v1 was not rebuilt; existing P4 protocol source-contract checks passed.
+- Existing P4-v1 and P4-v3 full PlatformIO builds and image budgets: passed.
+- Firmware protocol contracts: 70 passed; P4 source-version selection: 4 passed.
 - Desktop Node tests: 1817 passed, 1 skipped; production web build/CSP: passed.
-- Rust library compile and seven hello/identity-related tests: passed with
-  release bundle resources excluded for source-only verification.
+- Bridge tests: 236 passed. Full native macOS app build and device reconnection: passed.
+- Rust USB tests: 283 passed, 33 ignored; four failures also reproduce on
+  unmodified upstream `5e2dbda` (274 passed, the same four failures, 33 ignored).
+  The new exit-protection regression cases all passed; details are in
+  [background/exit verification](../../pc/BACKGROUND.md).
 - Bounded session C tests passed with UBSan on macOS. Linux CI additionally
   enables ASan. The production renderer's native framebuffer preview passed.
 - Source publication check: passed. P4 dependency locks/configs are unchanged.
-- Physical panel, touch, motor, USB reconnect and battery/stability tests remain
-  pending. GitHub-hosted CI has not been run from this local checkout.
+- Physical display, touch, both buttons, vibration, real Codex state following,
+  USB replug, device restart and native macOS client restart: passed on one v1.0.
+- Windows USB behavior, host sleep/wake, 24-hour stress and battery-life
+  acceptance remain unverified. GitHub-hosted CI still requires a PR run.
 
 ## On-board verification — 0.1.1
 
