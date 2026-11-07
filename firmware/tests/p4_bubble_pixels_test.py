@@ -157,10 +157,11 @@ def test_pins_survive_peer_retirement_and_new_content_has_text_fallback(receiver
         desire(client='c'*32),{'drawHeld':{'style':1,'ok':True,'first':0}},{'drawHeld':{'style':4,'ok':True,'first':0}},{'release':True},select('title','body',False)])
 
 def test_full_pinned_cache_declines_then_release_retires_safely(receiver):
+    # Pinned pages are bounded by CACHE_SLOTS (24): the 25th unsolicited asset
+    # cannot start, and previously pinned pages survive the refusal.
     commands=[]
-    for i in range(8):
+    for i in range(24):
         owner=f'{i+1:016x}';commands+=[desire(owner=owner,scope=f'state/{i}',assets=[(4,str(i))])]+send(transfer(str(i),owner=owner))+[select(body=str(i),pixels=True)]
-    # Eight recent displayed pages remain pinned by display metadata; no unbounded allocation.
     extra=transfer('overflow');receiver(commands+[desire(scope='state/overflow',assets=[(4,'overflow')])]+send(extra[:-1])+[{'payload':extra[-1],'ok':False},select(body='0',pixels=True)])
 
 def test_page_assets_are_independent_lazy_and_missing_page_falls_back(receiver):
@@ -177,8 +178,10 @@ def test_real_mutex_concurrent_draw_and_peer_retirement_keep_pins_safe(receiver)
 
 
 def test_missing_is_bounded_coalesced_and_stops_during_audio(receiver):
+    # Need requests are coalesced with an 80 ms throttle (was 1 s) so pixels keep
+    # up with streaming text; pausing still stops them entirely.
     receiver([desire(),select(body='missing'),select(body='missing'),{'need':{'now':1,'ok':True,'style':4,'page':0}},
-        select(body='missing'),{'need':{'now':500,'ok':False}},{'need':{'now':1001,'ok':True,'style':4,'page':0}},
+        select(body='missing'),{'need':{'now':50,'ok':False}},{'need':{'now':101,'ok':True,'style':4,'page':0}},
         {'maintain':{'now':2001,'pause':True}},select(body='blocked'),{'need':{'now':3001,'ok':False}}])
 
 

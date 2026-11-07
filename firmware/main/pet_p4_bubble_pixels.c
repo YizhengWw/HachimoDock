@@ -610,12 +610,20 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
   out->style = style;
   snprintf(out->title, sizeof(out->title), "%s", title ? title : "");
   snprintf(out->body, sizeof(out->body), "%s", body ? body : "");
+  /* The host hashes text clamped to the byte limits it renders (session:
+   * title 191 / body 383, conversation: title 63 / body 511). Clamp a copy for
+   * the key only: the renderer still shows the full text. */
+  char key_title[256], key_body[640];
+  snprintf(key_title, sizeof(key_title), "%s", out->title);
+  snprintf(key_body, sizeof(key_body), "%s", out->body);
+  clamp_utf8_bytes(key_title, style == PET_BUBBLE_BODY ? 63 : 191);
+  clamp_utf8_bytes(key_body, style == PET_BUBBLE_BODY ? 511 : 383);
   if (!mutex)
     return;
   xSemaphoreTake(mutex, portMAX_DELAY);
   cache_now_ms = now;
   out->epoch = lifecycle_epoch;
-  uint64_t        tk = text_key(1, out->title), bk = text_key(style, out->body), id = text_key(style, owner ? owner : "");
+  uint64_t        tk = text_key(1, key_title), bk = text_key(style, key_body), id = text_key(style, owner ? owner : "");
   text_view_t    *v = NULL, *victim = &views[0];
   for (unsigned i = 0; i < VIEW_SLOTS; i++) {
     if (views[i].occupied && views[i].owner == id) {
@@ -655,57 +663,17 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
     out->body_pin = b;
     cache[b].readers++;
   }
-  bool ready = (!out->title[0] || a >= 0) && (!out->body[0] || b >= 0);
-  if (ready) v->confirmed = true;
-  if (!v->first_seen_ms) v->first_seen_ms = now;
-  /* Confirmed display: keep the previous content for a short window while the
-   * new text's pixels are in flight, so updates never flash local glyphs.
-   * A never-shown owner has no previous content: wait briefly (800 ms) so the
-   * first paint is the host font too, then fall back rather than stay blank. */
-  /* Live speech captions change faster than any pixel frame can land. Holding
-   * the previous confirmed content there swallowed the user's own words (the
-   * bubble kept showing "我在听"). For the conversation owner, report the
-   * current text immediately and let pixels follow when they arrive. */
-  bool live_caption = g_live_caption && owner && !strncmp(owner, "conversation:", 13);
-  /* Live ASR captions are rendered locally: requesting a pixel frame for every
-   * partial transcript saturated the link during speech and dropped the
-   * connection. Once the transcript settles (speaking phase) pixels resume. */
-  if (live_caption) {
-    out->pixels = false;
-    out->wait = false;
-    out->title_pin = out->body_pin = -1;
-    xSemaphoreGive(mutex);
-    return;
-  }
-  uint64_t wait_ms = live_caption ? 0ULL
-    : (v->shown_valid ? BUBBLE_PIXEL_WAIT_MS : (client[0] ? 1500ULL : 300ULL));
-  if (ready || now - v->pending_since >= wait_ms) {
-    if (strcmp(v->shown_title, out->title) || strcmp(v->shown_body, out->body)
-        || v->shown_pixels != ready) {
-      v->shown_since_ms = now;
-      atomic_fetch_add(&revision, 1);
-    }
-    snprintf(v->shown_title, sizeof(v->shown_title), "%s", out->title);
-    snprintf(v->shown_body, sizeof(v->shown_body), "%s", out->body);
-    v->shown_pixels = ready;
-    v->shown_valid = true;
-  }
-  /* Report the confirmed content and pin its slots. */
-  snprintf(out->title, sizeof(out->title), "%s", v->shown_title);
-  snprintf(out->body, sizeof(out->body), "%s", v->shown_body);
-  out->pixels = v->shown_pixels;
-  out->since_ms = v->shown_since_ms ? v->shown_since_ms : now;
+  out->pixels = (!out->title[0] || a >= 0) && (!out->body[0] || b >= 0);
+  out->since_ms = v->since_ms;
   out->title_pin = -1;
   out->body_pin = -1;
-  if (out->pixels) {
-    if (out->title[0]) {
-      int sa = find(text_key(1, out->title), 1, 0);
-      if (sa >= 0) { out->title_pin = sa; cache[sa].readers++; } else out->pixels = false;
-    }
-    if (out->pixels && out->body[0]) {
-      int sb = find(text_key(style, out->body), style, 0);
-      if (sb >= 0) { out->body_pin = sb; cache[sb].readers++; } else out->pixels = false;
-    }
+  if (out->title[0] && a >= 0) {
+    out->title_pin = a;
+    cache[a].readers++;
+  }
+  if (out->body[0] && b >= 0) {
+    out->body_pin = b;
+    cache[b].readers++;
   }
   out->wait = false;
   xSemaphoreGive(mutex);
