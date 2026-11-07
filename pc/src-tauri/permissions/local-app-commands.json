@@ -68,6 +68,7 @@
           "check_voice_composer_readiness",
           "request_codex_accessibility_permission",
           "set_p4_session_binding",
+          "set_keep_awake_mode",
           "dispatch_remote_cli_binding",
           "load_bridge_profile",
           "save_bridge_profile",

@@ -91,7 +91,10 @@ fn request_body(cfg: &LlmConfig, system_prompt: &str, history: &[ChatTurn], user
         "messages": messages,
         "stream": true,
         "temperature": 0.8,
-        "max_tokens": 400,
+        // Voice replies are short, but reasoning models can spend several
+        // hundred tokens before emitting a tool call. A 400-token cap used to
+        // truncate the tool JSON and fail the turn with finish_reason=length.
+        "max_tokens": 1600,
     });
     // Realtime small talk must not spend seconds generating an unused reasoning trace.
     // Keep the vendor extension off custom endpoints and unrelated models.
@@ -1345,6 +1348,13 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn voice_request_has_room_for_reasoning_before_tool_calls() {
+        let cfg = LlmConfig { web_search:false, base_url:"https://opencode.ai/zen/go/v1".into(), model:"deepseek-v4.1-flash".into(), api_key:"k".into() };
+        let body = request_body(&cfg, "persona", &[], "打开灯");
+        assert!(body["max_tokens"].as_u64().unwrap_or(0) >= 1200);
     }
 
     #[test]

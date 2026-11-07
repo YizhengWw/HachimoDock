@@ -11429,7 +11429,58 @@ fn frontend_startup_ready(window: tauri::WebviewWindow, supervisor: tauri::State
     Ok(supervisor.ready(generation,&token))
 }
 
+#[cfg(target_os = "macos")]
+static APP_NAP_GUARD: std::sync::Mutex<Option<std::process::Child>> =
+    std::sync::Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn caffeinate_flag(block_sleep: bool) -> Option<&'static str> {
+    if block_sleep { Some("-imsu") } else { None }
+}
+
+#[cfg(target_os = "macos")]
+fn restart_app_nap_guard(block_sleep: bool) {
+    let mut guard = match APP_NAP_GUARD.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    // OFF must not launch anything: `caffeinate -u` is still a UserIsActive
+    // assertion and prevents idle system sleep, which made a closed-lid Mac
+    // stay awake and reconnect the P4.
+    let Some(flag) = caffeinate_flag(block_sleep) else { return; };
+    let pid = std::process::id().to_string();
+    match std::process::Command::new("caffeinate")
+        .args([flag, "-w", &pid])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(child) => {
+            *guard = Some(child);
+            eprintln!("[app-nap] caffeinate {flag} started for pid {pid}");
+        }
+        Err(error) => eprintln!("[app-nap] failed to start caffeinate: {error}"),
+    }
+}
+
+#[tauri::command]
+fn set_keep_awake_mode(block_sleep: bool) -> Result<(), String> {
+    eprintln!("[app-nap] set_keep_awake_mode block_sleep={block_sleep}");
+    #[cfg(target_os = "macos")]
+    restart_app_nap_guard(block_sleep);
+    #[cfg(not(target_os = "macos"))]
+    let _ = block_sleep;
+    Ok(())
+}
+
 pub fn run() {
+    #[cfg(target_os = "macos")]
+    restart_app_nap_guard(false);
     let usb_manager = usb_serial::UsbSerialManager::new();
     if !cfg!(feature = "composer-diagnostic") {
     if let Err(error) = sync_usb_desktop_device_id(&usb_manager) {
@@ -11564,6 +11615,7 @@ pub fn run() {
         .manage(usb_manager)
         .invoke_handler(tauri::generate_handler![
             appearance_recovery_ipc::usb_reconcile_appearance_unknown,
+            set_keep_awake_mode,
             reference_image::reference_image_mount,
             reference_image::reference_image_action,
             desktop_window::set_exit_reasons,
@@ -14891,6 +14943,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keep_awake_off_does_not_block_system_sleep() {
+        // OFF must not launch caffeinate: a `-u` user-activity assertion still
+        // blocks idle sleep. ON keeps the explicit sleep-blocking mode.
+        assert_eq!(caffeinate_flag(false), None);
+        assert_eq!(caffeinate_flag(true), Some("-imsu"));
+        // The audio player's own NSActivityOptions must never request idle
+        // system/display sleep; upstream already covers this separately in
+        // realtime_audio_macos::tests.
+        let source = include_str!("realtime_audio_macos.rs");
+        let options = source
+            .split("fn activity_options()")
+            .nth(1)
+            .expect("activity options");
+        let options_body = options.split('}').next().unwrap_or_default();
+        assert!(!options_body.contains("IdleSystemSleepDisabled"));
+    }
     fn build_usb_restore_speech_text_returns_none_without_state_or_text() {
         let payload = serde_json::json!({
             "reason": "heartbeat",

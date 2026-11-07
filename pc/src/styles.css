@@ -14835,3 +14835,46 @@ select:focus-visible {
 .wifi-settings__note--warning {
   color: var(--warning);
 }
+
+/* keep-awake switch (merged from integration/test-all) */
+.dashboard-actions-menu__toggle {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.dashboard-actions-menu__toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboard-actions-menu__switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  transition: background-color 120ms ease;
+}
+
+.dashboard-actions-menu__switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  transition: transform 120ms ease;
+}
+
+.dashboard-actions-menu__switch.is-on {
+  background: var(--accent);
+}
+
+.dashboard-actions-menu__switch.is-on::after {
+  transform: translateX(12px);
+}

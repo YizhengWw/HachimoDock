@@ -4,7 +4,7 @@
  *         保证既有调用方/测试不破)，以及可选 onUpdateFirmware /
  *         onDiagnostics opt-ins for P4 A/B updates and diagnostics.
  * [Output] Menu mounted into PageShell actions: 发送测试消息 / 复制桌面设备 ID /
- *          [⤴ 设备返回主屏]? / [🔄 强制同步形象]? /
+ *          [设备返回主屏]? / [强制同步形象]? /
  *          [opt-in] 固件升级 / 设备诊断 / 解绑设备 (danger).
  *          应急两项在物理按键失灵切不回主屏、客户端 UI 与设备形象脱节时使用。
  * [Pos] component node in pc/src/dashboard
@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp } from "lucide-react";
+import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp, Moon, ShieldCheck } from "lucide-react";
 
 export default function DashboardActionsMenu({
   onSendTest,
@@ -22,6 +22,8 @@ export default function DashboardActionsMenu({
   onForceSyncAppearance,
   onReconcileAppearance,
   canReconcileAppearance = false,
+  keepAwake,
+  onToggleKeepAwake,
   onUpdateFirmware,
   onDiagnostics,
 }) {
@@ -74,6 +76,22 @@ export default function DashboardActionsMenu({
             <Copy size={14} />
             复制桌面设备 ID
           </button>
+          {typeof keepAwake === "boolean" && (
+            <button
+              type="button"
+              className="dashboard-actions-menu__item dashboard-actions-menu__toggle"
+              role="menuitemcheckbox"
+              aria-checked={keepAwake}
+              onClick={() => onToggleKeepAwake?.()}
+              title="开启后合盖或空闲时保持唤醒；关闭后允许系统睡眠（默认）"
+            >
+              <span className="dashboard-actions-menu__toggle-label">
+                <Moon size={14} />
+                阻止合盖睡眠
+              </span>
+              <span className={`dashboard-actions-menu__switch${keepAwake ? " is-on" : ""}`} />
+            </button>
+          )}
           {onDeviceReturnHome && (
             <button
               type="button"
@@ -83,13 +101,13 @@ export default function DashboardActionsMenu({
               title="负一屏物理按键切不回主屏时，通过 USB 强制把设备 .screen-page 切到 main"
             >
               <ArrowUpLeft size={14} />
-              ⤴ 设备返回主屏
+              设备返回主屏
             </button>
           )}
           {onReconcileAppearance && (
             <button type="button" className="dashboard-actions-menu__item" role="menuitem"
               disabled={!canReconcileAppearance} onClick={dispatch(onReconcileAppearance)}>
-              <RefreshCw size={14} />
+              <ShieldCheck size={14} />
               核对形象状态
             </button>
           )}
@@ -102,7 +120,7 @@ export default function DashboardActionsMenu({
               title="客户端 UI 显示的形象与设备屏幕不一致时，绕过缓存重新推送一次"
             >
               <RefreshCw size={14} />
-              🔄 强制同步形象
+              强制同步形象
             </button>
           )}
           {onUpdateFirmware && (
