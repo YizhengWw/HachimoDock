@@ -104,12 +104,19 @@ fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
 fn open_serial_pair(port_name: &str, baud: u32) -> SerialPortPairResult {
     let mut port = serialport::new(port_name, baud)
         .timeout(SERIAL_IO_TIMEOUT)
-        .dtr_on_open(false)
+        // The P4 board routes the CH343 modem lines to the ESP auto-reset
+        // circuit: DTR low *and* RTS low pulses EN, so opening the port would
+        // reboot a running device on every App relaunch. Runtime discovery is
+        // not a flashing/reset operation, so keep both lines in their inactive
+        // (high) state; any other combination leaves EN alone (verified on
+        // hardware).
+        .dtr_on_open(true)
         .open()
         .map_err(|error| error.to_string())?;
-    // Runtime discovery is not a flashing/reset operation. Best effort keeps
-    // CDC drivers without modem-line ioctls compatible; do this before clone.
-    let _ = port.write_request_to_send(false);
+    // Best effort keeps CDC drivers without modem-line ioctls compatible;
+    // do this before clone.
+    let _ = port.write_request_to_send(true);
+    let _ = port.write_data_terminal_ready(true);
     let reader = port.try_clone().map_err(|error| error.to_string())?;
     Ok((port, reader))
 }
