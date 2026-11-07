@@ -4052,11 +4052,19 @@ bool pet_p4_handle_line_with_reply(
         const char *value=json_string(payload,fields[i]);
         cJSON_AddStringToObject(reply,fields[i],strlen(value)<=64?value:"");
       }
+      /* Do NOT block pixel transfer during audio/conversation: rejecting the
+       * frame there forced a local-render fallback and an opacity flicker as
+       * blocked toggled mid-session. Only OTA and asset transfers still need
+       * the write channel to themselves. */
       pet_bubble_pixels_maintain((uint64_t)(esp_timer_get_time()/1000),
-        pet_p4_audio_active() || pet_p4_audio_playback_active() || pet_p4_audio_music_active()
-        || pet_p4_audio_conversation_active() || pet_p4_ota_active() || state->asset_transfer_active);
+        pet_p4_ota_active() || state->asset_transfer_active);
       (void)pet_bubble_pixels_handle_owned(payload,ctx,(uint64_t)(esp_timer_get_time()/1000),reply);
-      send_topic_payload(send_line,ctx,"ui/text-pixels/status",reply);
+      /* Chunk frames are fire-and-forget on the host side now; replying to each
+       * 512-byte chunk only wasted wire time. Only begin/end carry a requestId
+       * that the host waits on. */
+      const char *phase = json_string(payload, "phase");
+      if (!strcmp(phase, "begin") || !strcmp(phase, "end"))
+        send_topic_payload(send_line,ctx,"ui/text-pixels/status",reply);
     }
   } else if (strcmp(topic, "speech/text") == 0) {
     handle_speech(state, payload);
@@ -4305,14 +4313,38 @@ bool pet_p4_handle_line_with_reply(
     }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
 #endif
+  } else if (strcmp(topic, "ui/bubble_opacity") == 0) {
+    const cJSON *opacity = cJSON_GetObjectItemCaseSensitive(payload, "opacity");
+    if (cJSON_IsNumber(opacity)) {
+      int value = (int) opacity->valuedouble;
+      if (value < 20) value = 20;
+      if (value > 100) value = 100;
+      state->bubble_opacity = (unsigned int) value;
+      pet_p4_renderer_set_bubble_opacity((unsigned int) value);
+      state->last_update_ms += 1;
+    }
+    send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "ui/conversation") == 0) {
     bool phase_changed = strcmp(state->conversation_state, json_string(payload, "state")) != 0;
-    bool accepted = pet_p4_conversation_update(state, json_string(payload, "sessionId"),
-      json_string(payload, "state"), json_string(payload, "name"), json_string(payload, "text"),
-      strcmp(json_string(payload, "role"), "user") == 0,
-      cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "final")), esp_timer_get_time() / 1000ULL);
-    bool failed = strcmp(state->conversation_state, "error") == 0;
-    if (accepted && phase_changed) pet_p4_audio_diagnostic(failed ? "conversation_failed" : "conversation_state", json_string(payload, "sessionId"), 0, !failed);
+    bool is_final = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(payload, "final"));
+    unsigned long long conversation_now_ms = (unsigned long long)(esp_timer_get_time() / 1000ULL);
+    /* Streaming partial text arrives faster than one pixel frame can transfer,
+     * so most frames were superseded before they landed and the bubble fell
+     * back to device glyphs. Coalesce intermediate partials to ~5 Hz; phase
+     * changes and final results still apply immediately. */
+    static unsigned long long last_visual_apply_ms;
+    bool visual_apply = phase_changed || is_final
+      || conversation_now_ms - last_visual_apply_ms >= 200ULL;
+    pet_bubble_pixels_set_live_caption(!strcmp(json_string(payload, "state"), "listening"));
+    if (visual_apply) {
+      bool accepted = pet_p4_conversation_update(state, json_string(payload, "sessionId"),
+        json_string(payload, "state"), json_string(payload, "name"), json_string(payload, "text"),
+        strcmp(json_string(payload, "role"), "user") == 0,
+        is_final, conversation_now_ms);
+      last_visual_apply_ms = conversation_now_ms;
+      bool failed = strcmp(state->conversation_state, "error") == 0;
+      if (accepted && phase_changed) pet_p4_audio_diagnostic(failed ? "conversation_failed" : "conversation_state", json_string(payload, "sessionId"), 0, !failed);
+    }
     send_protocol_ack_if_requested(send_line, ctx, topic, payload);
   } else if (strcmp(topic, "system/heartbeat") == 0) {
     const cJSON *clock=cJSON_GetObjectItemCaseSensitive(payload,"clock");

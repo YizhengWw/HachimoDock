@@ -53,6 +53,11 @@ import DeviceVolumePanel from "./dashboard/DeviceVolumePanel.jsx";
 import SharedLocationPanel from "./dashboard/SharedLocationPanel.jsx";
 import { createSharedLocationController } from "./dashboard/shared-location-model.js";
 import { useExitProtection } from "./lib/exit-protection.js";
+import { loadBubbleOpacity, saveBubbleOpacity } from "./lib/bubble-opacity.js";
+import {
+  loadTextRenderingSettings,
+  toggleTextRenderingSetting,
+} from "./lib/text-rendering-settings.js";
 import ChannelMatrixCard from "./dashboard/ChannelMatrixCard.jsx";
 import BoardButtonPanel from "./dashboard/BoardButtonPanel.jsx";
 import VoiceAssistantPanel, { buildVoiceSummary, formatVoiceSessionOption } from "./dashboard/VoiceAssistantPanel.jsx";
@@ -798,6 +803,29 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
   const { deviceVoiceFlow } = useDeviceVoiceRouter({
     onAudioActivity: onDeviceVoiceAudioActivity,
   });
+  const [textRenderingSettings, setTextRenderingSettings] = useState(loadTextRenderingSettings);
+  const toggleTextRendering = useCallback((key) => {
+    setTextRenderingSettings((current) => toggleTextRenderingSetting(current, key));
+  }, []);
+  const [bubbleOpacity, setBubbleOpacity] = useState(loadBubbleOpacity);
+  const updateBubbleOpacity = useCallback((value) => {
+    setBubbleOpacity(saveBubbleOpacity(value));
+  }, []);
+  useEffect(() => {
+    if (!usb.connected) return;
+    // Debounce: a slider drag fires many intermediate values in quick
+    // succession. Coalesce them so only the final value reaches the device,
+    // avoiding a per-frame opacity churn that reads as a flicker.
+    const timer = setTimeout(() => {
+      invoke("usb_send_topic", {
+        topic: "ui/bubble_opacity",
+        payload: { opacity: bubbleOpacity },
+      }).catch((error) => {
+        console.warn("Failed to update bubble opacity", error);
+      });
+    }, 120);
+    return () => clearTimeout(timer);
+  }, [usb.connected, bubbleOpacity]);
   const [voiceConfig, setVoiceConfig] = useState(loadVoiceConfigFromStorage);
   const voiceConfigRef = useRef(voiceConfig);
   // 实时对话键是否已绑到某个按键（提示文案用；真正的按键事件由 Rust 处理）
@@ -1517,6 +1545,10 @@ export default function DeviceDashboard({ active = true, binding, onUnbind, onOp
           onForceSyncAppearance={onForceSyncAppearance}
           onReconcileAppearance={onReconcileAppearance}
           canReconcileAppearance={usb.connected === true && Boolean(usb.boardDeviceId) && !appearanceSync?.pending && !appearanceObservationBusy}
+          bubbleOpacity={bubbleOpacity}
+          onUpdateBubbleOpacity={updateBubbleOpacity}
+          textRenderingSettings={textRenderingSettings}
+          onToggleTextRendering={toggleTextRendering}
           onUpdateFirmware={usb.connected && usb.runtime === P4_RUNTIME_ID
             ? () => {
               setFirmwareTargetBoardDeviceId(usb.boardDeviceId || "");

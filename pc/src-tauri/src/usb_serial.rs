@@ -276,6 +276,7 @@ const P4_FIRMWARE_STATUS_TIMEOUT: Duration = Duration::from_secs(2);
 // Control frames keep the proven 64-byte packetization on both desktop OSes.
 // Raw bodies use wider Windows WriteFile calls to reduce syscall overhead;
 // macOS retains the hardware-proven drained 64-byte write for every slice.
+const BUBBLE_MEDIA_GAP_WAIT: Duration = Duration::from_millis(250);
 const P4_CH343_SERIAL_WRITE_SLICE_BYTES: usize = 64;
 #[cfg(windows)]
 const P4_CH343_SERIAL_WRITE_GAP: Duration = Duration::from_micros(400);
@@ -1668,6 +1669,7 @@ fn ensure_p4_native_full_pack_supported(assets: &[AppearanceAssetEntry]) -> Resu
 #[derive(Clone)]
 pub struct UsbSerialManager {
     bubble_renderer: Arc<Mutex<bubble_pixels::RenderBridge>>,
+    bubble_sink_registered: Arc<std::sync::atomic::AtomicBool>,
     bubble_worker: Arc<AtomicBool>,
     last_serial_baud: Arc<Mutex<Option<(String, u32)>>>,
     connection: Arc<Mutex<Option<UsbConnection>>>,
@@ -2090,6 +2092,7 @@ impl UsbSerialManager {
     pub fn new() -> Self {
         Self {
             bubble_renderer: Arc::new(Mutex::new(bubble_pixels::RenderBridge::default())),
+            bubble_sink_registered: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             bubble_worker: Arc::new(AtomicBool::new(false)),
             last_serial_baud: Arc::new(Mutex::new(None)),
             connection: Arc::new(Mutex::new(None)),
@@ -2578,6 +2581,45 @@ impl UsbSerialManager {
                         let mut bridge=bubble_ref.lock().ok()?;
                         Some((bridge.sink(),bridge.need(&msg.payload,connection_id,&c.board_device_id)))
                     }));
+                    // DIAGNOSTIC (temporary): does the device's pixel request reach
+                    // the host, and does it match a text we can render? At most one
+                    // record per second so it never floods the log.
+                    {
+                        static LAST_NEED_LOG: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+                        let prev = LAST_NEED_LOG.swap(now_ms, std::sync::atomic::Ordering::Relaxed);
+                        if now_ms.saturating_sub(prev) >= 1000 {
+                            let (reached, matched) = match &delivery {
+                                Some((Some(_), events)) => (true, events.len()),
+                                Some((None, _)) => (false, 0),
+                                None => (false, 0),
+                            };
+                            let style_word = match msg.payload["style"].as_u64() {
+                                Some(1) => "style_one",
+                                Some(2) => "style_two",
+                                Some(3) => "style_three",
+                                Some(4) => "style_four",
+                                _ => "style_other",
+                            };
+                            let page_n = msg.payload["page"].as_u64().unwrap_or(0);
+                            crate::realtime_chat_log::record(
+                                "",
+                                "bubble_need",
+                                serde_json::json!({
+                                    "stage": if matched > 0 { "matched" } else { "unmatched" },
+                                    "ok": matched > 0,
+                                    "count": matched as u64,
+                                    "reason": if !reached { "no_sink_or_stale" }
+                                        else if page_n > 0 { "unmatched_page" }
+                                        else { style_word },
+                                }),
+                            );
+                        }
+                    }
                     if let Some((Some(sink),events))=delivery{for event in events{sink(event);}}
                 }
                 if msg.topic.starts_with("audio/") || msg.topic=="protocol/ack" {
@@ -2641,15 +2683,31 @@ impl UsbSerialManager {
         self.send_inner(topic, payload, true, None, None, None)
     }
 
+    pub(crate) fn resend_bubble_events(&self) -> Vec<serde_json::Value> {
+        self.bubble_renderer.lock().map(|bridge| bridge.resend()).unwrap_or_default()
+    }
+    pub(crate) fn bubble_sink_registered(&self) -> bool {
+        self.bubble_sink_registered.load(std::sync::atomic::Ordering::Acquire)
+    }
     pub(crate) fn set_bubble_renderer(
         &self,
         instance: &str,
         sink: Option<bubble_pixels::RenderSink>,
     ) -> bool {
-        self.bubble_renderer
+        let registered = sink.is_some();
+        self.bubble_sink_registered
+            .store(registered, std::sync::atomic::Ordering::Release);
+        let ok = self
+            .bubble_renderer
             .lock()
             .map(|mut bridge| bridge.set_sink(instance, sink))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        // DIAGNOSTIC: without a registered sink the host produces no pixels at
+        // all, so every bubble stays on the device's local glyphs.
+        crate::realtime_chat_log::record("", "bubble_service",
+            serde_json::json!({"stage": if registered { "registered" } else { "cleared" },
+                               "ok": ok}));
+        ok
     }
     pub(crate) fn reserve_bubble_worker(
         &self,
@@ -2668,6 +2726,22 @@ impl UsbSerialManager {
         }
         bubble_pixels::WorkerLease::acquire(self.bubble_worker.clone())
     }
+    /// Live media writes run as short chunks; wait for the idle gap between
+    /// chunks so an optional pixel frame can interleave instead of being
+    /// dropped for the whole playback window. Never waits past `deadline`.
+    fn wait_media_gap(&self, deadline: Instant, budget: Duration) -> bool {
+        let started = Instant::now();
+        loop {
+            if self.media_requests_pending.load(Ordering::SeqCst) == 0 {
+                return true;
+            }
+            if Instant::now() >= deadline || started.elapsed() >= budget {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
     pub(crate) fn send_bubble_pixels(&self, frame: BubbleFrame) -> Result<(), String> {
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&frame.data)
@@ -2691,15 +2765,24 @@ impl UsbSerialManager {
         let transfer = uuid::Uuid::new_v4().simple().to_string();
         let mut next_write = Instant::now();
         let mut phase = |name: &str,
-                         extra: serde_json::Value|
+                         extra: serde_json::Value,
+                         wait_ack: bool|
          -> Result<serde_json::Value, String> {
             while Instant::now() < next_write {
-                if Instant::now() >= deadline
-                    || !self
-                        .bubble_renderer
-                        .lock()
-                        .map_err(|_| "BUBBLE_FALLBACK: lifecycle")?
-                        .current(&frame)
+                if Instant::now() >= deadline {
+                    return Err("BUBBLE_FALLBACK: deadline".into());
+                }
+                // Live audio arrives as short chunks with idle gaps between them.
+                // Skip an in-flight chunk, then continue in the gap, instead of
+                // dropping the whole frame for the entire playback.
+                // Give audio a short chance, then keep pacing anyway; dropping
+                // the frame here was the other starvation path during TTS.
+                let _ = self.wait_media_gap(deadline, Duration::from_millis(8));
+                if !self
+                    .bubble_renderer
+                    .lock()
+                    .map_err(|_| "BUBBLE_FALLBACK: lifecycle")?
+                    .current(&frame)
                 {
                     return Err("BUBBLE_FALLBACK: retired".into());
                 }
@@ -2731,21 +2814,25 @@ impl UsbSerialManager {
                 return Err("BUBBLE_FALLBACK: frame budget".into());
             }
             let (sender, receiver) = mpsc::channel();
-            self.device_response_waiters
-                .lock()
-                .map_err(|_| "BUBBLE_FALLBACK: waiter")?
-                .push(DeviceResponseWaiter {
-                    request_id: request_id.clone(),
-                    response_topic: "ui/text-pixels/status".into(),
-                    sender,
-                });
+            if wait_ack {
+                self.device_response_waiters
+                    .lock()
+                    .map_err(|_| "BUBBLE_FALLBACK: waiter")?
+                    .push(DeviceResponseWaiter {
+                        request_id: request_id.clone(),
+                        response_topic: "ui/text-pixels/status".into(),
+                        sender,
+                    });
+            }
             let result = (|| {
                 // One FRAME owns the low-priority guard. It is released before
                 // token sleep or ACK wait, allowing media/OTA between frames.
                 {
-                    if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
-                        return Err("BUBBLE_FALLBACK: media pending".into());
-                    }
+                    // Prefer an audio gap, but never abandon the frame: during
+                    // continuous TTS the pending counter can stay non-zero for
+                    // the whole reply, which used to starve every pixel frame
+                    // until the device timed out and degraded to local text.
+                    let _ = self.wait_media_gap(deadline, Duration::from_millis(12));
                     let _guard = self
                         .asset_transfer_guard
                         .try_lock()
@@ -2760,6 +2847,13 @@ impl UsbSerialManager {
                     )?;
                 }
                 next_write = Instant::now() + Duration::from_secs_f64(cost as f64 / rate as f64);
+                /* Chunk frames are fire-and-forget: waiting for an ACK on every
+                 * 512-byte chunk turned one 32KB image into ~64 round trips and
+                 * delayed the frame far past the UI window. Only begin/end need a
+                 * confirmed reply; chunk ordering is guaranteed by the writer. */
+                if !wait_ack {
+                    return Ok(serde_json::Value::Null);
+                }
                 let wait = deadline
                     .saturating_duration_since(Instant::now())
                     .min(Duration::from_millis(1000));
@@ -2774,11 +2868,17 @@ impl UsbSerialManager {
                     }
                 }
                 if reply["ok"] != true {
-                    return Err("BUBBLE_FALLBACK: device declined".into());
+                    // Device error strings are fixed categories (stale_content,
+                    // stage_busy, protected_audio_or_update, ...). Keep them so
+                    // the fallback log says WHY the frame was rejected.
+                    let reason = reply["error"].as_str().unwrap_or("unknown");
+                    return Err(format!("BUBBLE_FALLBACK: device declined {reason}"));
                 }
                 Ok(reply)
             })();
-            self.remove_device_response_waiter(&request_id, "ui/text-pixels/status");
+            if wait_ack {
+                self.remove_device_response_waiter(&request_id, "ui/text-pixels/status");
+            }
             result
         };
         let result = (|| {
@@ -2786,6 +2886,7 @@ impl UsbSerialManager {
                 "begin",
                 serde_json::json!({"pageSizes":frame.page_sizes,"pageIndex":frame.page_index,
                 "pageCount":frame.page_count,"checksum":frame.checksum,"totalBytes":bytes.len()}),
+                true,
             )?;
             if begin["cached"] == true {
                 return Ok(());
@@ -2794,16 +2895,22 @@ impl UsbSerialManager {
                 return Err("BUBBLE_FALLBACK: invalid READY".into());
             }
             for (index, chunk) in bytes.chunks(bubble_pixels::CHUNK_BYTES).enumerate() {
-                let reply = phase(
+                phase(
                     "chunk",
                     serde_json::json!({"offset":index*bubble_pixels::CHUNK_BYTES,
                     "data":base64::engine::general_purpose::STANDARD.encode(chunk)}),
+                    false,
                 )?;
-                if reply["offset"] != index * bubble_pixels::CHUNK_BYTES + chunk.len() {
-                    return Err("BUBBLE_FALLBACK: offset ACK".into());
+                // Interleave audio: a tight burst of chunk frames overran the
+                // device RX buffer, corrupting frames and eventually dropping
+                // the link mid-reply.
+                if self.media_requests_pending.load(Ordering::SeqCst) != 0 {
+                    thread::sleep(Duration::from_millis(6));
+                } else {
+                    thread::sleep(Duration::from_micros(900));
                 }
             }
-            phase("end", serde_json::json!({}))?;
+            phase("end", serde_json::json!({}), true)?;
             Ok(())
         })();
         // No uncertain image/frame replay. Superseding text invalidates its
@@ -3065,8 +3172,12 @@ impl UsbSerialManager {
         }
         let mut payload = payload.clone();
         let pixel_wire_guard=if topic=="ui/text-pixels" {
-            if conn.capture_active.load(Ordering::Acquire)||self.media_requests_pending.load(Ordering::SeqCst)!=0
-                ||self.appearance_sync_active.load(Ordering::Acquire)||conn.cancel_reader.load(Ordering::Acquire){
+            // Only bulk/exclusive transfers still need the wire to themselves.
+            // Audio capture and TTS playback are short chunked writes with idle
+            // gaps; rejecting pixel frames here forced a local-render fallback
+            // and a visible opacity/text flicker as capture/media toggled.
+            // Gap interleaving in send_bubble_pixels keeps audio priority.
+            if self.appearance_sync_active.load(Ordering::Acquire)||conn.cancel_reader.load(Ordering::Acquire){
                 return Err("BUBBLE_FALLBACK: protected transport".into());
             }
             let bridge=self.bubble_renderer.lock().map_err(|_|"BUBBLE_FALLBACK: lifecycle")?;
@@ -3081,6 +3192,29 @@ impl UsbSerialManager {
             let mut bridge=self.bubble_renderer.lock().map_err(|_|"BUBBLE_FALLBACK: lifecycle")?;
             let boot=conn.capabilities["bubblePixelsBoot"].as_str().unwrap_or("");
             bubble_events=bridge.observe(topic,&payload,conn.connection_id,&conn.board_device_id,boot);
+            // DIAGNOSTIC (temporary): how many render events the host actually
+            // produces. If this stays at zero while the device shows local
+            // glyphs, the host never renders and the cache can never warm.
+            {
+                static LAST_EMIT_LOG: std::sync::atomic::AtomicU64 =
+                    std::sync::atomic::AtomicU64::new(0);
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let prev = LAST_EMIT_LOG.swap(now_ms, std::sync::atomic::Ordering::Relaxed);
+                if now_ms.saturating_sub(prev) >= 1000 {
+                    crate::realtime_chat_log::record(
+                        "",
+                        "bubble_render",
+                        serde_json::json!({
+                            "stage": "emit",
+                            "count": bubble_events.len() as u64,
+                            "ok": !bubble_events.is_empty(),
+                        }),
+                    );
+                }
+            }
             payload["textPixels"]=bridge.metadata(topic,boot);bubble_sink=bridge.sink();
         }
         if topic == "system/heartbeat" && conn.capabilities["widgetLocalTools"] == "p4-local-tools-v1" && payload.is_object() {

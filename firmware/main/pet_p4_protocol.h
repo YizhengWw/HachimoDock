@@ -97,6 +97,7 @@ typedef struct {
   pet_p4_session_queue_item_t session_queue[PET_P4_SESSION_QUEUE_MAX];
   pet_p4_session_queue_item_t session_queue_staging[PET_P4_SESSION_QUEUE_MAX];
   unsigned int session_queue_count;
+  unsigned int bubble_opacity;
   bool session_voice_active;
   unsigned long long session_snapshot_last_seen_ms;
   char screen_page[PET_P4_PAGE_MAX];

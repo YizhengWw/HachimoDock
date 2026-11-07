@@ -191,3 +191,52 @@ test('unknown asset and invalid requested pages never raster or submit',async()=
     await new Promise(r=>setTimeout(r,10));assert.equal(f.sent.length,0);
   }finally{f.stop();}
 });
+
+test('media-pending fallback retries with backoff instead of a permanent cooldown', async () => {
+  let calls = 0; const sent = [];
+  const f = await fixture({
+    setTimer: fn => setTimeout(fn, 0),
+    invoke: async (command, args) => {
+      if (command !== 'usb_send_bubble_pixels') return;
+      calls++;
+      if (calls <= 2) throw Error('BUBBLE_FALLBACK: media pending');
+      sent.push(args.frame);
+    },
+  });
+  try {
+    f.emit(event('body'));
+    await waitUntil(() => sent.some(x => x.text === 'body'));
+    assert(calls >= 3, 'media pending is pre-admission and must be retried');
+  } finally { f.stop(); }
+});
+
+test('transfer contention fallback also retries, but an uncertain ACK is never replayed', async () => {
+  let contention = 0, uncertain = 0; const sent = [];
+  const a = await fixture({
+    setTimer: fn => setTimeout(fn, 0),
+    invoke: async (command, args) => {
+      if (command !== 'usb_send_bubble_pixels') return;
+      contention++;
+      if (contention <= 1) throw Error('BUBBLE_FALLBACK: transfer contention');
+      sent.push(args.frame);
+    },
+  });
+  try {
+    a.emit(event('body'));
+    await waitUntil(() => sent.some(x => x.text === 'body'));
+    assert(contention >= 2);
+  } finally { a.stop(); }
+  const b = await fixture({
+    setTimer: fn => setTimeout(fn, 0),
+    invoke: async command => {
+      if (command !== 'usb_send_bubble_pixels') return;
+      uncertain++;
+      throw Error('BUBBLE_FALLBACK: unknown ACK; no replay');
+    },
+  });
+  try {
+    b.emit(event('body'));
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(uncertain, 1, 'an uncertain physical ACK must never be replayed');
+  } finally { b.stop(); }
+});

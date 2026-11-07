@@ -808,6 +808,10 @@ static bool sfx_drain_step(uint8_t *pcm) {
   if (pet_resources_device_realtime_begin(&sfx_work) != PET_RESOURCE_OK) {
     xSemaphoreGiveRecursive(g_stream_lock); return false;
   }
+#if PET_P4_CONVERSATION_VIDEO
+  /* Same as cues: keep the cached animation running under short effects. */
+  (void)pet_resources_device_realtime_video_ready(sfx_work,true);
+#endif
   pet_sfx_render(&g_sfx_core,(int16_t*)pcm,320,atomic_load(&g_sfx_volume));
   (void)cext_mix_step((int16_t*)pcm,false);
   if(esp_codec_dev_write(g_speaker,pcm,640)!=ESP_OK)pet_sfx_reset(&g_sfx_core);
@@ -899,6 +903,11 @@ static void playback_task(void *arg) {
       TickType_t wait=pdMS_TO_TICKS(10);vTaskDelay(wait?wait:1);
       continue;
     }
+#if PET_P4_CONVERSATION_VIDEO
+    /* Cues are short and only need cached (no-I/O) animation decode. Without
+     * this opt-in a cue revokes the video lease and freezes the pet frame. */
+    (void)pet_resources_device_realtime_video_ready(file_playback_work,true);
+#endif
     char fs_path[80];
     FILE *file = NULL;
     pet_fs_activity_t file_activity __attribute__((cleanup(pet_fs_activity_end)))={0};
@@ -1002,8 +1011,11 @@ static void audio_task(void *arg) {
 #if PET_P4_CONVERSATION_VIDEO
       /* The pending/capture actor blocks video through microphone/AEC setup.
        * Only this physical worker may relax its own exact reservation. */
+      /* Keep the animation running under the microphone, but the renderer
+       * decodes it at half rate while capture is live so AEC keeps its CPU
+       * margin (decoding every frame caused feedback howling). */
       (void)pet_resources_device_realtime_video_ready(capture_work,
-        conversation&&!atomic_load(&g_conversation_starting)
+        !atomic_load(&g_conversation_starting)
           &&(atomic_load(&g_conversation_half_duplex)||pet_p4_afe_ready()));
 #endif
       if (!conversation && now_ms - started_ms >= PET_P4_AUDIO_MAX_CAPTURE_MS) {
@@ -1373,6 +1385,9 @@ esp_err_t pet_p4_audio_capture_start_owned(bool session_queue_empty,const char *
   if (!pet_p4_audio_ready() || !pet_p4_audio_enabled()) return ESP_ERR_INVALID_STATE;
   PET_AUDIO_REALTIME_SCOPE(request);
   if (pet_resources_device_realtime_begin(&request) != PET_RESOURCE_OK) return ESP_ERR_INVALID_STATE;
+  /* Microphone capture (AEC) is the only audio actor that must exclude
+   * background asset I/O; playback leaves the animation running. */
+  (void)pet_resources_device_realtime_mic(request, true);
   if(g_stream_lock)xSemaphoreTakeRecursive(g_stream_lock,portMAX_DELAY);
   /* Restore the voice clock before waking the microphone task. */
   if (atomic_load(&g_music)) pet_p4_audio_stream_flush();
@@ -1443,6 +1458,8 @@ esp_err_t pet_p4_audio_conversation_set(bool enabled, bool half_duplex, const ch
   }
   PET_AUDIO_REALTIME_SCOPE(conversation_request);
   if (pet_resources_device_realtime_begin(&conversation_request) != PET_RESOURCE_OK) return ESP_ERR_INVALID_STATE;
+  /* Conversation owns the microphone too. */
+  (void)pet_resources_device_realtime_mic(conversation_request, true);
   if (g_stream_lock) xSemaphoreTakeRecursive(g_stream_lock, portMAX_DELAY);
   if (atomic_load(&g_music)) pet_p4_audio_stream_flush();
   if (!conversation_mic_gain(!half_duplex)) {

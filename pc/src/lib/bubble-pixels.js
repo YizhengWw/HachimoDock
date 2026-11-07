@@ -221,13 +221,25 @@ export function collectBubbleTexts(topic, payload) {
     const sessions = (Array.isArray(payload.sessions) ? payload.sessions : [])
       .filter(session => session && typeof session === "object" && !Array.isArray(session)).slice(0, 8);
     sessions.sort((a, b) => Number(a.id === payload.sessionId) - Number(b.id === payload.sessionId));
-    for (const session of sessions) pair(session.title, session.content || session.state, 191, 383);
+    for (const session of sessions) {
+      pair(session.title, session.content || session.state, 191, 383);
+      // The compact bubble renders the body in style 3, and falls back to the
+      // title when the body is empty.
+      add(3, session.content || session.state, 511);
+      add(3, session.title, 511);
+    }
   } else if (topic === "ui/conversation") {
     add(1, payload.name || "宠物", 63);
+    /* The device shows these status hints as the bubble body; without them in
+     * the rendered set the bubble stayed on device glyphs. */
+    for (const hint of ["我在听", "想一想", "准备回答", "准备中"]) add(2, hint, 511);
 
     pair(payload.role === "user" ? "你" : payload.name || "宠物", payload.text, 63, 511, 2);
+    add(3, payload.text, 511);
+    add(3, payload.name || "宠物", 511);
   } else if (topic === "audio/play_subtitle") {
     add(2, payload.text, 511);
+    add(3, payload.text, 511);
   } else if (topic === "speech/text" || topic.startsWith("state/")) {
     const body = first("displayContent", "text", "message", "speech", "summary", "statusText");
     pair(first("displayTitle", "sessionName", "title", "agent") || "pet", body);
@@ -244,14 +256,15 @@ export async function startBubblePixelService({ listen, invoke, render = renderB
   instance = globalThis.crypto.randomUUID().replaceAll("-", "") }) {
   let stopped = false, busy = false, peer = "", timer = null, epoch = 0, inflightOwner = "";
   const pending = new Map(), desired = new Map(), cooldown = new Map();
-  const schedule = () => {
-    if (!stopped && !busy && !timer && pending.size) timer = setTimer(pump, interval);
+  const schedule = (delay) => {
+    if (!stopped && !busy && !timer && pending.size) timer = setTimer(pump, delay ?? interval);
   };
   const current = job => !stopped && job.epoch === epoch && job.peer === peer
     && desired.get(job.owner)?.version === job.version;
   async function pump() {
     timer = null;
     if (stopped || busy || !pending.size) return;
+    let retryDelay;
     busy = true;
     const [owner, job] = pending.entries().next().value; // FIFO owners, never LIFO.
     pending.delete(owner); inflightOwner = owner;
@@ -272,13 +285,30 @@ export async function startBubblePixelService({ listen, invoke, render = renderB
         job.requests.push({ ...request, page: (request.page || 0) + 1 });
       if (job.next < job.requests.length) pending.set(owner, job);
     } catch (error) {
-      // Only native PRE-admission contention is retryable. Never replay an
-      // uncertain physical write/ACK timeout, nor retry arbitrary 'busy' prose.
-      if (current(job) && (error instanceof Error ? error.message : String(error)).startsWith("BUBBLE_BUSY:")
-          && job.attempts < 2 && now() < job.deadline) {
-        job.attempts++; pending.set(owner, job);
-      } else if (current(job)) cooldown.set(owner, now() + 5000);
-    } finally { busy = false; inflightOwner = ""; schedule(); }
+      // Only native PRE-admission contention is retryable: nothing was written
+      // yet, so replaying cannot duplicate a frame. Never replay an uncertain
+      // physical write/ACK timeout, nor retry arbitrary 'busy' prose.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!current(job)) {
+        // stale/retired job: nothing to do
+      } else if (message.startsWith("BUBBLE_BUSY:")) {
+        if (job.attempts < 2 && now() < job.deadline) { job.attempts++; pending.set(owner, job); }
+      } else if (message.startsWith("BUBBLE_FALLBACK: media pending")
+          || message.startsWith("BUBBLE_FALLBACK: transfer contention")) {
+        // Audio/media owns the live write queue. Keep the latest text desired
+        // and retry after a short backoff instead of dropping to a permanent
+        // local-render fallback (the device only ever renders the last frame).
+        if (job.attempts < 12 && now() < job.deadline) {
+          job.attempts++;
+          retryDelay = Math.min(1200, 250 + job.attempts * 150);
+          pending.set(owner, job);
+        } else {
+          cooldown.set(owner, now() + 5000);
+        }
+      } else {
+        cooldown.set(owner, now() + 5000);
+      }
+    } finally { busy = false; inflightOwner = ""; schedule(retryDelay); }
   }
   const unlisten = await listen("usb-bubble-render", ({ payload: event }) => {
     if (stopped || event?.rendererId !== instance || !/^[0-9a-f]{16}$/.test(event.bootId || "")
@@ -291,7 +321,9 @@ export async function startBubblePixelService({ listen, invoke, render = renderB
     if (event.need && ((cooldown.get(event.owner) || 0) > now() || pending.has(event.owner)
         || (busy && inflightOwner === event.owner))) return;
     if (prior?.version === event.version && !event.need) return;
-    let requests = collectBubbleTexts(event.topic, event.payload);
+    let requests = event.topic === "device/need" && typeof event.payload?.text === "string"
+      ? [{ style: event.need?.style, text: event.payload.text, page: 0 }]
+      : collectBubbleTexts(event.topic, event.payload);
     if (event.need) {
       if (!Number.isInteger(event.need.page) || event.need.page < 0
           || event.need.page >= (BUBBLE_STYLES[event.need.style]?.maxPages || 0)) return;

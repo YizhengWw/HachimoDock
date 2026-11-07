@@ -126,14 +126,14 @@ static bool h264_prefetch_offer(pet_p4_asset_cache_entry_t *source,const char *p
 #endif
   portEXIT_CRITICAL(&g_asset_prepare_mux);
   pet_resource_kind_t kind=PET_RESOURCE_ASSET_PREPARE;
-  bool audio_blocked=asset_prepare_audio_busy();
 #if PET_P4_CONVERSATION_VIDEO
   /* This lease admits only decode of a finished, pinned PSRAM source on the
    * existing single worker. No file/cache allocation is moved into audio. */
   kind=PET_RESOURCE_CACHED_VIDEO; /* NULL-source jobs only close the codec. */
-  audio_blocked=audio_blocked&&(!pet_p4_audio_conversation_video_ready()||pet_p4_audio_music_active());
 #endif
-  if(!room||!g_asset_prepare_task||audio_blocked)return false;
+  /* Audio no longer blocks H264 prefetch: test-all decodes concurrently with
+   * playback without this gate, and blocking stalled the animation. */
+  if(!room||!g_asset_prepare_task)return false;
   if(pet_resources_device_owner_open(PET_RESOURCE_MASK(kind),&next.owner)!=PET_RESOURCE_OK)return false;
   if(pet_resources_device_acquire(next.owner,kind,1,&next.lease)!=PET_RESOURCE_OK){
     pet_resources_device_revoke(next.owner);return false;
@@ -287,7 +287,31 @@ static bool render_h264_asset_frame_async(const pet_p4_asset_selection_t *asset,
   portEXIT_CRITICAL(&g_asset_prepare_mux);
   if(reset||strcmp(path,g_h264_presented_path)){
     if(!h264_prefetch_reset()){g_asset_cache_pending=true;return false;}
+    /* reset() only cancels; the worker may still hold the previous clip's
+     * buffer. Wait (bounded) until the lifetime is empty so this clip cannot
+     * pack into a buffer that is still referenced, which showed up as a garbled
+     * frame exactly when the animation switched. */
+    for(int wait=0;wait<20;wait++){
+      portENTER_CRITICAL(&g_asset_prepare_mux);
+      pet_prefetch_phase_t phase=g_h264_prefetch_lifetime.phase;
+      portEXIT_CRITICAL(&g_asset_prepare_mux);
+      if(phase==PET_PREFETCH_EMPTY)break;
+      vTaskDelay(1);
+    }
     snprintf(g_h264_presented_path,sizeof(g_h264_presented_path),"%s",path);
+    /* The reset dropped the previous clip's frame, so without waiting this frame
+     * has no pet background and the translucent card composites over the
+     * previous frame's pixels (opacity jump on every animation switch). Ask for
+     * the new clip's first frame ONCE here and wait briefly for it. */
+    (void)h264_prefetch_offer(source,path,asset->width,asset->height,true,0);
+    for(int wait=0;wait<25;wait++){
+      portENTER_CRITICAL(&g_asset_prepare_mux);
+      bool ready_now=g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY
+        &&g_h264_prefetch_job.frame<=0&&!strcmp(g_h264_prefetch_job.path,path);
+      portEXIT_CRITICAL(&g_asset_prepare_mux);
+      if(ready_now)break;
+      vTaskDelay(1);
+    }
   }
   uint64_t now_ms=renderer_monotonic_ms();
   uint64_t elapsed=g_h264_first_presented_ms&&now_ms>=g_h264_first_presented_ms?now_ms-g_h264_first_presented_ms:0;
@@ -358,6 +382,12 @@ static bool render_h264_asset_frame_async(const pet_p4_asset_selection_t *asset,
   }
   if(direct_cpu)return true;
   if(!g_h264_packed_current.data){g_asset_cache_pending=true;return false;}
+  /* Never scale a packed view that belongs to another clip/resolution: its
+   * geometry feeds the PPA scaler and a mismatch garbles the whole frame. */
+  if(g_h264_packed_current.width!=asset->width||g_h264_packed_current.height!=asset->height){
+    g_h264_packed_current=(pet_h264_packed_view_t){0};
+    g_asset_cache_pending=true;return false;
+  }
   int64_t scale_started=esp_timer_get_time();
   if(!h264_frame_supports_ppa_yuv420(asset->width,g_h264_packed_current.storage_height)
       ||!scale_h264_frame_ppa(g_h264_packed_current.data,asset->width,asset->height,g_h264_packed_current.storage_height)){

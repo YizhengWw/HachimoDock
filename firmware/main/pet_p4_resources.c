@@ -39,8 +39,14 @@ pet_resource_limit_t pet_resources_limit(pet_resource_kind_t kind) {
   return valid_kind(kind) ? limits[kind] : (pet_resource_limit_t){0};
 }
 
+static bool realtime_mic_active(const pet_resource_broker_t *broker) {
+  for (unsigned i = 0; i < PET_RESOURCE_REALTIME_SLOTS; i++)
+    if (broker->realtime[i] && broker->realtime_mic[i]) return true;
+  return false;
+}
 static bool realtime_active(const pet_resource_broker_t *broker) {
   for (unsigned i = 0; i < PET_RESOURCE_REALTIME_SLOTS; i++) if (broker->realtime[i]) return true;
+
   return false;
 }
 static bool realtime_blocks_video(const pet_resource_broker_t *broker) {
@@ -58,10 +64,17 @@ pet_resource_result_t pet_resources_realtime_begin(pet_resource_broker_t *broker
   if (slot == PET_RESOURCE_REALTIME_SLOTS) return PET_RESOURCE_BUSY;
   broker->realtime[slot] = ++broker->next_realtime_serial;
   broker->realtime_video_ready[slot] = false;
+  broker->realtime_mic[slot] = false;
   *out = (pet_resource_realtime_t){broker, broker->realtime[slot], (uint8_t)slot};
   for (unsigned i = 0; i < PET_RESOURCE_LEASE_SLOTS; i++) {
+    /* Do not revoke an ALREADY-HELD pet-asset decode lease: the pet animation
+     * decodes from pinned PSRAM (no I/O) and revoking it froze the animation
+     * for every cue, which then made translucent cards composite over stale
+     * pixels. New acquisitions stay blocked by try_acquire, so audio still never
+     * waits behind asset file reads. */
     if (broker->leases[i].occupied
-        && ((PET_RESOURCE_BACKGROUND_MASK | PET_RESOURCE_MASK(PET_RESOURCE_CACHED_VIDEO))
+        && (((PET_RESOURCE_BACKGROUND_MASK & ~PET_RESOURCE_MASK(PET_RESOURCE_ASSET_PREPARE))
+              | PET_RESOURCE_MASK(PET_RESOURCE_CACHED_VIDEO))
           & PET_RESOURCE_MASK(broker->leases[i].ticket.kind)))
       (void)pet_resources_owner_revoke(broker, broker->leases[i].ticket.owner);
   }
@@ -75,6 +88,26 @@ bool pet_resources_realtime_finish(pet_resource_broker_t *broker, pet_resource_r
   if (!pet_resources_realtime_current(broker, ticket)) return false;
   broker->realtime[ticket.slot] = 0;
   broker->realtime_video_ready[ticket.slot] = false;
+  broker->realtime_mic[ticket.slot] = false;
+  return true;
+}
+bool pet_resources_realtime_mic(pet_resource_broker_t *broker,
+    pet_resource_realtime_t ticket,bool active) {
+  if(!pet_resources_realtime_current(broker,ticket))return false;
+  broker->realtime_mic[ticket.slot]=active;
+  if (active) {
+    /* Microphone/AEC work is latency-critical: once it starts, drop every
+     * already-held background job (including the pet-asset decode lease).
+     * Letting decode keep running under the mic broke AEC and produced
+     * feedback howling. Plain playback never sets this flag, so cues and TTS
+     * keep the animation alive. */
+    for (unsigned i = 0; i < PET_RESOURCE_LEASE_SLOTS; i++)
+      if (broker->leases[i].occupied
+          && (PET_RESOURCE_BACKGROUND_MASK
+              & PET_RESOURCE_MASK(broker->leases[i].ticket.kind)))
+        (void)pet_resources_owner_revoke(broker, broker->leases[i].ticket.owner);
+    /* Animation decode leases are intentionally kept: they only read PSRAM. */
+  }
   return true;
 }
 bool pet_resources_realtime_video_ready(pet_resource_broker_t *broker,
@@ -137,7 +170,7 @@ pet_resource_result_t pet_resources_try_acquire(pet_resource_broker_t *broker,
   pet_resource_limit_t limit = pet_resources_limit(kind);
   if (!limit.leases || !limit.units) return PET_RESOURCE_UNAVAILABLE;
   if (units > limit.units) return PET_RESOURCE_INVALID;
-  if ((PET_RESOURCE_BACKGROUND_MASK & bit) && realtime_active(broker)) return PET_RESOURCE_PROTECTED;
+  if ((PET_RESOURCE_BACKGROUND_MASK & bit) && realtime_mic_active(broker)) return PET_RESOURCE_PROTECTED;
   if(kind==PET_RESOURCE_CACHED_VIDEO&&realtime_blocks_video(broker))return PET_RESOURCE_PROTECTED;
   if (broker->protected_mask & bit) return PET_RESOURCE_PROTECTED;
   if (broker->next_serial == UINT64_MAX) return PET_RESOURCE_EXHAUSTED;

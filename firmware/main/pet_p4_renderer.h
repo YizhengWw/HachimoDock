@@ -23,6 +23,8 @@ extern "C" {
 #endif
 
 esp_err_t pet_p4_renderer_init(void);
+void pet_p4_renderer_set_bubble_opacity(unsigned percent);
+void pet_p4_renderer_load_bubble_opacity(void);
 typedef struct {
   uint32_t last_us, p95_us, max_us, last_decode_us;
   uint32_t window_samples, submitted_frames, unchanged_frames;
