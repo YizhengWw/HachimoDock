@@ -25,7 +25,7 @@ async function resume(session) {
   const start = source.indexOf("export async function resumeGenerationTask(");
   const end = source.indexOf("export async function dismissGenerationSession(", start);
   assert.ok(start >= 0 && end > start);
-  const context = vm.createContext({ File, Uint8Array, resumeGenerationImageEdit,
+  const context = vm.createContext({ File, Uint8Array, resumeGenerationImageEdit, sessionTransitionPending: false,
     isGenerationRunning: () => false, loadGenerationSession: async () => structuredClone(session),
     loadProviderConfig: () => ({ apiKey: "fixture-video-current", imageModel: "ep-new-settings" }),
     loadArkImageConfig: () => ({ apiKey: "fixture-image-current", model: "ep-new-settings" }),
