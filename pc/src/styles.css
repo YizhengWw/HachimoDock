@@ -14837,24 +14837,15 @@ select:focus-visible {
 }
 
 /* keep-awake switch (merged from integration/test-all) */
-.dashboard-actions-menu__section {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-  border-top: 1px solid var(--line);
-  margin-top: 4px;
-}
-
-.dashboard-actions-menu__section-label {
-  padding: 6px 10px 2px;
-  color: var(--text-soft);
-  font-size: 11px;
-}
-
 .dashboard-actions-menu__toggle {
   justify-content: space-between;
   gap: 16px;
+}
+
+.dashboard-actions-menu__toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .dashboard-actions-menu__switch {

@@ -11470,6 +11470,7 @@ fn restart_app_nap_guard(block_sleep: bool) {
 
 #[tauri::command]
 fn set_keep_awake_mode(block_sleep: bool) -> Result<(), String> {
+    eprintln!("[app-nap] set_keep_awake_mode block_sleep={block_sleep}");
     #[cfg(target_os = "macos")]
     restart_app_nap_guard(block_sleep);
     #[cfg(not(target_os = "macos"))]

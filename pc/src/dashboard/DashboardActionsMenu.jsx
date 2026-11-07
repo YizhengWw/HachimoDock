@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp } from "lucide-react";
+import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp, Moon } from "lucide-react";
 
 export default function DashboardActionsMenu({
   onSendTest,
@@ -77,20 +77,20 @@ export default function DashboardActionsMenu({
             复制桌面设备 ID
           </button>
           {typeof keepAwake === "boolean" && (
-            <div className="dashboard-actions-menu__section">
-              <span className="dashboard-actions-menu__section-label">电源</span>
-              <button
-                type="button"
-                className="dashboard-actions-menu__item dashboard-actions-menu__toggle"
-                role="menuitemcheckbox"
-                aria-checked={keepAwake}
-                onClick={() => onToggleKeepAwake?.()}
-                title="开启后合盖或空闲时保持唤醒；关闭后允许系统睡眠（默认）"
-              >
-                <span>阻止合盖睡眠</span>
-                <span className={`dashboard-actions-menu__switch${keepAwake ? " is-on" : ""}`} />
-              </button>
-            </div>
+            <button
+              type="button"
+              className="dashboard-actions-menu__item dashboard-actions-menu__toggle"
+              role="menuitemcheckbox"
+              aria-checked={keepAwake}
+              onClick={() => onToggleKeepAwake?.()}
+              title="开启后合盖或空闲时保持唤醒；关闭后允许系统睡眠（默认）"
+            >
+              <span className="dashboard-actions-menu__toggle-label">
+                <Moon size={14} />
+                阻止合盖睡眠
+              </span>
+              <span className={`dashboard-actions-menu__switch${keepAwake ? " is-on" : ""}`} />
+            </button>
           )}
           {onDeviceReturnHome && (
             <button
