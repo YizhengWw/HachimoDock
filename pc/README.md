@@ -125,3 +125,21 @@ macOS 本地包采用 ad-hoc 签名，不等于 Developer ID 签名或公证。W
 预览运行时由同一份 C 核心生成。重建与 `--check` 使用 LLVM/LLD **20.1.8**，
 通过 `CLANG` 指定 clang；配套 wasm-ld 必须可用。编译器版本会影响输出字节，
 请使用固定工具链保留原有镜像一致性检查。普通客户端开发不需要重建这些已提交产物。
+
+### 按需预览加载回归（隔离 UI）
+
+先在一个终端启动已有的全模拟页面：
+
+```sh
+cd pc
+node node_modules/vite/bin/vite.js --config vite.app-surface.config.js --host 127.0.0.1 --port 4191
+```
+
+另一个终端从 `pc/` 运行；浏览器必须已安装，此命令不会自动下载：
+
+```sh
+PET_TEST_BROWSER_EXECUTABLE="/absolute/path/to/chrome" node tests/component-preview-loading.mjs
+```
+
+脚本使用独立浏览器上下文，阻止外网请求，不读取用户资料或连接设备；检查初始列表
+不加载预览模块、加载中 Escape 关闭、重新打开，以及没有设备变更调用。

@@ -248,7 +248,8 @@ test("ComponentCenter renders the component library grid using CandidateCard", (
 
 test("ComponentCenter opens ComponentPreviewModal on candidate click (transient selection)", () => {
   const component = readSource("ComponentCenter.jsx");
-  assert.match(component, /import\s+ComponentPreviewModal/);
+  assert.match(component, /const ComponentPreviewModal = lazy\(\(\) => import\("\.\/component-center\/ComponentPreviewModal\.jsx"\)\)/);
+  assert.match(component, /<Suspense fallback=\{<ComponentPreviewLoading/);
   assert.match(component, /previewComponent/);
   assert.match(component, /<ComponentPreviewModal/);
 });
