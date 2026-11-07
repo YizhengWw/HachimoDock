@@ -27,12 +27,12 @@
  *          in the user's current Agent conversation through the editable frog-pet example:
  *          petui validates and atomically publishes
  *          to the formal local library, which this page watches and refreshes without launching CLIs
- *          or exposing a separate manual package-import flow.
+ *          or exposing a separate manual package-import flow. Preview details load on demand with a cancellable loading dialog.
  * [Pos] component node in pc/src
  * [Sync] If this file changes, update this header and `pc/src/.folder.md`.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import {
   Clipboard,
   Gamepad2,
@@ -67,7 +67,6 @@ import { useToast } from "./shell/ToastStack.jsx";
 import { useDeviceContext } from "./shell/DeviceContext.jsx";
 import { ONBOARDING_PAGE_IDS } from "./lib/onboarding-state.js";
 import CandidateCard, { resolveComponentKind } from "./component-center/CandidateCard.jsx";
-import ComponentPreviewModal from "./component-center/ComponentPreviewModal.jsx";
 import {ProgramBackgroundProvider} from './component-center/ProgramBackground.jsx';
 import CommunityCenter from "./component-center/CommunityCenter.jsx";
 import RemovedComponents from './component-center/RemovedComponents.jsx';
@@ -86,6 +85,8 @@ import {
   optionForControlLabel,
   resolveGlobalExitEvents,
 } from "./component-center/button-config.js";
+
+const ComponentPreviewModal = lazy(() => import("./component-center/ComponentPreviewModal.jsx"));
 
 const COMPONENT_BUTTON_OVERRIDES_STORAGE_KEY = "pet-manager:component-button-overrides:v1";
 // Formal-library source revisions that have been promoted into the builtin
@@ -1625,56 +1626,58 @@ export default function ComponentCenter({ active = true }) {
       {trashOpen&&<RemovedComponents onClose={()=>setTrashOpen(false)} onRestored={refreshComponentLibrary}/>}
 
       {previewComponent && isComponentVisible(previewComponent) && (
-        <ComponentPreviewModal
-          active={active}
-          component={previewComponent}
-          onSourceChange={openComponent}
-          usb={usb}
-          kind={resolveComponentKind(previewComponent.kind, previewComponent.gameType)}
-          isLocal={previewComponent.isLocal}
-          isInstalled={previewIsInstalled}
-          currentComponent={currentFullComponent}
-          isCurrent={previewIsCurrent}
-          singleSlotReplacement={previewReplacesSingleSlot}
-          deviceConnected={deviceConnected}
-          installing={otaPhase === "installing"}
-          bindings={resolveComponentBindings(previewComponent)}
-          bindingConflict={bindingConflictForComponent(previewComponent)}
-          globalExitControl={
-            globalExitEvents
-              .map(globalExitControlLabel)
-              .filter(Boolean)
-              .join("、") || "未设置"
-          }
-          getControlOptions={(binding) => controlOptionsForBinding(binding, previewComponent)}
-          onBindingChange={(binding, nextControl) => updateBinding(binding, nextControl, previewComponent)}
-          onResetBindings={() => resetBindings(previewComponent)}
-          componentButtonsWillApply={
-            Array.isArray(previewComponent.defaultBindings)
-            && previewComponent.defaultBindings.filter(isRoutedWidgetBinding).length > 0
-          }
-          installBlockedReason={
-            previewComponent.isDeviceOnly
-              ? "本机没有这个组件的安装源；可以继续保留，或从当前卡片移除。"
-              : localInstallBlockedReason(previewComponent)
-                || gameInstallBlockedReason(previewComponent, usb)
-          }
-          onInstall={
-            previewComponent.isDeviceOnly
-              ? undefined
-              : () => syncSelectedComponent(previewComponent)
-          }
-          onDelete={
-            previewComponent.isLocal || previewIsInstalled
-              ? () => {
-                  const component = previewComponent;
-                  setPreviewComponent(null);
-                  requestComponentDelete(component, previewIsInstalled);
-                }
-              : undefined
-          }
-          onClose={closeComponent}
-        />
+        <Suspense fallback={<ComponentPreviewLoading onClose={closeComponent} />}>
+          <ComponentPreviewModal
+            active={active}
+            component={previewComponent}
+            onSourceChange={openComponent}
+            usb={usb}
+            kind={resolveComponentKind(previewComponent.kind, previewComponent.gameType)}
+            isLocal={previewComponent.isLocal}
+            isInstalled={previewIsInstalled}
+            currentComponent={currentFullComponent}
+            isCurrent={previewIsCurrent}
+            singleSlotReplacement={previewReplacesSingleSlot}
+            deviceConnected={deviceConnected}
+            installing={otaPhase === "installing"}
+            bindings={resolveComponentBindings(previewComponent)}
+            bindingConflict={bindingConflictForComponent(previewComponent)}
+            globalExitControl={
+              globalExitEvents
+                .map(globalExitControlLabel)
+                .filter(Boolean)
+                .join("、") || "未设置"
+            }
+            getControlOptions={(binding) => controlOptionsForBinding(binding, previewComponent)}
+            onBindingChange={(binding, nextControl) => updateBinding(binding, nextControl, previewComponent)}
+            onResetBindings={() => resetBindings(previewComponent)}
+            componentButtonsWillApply={
+              Array.isArray(previewComponent.defaultBindings)
+              && previewComponent.defaultBindings.filter(isRoutedWidgetBinding).length > 0
+            }
+            installBlockedReason={
+              previewComponent.isDeviceOnly
+                ? "本机没有这个组件的安装源；可以继续保留，或从当前卡片移除。"
+                : localInstallBlockedReason(previewComponent)
+                  || gameInstallBlockedReason(previewComponent, usb)
+            }
+            onInstall={
+              previewComponent.isDeviceOnly
+                ? undefined
+                : () => syncSelectedComponent(previewComponent)
+            }
+            onDelete={
+              previewComponent.isLocal || previewIsInstalled
+                ? () => {
+                    const component = previewComponent;
+                    setPreviewComponent(null);
+                    requestComponentDelete(component, previewIsInstalled);
+                  }
+                : undefined
+            }
+            onClose={closeComponent}
+          />
+        </Suspense>
       )}
 
       {otaPhase !== "idle" && (
@@ -2050,4 +2053,12 @@ function CreateComponentDrawer({
       </aside>
     </div>
   );
+}
+
+function ComponentPreviewLoading({ onClose }) {
+  const ref = useDialogFocus(onClose, false);
+  return <div ref={ref} tabIndex={-1} className="component-replace-modal" role="dialog" aria-modal="true" aria-label="组件预览">
+    <p role="status">正在加载组件预览…</p>
+    <button type="button" className="btn btn-secondary" onClick={onClose}>关闭</button>
+  </div>;
 }
