@@ -41,7 +41,8 @@ typedef struct {uint8_t *outbuf;uint32_t out_size;}esp_h264_dec_out_frame_t;
 typedef struct {int frames,width,height;}pet_p4_asset_selection_t;
 typedef struct {const uint8_t *plane_y,*plane_u,*plane_v;uint8_t *packed;size_t packed_stride;int src_w,src_stride,row_begin,row_end;}pet_p4_h264_pack_job_t;
 static unsigned critical,notifications,codec_calls,codec_frees,freed_buffers,render_packs,worker_pack_rows,split_packs;
-static unsigned hook;static bool fail_new,fail_decode,fail_worker_layout,playback_busy,pack_given;
+static unsigned hook;static bool fail_new,fail_decode,fail_worker_layout,pack_given;
+static void vTaskDelay(unsigned ticks){(void)ticks;}
 static uint64_t now_us=100000;static pet_resource_broker_t broker;
 static uint8_t decoded[16*16*3/2],packed_pixels[sizeof(decoded)];
 static uint16_t framebuffer[640*480],*g_framebuffer=framebuffer,expected_pixel;
@@ -74,10 +75,6 @@ static uint32_t elapsed_us_clamped(int64_t from,int64_t to){return to>=from?(uin
 static uint32_t uxTaskGetStackHighWaterMark(void *task){(void)task;assert(!critical);return 1234;}
 static UBaseType_t uxTaskPriorityGet(void *task){(void)task;return 1;}
 static void vTaskPrioritySet(void *task,UBaseType_t priority){(void)task;(void)priority;assert(!"worker must not impersonate renderer");}
-static bool pet_p4_audio_active(void){return playback_busy;}
-static bool pet_p4_audio_playback_active(void){return false;}
-static bool pet_p4_audio_conversation_active(void){return false;}
-static bool pet_p4_audio_music_active(void){return false;}
 static pet_resource_result_t pet_resources_device_owner_open(uint32_t mask,pet_resource_owner_t *out){assert(!critical);return pet_resources_owner_open(&broker,mask,out);}
 static pet_resource_result_t pet_resources_device_acquire(pet_resource_owner_t owner,pet_resource_kind_t kind,uint32_t units,pet_resource_lease_t *out){assert(!critical);return pet_resources_try_acquire(&broker,owner,kind,units,out);}
 static bool pet_resources_device_current(pet_resource_lease_t lease){assert(!critical);return pet_resources_current(&broker,lease);}
@@ -209,12 +206,24 @@ int main(void){
    assert(worker_pack_rows==rows+(scenario==5?16:0)); /* only an authoritative decode is packed */
    fail_new=fail_decode=false;fresh_source();
  }
- /* A ready result cannot survive audio authority revocation or be replayed. */
+ /* Plain playback keeps the pinned-PSRAM asset decode alive so the pet
+  * animation does not freeze during cues/TTS (decode performs no I/O). */
  assert(h264_prefetch_offer(&g_asset_cache[0],"audio",16,16,true,0));
  pet_resource_realtime_t audio={0};assert(pet_resources_realtime_begin(&broker,&audio)==PET_RESOURCE_OK);
- assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_DISCARDED);
+ assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
  assert(pet_resources_realtime_finish(&broker,audio));fresh_source();
- playback_busy=true;assert(!h264_prefetch_offer(&g_asset_cache[0],"busy",16,16,true,0));playback_busy=false;
+ /* Microphone/AEC ownership is latency-critical for flash/file background
+  * work, but the pinned-PSRAM animation decode lease survives: decode performs
+  * no I/O, so mic capture must not freeze the pet animation. */
+ assert(h264_prefetch_offer(&g_asset_cache[0],"mic",16,16,true,0));
+ audio=(pet_resource_realtime_t){0};assert(pet_resources_realtime_begin(&broker,&audio)==PET_RESOURCE_OK);
+ assert(pet_resources_realtime_mic(&broker,audio,true));
+ assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
+ assert(pet_resources_realtime_finish(&broker,audio));fresh_source();
+ /* Audio activity alone no longer gates prefetch: the resource broker owns
+  * realtime authority (verified above) and conversation must not stall the
+  * animation. A free broker therefore admits the offer. */
+ assert(h264_prefetch_offer(&g_asset_cache[0],"audio-active",16,16,true,0));fresh_source();
  /* Worker-side layout failure: the job stays READY, the render thread keeps its
   * original pack as the counted fallback, and the next offer avoids the
   * fallback buffer's front. */

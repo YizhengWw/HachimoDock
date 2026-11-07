@@ -7500,13 +7500,11 @@ esp_err_t pet_p4_renderer_render(
    * deliberately NOT re-read from state so session/state refreshes cannot make
    * the cards snap back to opaque for a frame. */
   bool component_media_idle=true;
-  if(strcmp(page,"app")){
-    component_media_idle=renderer_component_media_frame(NULL);
-    /* A running component clip owns the decoder for this frame, so the pet
-     * asset is still pending; the pet frame itself is attempted anyway so the
-     * background (and card alpha) never goes stale. */
-    if(!component_media_idle)g_asset_cache_pending=true;
-  }
+  /* A running component clip owns the decoder for this frame, so the pet asset
+   * is still pending; the pet frame itself is attempted anyway so the background
+   * (and card alpha) never goes stale. */
+  if(strcmp(page,"app"))component_media_idle=renderer_component_media_frame(NULL);
+  if(!component_media_idle)g_asset_cache_pending=true;
   if (realtime_mode != g_last_realtime_conversation) {
 #if PET_P4_APP_RETAIN_LOGICAL
     g_app_may_retain=false;
@@ -7525,6 +7523,8 @@ esp_err_t pet_p4_renderer_render(
   if (approval_changed) {
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
+    g_main_appearance_ready = false;
+    pet_compact_underlay_forget(&g_main_compact_underlay);
     g_last_approval_visible = approval_visible;
   }
   if (strcmp(page, "components") == 0) {

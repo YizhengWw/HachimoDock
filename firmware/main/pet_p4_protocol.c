@@ -4052,12 +4052,12 @@ bool pet_p4_handle_line_with_reply(
         const char *value=json_string(payload,fields[i]);
         cJSON_AddStringToObject(reply,fields[i],strlen(value)<=64?value:"");
       }
-      /* Do NOT block pixel transfer during audio/conversation: rejecting the
+      /* Do NOT block pixel transfer during conversation/voice: rejecting the
        * frame there forced a local-render fallback and an opacity flicker as
-       * blocked toggled mid-session. Only OTA and asset transfers still need
-       * the write channel to themselves. */
+       * blocked toggled mid-session. Music playback (underrun-sensitive), OTA
+       * and asset transfers still need the write channel to themselves. */
       pet_bubble_pixels_maintain((uint64_t)(esp_timer_get_time()/1000),
-        pet_p4_ota_active() || state->asset_transfer_active);
+        pet_p4_audio_music_active() || pet_p4_ota_active() || state->asset_transfer_active);
       (void)pet_bubble_pixels_handle_owned(payload,ctx,(uint64_t)(esp_timer_get_time()/1000),reply);
       /* Chunk frames are fire-and-forget on the host side now; replying to each
        * 512-byte chunk only wasted wire time. Only begin/end carry a requestId

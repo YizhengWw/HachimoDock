@@ -92,16 +92,15 @@ bool pet_resources_realtime_mic(pet_resource_broker_t *broker,
   broker->realtime_mic[ticket.slot]=active;
   if (active) {
     /* Microphone/AEC work is latency-critical: once it starts, drop every
-     * already-held background job (including the pet-asset decode lease).
-     * Letting decode keep running under the mic broke AEC and produced
-     * feedback howling. Plain playback never sets this flag, so cues and TTS
-     * keep the animation alive. */
+     * already-held flash/file background job. The pet-asset decode lease is
+     * NOT in this mask because it reads pinned PSRAM only; cancelling it froze
+     * the animation for the whole recording. */
     for (unsigned i = 0; i < PET_RESOURCE_LEASE_SLOTS; i++)
       if (broker->leases[i].occupied
           && (PET_RESOURCE_BACKGROUND_MASK
               & PET_RESOURCE_MASK(broker->leases[i].ticket.kind)))
         (void)pet_resources_owner_revoke(broker, broker->leases[i].ticket.owner);
-    /* Animation decode leases are intentionally kept: they only read PSRAM. */
+
   }
   return true;
 }
