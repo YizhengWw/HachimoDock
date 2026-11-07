@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp, Moon } from "lucide-react";
+import { Activity, MoreHorizontal, Send, Copy, Unlink, ArrowUpLeft, RefreshCw, FileUp, Moon, ShieldCheck } from "lucide-react";
 
 export default function DashboardActionsMenu({
   onSendTest,
@@ -107,7 +107,7 @@ export default function DashboardActionsMenu({
           {onReconcileAppearance && (
             <button type="button" className="dashboard-actions-menu__item" role="menuitem"
               disabled={!canReconcileAppearance} onClick={dispatch(onReconcileAppearance)}>
-              <RefreshCw size={14} />
+              <ShieldCheck size={14} />
               核对形象状态
             </button>
           )}
