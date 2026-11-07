@@ -44,11 +44,6 @@ static bool realtime_mic_active(const pet_resource_broker_t *broker) {
     if (broker->realtime[i] && broker->realtime_mic[i]) return true;
   return false;
 }
-static bool realtime_active(const pet_resource_broker_t *broker) {
-  for (unsigned i = 0; i < PET_RESOURCE_REALTIME_SLOTS; i++) if (broker->realtime[i]) return true;
-
-  return false;
-}
 static bool realtime_blocks_video(const pet_resource_broker_t *broker) {
   for (unsigned i=0;i<PET_RESOURCE_REALTIME_SLOTS;i++)
     if(broker->realtime[i]&&!broker->realtime_video_ready[i])return true;

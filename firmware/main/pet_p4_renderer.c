@@ -7500,7 +7500,13 @@ esp_err_t pet_p4_renderer_render(
    * deliberately NOT re-read from state so session/state refreshes cannot make
    * the cards snap back to opaque for a frame. */
   bool component_media_idle=true;
-  if(strcmp(page,"app"))component_media_idle=renderer_component_media_frame(NULL);
+  if(strcmp(page,"app")){
+    component_media_idle=renderer_component_media_frame(NULL);
+    /* A running component clip owns the decoder for this frame, so the pet
+     * asset is still pending; the pet frame itself is attempted anyway so the
+     * background (and card alpha) never goes stale. */
+    if(!component_media_idle)g_asset_cache_pending=true;
+  }
   if (realtime_mode != g_last_realtime_conversation) {
 #if PET_P4_APP_RETAIN_LOGICAL
     g_app_may_retain=false;
@@ -7542,7 +7548,7 @@ esp_err_t pet_p4_renderer_render(
      * over a freshly drawn background (throttled frames re-composited over stale
      * pixels and made the card opacity appear to drift). */
     bool drew_asset = render_asset_pet_frame(state, view, now_ms);
-    if(drew_asset){g_main_appearance_ready=true;ever_drew_asset=true;}
+    if(drew_asset){g_main_appearance_ready=true;ever_drew_asset=true;g_asset_cache_pending=false;}
     /* g_framebuffer is a single persistent UI buffer: on a frame without a pet
      * it still holds the previous complete frame. Skipping the card draw keeps
      * that frame intact (zero copies, no tearing, no input stall) instead of
