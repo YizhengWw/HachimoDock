@@ -73,6 +73,10 @@ const MAX_CLAUDE_SESSION_METADATA_DEPTH: usize = 4;
 const MAX_CLAUDE_SESSION_METADATA_BYTES: u64 = 2 * 1024 * 1024;
 const SESSION_CONFIRM_TIMEOUT: Duration = Duration::from_millis(2_500);
 const COMPOSER_READBACK_TIMEOUT: Duration = Duration::from_millis(500);
+/* Electron clients can take well over 500 ms to expose an updated caret/selection
+ * in AX after it was set programmatically; the short budget made dictation fail
+ * with "末尾光标未确认" even though the editor had accepted the range. */
+const CARET_READBACK_TIMEOUT: Duration = Duration::from_millis(2000);
 const SUBMIT_CONFIRM_TIMEOUT: Duration = Duration::from_millis(3_000);
 const SUBMIT_FALLBACK_DELAY: Duration = Duration::from_millis(800);
 const DEEPLINK_FOCUS_DELAY: Duration = Duration::from_millis(450);
@@ -132,6 +136,21 @@ impl MacosAgent {
     }
 }
 
+/// Bring the agent's app forward without raising a specific window or waiting.
+/// Used before device dictation starts so the safety checks in the composer
+/// worker see the expected frontmost app.
+pub(super) fn activate_agent(agent: MacosAgent) {
+    for bundle_identifier in agent_bundle_identifiers(agent) {
+        let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
+            &NSString::from_str(bundle_identifier),
+        );
+        for application in applications.iter() {
+            let _ = application.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+            return;
+        }
+    }
+}
+
 pub(super) fn agent_is_frontmost(agent: MacosAgent) -> bool {
     for bundle_identifier in agent_bundle_identifiers(agent) {
         let applications = NSRunningApplication::runningApplicationsWithBundleIdentifier(
@@ -168,7 +187,29 @@ fn agent_application_names(agent: MacosAgent) -> &'static [&'static str] {
     }
 }
 
+/// Last text this writer confirmed in the DeepSeek Harness composer. Kept across
+/// utterances because each recording builds a fresh composer state, and every AX
+/// read on Electron costs ~700 ms.
+static LAST_DSH_WRITTEN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The DSH composer becomes empty after a submitted draft, so the cached value
+/// must be dropped instead of being reused by the next utterance.
+pub(super) fn clear_last_dsh_written() {
+    if let Ok(mut cached) = LAST_DSH_WRITTEN.lock() { *cached = None; }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AgentDiagnostics {
+    pub pids: usize,
+}
+
+pub(super) fn agent_pid_count(agent: MacosAgent) -> usize {
+    agent_application_pids(agent).len()
+}
+
 pub(super) struct MacosComposerState {
+    /// Text this writer last confirmed in the client's composer.
+    pub(super) last_written_value: Option<String>,
     agent: MacosAgent,
     session_id: String,
     session_title: String,
@@ -2405,23 +2446,45 @@ fn find_voice_target(state: &mut MacosComposerState) -> Result<ComposerTarget, S
             return Err("DESKTOP_TASK_TARGET_CHANGED".into());
         }
     }
-    let Some(window) = agent_windows(state.agent)?
-        .into_iter()
-        .find(|candidate| candidate.window == pinned_window)
-    else {
-        return Err(format!(
-            "{} macOS 当前窗口在语音输入期间发生变化",
-            state.agent.label()
-        ));
-    };
+    /* Reuse the pinned window instead of re-enumerating every AX window of the
+     * client on each update: Electron's AX tree walk cost seconds per insert and
+     * made dictation feel slow. Focus/identity are verified before any write. */
+    let window = CodexWindow { app: pinned.app.clone(), window: pinned_window };
     if state.agent.current_electron() {
+        if !agent_is_frontmost(state.agent) {
+            /* Device dictation always targets this client: re-activate it once
+             * (cheap NSRunningApplication call) instead of aborting the utterance
+             * because focus moved to another window between speaking and writing. */
+            activate_agent(state.agent);
+            for _ in 0..6 {
+                std::thread::sleep(Duration::from_millis(40));
+                if agent_is_frontmost(state.agent) { break; }
+            }
+        }
         if !agent_is_frontmost(state.agent) {
             return Err(format!("{} 已不在前台，已停止写入，请回到目标对话重新长按", state.agent.label()));
         }
     } else {
         focus_window(&window)?;
     }
-    let (composer, value) = find_composer(state.agent, &window)?;
+    /* Electron clients: the composer element is already pinned from the first
+     * lookup. Re-running the AX tree search cost ~1.4 s per utterance, so reuse
+     * the element and only re-read its value (single AX call). Non-Electron
+     * clients keep the full search. */
+    let (composer, value) = if state.agent.current_electron() {
+        /* After our own successful write the composer holds exactly that text,
+         * so reuse it instead of paying another ~700 ms AX read. A manual edit
+         * makes the append guard reject the write instead of corrupting it. */
+        let value = if state.agent == MacosAgent::DeepSeekHarness {
+            LAST_DSH_WRITTEN.lock().ok().and_then(|v| v.clone())
+        } else {
+            state.last_written_value.clone()
+        }
+        .unwrap_or_else(|| composer_value(&pinned_composer));
+        (pinned_composer.clone(), value)
+    } else {
+        find_composer(state.agent, &window)?
+    };
     if composer != pinned_composer {
         if state.task_identity.is_some() {
             return Err("DESKTOP_TASK_TARGET_CHANGED".into());
@@ -2516,15 +2579,60 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
         }
         Ok(())
     };
-    assert_target()?;
-    if current_electron_value(&target.composer)? != target.value { return Err("DESKTOP_TASK_READBACK_CHANGED".into()); }
+    let assert_started = std::time::Instant::now();
+    /* Electron AX reads cost ~700 ms each, so for DeepSeek Harness only the
+     * cheap NSRunningApplication frontmost check runs before writing; the final
+     * readback still proves the text landed in the pinned composer. */
+    let fast_target = target.agent == MacosAgent::DeepSeekHarness;
+    if fast_target {
+        if !agent_is_frontmost(target.agent) {
+            return Err(format!("{} 已不在前台，已停止写入", target.agent.label()));
+        }
+    } else {
+        assert_target()?;
+    }
+    /* Cheap write-time guard: on Electron every full assert_target() costs two
+     * extra AX reads, and it ran twice per typed chunk. Frontmost plus the final
+     * value readback are enough to prove the text landed correctly. */
+    let assert_writable = || -> Result<(), String> {
+        if fast_target {
+            if !agent_is_frontmost(target.agent) {
+                return Err(format!("{} 已不在前台，已停止写入", target.agent.label()));
+            }
+            Ok(())
+        } else {
+            assert_target()
+        }
+    };
+    let skip_initial_value_read = fast_target;
+    if !skip_initial_value_read && current_electron_value(&target.composer)? != target.value {
+        return Err("DESKTOP_TASK_READBACK_CHANGED".into());
+    }
     let append = current_electron_append_suffix(&target.value, text);
     let mut append_end = None;
+    crate::realtime_chat_log::record("", "voice_write_timing", serde_json::json!({
+        "stage": "assert_and_read", "elapsedMs": assert_started.elapsed().as_millis() as u64,
+        "ok": true, "count": append.is_some() as u64,
+    }));
+    let caret_started = std::time::Instant::now();
     if append.is_some() {
-        let raw = current_electron_raw_value(&target.composer)?;
+        /* Empty DSH composer: skip the pre-insert raw read; the trailing
+         * verification proves the whole text arrived. */
+        let raw = if fast_target && target.value.is_empty() {
+            String::new()
+        } else {
+            current_electron_raw_value(&target.composer)?
+        };
         if normalize_element_composer_value(&target.composer, &raw) != target.value {
             return Err("DESKTOP_TASK_READBACK_CHANGED".into());
         }
+        if raw.is_empty() && target.value.is_empty() {
+            /* Empty composer: the caret is already at the only valid position.
+             * Electron exposes the programmatic caret change slowly, so the
+             * range-set + readback below cost up to CARET_READBACK_TIMEOUT for
+             * no benefit. Insert directly and verify the final value instead. */
+            append_end = None;
+        } else {
         let end = raw.encode_utf16().count();
         if !current_electron_append_guard(&target.value, &target.value,
             current_composer_selection(&target.composer), end) {
@@ -2536,7 +2644,7 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
             target.composer.set_attribute(&AXAttribute::new(&CFString::new("AXSelectedTextRange")), value)
                 .map_err(|_| "DeepSeek Harness 无法设置末尾光标，未写入".to_owned())?;
         }
-        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        let deadline = Instant::now() + CARET_READBACK_TIMEOUT;
         let mut stable_since = None;
         loop {
             assert_target()?;
@@ -2553,11 +2661,12 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
             thread::sleep(Duration::from_millis(25));
         }
         append_end = Some(end);
+        }
     } else if !target.value.is_empty() {
         // Existing explicit task replacement remains strict. Voice callers
         // reject non-append revisions before entering this legacy branch.
         select_workbuddy_draft(&target.composer).map_err(|_| "DeepSeek Harness 无法确认原文选区，未写入".to_owned())?;
-        let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
+        let deadline = Instant::now() + CARET_READBACK_TIMEOUT;
         loop {
             assert_target()?;
             let selected = target.composer.attribute(&AXAttribute::new(&CFString::new("AXSelectedText")))
@@ -2567,17 +2676,23 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
             thread::sleep(Duration::from_millis(25));
         }
     }
+    crate::realtime_chat_log::record("", "voice_write_timing", serde_json::json!({
+        "stage": "caret", "elapsedMs": caret_started.elapsed().as_millis() as u64,
+        "ok": append_end.is_some(), "count": append_end.unwrap_or(0) as u64,
+    }));
     if text.is_empty() {
         if !target.value.is_empty() { assert_target()?; post_workbuddy_key(&target.app, 51, CGEventFlags::CGEventFlagNull)?; }
         return Ok(());
     }
+    let typing_started = std::time::Instant::now();
+    let mut chunks_sent = 0u64;
     let source = CGEventSource::new(CGEventSourceStateID::Private)
         .map_err(|_| "DeepSeek Harness 无法创建定向输入事件".to_owned())?;
     let input = append.unwrap_or(text);
     let chars = input.chars().collect::<Vec<_>>();
     let mut expected = if append_end.is_some() { target.value.clone() } else { String::new() };
-    for chars in chars.chunks(8) {
-        assert_target()?;
+    for chars in chars.chunks(64) {
+        assert_writable()?;
         if let Some(end) = append_end {
             if !current_electron_append_guard(&current_electron_value(&target.composer)?, &expected,
                 current_composer_selection(&target.composer), end) {
@@ -2593,10 +2708,11 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
             event.post_to_pid(pid);
         }
         expected.push_str(&part);
+        chunks_sent += 1;
         append_end = append_end.map(|end| end + part.encode_utf16().count());
         let deadline = Instant::now() + COMPOSER_READBACK_TIMEOUT;
         loop {
-            assert_target()?;
+            assert_writable()?;
             let actual = current_electron_value(&target.composer)
                 .map_err(|_| "DeepSeek Harness 草稿写入未确认，未自动重试".to_owned())?;
             let confirmed = match append_end {
@@ -2609,13 +2725,19 @@ fn replace_current_electron_without_clipboard(target: &ComposerTarget, text: &st
             thread::sleep(Duration::from_millis(25));
         }
     }
+    crate::realtime_chat_log::record("", "voice_write_timing", serde_json::json!({
+        "stage": "typing", "elapsedMs": typing_started.elapsed().as_millis() as u64,
+        "ok": true, "count": chunks_sent,
+    }));
     Ok(())
 }
 
 fn replace_composer_text(target: &ComposerTarget, text: &str) -> Result<(), String> {
     let text = text.replace("\r\n", "\n");
     focus_composer(target)?;
-    if composer_value(&target.composer) != target.value {
+    /* DeepSeek Harness: find_voice_target has just read this exact value through
+     * AX; every extra read costs ~700 ms on Electron, so do not repeat it. */
+    if target.agent != MacosAgent::DeepSeekHarness && composer_value(&target.composer) != target.value {
         return Err("输入框内容在获取焦点后发生变化，已保留原文".into());
     }
     if target.agent == MacosAgent::DeepSeekHarness {
@@ -3036,6 +3158,7 @@ pub(super) fn begin_voice(
     };
     focus_composer(&target)?;
     Ok(MacosComposerState {
+        last_written_value: None,
         agent,
         session_id: session_id.to_string(),
         session_title,
@@ -3053,6 +3176,7 @@ pub(super) fn begin_current_voice(agent: MacosAgent) -> Result<MacosComposerStat
     focus_composer(&target)?;
     let identity = (agent == MacosAgent::DeepSeekHarness).then(|| task_window_identity(&target.window));
     Ok(MacosComposerState {
+        last_written_value: None,
         agent,
         session_id: String::new(),
         session_title: String::new(),
@@ -3116,32 +3240,94 @@ pub(super) fn begin_current_task() -> Result<MacosComposerState, String> {
 pub(super) fn begin_current_task_for(agent: MacosAgent) -> Result<MacosComposerState, String> {
     let target = find_stable_current_target(agent, true)?;
     let identity = task_window_identity(&target.window);
-    Ok(MacosComposerState { agent, session_id: String::new(),
+    Ok(MacosComposerState { last_written_value: None, agent, session_id: String::new(),
         session_title: String::new(), draft: crate::voice_draft::VoiceDraft::new(target.value.clone()),
         current_visible_target: Some(target), task_identity: Some(identity), confirmation_identity: None, native_voice_text: String::new() })
+}
+
+/// Rebuild the recording draft around the composer's current value so this
+/// utterance appends at the end, even when the original baseline was sent,
+/// cleared or edited between recordings.
+fn rebase_voice_draft(state: &mut MacosComposerState, current: &str, transcript: &str) -> Option<String> {
+    let caret = current.encode_utf16().count();
+    let draft = crate::voice_draft::VoiceDraft::at_utf16_caret(current.to_string(), caret).ok()?;
+    let desired = draft.desired(transcript);
+    state.draft = draft;
+    state.draft.last = desired.clone();
+    Some(desired)
 }
 
 pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result<String, String> {
     if state.agent == MacosAgent::Codex && state.draft.caret_after(text).is_some() {
         return insert_codex_voice_once(state, text);
     }
-    let text = state.draft.desired(text);
+    let raw_text = text.to_string();
+    let mut text = state.draft.desired(text);
     let mut last_error = String::new();
     // An uncertain native paste must never be repeated: a delayed first paste
     // could otherwise duplicate the utterance on top of the retry.
-    let attempts = if state.agent.current_electron() { 1 } else { 2 };
+    /* Electron paste is not retried blindly, but DeepSeek Harness may read a
+     * stale cached draft value; one retry after dropping that cache is safe
+     * because nothing was written yet (readback mismatch aborts before the
+     * key events). */
+    let attempts = if state.agent.current_electron() {
+        if state.agent == MacosAgent::DeepSeekHarness { 2 } else { 1 }
+    } else {
+        2
+    };
     for _ in 0..attempts {
-        match find_voice_target(state).and_then(|target| {
-            let identity_before = state.agent.current_electron().then(|| task_window_identity(&target.window));
+        let find_started = std::time::Instant::now();
+        let found = find_voice_target(state);
+        crate::realtime_chat_log::record("", "voice_write_timing", serde_json::json!({
+            "stage": "find_target", "elapsedMs": find_started.elapsed().as_millis() as u64,
+            "ok": found.is_ok(),
+        }));
+        match found.and_then(|target| {
+            /* Window identity costs another AX round-trip on Electron and is
+             * only used as a confirmation hint; DeepSeek Harness skips it. */
+            let want_identity = state.agent.current_electron()
+                && state.agent != MacosAgent::DeepSeekHarness;
+            let identity_before = want_identity.then(|| task_window_identity(&target.window));
             if !state.draft.can_update(&target.value, &text) {
-                return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
+                /* The draft baseline drifted from what the composer actually holds
+                 * (previous draft was sent, cleared or edited). Rebuild the draft
+                 * around the current value and append at its end instead of
+                 * discarding this utterance. */
+                if let Some(rebased) = rebase_voice_draft(state, &target.value, &raw_text) {
+                    text = rebased;
+                } else {
+                    if let Ok(mut cached) = LAST_DSH_WRITTEN.lock() { *cached = None; }
+                    return Err("输入框已被手动修改，已停止更新本段语音以保留原文".into());
+                }
             }
             if state.agent == MacosAgent::DeepSeekHarness
                 && current_electron_append_suffix(&target.value, &text).is_none() {
-                return Err("DeepSeek Harness 本次语音不是追加更新，已保留原草稿且未写入".into());
+                /* The baseline and the composer drifted apart (draft sent, cleared
+                 * or edited between utterances). Rebuild around the current value
+                 * and retry instead of discarding the utterance. */
+                match rebase_voice_draft(state, &target.value, &raw_text) {
+                    Some(rebased)
+                        if current_electron_append_suffix(&target.value, &rebased).is_some() => {
+                        text = rebased;
+                    }
+                    _ => return Err(
+                        "DeepSeek Harness 本次语音不是追加更新，已保留原草稿且未写入".into()),
+                }
             }
-            if target.value != text { replace_composer_text(&target, &text)?; }
-            let identity_after = state.agent.current_electron().then(|| task_window_identity(&target.window));
+            if target.value != text {
+                match replace_composer_text(&target, &text) {
+                    Ok(()) => {}
+                    Err(error) => {
+                        if let Ok(mut cached) = LAST_DSH_WRITTEN.lock() { *cached = None; }
+                        return Err(error);
+                    }
+                }
+            }
+            state.last_written_value = Some(text.clone());
+            if target.agent == MacosAgent::DeepSeekHarness {
+                if let Ok(mut cached) = LAST_DSH_WRITTEN.lock() { *cached = Some(text.clone()); }
+            }
+            let identity_after = want_identity.then(|| task_window_identity(&target.window));
             Ok((target, stable_confirmation_identity(identity_before, identity_after)))
         }) {
             Ok((_target, confirmation_identity)) => {
@@ -3152,6 +3338,9 @@ pub(super) fn update_voice(state: &mut MacosComposerState, text: &str) -> Result
                 return Ok(text);
             }
             Err(error) => {
+                if error.contains("DESKTOP_TASK_READBACK_CHANGED") {
+                    if let Ok(mut cached) = LAST_DSH_WRITTEN.lock() { *cached = None; }
+                }
                 last_error = error;
                 thread::sleep(Duration::from_millis(40));
             }

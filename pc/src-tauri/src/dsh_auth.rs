@@ -118,6 +118,27 @@ pub(crate) fn client(timeout: Duration) -> Result<reqwest::blocking::Client, Str
         .build()
         .map_err(|_| "DSH HTTP client unavailable".into())
 }
+pub(crate) fn get(cap: &Capability, path: &str) -> Result<Value, String> {
+    if !["/sessions"].contains(&path) {
+        return Err("invalid DSH operation".into());
+    }
+    let response = client(Duration::from_secs(3))?
+        .get(format!("{}{path}", cap.base_url))
+        .bearer_auth(&cap.token)
+        .send()
+        .map_err(|_| "DSH query failed".to_string())?;
+    let status = response.status();
+    let mut raw = String::new();
+    response
+        .take(65537)
+        .read_to_string(&mut raw)
+        .map_err(|_| "DSH receipt unavailable")?;
+    if !status.is_success() {
+        return Err(format!("DSH query rejected (HTTP {})", status.as_u16()));
+    }
+    serde_json::from_str(&raw).map_err(|_| "invalid DSH receipt".into())
+}
+
 pub(crate) fn post(cap: &Capability, path: &str, body: &Value) -> Result<Value, String> {
     if ![
         "/voice/status",
