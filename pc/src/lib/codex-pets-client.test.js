@@ -45,3 +45,18 @@ test("installCodexCommunityPet invalidates the cached pet scan", async () => {
   ]);
   assert.deepEqual(calls[1].payload, { petId: "rx-93" });
 });
+
+test("install invalidation retires an earlier Codex pet scan", async () => {
+  let release, reads = 0;
+  const old = new Promise(resolve => { release = resolve; });
+  const client = createCodexPetsClient({ invoke: async command => {
+    if (command === "list_codex_pets") return ++reads === 1 ? old : [{ id: "installed" }];
+    return { installed: true };
+  } });
+  const first = client.listCodexPets();
+  await Promise.resolve();
+  await client.installCodexCommunityPet("installed");
+  await client.listCodexPets();
+  release([]); await first;
+  assert.deepEqual(await client.listCodexPets(), [{ id: "installed" }]);
+});
