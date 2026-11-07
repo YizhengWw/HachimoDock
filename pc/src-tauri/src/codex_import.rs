@@ -685,11 +685,29 @@ pub fn install_codex_community_pet(pet_id: &str) -> Result<CodexCommunityInstall
         //    (Node >= 24). Pass the proxy through explicitly when configured.
         let mut command = crate::command_for_host("cmd");
         command.arg("/c").arg(npx);
-        if let Ok(proxy) = std::env::var("HTTPS_PROXY") {
-            if !proxy.is_empty() { command.env("NODE_USE_ENV_PROXY", "1"); }
-        }
-        if let Ok(proxy) = std::env::var("https_proxy") {
-            if !proxy.is_empty() { command.env("NODE_USE_ENV_PROXY", "1"); }
+        // codex-pets.net is DNS-poisoned on some networks, so the CLI's fetch
+        // needs a proxy. If the user has one configured, enable Node's env
+        // proxy support (undici otherwise ignores HTTPS_PROXY). Without an
+        // explicit proxy, probe the common local proxy ports so the import
+        // works out of the box on machines running Clash / v2ray-style tools.
+        if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
+            if !proxy.is_empty() {
+                command.env("NODE_USE_ENV_PROXY", "1");
+                command.env("HTTPS_PROXY", proxy);
+            }
+        } else {
+            for port in [7897u16, 7890, 10809, 1080] {
+                if std::net::TcpStream::connect_timeout(
+                    &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                    std::time::Duration::from_millis(150),
+                )
+                .is_ok()
+                {
+                    command.env("NODE_USE_ENV_PROXY", "1");
+                    command.env("HTTPS_PROXY", format!("http://127.0.0.1:{port}"));
+                    break;
+                }
+            }
         }
         if let Some(file) = &extra_ca { command.env("NODE_EXTRA_CA_CERTS", file.path()); }
         let output = command
