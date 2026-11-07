@@ -23,7 +23,7 @@ def test_actual_frame_offer_never_publishes_until_tail_and_rejects_revoked_inten
 #define portEXIT_CRITICAL(m) ((void)(m),leave())
 typedef struct {uint8_t *bytes;bool finished,failed;unsigned decoder_readers;pet_resource_lease_t buffer_lease,prepare_lease;pet_resource_owner_t owner;bool loading;}pet_p4_asset_cache_entry_t;
 typedef struct {pet_p4_asset_cache_entry_t *source;int width,height,frame;bool restart;uint64_t enqueued_us,cancel_epoch;char path[80];uint8_t *packed;size_t packed_capacity;pet_resource_owner_t owner;pet_resource_lease_t lease;pet_prefetch_ticket_t ticket;}pet_h264_prefetch_job_t;
-static unsigned depth,notifications,hook,freed;static bool suspended_audio;
+static unsigned depth,notifications,hook,freed;
 static int g_asset_prepare_mux,g_metrics_lock,g_asset_prepare_slot=-1,g_asset_prepare_task=1;
 static uint64_t g_asset_prepare_cancel_epoch,g_asset_prepare_storage_epoch;
 static bool g_asset_prepare_suspended;
@@ -38,7 +38,6 @@ static uint64_t esp_timer_get_time(void){return 123456;}
 static uint32_t elapsed_us_clamped(int64_t a,int64_t b){return (uint32_t)(b-a);}
 static void pet_render_counter_increment(uint32_t *v){(*v)++;}
 static uint8_t *h264_worker_back_buffer(void){return pixels;}
-static bool asset_prepare_audio_busy(void){return suspended_audio;}
 static void xTaskNotifyGive(int task){assert(task&&!depth);notifications++;}
 static pet_resource_result_t pet_resources_device_owner_open(uint32_t m,pet_resource_owner_t *o){
  assert(!depth);if(hook==1){hook=0;g_asset_prepare_cancel_epoch++;}if(hook==2){hook=0;g_asset_prepare_storage_epoch++;}
@@ -88,11 +87,11 @@ int main(void){
   if(scenario==2)g_asset_prepare_suspended=true;
   if(scenario==3)hook=1;
   if(scenario==4)hook=2;
-  if(scenario==5)suspended_audio=true;
+  if(scenario==5)g_asset_prepare_cancel_epoch++;
   h264_frame_offer_end(scenario!=6); /* rotate/LCD failure drops the pin */
   assert(!source.decoder_readers&&!g_h264_frame_offer.pending&&!g_h264_frame_offer.source);
   assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_EMPTY&&notifications==1);
-  g_asset_prepare_suspended=suspended_audio=false;
+  g_asset_prepare_suspended=false;
  }
  /* Explicit cleanup is deferred too; it has no source pin. */
  h264_frame_offer_begin();assert(h264_prefetch_offer(NULL,NULL,0,0,true,-1));assert(notifications==1);h264_frame_offer_end(true);assert(notifications==2);retire();

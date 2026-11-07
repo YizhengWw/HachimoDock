@@ -51,8 +51,8 @@ pet_resource_finish_t pet_resources_device_finish(pet_resource_lease_t lease) {
 static pet_resource_usage_t usage(void) {
   pet_resource_usage_t result; BROKER_BEGIN(); pet_resources_usage(&broker, &result); BROKER_END(); return result;
 }
-static _Atomic unsigned allocations, frees, reads, yields, notifications, audio_at_yield;
-static _Atomic bool audio, fail_alloc, fail_read, block_read, use_raw = true;
+static _Atomic unsigned allocations, frees, reads, yields, notifications;
+static _Atomic bool fail_alloc, fail_read, block_read, use_raw = true;
 static _Atomic int active_slot = 1;
 static bool fail_task, cancel_in_locate;
 static pthread_mutex_t read_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -64,10 +64,6 @@ static int64_t esp_timer_get_time(void) { return atomic_fetch_add(&clock_us, 10)
 static unsigned long long renderer_monotonic_ms(void) { return (unsigned long long) esp_timer_get_time() / 1000; }
 static uint32_t elapsed_us_clamped(int64_t start, int64_t end) { return end > start ? (uint32_t)(end - start) : 0; }
 static pet_p4_render_trace_t g_render_trace;
-static bool pet_p4_audio_active(void) { return audio; }
-static bool pet_p4_audio_playback_active(void) { return false; }
-static bool pet_p4_audio_conversation_active(void) { return false; }
-static bool pet_p4_audio_music_active(void) { return false; }
 static void *heap_caps_malloc(size_t n, int flags) {
   assert(!critical_depth && flags == 3 && n <= PET_P4_ASSET_CACHE_MAX_FILE_BYTES);
   if (fail_alloc) return NULL;
@@ -75,8 +71,7 @@ static void *heap_caps_malloc(size_t n, int flags) {
 }
 static void heap_caps_free(void *p) { assert(!critical_depth && p); frees++; free(p); }
 static void vTaskDelay(unsigned ticks) {
-  assert(!critical_depth && ticks == 1); unsigned count = ++yields;
-  if (audio_at_yield && count >= audio_at_yield) audio = true;
+  assert(!critical_depth && ticks == 1); ++yields;
 }
 static int xTaskCreate(void (*fn)(void *), const char *name, unsigned stack, void *arg, unsigned priority, TaskHandle_t *out) {
   assert(fn && !strcmp(name, "p4-asset-prep") && stack == 4096 && !arg && priority == 1);
@@ -203,14 +198,10 @@ int main(void) {
   assert(!request("unsafe", true)); run_job();
   assert(!request("unsafe", true) && !g_asset_cache_pending); assert_empty(); valid_source();
 
-  /* Audio activation between read chunks and during scanner yields both
-     revoke work; no new work is admitted while audio remains busy. */
-  for (unsigned stop = 1; stop <= 4; stop += 3) {
-    audio_at_yield = yields + stop;
-    assert(!request("audio", true)); run_job(); assert(audio);
-    assert(!request("audio", true) && g_asset_cache_pending); assert_empty();
-    audio = false; audio_at_yield = 0;
-  }
+  /* Audio activity no longer gates asset preparation: playback and decode run
+     concurrently (the pinned-PSRAM animation path never waits behind audio),
+     so there is no audio-revocation case left to assert here; cancellation and
+     suspension coverage above remains authoritative. */
 
   /* Capture the SPIFFS path once; worker never re-resolves active slot. */
   use_raw = false; source_file = tmpfile(); assert(source_file);

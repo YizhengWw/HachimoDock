@@ -39,9 +39,8 @@ pet_resource_limit_t pet_resources_limit(pet_resource_kind_t kind) {
   return valid_kind(kind) ? limits[kind] : (pet_resource_limit_t){0};
 }
 
-static bool realtime_mic_active(const pet_resource_broker_t *broker) {
-  for (unsigned i = 0; i < PET_RESOURCE_REALTIME_SLOTS; i++)
-    if (broker->realtime[i] && broker->realtime_mic[i]) return true;
+static bool realtime_active(const pet_resource_broker_t *broker) {
+  for (unsigned i = 0; i < PET_RESOURCE_REALTIME_SLOTS; i++) if (broker->realtime[i]) return true;
   return false;
 }
 static bool realtime_blocks_video(const pet_resource_broker_t *broker) {
@@ -164,7 +163,7 @@ pet_resource_result_t pet_resources_try_acquire(pet_resource_broker_t *broker,
   pet_resource_limit_t limit = pet_resources_limit(kind);
   if (!limit.leases || !limit.units) return PET_RESOURCE_UNAVAILABLE;
   if (units > limit.units) return PET_RESOURCE_INVALID;
-  if ((PET_RESOURCE_BACKGROUND_MASK & bit) && realtime_mic_active(broker)) return PET_RESOURCE_PROTECTED;
+  if ((PET_RESOURCE_BACKGROUND_MASK & bit) && realtime_active(broker)) return PET_RESOURCE_PROTECTED;
   if(kind==PET_RESOURCE_CACHED_VIDEO&&realtime_blocks_video(broker))return PET_RESOURCE_PROTECTED;
   if (broker->protected_mask & bit) return PET_RESOURCE_PROTECTED;
   if (broker->next_serial == UINT64_MAX) return PET_RESOURCE_EXHAUSTED;

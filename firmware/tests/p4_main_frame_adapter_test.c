@@ -210,7 +210,13 @@ int main(void){
   * animation does not freeze during cues/TTS (decode performs no I/O). */
  assert(h264_prefetch_offer(&g_asset_cache[0],"audio",16,16,true,0));
  pet_resource_realtime_t audio={0};assert(pet_resources_realtime_begin(&broker,&audio)==PET_RESOURCE_OK);
- assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
+ assert(h264_prefetch_worker());
+#if PET_P4_CONVERSATION_VIDEO
+ /* Cached-video leases are revoked by any realtime begin (audio startup). */
+ assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_DISCARDED);
+#else
+ assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
+#endif
  assert(pet_resources_realtime_finish(&broker,audio));fresh_source();
  /* Microphone/AEC ownership is latency-critical for flash/file background
   * work, but the pinned-PSRAM animation decode lease survives: decode performs
@@ -218,7 +224,12 @@ int main(void){
  assert(h264_prefetch_offer(&g_asset_cache[0],"mic",16,16,true,0));
  audio=(pet_resource_realtime_t){0};assert(pet_resources_realtime_begin(&broker,&audio)==PET_RESOURCE_OK);
  assert(pet_resources_realtime_mic(&broker,audio,true));
- assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
+ assert(h264_prefetch_worker());
+#if PET_P4_CONVERSATION_VIDEO
+ assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_DISCARDED);
+#else
+ assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
+#endif
  assert(pet_resources_realtime_finish(&broker,audio));fresh_source();
  /* Audio activity alone no longer gates prefetch: the resource broker owns
   * realtime authority (verified above) and conversation must not stall the
