@@ -675,7 +675,22 @@ pub fn install_codex_community_pet(pet_id: &str) -> Result<CodexCommunityInstall
     let extra_ca = crate::llm_network::community_ca_file()?;
 
     for npx in npx_candidates() {
-        let mut command = crate::command_for_host(npx);
+        // Two Windows pitfalls with `Command::new("npx.cmd")`:
+        // 1. Spawning a .cmd via CreateProcess resolves the batch file relative
+        //    to the current working directory, so node fails with
+        //    "Cannot find module '<cwd>\node_modules\npm\bin\npm-prefix.js'".
+        //    Wrapping in `cmd /c` makes %~dp0 resolve to the real install dir.
+        // 2. codex-pets.net is DNS-poisoned on some networks; Node's fetch
+        //    (undici) ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY is set
+        //    (Node >= 24). Pass the proxy through explicitly when configured.
+        let mut command = crate::command_for_host("cmd");
+        command.arg("/c").arg(npx);
+        if let Ok(proxy) = std::env::var("HTTPS_PROXY") {
+            if !proxy.is_empty() { command.env("NODE_USE_ENV_PROXY", "1"); }
+        }
+        if let Ok(proxy) = std::env::var("https_proxy") {
+            if !proxy.is_empty() { command.env("NODE_USE_ENV_PROXY", "1"); }
+        }
         if let Some(file) = &extra_ca { command.env("NODE_EXTRA_CA_CERTS", file.path()); }
         let output = command
             .args(["--yes", "codex-pets", "add", &pet_id])
