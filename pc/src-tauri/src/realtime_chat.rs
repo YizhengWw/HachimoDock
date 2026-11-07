@@ -526,7 +526,14 @@ fn route_session_audio(session: &Session, topic: &str, payload: &Value) -> bool 
         if let Some(data) = payload.get("data").and_then(Value::as_str) {
             if let Ok(pcm) = BASE64.decode(data) {
                 if pcm.len() != FRAME_BYTES {
-                    request_failure(session, "capture_frame_invalid", Some("设备音频帧长度无效，本轮对话已停止"));
+                    // UART links drop/garble bytes at ~1e-7 BER; one bad frame is
+                    // harmless to ASR. Drop it and keep the conversation alive
+                    // instead of failing the whole session.
+                    diagnostics::record(&session.id, "capture_frame_skipped", json!({
+                        "reason": "frame_length",
+                        "decodedBytes": pcm.len(),
+                        "expectedBytes": FRAME_BYTES,
+                    }));
                     return true;
                 }
                 if let Some(id) = payload["sessionId"].as_str().filter(|id| !id.is_empty()) {
@@ -543,7 +550,11 @@ fn route_session_audio(session: &Session, topic: &str, payload: &Value) -> bool 
                 return true;
             }
         }
-        request_failure(session, "capture_frame_invalid", Some("设备音频帧编码无效，本轮对话已停止"));
+        // Unparseable base64 is almost always a single-character UART bit error.
+        // Skip the frame; the ASR stream tolerates a missing 20 ms of audio.
+        diagnostics::record(&session.id, "capture_frame_skipped", json!({
+            "reason": "base64_decode",
+        }));
         return true;
     }
     if topic == "audio/error" {
