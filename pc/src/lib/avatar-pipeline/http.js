@@ -248,8 +248,9 @@ export async function downloadBinary(url, signal, options = {}) {
   signal?.addEventListener("abort", relay, {once:true});
   let expired = false;
   const timer = bounded ? setTimeout(() => {expired=true;controller.abort();}, Math.min(120000,Math.max(1,options.timeoutMs ?? 120000))) : null;
+  let response;
   try {
-    const response = await pipelineFetch(url, { method: "GET", signal:controller?.signal || signal, diagnosticStage: "download" });
+    response = await pipelineFetch(url, { method: "GET", signal:controller?.signal || signal, diagnosticStage: "download" });
     if (!response.ok) {
       const error=new Error(`素材下载失败（HTTP ${response.status}）`);error.status=response.status;throw error;
     }
@@ -269,7 +270,15 @@ export async function downloadBinary(url, signal, options = {}) {
     if(signal?.aborted)throw new DOMException('aborted','AbortError');
     if(expired)throw Object.assign(new Error('已知图片下载超时，结果链接已保留'),{diagnostic:{outcome:'timeout'}});
     throw error;
-  } finally {if(timer!==null)clearTimeout(timer);signal?.removeEventListener('abort',relay);}
+  } finally {
+    if(timer!==null)clearTimeout(timer);
+    signal?.removeEventListener('abort',relay);
+    // Header/status rejection happens before a reader exists. Dispose its body
+    // as well; cleanup failures must not replace the original download outcome.
+    if (response?.body && !response.body.locked) {
+      try { await response.body.cancel(); } catch { /* best-effort cleanup */ }
+    }
+  }
 }
 
 /** Treat non-2xx as throw-with-body for clearer error reporting. */
