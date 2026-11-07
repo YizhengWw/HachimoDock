@@ -8,7 +8,7 @@ import atexit
 
 project_dir = env.subst("$PROJECT_DIR")
 # Keep exact per-environment SDK compilation contexts available to host checks.
-env.Replace(COMPILATIONDB_INCLUDE_TOOLCHAIN=True,
+env.Replace(COMPILATIONDB_INCLUDE_TOOLCHAIN=False,
             COMPILATIONDB_PATH=os.path.join(env.subst("$BUILD_DIR"), "platformio_compile_commands.json"))
 env["ENV"]["PET_P4_PROJECT_DIR"] = project_dir
 env["ENV"]["PET_P4_CHIP_FAMILY"] = env.GetProjectOption("custom_p4_chip_family", "v1")
