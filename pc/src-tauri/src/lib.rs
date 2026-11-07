@@ -11453,7 +11453,7 @@ fn restart_app_nap_guard(block_sleep: bool) {
     // stay awake and reconnect the P4.
     let Some(flag) = caffeinate_flag(block_sleep) else { return; };
     let pid = std::process::id().to_string();
-    match std::process::Command::new("/usr/bin/caffeinate")
+    match std::process::Command::new("caffeinate")
         .args([flag, "-w", &pid])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
