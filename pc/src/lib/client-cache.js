@@ -10,6 +10,7 @@ export function createAsyncCache({ ttlMs = 30_000, now = () => Date.now() } = {}
   let hasCachedValue = false;
   let expiresAt = 0;
   let pending = null;
+  let revision = 0;
 
   return {
     async get(loader, { force = false } = {}) {
@@ -21,19 +22,22 @@ export function createAsyncCache({ ttlMs = 30_000, now = () => Date.now() } = {}
         return pending;
       }
 
-      pending = Promise.resolve()
+      const requestRevision = ++revision;
+      const request = Promise.resolve()
         .then(loader)
         .then((value) => {
-          cachedValue = value;
-          hasCachedValue = true;
-          expiresAt = now() + ttlMs;
+          if (requestRevision === revision) {
+            cachedValue = value;
+            hasCachedValue = true;
+            expiresAt = now() + ttlMs;
+          }
           return value;
         })
         .finally(() => {
-          pending = null;
+          if (pending === request) pending = null;
         });
-
-      return pending;
+      pending = request;
+      return request;
     },
 
     peek() {
@@ -42,6 +46,7 @@ export function createAsyncCache({ ttlMs = 30_000, now = () => Date.now() } = {}
     },
 
     invalidate() {
+      revision++;
       cachedValue = undefined;
       hasCachedValue = false;
       expiresAt = 0;
