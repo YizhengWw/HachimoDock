@@ -4,7 +4,7 @@
  *   survives navigation, distinguishes reference-image moderation and skipped actions,
  *   identifies unavailable models by request stage and actual model ID,
  *   replaces conversion progress with a truthful terminal summary, and guards
- *   terminal-result acknowledgement by completion epoch.
+ *   terminal-result acknowledgement by completion epoch, with exclusive checkpoint transitions.
  * [Pos] lib node in pc/src/lib
  * [Sync] If this file changes, update this header and any UI component subscribing
  *   via `subscribeGenerationTask` (currently App.jsx + AppearanceGallery.jsx).
@@ -52,6 +52,8 @@ let activeController = null;
 let gateResolve = null;
 let initialization = null;
 let resumeTimer = null;
+// Reserve checkpoint transitions before their first await, including writes.
+let sessionTransitionPending = false;
 function scheduleResume(session) {
   clearTimeout(resumeTimer);
   if(!canAutoResume(session))return;
@@ -97,28 +99,42 @@ export function initializeGenerationRecovery() {
 }
 
 export async function resumeGenerationTask(key = "current", { automaticResume = false } = {}) {
-  if (isGenerationRunning()) return;
-  const session = await loadGenerationSession(key);
-  if (!session || session.finished || session.dismissed) return;
-  if (!["volcengine", "kling"].includes(session.config.provider)) throw new Error("自定义接口任务暂不支持跨重启恢复，避免将旧任务发送到不同服务；请在原服务核对结果。");
-  const provider = session.config.provider;
-  const saved = loadProviderConfig(provider);
-  const imageFile=session.original?.bytes?.byteLength
-    ? new File([session.original.bytes],session.original.filename||'reference.png',{type:session.original.mime||'image/png'})
-    : session.imageFile;
-  startGenerationTask({ imageFile, appearanceName: session.appearanceName,
-    personality: session.personality, styleDescription: session.styleDescription || '', skipProcessing: session.skipProcessing, session, restoreArchived: key !== "current",
-    manualReview: session.automatic !== true,
-    retryReview: !automaticResume,
-    providerConfig: { ...saved, ...session.config, imageEdit: resumeGenerationImageEdit(session, loadArkImageConfig()) },
-  });
+  if (isGenerationRunning() || sessionTransitionPending) return;
+  sessionTransitionPending = true;
+  let restoredInput;
+  try {
+    const session = await loadGenerationSession(key);
+    if (!session || session.finished || session.dismissed) return;
+    if (!["volcengine", "kling"].includes(session.config.provider)) throw new Error("自定义接口任务暂不支持跨重启恢复，避免将旧任务发送到不同服务；请在原服务核对结果。");
+    const provider = session.config.provider;
+    const saved = loadProviderConfig(provider);
+    const imageFile=session.original?.bytes?.byteLength
+      ? new File([session.original.bytes],session.original.filename||'reference.png',{type:session.original.mime||'image/png'})
+      : session.imageFile;
+    restoredInput = { imageFile, appearanceName: session.appearanceName,
+      personality: session.personality, styleDescription: session.styleDescription || '', skipProcessing: session.skipProcessing, session, restoreArchived: key !== "current",
+      manualReview: session.automatic !== true,
+      retryReview: !automaticResume,
+      providerConfig: { ...saved, ...session.config, imageEdit: resumeGenerationImageEdit(session, loadArkImageConfig()) },
+    };
+  } finally {
+    sessionTransitionPending = false;
+  }
+  // No await between releasing the reservation and claiming the running state.
+  if (restoredInput) startGenerationTask(restoredInput);
 }
 
 export async function dismissGenerationSession() {
-  if (isGenerationRunning()) return;
-  const session = await loadGenerationSession();
-  if (session) { session.dismissed = true; await saveGenerationSession(session); }
-  setState({ status: "idle", resumable: false, progress: null, error: "" });
+  if (isGenerationRunning() || sessionTransitionPending) return;
+  sessionTransitionPending = true;
+  clearTimeout(resumeTimer);
+  try {
+    const session = await loadGenerationSession();
+    if (session) { session.dismissed = true; await saveGenerationSession(session); }
+    setState({ status: "idle", resumable: false, progress: null, error: "" });
+  } finally {
+    sessionTransitionPending = false;
+  }
 }
 
 /** @type {Set<(s: GenerationTaskState) => void>} */
@@ -194,6 +210,9 @@ export function startGenerationTask(input) {
     throw new Error("已有生成任务在进行中，请等待完成后再开始新的生成。");
   }
 
+  if (sessionTransitionPending) {
+    throw new Error("任务记录正在更新，请稍候再开始新的生成。");
+  }
   activeController = new AbortController();
   clearTimeout(resumeTimer);
   setState({
