@@ -20,7 +20,13 @@ pub fn configure(dir: &Path) -> Result<(), String> {
     let dir = dir.join("logs");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let _ = LOG.set(Mutex::new(dir.join("realtime-chat.jsonl")));
-    record("", "logger_ready", json!({"version":env!("CARGO_PKG_VERSION")}));
+    #[cfg(target_os = "macos")]
+    let ax_granted = crate::codex_composer::CodexComposerBridge::accessibility_permission_granted();
+    #[cfg(not(target_os = "macos"))]
+    let ax_granted = true;
+    /* Accessibility trust decides whether AX reads/writes are fast or hang for
+     * seconds; without it voice dictation looks like a bridge timeout. */
+    record("", "logger_ready", json!({"version":env!("CARGO_PKG_VERSION"),"ok":ax_granted}));
     Ok(())
 }
 

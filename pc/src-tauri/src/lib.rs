@@ -677,6 +677,9 @@ fn p4_session_target_is_unique(
 }
 
 fn agent_uses_visible_composer(agent_id: &str) -> bool {
+    /* DeepSeek Harness desktop voice is the OS accessibility composer adapter
+     * (see integrations/dsh-hachimodock/README.md); the plugin voice endpoints
+     * are a legacy ticket flow and do not register a desktop voice owner. */
     matches!(agent_id, "codex" | "claude-code" | "workbuddy" | "deepseek-harness")
 }
 
@@ -1994,6 +1997,8 @@ fn confirm_pending_device_voice_draft(topic: &str, payload: &serde_json::Value) 
                     );
                     return;
                 }
+                #[cfg(target_os = "macos")]
+                codex_composer::CodexComposerBridge::clear_dsh_draft_cache();
                 emit_device_voice_transcript(&context, "submitted", revision, &text, true, true, "");
                 let _ = context.emitter.emit(
                     "usb-input-action-result",
@@ -2188,6 +2193,31 @@ fn start_device_voice_context(
     session_queue_empty_at_start: bool,
 ) {
     let target = device_voice_target_snapshot(board_device_id);
+    /* Device dictation writes into the target client, so bring it forward before
+     * the composer bridge is created. Doing it here (USB event thread) instead of
+     * inside the composer worker keeps the worker responsive: activating there
+     * made the first draft write time out. */
+    #[cfg(target_os = "macos")]
+    {
+        let front_before = codex_composer::CodexComposerBridge::is_agent_frontmost(&target.agent_id);
+        let mut act_pids = 0usize;
+        let mut front_after = front_before;
+        if !front_before {
+            codex_composer::CodexComposerBridge::activate_agent(&target.agent_id);
+            for _ in 0..6 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                front_after = codex_composer::CodexComposerBridge::is_agent_frontmost(&target.agent_id);
+                if front_after { break; }
+            }
+        }
+        if let Some(agent) = codex_composer::CodexComposerBridge::agent_diagnostics(&target.agent_id) {
+            act_pids = agent.pids;
+        }
+        crate::realtime_chat_log::record("", "voice_focus",
+            serde_json::json!({"stage":"start","reason":if front_after {"ok"} else {"not_frontmost"},
+                "ok":front_after,"count":act_pids as u64,
+                "agent":target.agent_id.clone()}));
+    }
     let agent_is_frontmost =
         codex_composer::CodexComposerBridge::is_agent_frontmost(&target.agent_id);
     let use_current_visible_session = voice_needs_current_composer(

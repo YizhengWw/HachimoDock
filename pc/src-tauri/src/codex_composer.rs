@@ -4839,6 +4839,38 @@ impl CodexComposerBridge {
         macos::agent_is_frontmost(agent)
     }
 
+    /// Diagnostics: how many processes of this agent are currently running.
+    pub fn agent_diagnostics(agent_id: &str) -> Option<macos::AgentDiagnostics> {
+        let agent = match agent_id.trim() {
+            "codex" => macos::MacosAgent::Codex,
+            "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
+            _ => return None,
+        };
+        Some(macos::AgentDiagnostics {
+            pids: macos::agent_pid_count(agent),
+        })
+    }
+
+    /// Called after a DSH draft was submitted: the composer is empty again.
+    pub fn clear_dsh_draft_cache() {
+        macos::clear_last_dsh_written();
+    }
+
+    /// Bring the target agent forward before device dictation writes into it.
+    pub fn activate_agent(agent_id: &str) -> bool {
+        let agent = match agent_id.trim() {
+            "codex" => macos::MacosAgent::Codex,
+            "claude-code" => macos::MacosAgent::Claude,
+            "workbuddy" => macos::MacosAgent::WorkBuddy,
+            "deepseek-harness" => macos::MacosAgent::DeepSeekHarness,
+            _ => return false,
+        };
+        macos::activate_agent(agent);
+        true
+    }
+
     pub fn accessibility_permission_granted() -> bool {
         macos::accessibility_permission_granted()
     }
