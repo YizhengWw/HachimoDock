@@ -64,9 +64,15 @@
     "componentCount": 28,
     "physicalDeviceValidationThisPackagingRun": false,
     "windowsRuntimeValidationThisPackagingRun": false,
-    "scope": "Published v0.1.217 Windows installer and four R206 factory flashing kits."
+    "scope": "Published v0.1.217 macOS and Windows installers and four R206 factory flashing kits. The macOS disk image passed Developer ID, Apple notarization and PetUI checks."
   },
   "artifacts": [
+    {
+      "file": "HachimiDock_0.1.217_macOS-arm64.dmg",
+      "role": "macos",
+      "bytes": 182183203,
+      "sha256": "926424f5612530e3e6d3bc99ad9ea35d159e9344b90e9a48bf3a7784c999abec"
+    },
     {
       "file": "HachimiDock_0.1.217_Windows-x64-setup.exe",
       "role": "windows",
@@ -100,8 +106,8 @@
     {
       "file": "SHA256SUMS",
       "role": "checksums",
-      "bytes": 610,
-      "sha256": "6b906f7cf012ab6b03a845ceda90d0dcdd3b6d0b528c25ca0c09c7301d9e252d"
+      "bytes": 712,
+      "sha256": "2d635d6d97b9102e412459cad597a70e271aa0aebefbf8bb110d71b01aece3e2"
     }
   ]
 }

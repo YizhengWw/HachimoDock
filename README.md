@@ -41,12 +41,12 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 | 项目 | 版本 | 下载 |
 | --- | --- | --- |
 | Windows x64 | **0.1.217** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_Windows-x64-setup.exe) |
-| macOS Apple silicon | 0.1.217 安装包待补 | [查看历史版本](https://github.com/ai-maker-lab/HachimoDock/releases) |
+| macOS Apple silicon | **0.1.217** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_macOS-arm64.dmg) |
 | 配套设备固件 | **0.7.103-p4-r206** | [WiFi6 / Pico 完整烧录包](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217#设备固件) |
 
 0.1.217 改善实时对话断线后的恢复和 WASM 组件预览。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.217 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217) 的 `SHA256SUMS` 核对下载。
 
-当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。Windows 安装器未做发行者签名。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
+当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 安装包已签名并通过 Apple 公证。Windows 安装器未做发行者签名。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
 
 ## 核心能力
 
