@@ -57,7 +57,25 @@ impl Journal {
         let mut lock=options.open(directory.join("appearance.lock")).map_err(|_|ERROR)?;
         #[cfg(unix)] {use std::os::fd::AsRawFd;
             // The lock remains owned for this Journal's entire lifetime.
-            if unsafe{libc::flock(lock.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0{return Err(ERROR.into());}
+            if unsafe{libc::flock(lock.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0{
+                // Stale holder: an orphaned Node bridge whose parent app died
+                // without cleanup (SIGKILL / crash). Reclaim, then retry once.
+                recover_stale_lock(directory);
+                let mut retry=OpenOptions::new().read(true).write(true).create(true).open(directory.join("appearance.lock")).map_err(|_|ERROR)?;
+                if unsafe{libc::flock(retry.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}==0{lock=retry;}
+                else{
+                    // The holder is a process lsof cannot attribute (stale hold on this
+                    // inode left by a hard-killed process). Rotate the lock file inode:
+                    // the stale holder keeps the deleted inode (harmless); the fresh file
+                    // is uncontested. Only a genuinely concurrent live instance opening the
+                    // new file after our create would block this.
+                    let _=fs::remove_file(directory.join("appearance.lock"));
+                    let mut rotated=OpenOptions::new().read(true).write(true).create(true).open(directory.join("appearance.lock")).map_err(|_|ERROR)?;
+                    if unsafe{libc::flock(rotated.as_raw_fd(),libc::LOCK_EX|libc::LOCK_NB)}!=0{return Err(ERROR.into());}
+                    lock=rotated;
+                    eprintln!("pet-manager: appearance.lock stale-held by unattributable process; rotated lock inode");
+                }
+            }
         }
         #[cfg(not(any(unix,windows)))] return Err(ERROR.into());
         let initialized=lock.metadata().map_err(|_|ERROR)?.len()!=0;
@@ -402,4 +420,37 @@ impl UsbSerialManager {
             }
         }
     }
+}
+#[cfg(unix)]
+fn recover_stale_lock(directory:&Path){
+    let lock_path=directory.join("appearance.lock");
+    let Ok(out)=std::process::Command::new("lsof").arg("-t").arg(&lock_path).output() else {return;};
+    let holders:Vec<u32>=String::from_utf8_lossy(&out.stdout).lines().filter_map(|l|l.trim().parse().ok()).collect();
+    let self_pid=std::process::id();
+    for pid in &holders{
+        if *pid==self_pid{continue;}
+        let Ok(pout)=std::process::Command::new("ps").args(["-o","ppid=","-p",&pid.to_string()]).output() else {continue;};
+        let ppid:u32=String::from_utf8_lossy(&pout.stdout).trim().parse().unwrap_or(0);
+        // Only kill holders whose parent process is already gone (orphans):
+        // the app that launched them died without running exit cleanup.
+        if ppid==1||!pid_alive(ppid)||parent_is_zombie(ppid){
+            let _=std::process::Command::new("kill").args(["-9",&pid.to_string()]).status();
+        }
+    }
+    for _ in 0..20{
+        if !holders.iter().copied().filter(|h|*h!=self_pid).any(pid_alive){break;}
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[cfg(unix)]
+fn pid_alive(pid:u32)->bool{
+    if pid==0{return false;}
+    unsafe{libc::kill(pid as libc::pid_t,0)==0}
+}
+#[cfg(unix)]
+fn parent_is_zombie(pid:u32)->bool{
+    if pid==0{return false;}
+    let Ok(out)=std::process::Command::new("ps").args(["-o","state=","-p",&pid.to_string()]).output() else {return false;};
+    String::from_utf8_lossy(&out.stdout).trim().starts_with('Z')
 }

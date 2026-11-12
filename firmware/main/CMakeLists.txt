@@ -28,6 +28,7 @@ idf_component_register(
     "pet_p4_boot_dma.c"
     "pet_p4_flash_phase.c"
     "pet_p4_native_panic.c"
+    "pet_p4_wdt_deadlock.c"
     # MiSans16/32 share the original license; see licenses/MiSans-Font-License-Agreement.pdf
     # and licenses/MiSans-Embedded-Fonts-NOTICE.txt at the repository root.
     "pet_p4_font_cn.c"

@@ -74,6 +74,11 @@ pub struct DoubaoTtsConfig {
     /// 1.0 = normal; mapped onto the provider's speech_rate (-50..100) when not 1.0.
     pub speed: f32,
     pub ws_url: String,
+    /// "volcengine" (built-in) or "openai" (custom OpenAI-compatible endpoint).
+    pub tts_provider: String,
+    pub tts_base_url: String,
+    pub tts_model: String,
+    pub tts_voice: String,
 }
 
 impl DoubaoTtsConfig {
@@ -95,6 +100,10 @@ impl DoubaoTtsConfig {
             speaker: if cloned { clone_speaker_id.trim().to_string() } else { speaker.trim().to_string() },
             speed: if speed.is_finite() && speed > 0.0 { speed } else { 1.0 },
             ws_url: DEFAULT_WS_URL.to_string(),
+            tts_provider: "volcengine".into(),
+            tts_base_url: String::new(),
+            tts_model: String::new(),
+            tts_voice: String::new(),
         }
     }
 
@@ -356,6 +365,9 @@ impl DoubaoTtsClient {
     where
         F: FnMut(&[u8]),
     {
+        if self.cfg.tts_provider == "openai" {
+            return crate::openai_tts::synthesize(&self.cfg, text, &mut on_pcm).await;
+        }
         let clean = text.trim();
         if clean.is_empty() {
             return Ok(0);

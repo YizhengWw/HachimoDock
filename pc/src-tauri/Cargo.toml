@@ -36,7 +36,7 @@ encoding_rs = "0.8"
 sysinfo = { version = "0.39", default-features = false, features = ["system", "network"] }
 chrono = "0.4"
 chrono-tz = "0.10"
-reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-tls", "system-proxy", "gzip"] }
+reqwest = { version = "0.12", features = ["blocking", "json", "stream", "native-tls", "system-proxy", "gzip", "multipart"] }
 uuid = { version = "1", features = ["v4"] }
 flate2 = "1"
 futures-util = "0.3"

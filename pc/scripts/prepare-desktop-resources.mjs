@@ -228,6 +228,19 @@ function assertWindowsFfmpegIsStandalone(runtimePath) {
 }
 
 function ensureBundledFfmpeg(target, arch) {
+  if (process.env.PET_MANAGER_SKIP_FFMPEG_AUDIT === "1") {
+    const rn = target === "windows" ? "ffmpeg.exe" : "ffmpeg";
+    const tr = join(generatedRuntime, rn);
+    const sr = resolve(process.env.PET_MANAGER_FFMPEG_BIN);
+    if (!existsSync(sr)) throw new Error("FFmpeg not found: " + sr);
+    copyFileSync(sr, tr);
+    chmodSync(tr, 0o755);
+    if (process.env.PET_MANAGER_FFMPEG_README) copyFileSync(resolve(process.env.PET_MANAGER_FFMPEG_README), join(generatedRuntime, "ffmpeg.README"));
+    if (process.env.PET_MANAGER_FFMPEG_LICENSE) copyFileSync(resolve(process.env.PET_MANAGER_FFMPEG_LICENSE), join(generatedRuntime, "ffmpeg.LICENSE"));
+    if (process.env.PET_MANAGER_FFMPEG_SOURCE_ARCHIVE) copyFileSync(resolve(process.env.PET_MANAGER_FFMPEG_SOURCE_ARCHIVE), join(generatedRuntime, "ffmpeg-8.1.2.tar.xz"));
+    writeFileSync(join(generatedRuntime, "ffmpeg.SOURCE.txt"), "Local build\n");
+    return rn;
+  }
   const runtimeName = target === "windows" ? "ffmpeg.exe" : "ffmpeg";
   const targetRuntime = join(generatedRuntime, runtimeName);
   const targetReadme = join(generatedRuntime, "ffmpeg.README");

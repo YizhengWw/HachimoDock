@@ -88,6 +88,13 @@ pub fn hide_main(app:&AppHandle)->bool{
 pub fn set_exit_reasons(reasons:Vec<String>){
     if let Ok(mut state)=REASONS.lock(){*state=reasons.into_iter().take(30).map(|s|s.chars().take(120).collect()).collect();}
 }
+/// Signal-based termination (SIGTERM/SIGINT from `kill`, Activity Monitor
+/// Force Quit): the user has already asked for exit, so skip the
+/// interactive confirmation prompt and let RunEvent::Exit run cleanup.
+pub fn approve_exit_for_signal() {
+    APPROVED.store(true, Ordering::SeqCst);
+}
+
 pub fn request_exit(app:&AppHandle)->bool{
     if APPROVED.load(Ordering::SeqCst){return false;}
     let mut reasons=REASONS.lock().map(|s|s.clone()).unwrap_or_default();
