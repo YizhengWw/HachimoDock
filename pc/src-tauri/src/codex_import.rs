@@ -675,7 +675,40 @@ pub fn install_codex_community_pet(pet_id: &str) -> Result<CodexCommunityInstall
     let extra_ca = crate::llm_network::community_ca_file()?;
 
     for npx in npx_candidates() {
-        let mut command = crate::command_for_host(npx);
+        // Two Windows pitfalls with `Command::new("npx.cmd")`:
+        // 1. Spawning a .cmd via CreateProcess resolves the batch file relative
+        //    to the current working directory, so node fails with
+        //    "Cannot find module '<cwd>\node_modules\npm\bin\npm-prefix.js'".
+        //    Wrapping in `cmd /c` makes %~dp0 resolve to the real install dir.
+        // 2. codex-pets.net is DNS-poisoned on some networks; Node's fetch
+        //    (undici) ignores HTTPS_PROXY unless NODE_USE_ENV_PROXY is set
+        //    (Node >= 24). Pass the proxy through explicitly when configured.
+        let mut command = crate::command_for_host("cmd");
+        command.arg("/c").arg(npx);
+        // codex-pets.net is DNS-poisoned on some networks, so the CLI's fetch
+        // needs a proxy. If the user has one configured, enable Node's env
+        // proxy support (undici otherwise ignores HTTPS_PROXY). Without an
+        // explicit proxy, probe the common local proxy ports so the import
+        // works out of the box on machines running Clash / v2ray-style tools.
+        if let Ok(proxy) = std::env::var("HTTPS_PROXY").or_else(|_| std::env::var("https_proxy")) {
+            if !proxy.is_empty() {
+                command.env("NODE_USE_ENV_PROXY", "1");
+                command.env("HTTPS_PROXY", proxy);
+            }
+        } else {
+            for port in [7897u16, 7890, 10809, 1080] {
+                if std::net::TcpStream::connect_timeout(
+                    &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+                    std::time::Duration::from_millis(150),
+                )
+                .is_ok()
+                {
+                    command.env("NODE_USE_ENV_PROXY", "1");
+                    command.env("HTTPS_PROXY", format!("http://127.0.0.1:{port}"));
+                    break;
+                }
+            }
+        }
         if let Some(file) = &extra_ca { command.env("NODE_EXTRA_CA_CERTS", file.path()); }
         let output = command
             .args(["--yes", "codex-pets", "add", &pet_id])

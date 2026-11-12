@@ -46,8 +46,11 @@
 #include "pet_p4_miniapp.h"
 #include "pet_p4_media.h"
 
-#define PET_P4_INPUT_SW1_GPIO GPIO_NUM_50
-#define PET_P4_INPUT_SW2_GPIO GPIO_NUM_49
+/* Waveshare ESP32-P4-Pico-M: SW1 is wired to GPIO14 and SW2 to GPIO6.  The
+ * GPIO50/49 values of the ESP32-P4-WIFI6-Touch-LCD-4.3 board map are unused on
+ * this module, which left both buttons dead. */
+#define PET_P4_INPUT_SW1_GPIO GPIO_NUM_14
+#define PET_P4_INPUT_SW2_GPIO GPIO_NUM_6
 #define PET_P4_INPUT_SW3_GPIO GPIO_NUM_5
 #define PET_P4_INPUT_ENCODER_PRESS_GPIO GPIO_NUM_4
 #define PET_P4_INPUT_ENCODER_B_GPIO GPIO_NUM_3
