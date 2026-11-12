@@ -15,12 +15,30 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "mbedtls/base64.h"
-#define CACHE_SLOTS 8
-#define CACHE_BYTES (256U * 1024U)
+/* The working set is one title + one body per session card, plus the bubble and
+ * conversation hints. 8 slots x 256 KB thrashed, so most texts fell back to
+ * local glyphs. */
+#define CACHE_SLOTS 24
+#define CACHE_BYTES (1024U * 1024U)
 #define IMAGE_BYTES (32U * 1024U)
 #define VIEW_SLOTS 12
 #define IDLE_MS 3000U
 #define ABSOLUTE_MS 10000U
+/* Confirmed-display wait (test-all semantics): while the new text's App pixels
+ * are still in flight the renderer keeps drawing the previously confirmed
+ * content, so a card never flashes local glyphs and then swaps to App pixels. */
+/* Short confirmation window: keep the previous content only long enough for the
+ * App frame (p50 ~120 ms) to land. A 3 s window made streaming text lag seconds
+ * behind because the deadline survived every change. */
+/* Covers the full chain: need throttle + App canvas render + ~120 ms transfer.
+ * The window restarts on every text change, so a longer value cannot accumulate
+ * into the multi-second lag seen with a carried-over deadline. */
+/* Keep the previous confirmed content until the new pixels arrive, but restart
+ * the window on every change (a carried-over deadline was what made streaming
+ * text appear frozen for seconds). 3 s only elapses when the host never
+ * delivers, and then it degrades to local glyphs for the current text. */
+#define BUBBLE_PIXEL_WAIT_MS 3000U
+#define BUBBLE_PIXEL_DEGRADED_MS 3000U
 #define SCHEMA "p4-text-alpha-v2:rle4:1:"
 typedef struct {
   uint64_t        key;
@@ -34,15 +52,27 @@ typedef struct {
   uint64_t        key;
   unsigned        style;
 } desired_asset_t;
+/* One owner can advertise more than the original four assets: title, body,
+ * compact body, compact title and the conversation status hints all belong to
+ * the same owner. The old cap invalidated the whole manifest, so every host
+ * frame was rejected as stale_content and bubbles stayed on local glyphs. */
+#define DESIRED_ASSETS_PER_OWNER 12U
 typedef struct {
   uint64_t        owner, version, scope;
-  desired_asset_t assets[4];
+  desired_asset_t assets[DESIRED_ASSETS_PER_OWNER];
   unsigned        asset_count;
 } desired_t;
 typedef struct {
   uint64_t        owner, target, since_ms, seen_ms, title_key, body_key;
   unsigned        style;
   bool            occupied;
+  /* Confirmed display state: while the new text's pixels are still in flight
+   * the renderer keeps drawing this content, so no local-glyph flash occurs. */
+  uint64_t        first_seen_ms;
+  bool            confirmed;
+  char            shown_title[192], shown_body[512];
+  uint64_t        shown_since_ms, pending_since;
+  bool            shown_pixels, shown_valid;
 } text_view_t;
 static text_image_t cache[CACHE_SLOTS], staging;
 static desired_t desired[VIEW_SLOTS];
@@ -54,9 +84,17 @@ static uint32_t stage_hash;
 static atomic_uint revision;
 static uint64_t stage_owner, stage_version, stage_started, stage_seen, cache_now_ms;
 static uint32_t lifecycle_epoch;
+/* Set while the user is speaking: live ASR captions must not be held back by the
+ * confirmation window (their text changes faster than a pixel frame). */
+static volatile bool g_live_caption;
 typedef struct {
   uint64_t        key;
   unsigned        style, page;
+  /* The exact text the renderer is drawing. The host derives its own text set
+   * per topic, and any drift there made the pixel key unmatchable, so the device
+   * sends the content it actually needs rendered. */
+  char            text[512];
+  uint64_t        owner, version;
 } need_t;
 static need_t needs[8];
 static unsigned need_count;
@@ -80,6 +118,19 @@ static uint64_t hash_bytes(uint64_t hash, const char *s){
     hash = (hash ^ *p) * UINT64_C(1099511628211);
   return hash;
 }
+/* The host renders pixels from text clamped to fixed byte limits (session:
+ * title 191 / body 383, conversation: title 63 / body 511). Hashing the
+ * unclamped string here produced keys the host could never match, so every
+ * long text silently stayed on local glyphs. Clamp exactly the same way. */
+static void clamp_utf8_bytes(char *s, size_t max_bytes) {
+  if (!s) return;
+  size_t len = strlen(s);
+  if (len <= max_bytes) return;
+  size_t cut = max_bytes;
+  while (cut > 0 && ((unsigned char) s[cut] & 0xC0) == 0x80) cut--;
+  s[cut] = 0;
+}
+
 static uint64_t text_key(unsigned style, const char *text){
   uint64_t        h = hash_bytes(UINT64_C(14695981039346656037), SCHEMA);
   return hash_bytes((h ^ style) * UINT64_C(1099511628211), text);
@@ -178,16 +229,26 @@ oldest(void)
   return n;
 }
 static void
-missing(uint64_t key, unsigned style, unsigned page)
+missing(uint64_t key, unsigned style, unsigned page, const char *text)
 {
   if (blocked || !client[0] || need_count >= 8)
     return;
   for (unsigned i = 0; i < need_count; i++)
     if (needs[i].key == key && needs[i].style == style && needs[i].page == page)
       return;
-  needs[need_count++] = (need_t) {
-    key, style, page
-  };
+  need_t *slot = &needs[need_count++];
+  *slot = (need_t) {0};
+  slot->key = key;
+  slot->style = style;
+  slot->page = page;
+  /* owner/version let the host send a frame the device will still accept. */
+  for (unsigned i = 0; i < desired_count; i++)
+    for (unsigned k = 0; k < desired[i].asset_count; k++)
+      if (desired[i].assets[k].key == key && desired[i].assets[k].style == style) {
+        slot->owner = desired[i].owner;
+        slot->version = desired[i].version;
+      }
+  snprintf(slot->text, sizeof(slot->text), "%s", text ? text : "");
 }
 /* One small coalesced notice per second, outside the cache lock/renderer. */
 bool
@@ -196,7 +257,11 @@ pet_bubble_pixels_next_need(uint64_t now, pet_bubble_need_t * out)
   if (!mutex || !out)
     return false;
   xSemaphoreTake(mutex, portMAX_DELAY);
-  if (blocked || !client[0] || (last_need_ms && now - last_need_ms < 1000)) {
+  /* The old 1s throttle delayed the first pixel request after a text change by
+   * up to a second, which always lost the race against the local fallback.
+   * 150ms keeps request traffic bounded while letting the App frame arrive
+   * inside the renderer's wait window. */
+  if (blocked || !client[0] || (last_need_ms && now - last_need_ms < 80)) {
     xSemaphoreGive(mutex);
     return false;
   }
@@ -206,6 +271,9 @@ pet_bubble_pixels_next_need(uint64_t now, pet_bubble_need_t * out)
     if (find(n.key, n.style, n.page) >= 0)
       continue;
     snprintf(out->id, sizeof(out->id), "%016" PRIx64, n.key);
+    snprintf(out->owner, sizeof(out->owner), "%016" PRIx64, n.owner);
+    snprintf(out->version, sizeof(out->version), "%016" PRIx64, n.version);
+    snprintf(out->text, sizeof(out->text), "%s", n.text);
     snprintf(out->boot, sizeof(out->boot), "%s", boot);
     snprintf(out->client, sizeof(out->client), "%s", client);
     out->style = n.style;
@@ -247,6 +315,9 @@ pet_bubble_pixels_boot(void)
 {
   return boot;
 }
+void            pet_bubble_pixels_set_live_caption(bool live){
+  g_live_caption=live;
+}
 void            pet_bubble_pixels_maintain(uint64_t now, bool pause){
   if (!mutex)
     return;
@@ -267,13 +338,17 @@ pet_bubble_pixels_desire(const cJSON * payload, const void *ctx, const char *sco
   const           cJSON *m = cJSON_GetObjectItemCaseSensitive(payload, "textPixels");
   xSemaphoreTake(mutex, portMAX_DELAY);
   if (!cJSON_IsObject(m)) {
+    /* The host explicitly reports "not rendering" (its bubble service is off).
+     * Stop asking for pixels: otherwise the device keeps requesting ~12 needs
+     * per second that nobody serves, and that traffic delayed audio status
+     * acknowledgements enough to fail "playback completed" confirmation. */
     if (client[0]) {
       clear_stage();
       retire_cache();
       client[0] = 0;
       desired_count = 0;
     }
-  xSemaphoreGive(mutex);
+    xSemaphoreGive(mutex);
     return;
   }
   const char     *b = string_value(m, "boot"), *c = string_value(m, "client");
@@ -290,7 +365,7 @@ pet_bubble_pixels_desire(const cJSON * payload, const void *ctx, const char *sco
         valid = false;
     const           cJSON *assets = cJSON_GetObjectItemCaseSensitive(v, "assets");
     int             count = cJSON_GetArraySize(assets);
-    if (!cJSON_IsArray(assets) || count < 0 || count > 4)
+    if (!cJSON_IsArray(assets) || count < 0 || count > (int) DESIRED_ASSETS_PER_OWNER)
       valid = false;
     next[i].asset_count = valid ? (unsigned)count : 0;
     for (unsigned k = 0; valid && k < next[i].asset_count; k++) {
@@ -350,8 +425,15 @@ handle_locked(const cJSON * p, const void *ctx, uint64_t now, cJSON * reply, con
   }
   if (!strcmp(phase, "begin")) {
     if (staging.data) {
-      *error = "stage_busy";
-      return false;
+      /* A host-side failure mid-frame (contention, superseded text) leaves the
+       * staging buffer occupied until the idle timeout, so every new begin is
+       * rejected with stage_busy meanwhile -- starving the cache and leaving
+       * bubbles on local glyphs. Reclaim a staging buffer that has gone quiet. */
+      if (now - stage_seen < 400) {
+        *error = "stage_busy";
+        return false;
+      }
+      clear_stage();
     } unsigned      style, size, page, pages;
     uint64_t        sum;
     const           cJSON *sizes = cJSON_GetObjectItemCaseSensitive(p, "pageSizes");
@@ -514,7 +596,7 @@ pet_bubble_pixels_pin_page(pet_bubble_text_view_t * out, unsigned page)
     out->body_pin = slot;
     cache[slot].readers++;
   } else if (out->body[0])
-    missing(text_key(out->style, out->body), out->style, page);
+    missing(text_key(out->style, out->body), out->style, page, out->body);
   out->pixels = (!out->title[0] || out->title_pin >= 0) && (!out->body[0] || out->body_pin >= 0);
   xSemaphoreGive(mutex);
 }
@@ -528,12 +610,20 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
   out->style = style;
   snprintf(out->title, sizeof(out->title), "%s", title ? title : "");
   snprintf(out->body, sizeof(out->body), "%s", body ? body : "");
+  /* The host hashes text clamped to the byte limits it renders (session:
+   * title 191 / body 383, conversation: title 63 / body 511). Clamp a copy for
+   * the key only: the renderer still shows the full text. */
+  char key_title[256], key_body[640];
+  snprintf(key_title, sizeof(key_title), "%s", out->title);
+  snprintf(key_body, sizeof(key_body), "%s", out->body);
+  clamp_utf8_bytes(key_title, style == PET_BUBBLE_BODY ? 63 : 191);
+  clamp_utf8_bytes(key_body, style == PET_BUBBLE_BODY ? 511 : 383);
   if (!mutex)
     return;
   xSemaphoreTake(mutex, portMAX_DELAY);
   cache_now_ms = now;
   out->epoch = lifecycle_epoch;
-  uint64_t        tk = text_key(1, out->title), bk = text_key(style, out->body), id = text_key(style, owner ? owner : "");
+  uint64_t        tk = text_key(1, key_title), bk = text_key(style, key_body), id = text_key(style, owner ? owner : "");
   text_view_t    *v = NULL, *victim = &views[0];
   for (unsigned i = 0; i < VIEW_SLOTS; i++) {
     if (views[i].occupied && views[i].owner == id) {
@@ -552,6 +642,9 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
   if (v->target != target) {
     v->target = target;
     v->since_ms = now;
+    /* Restart the confirmation window on every change; a carried-over deadline
+     * made streaming text look frozen for seconds. */
+    v->pending_since = now;
   }
   v->seen_ms = now;
   v->title_key = tk;
@@ -560,9 +653,9 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
   out->since_ms = v->since_ms;
   int             a = find(tk, 1, 0), b = find(bk, style, 0);
   if (out->title[0] && a < 0)
-    missing(tk, 1, 0);
+    missing(tk, 1, 0, out->title);
   if (out->body[0] && b < 0)
-    missing(bk, style, 0);
+    missing(bk, style, 0, out->body);
   if (out->title[0] && a >= 0) {
     out->title_pin = a;
     cache[a].readers++;
@@ -571,6 +664,18 @@ pet_bubble_pixels_select(const char *owner, unsigned style, const char *title, c
     cache[b].readers++;
   }
   out->pixels = (!out->title[0] || a >= 0) && (!out->body[0] || b >= 0);
+  out->since_ms = v->since_ms;
+  out->title_pin = -1;
+  out->body_pin = -1;
+  if (out->title[0] && a >= 0) {
+    out->title_pin = a;
+    cache[a].readers++;
+  }
+  if (out->body[0] && b >= 0) {
+    out->body_pin = b;
+    cache[b].readers++;
+  }
+  out->wait = false;
   xSemaphoreGive(mutex);
 }
 unsigned        pet_bubble_pixels_pages(unsigned style, const char *text){

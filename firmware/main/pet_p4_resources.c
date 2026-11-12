@@ -58,10 +58,17 @@ pet_resource_result_t pet_resources_realtime_begin(pet_resource_broker_t *broker
   if (slot == PET_RESOURCE_REALTIME_SLOTS) return PET_RESOURCE_BUSY;
   broker->realtime[slot] = ++broker->next_realtime_serial;
   broker->realtime_video_ready[slot] = false;
+  broker->realtime_mic[slot] = false;
   *out = (pet_resource_realtime_t){broker, broker->realtime[slot], (uint8_t)slot};
   for (unsigned i = 0; i < PET_RESOURCE_LEASE_SLOTS; i++) {
+    /* Do not revoke an ALREADY-HELD pet-asset decode lease: the pet animation
+     * decodes from pinned PSRAM (no I/O) and revoking it froze the animation
+     * for every cue, which then made translucent cards composite over stale
+     * pixels. New acquisitions stay blocked by try_acquire, so audio still never
+     * waits behind asset file reads. */
     if (broker->leases[i].occupied
-        && ((PET_RESOURCE_BACKGROUND_MASK | PET_RESOURCE_MASK(PET_RESOURCE_CACHED_VIDEO))
+        && (((PET_RESOURCE_BACKGROUND_MASK & ~PET_RESOURCE_MASK(PET_RESOURCE_ASSET_PREPARE))
+              | PET_RESOURCE_MASK(PET_RESOURCE_CACHED_VIDEO))
           & PET_RESOURCE_MASK(broker->leases[i].ticket.kind)))
       (void)pet_resources_owner_revoke(broker, broker->leases[i].ticket.owner);
   }
@@ -75,6 +82,25 @@ bool pet_resources_realtime_finish(pet_resource_broker_t *broker, pet_resource_r
   if (!pet_resources_realtime_current(broker, ticket)) return false;
   broker->realtime[ticket.slot] = 0;
   broker->realtime_video_ready[ticket.slot] = false;
+  broker->realtime_mic[ticket.slot] = false;
+  return true;
+}
+bool pet_resources_realtime_mic(pet_resource_broker_t *broker,
+    pet_resource_realtime_t ticket,bool active) {
+  if(!pet_resources_realtime_current(broker,ticket))return false;
+  broker->realtime_mic[ticket.slot]=active;
+  if (active) {
+    /* Microphone/AEC work is latency-critical: once it starts, drop every
+     * already-held flash/file background job. The pet-asset decode lease is
+     * NOT in this mask because it reads pinned PSRAM only; cancelling it froze
+     * the animation for the whole recording. */
+    for (unsigned i = 0; i < PET_RESOURCE_LEASE_SLOTS; i++)
+      if (broker->leases[i].occupied
+          && (PET_RESOURCE_BACKGROUND_MASK
+              & PET_RESOURCE_MASK(broker->leases[i].ticket.kind)))
+        (void)pet_resources_owner_revoke(broker, broker->leases[i].ticket.owner);
+
+  }
   return true;
 }
 bool pet_resources_realtime_video_ready(pet_resource_broker_t *broker,

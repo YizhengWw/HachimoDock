@@ -230,7 +230,10 @@ int main(void){
  reset();hook=11;queue();assert(run()==PET_MINIAPP_ACTIVATION_FAILED&&restores==0&&writes==0);
  reset();hook=10;queue();assert(run()==PET_MINIAPP_ACTIVATION_OPENED_UNSAVED&&writes==0);
  assert(!strcmp(g_runtime.widget_id,"next-app"));
- reset();queue();enter_realtime();assert(run()==PET_MINIAPP_ACTIVATION_FAILED&&loads==0);
+ // Asset decode is no longer background work, so only a live microphone blocks
+ // the miniapp's background load now.
+ reset();queue();enter_realtime();assert(pet_resources_realtime_mic(&broker,realtime,true));
+ assert(run()==PET_MINIAPP_ACTIVATION_FAILED&&loads==0);
  reset();g_catalog[1].resource_state=2;queue();assert(run()==PET_MINIAPP_ACTIVATION_FAILED&&loads==0&&writes==0);
  // Queue failure, staging and token exhaustion cannot cause inline I/O/reuse.
  reset();fail_queue=true;assert(pet_p4_miniapp_activation_request_selected()==PET_MINIAPP_ACTIVATION_REJECTED);

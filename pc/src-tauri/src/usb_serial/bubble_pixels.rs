@@ -54,6 +54,9 @@ fn hash(bytes: impl IntoIterator<Item = u8>) -> String {
     });
     format!("{h:016x}")
 }
+fn valid_owner(value: &str) -> bool {
+    value.len() == 16 && value.bytes().all(|b| b.is_ascii_hexdigit())
+}
 fn asset(style: u8, s: &str) -> String {
     hash(
         b"p4-text-alpha-v2:rle4:1:"
@@ -117,6 +120,37 @@ impl RenderBridge {
                     && d.assets.iter().any(|(s, k)| *s == f.style && *k == f.id)
             })
     }
+    /// Re-emit every text the bridge currently knows about. Called when the
+    /// renderer (re)registers: the device side only requests pixels for texts
+    /// it can still see, and its request path depends on metadata the host only
+    /// sends on text updates, so without this a reboot leaves most texts with
+    /// no pixels at all (local glyphs).
+    pub fn resend(&self) -> Vec<Value> {
+        if self.sink.is_none() {
+            return Vec::new();
+        }
+        let mut parts = self.peer.split(':');
+        let board = parts.next().unwrap_or("");
+        let generation = parts.next().unwrap_or("");
+        let boot = parts.next().unwrap_or("");
+        if board.is_empty() || generation.is_empty() || !valid_boot(boot) {
+            return Vec::new();
+        }
+        /* Only the newest payload per owner is still valid on the device; older
+         * versions were rejected as stale_content and crowded out fresh frames. */
+        let mut newest: std::collections::HashMap<String, &Desired> = std::collections::HashMap::new();
+        for desired in self.recent.iter() {
+            newest.insert(desired.owner.clone(), desired);
+        }
+        newest
+            .into_values()
+            .map(|d| {
+                json!({"topic":d.topic,"payload":d.payload,"connectionId":generation,
+                    "boardDeviceId":board,"bootId":boot,"rendererId":self.instance,
+                    "owner":d.owner,"version":d.version})
+            })
+            .collect()
+    }
     pub fn need(&mut self, p: &Value, generation: u64, board: &str) -> Vec<Value> {
         let boot = p["boot"].as_str().unwrap_or("");
         if !valid_boot(boot)
@@ -125,7 +159,11 @@ impl RenderBridge {
             || self.sink.is_none()
             || self
                 .last_need
-                .map(|n| n.elapsed() < Duration::from_millis(900))
+                /* The device already throttles its own need requests (80 ms);
+                 * a 900 ms host throttle silently dropped most of them, so a
+                 * new session's cards never got pixels and fell back to local
+                 * glyphs. */
+                .map(|n| n.elapsed() < Duration::from_millis(120))
                 .unwrap_or(false)
         {
             return Vec::new();
@@ -142,6 +180,30 @@ impl RenderBridge {
               "bootId":boot,"rendererId":self.instance,"owner":d.owner,"version":d.version,"need":{"style":style,"id":id,"page":page}}));
                     break;
                 }
+            }
+        }
+        if events.is_empty() {
+            /* The device sends the text it actually renders. When the host's own
+             * per-topic derivation cannot produce that exact string (hints, compact
+             * fallbacks, subtitle pages), render it directly instead of leaving the
+             * bubble on local glyphs. */
+            if let (Some(text_value), Some(style), Some(owner), Some(version)) = (
+                p["text"].as_str().filter(|t| !t.is_empty() && t.len() <= 512),
+                p["style"].as_u64().filter(|s| (1..=4).contains(s)),
+                p["owner"].as_str().filter(|o| valid_owner(o)),
+                p["version"].as_str().filter(|v| valid_owner(v)),
+            ) {
+                events.push(json!({
+                    "topic": "device/need",
+                    "payload": {"text": text_value},
+                    "connectionId": generation.to_string(),
+                    "boardDeviceId": board,
+                    "bootId": boot,
+                    "rendererId": self.instance,
+                    "owner": owner,
+                    "version": version,
+                    "need": {"style": style, "id": p["id"], "page": 0},
+                }));
             }
         }
         if !events.is_empty() {
@@ -301,6 +363,11 @@ impl RenderBridge {
                     }
                 }
             };
+            /* Live transcripts are drawn by the device itself; rendering a pixel
+             * frame per partial saturated the link and dropped the connection. */
+            if topic == "ui/conversation" && payload["state"] == "listening" {
+                return Vec::new();
+            }
             let assets = assets_for(topic, &payload);
             let event = json!({"topic":topic,"payload":payload,"connectionId":generation.to_string(),"boardDeviceId":board,
                 "bootId":boot,"rendererId":self.instance,"owner":owner,"version":version});
@@ -339,6 +406,12 @@ fn assets_for(topic: &str, p: &Value) -> Vec<(u8, String)> {
         if let Some(a) = p["sessions"].as_array() {
             for s in a {
                 add(1, text(s.get("title"), 191));
+                add(3, text(
+                    if s["content"].as_str().unwrap_or("").is_empty() { s.get("state") } else { s.get("content") },
+                    511,
+                ));
+                // The compact bubble falls back to the title when the body is empty.
+                add(3, text(s.get("title"), 511));
                 add(
                     4,
                     if s["content"].as_str().unwrap_or("").is_empty() {
@@ -365,8 +438,15 @@ fn assets_for(topic: &str, p: &Value) -> Vec<(u8, String)> {
             },
         );
         add(2, text(p.get("text"), 511));
+        add(3, text(p.get("text"), 511));
+        add(3, text(p.get("name"), 511));
+        // Status hints the device renders as the bubble body.
+        for hint in ["我在听", "想一想", "准备回答", "准备中"] {
+            add(2, hint.to_string());
+        }
     } else if topic == "audio/play_subtitle" {
         add(2, text(p.get("text"), 511));
+        add(3, text(p.get("text"), 511));
     } else {
         let title = ["displayTitle", "sessionName", "title", "agent"]
             .iter()
@@ -463,7 +543,16 @@ impl Drop for WorkerLease {
     }
 }
 pub(super) fn wire_rate(baud: u32) -> usize {
-    ((baud as usize / 10) * 8 / 100).clamp(1, 12288)
+    /* Bubble frames were capped at 12 KB/s regardless of link speed, so a
+     * 4M-baud link spent its whole budget sleeping between chunks (~320 ms
+     * median per frame) and lost the race against the local fallback. Keep the
+     * rate below the writer's 64 B/250 us slice ceiling (~256 KB/s) but stop
+     * throttling to 3% of the link. */
+    /* Enough to beat the local-fallback window, low enough that a burst of
+     * chunk frames cannot overflow the device UART RX buffer (which showed up
+     * as length-mismatch frames and then a write timeout that dropped the
+     * link). */
+    ((baud as usize / 10) * 16 / 100).clamp(1, 131072)
 }
 pub(super) fn estimated_wire_bytes(bytes: usize) -> usize {
     bytes.div_ceil(3) * 4 + bytes.div_ceil(CHUNK_BYTES) * 320 + 2048
@@ -704,8 +793,8 @@ mod tests {
     }
     #[test]
     fn baud_budget_declines_assets_that_cannot_finish_and_has_a_fixed_ceiling() {
-        assert_eq!(wire_rate(115200), 921);
-        assert_eq!(wire_rate(4_000_000), 12288);
+        assert_eq!(wire_rate(115200), 1843);
+        assert_eq!(wire_rate(4_000_000), 64000);
         assert!(estimated_wire_bytes(MAX_BYTES) > wire_rate(115200) * 10);
         assert!(estimated_wire_bytes(MAX_BYTES) < wire_rate(4_000_000) * 10);
     }

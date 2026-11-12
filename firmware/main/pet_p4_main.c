@@ -26,6 +26,7 @@
 #include "esp_spiffs.h"
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "cJSON.h"
 #include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
@@ -1863,7 +1864,28 @@ static void uart_rx_task(void *arg) {
  * model turn still samples its own now_ms exactly once after the lock. */
 static inline int64_t pet_p4_gap_clock_us(void){return esp_timer_get_time();}
 #endif
+/* The protocol parses one JSON tree per inbound frame. Pixel frames are large
+ * and arrive in bursts, and cJSON's default allocator is the small internal
+ * heap that the audio front end needs for AEC. Route parsing to PSRAM so the
+ * internal heap stays contiguous; fall back to internal only if PSRAM fails. */
+static void *cjson_psram_malloc(size_t size) {
+  /* Only large payloads (base64 chunks, manifest strings) need to move off the
+   * internal heap to protect AEC. Small JSON nodes stay in internal RAM: PSRAM
+   * random access is slower and routing every node there measurably delayed the
+   * boot handshake and asset-manifest parsing. */
+  if (size >= 256) {
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p) return p;
+  }
+  return heap_caps_malloc(size, MALLOC_CAP_8BIT);
+}
+static void cjson_psram_free(void *ptr) {
+  if (ptr) heap_caps_free(ptr);
+}
+
 void app_main(void) {
+  cJSON_Hooks cjson_hooks = { cjson_psram_malloc, cjson_psram_free };
+  cJSON_InitHooks(&cjson_hooks);
   pet_boot_dma_link_anchor();
   (void)pet_boot_trace_begin();
 #if PET_P4_RESET_PHASE_TRACE
@@ -2002,6 +2024,7 @@ void app_main(void) {
     ESP_LOGW(TAG, "P4 touchscreen unavailable, keeping buttons and display alive: %s",
              esp_err_to_name(touch_err));
   }
+  pet_p4_renderer_load_bubble_opacity();
   esp_err_t audio_err = pet_p4_audio_init(board_device_id, transport_send_audio_line, NULL);
   if (audio_err != ESP_OK) {
     ESP_LOGW(TAG, "P4 microphone unavailable, keeping non-voice controls alive: %s",
@@ -2178,13 +2201,30 @@ void app_main(void) {
       &&!pet_p4_ota_transfer_active()&&!pet_p4_audio_conversation_active(),
       instrument_effect,instrument_ambience);
     pet_bubble_pixels_maintain(now_ms,
-      pet_p4_audio_active() || pet_p4_audio_playback_active() || pet_p4_audio_music_active()
-      || pet_p4_audio_conversation_active() || pet_p4_ota_active() || g_state.asset_transfer_active);
+      pet_p4_audio_music_active() || pet_p4_ota_active() || g_state.asset_transfer_active);
     pet_bubble_need_t need;
     if(pet_bubble_pixels_next_need(now_ms,&need)){
-      char notice[256];
-      int count=snprintf(notice,sizeof(notice),"{\"topic\":\"ui/text-pixels/need\",\"payload\":{\"boot\":\"%s\",\"client\":\"%s\",\"id\":\"%s\",\"style\":%u,\"page\":%u}}",need.boot,need.client,need.id,need.style,need.page);
-      if(count>0&&(size_t)count<sizeof(notice))transport_send_line(notice,(void*)need.route);
+      /* Include the exact text plus owner/version so the host can render it on
+       * demand even when its own per-topic text derivation differs. */
+      cJSON *notice = cJSON_CreateObject();
+      if (notice) {
+        cJSON *payload_json = cJSON_CreateObject();
+        if (payload_json) {
+          cJSON_AddItemToObject(notice, "topic", cJSON_CreateString("ui/text-pixels/need"));
+          cJSON_AddStringToObject(payload_json, "boot", need.boot);
+          cJSON_AddStringToObject(payload_json, "client", need.client);
+          cJSON_AddStringToObject(payload_json, "id", need.id);
+          cJSON_AddStringToObject(payload_json, "owner", need.owner);
+          cJSON_AddStringToObject(payload_json, "version", need.version);
+          cJSON_AddStringToObject(payload_json, "text", need.text);
+          cJSON_AddNumberToObject(payload_json, "style", need.style);
+          cJSON_AddNumberToObject(payload_json, "page", need.page);
+          cJSON_AddItemToObject(notice, "payload", payload_json);
+          char *line = cJSON_PrintUnformatted(notice);
+          if (line) { transport_send_line(line, (void *) need.route); cJSON_free(line); }
+        }
+        cJSON_Delete(notice);
+      }
     }
     /* p4-sfx-v1 cues: same preconditions as the instrument path, no AEC involvement. */
     pet_p4_miniapp_sfx_process(now_ms,!strcmp(g_state.screen_page,"app")&&!g_state.asset_transfer_active

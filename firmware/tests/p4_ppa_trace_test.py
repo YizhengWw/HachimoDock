@@ -114,6 +114,10 @@ def test_production_adapter_preserves_blocking_buffers_errors_and_optional_regis
         depth += (text[end] == '{') - (text[end] == '}')
         end += 1
     registration = text[start:end]
+    adapter += ('\nstatic void verify_blend_globals(void){(void)g_ppa_blend_client;'
+                '(void)g_ppa_card_mask;(void)g_ppa_card_mask_capacity;(void)g_ppa_card_mask_w;'
+                '(void)g_ppa_card_mask_h;(void)g_ppa_card_mask_radius;(void)g_ppa_card_mask_alpha;'
+                '(void)g_bubble_opacity_percent;}\n')
     for operation, config in [('SCALE', 'scaling'), ('CONVERT', 'scaling'), ('ROTATE', 'rotation')]:
         assert f'ppa_trace_srm(PET_PPA_TRACE_{operation}, &{config})' in text
     assert adapter.count('ppa_do_scale_rotate_mirror(') == 1
@@ -132,7 +136,7 @@ static unsigned held;
 #define portENTER_CRITICAL_ISR(m) portENTER_CRITICAL(m)
 #define portEXIT_CRITICAL_ISR(m) portEXIT_CRITICAL(m)
 typedef int esp_err_t;
-enum {ESP_OK=0,ERROR=17,PPA_TRANS_MODE_BLOCKING=0,PPA_OPERATION_SRM=1,PPA_DATA_BURST_LENGTH_128=128};
+enum {ESP_OK=0,ERROR=17,PPA_TRANS_MODE_BLOCKING=0,PPA_OPERATION_SRM=1,PPA_OPERATION_BLEND=2,PPA_DATA_BURST_LENGTH_128=128};
 typedef void *ppa_client_handle_t;
 typedef struct {unsigned unused;} ppa_event_data_t;
 typedef bool (*ppa_event_callback_t)(ppa_client_handle_t,ppa_event_data_t*,void*);
@@ -148,7 +152,7 @@ static ppa_event_callback_t callback;
 static void *late_cookie;
 static unsigned input[8],output[8];
 static esp_err_t ppa_register_client(const ppa_client_config_t *config,ppa_client_handle_t *out){
-  assert(!held&&config->oper_type==PPA_OPERATION_SRM&&config->max_pending_trans_num==1&&config->data_burst_length==128);
+  assert(!held&&(config->oper_type==PPA_OPERATION_SRM||config->oper_type==PPA_OPERATION_BLEND)&&config->max_pending_trans_num==1&&config->data_burst_length==128);
   if(client_result)return client_result;
   *out=(void*)(uintptr_t)1;
   return ESP_OK;
@@ -198,7 +202,7 @@ int main(void){
   assert(ppa_trace_srm(PET_PPA_TRACE_CONVERT,&config)==ERROR);
   ppa_trace_frame_snapshot(&frame);assert((frame.op[1].flags&PET_PPA_TRACE_ERROR)&&calls==1);
   reset();client_result=ERROR;initialize();assert(!g_ppa_srm_client&&!registrations);
-  assert(!held);return 0;
+  assert(!held);verify_blend_globals();return 0;
 }
 '''
     compile_run(tmp_path, 'ppa_adapter', source)

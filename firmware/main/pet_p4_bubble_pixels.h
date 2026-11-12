@@ -9,12 +9,16 @@ typedef struct {
   char            title[192], body[512];
   uint64_t        since_ms;
   bool            pixels;
+  /* True while a never-shown text is still waiting for its first pixels: the
+   * renderer must not paint local glyphs yet (first session/voice bubble). */
+  bool            wait;
   unsigned        style;
   uint32_t        epoch;
   int             title_pin, body_pin;
 } pet_bubble_text_view_t;
 typedef struct {
-  char            id[17], boot[17], client[33];
+  char            id[17], boot[17], client[33], owner[17], version[17];
+  char            text[512];
   unsigned        style, page;
   const void     *route;
 } pet_bubble_need_t;
@@ -22,6 +26,7 @@ bool            pet_bubble_pixels_next_need(uint64_t now_ms, pet_bubble_need_t *
 bool            pet_bubble_pixels_init(void);
 const char     *pet_bubble_pixels_boot(void);
 void            pet_bubble_pixels_maintain(uint64_t now_ms, bool pause);
+void            pet_bubble_pixels_set_live_caption(bool live);
 void            pet_bubble_pixels_desire(const cJSON * payload, const void *route, const char *scope, uint64_t now_ms);
 bool            pet_bubble_pixels_handle_owned(const cJSON * payload, const void *route, uint64_t now_ms, cJSON * reply);
 uint32_t        pet_bubble_pixels_revision(void);

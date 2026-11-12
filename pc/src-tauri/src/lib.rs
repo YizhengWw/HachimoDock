@@ -7557,6 +7557,30 @@ async fn usb_send_speech(
     Ok(())
 }
 
+/// Client-side diagnostics for the bubble pixel service. The webview cannot
+/// write the shared log file, so failures there were previously invisible.
+#[tauri::command]
+fn usb_log_client_event(usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>, stage: String, detail: String, ok: bool) {
+    let normalize = |value: &str| -> String {
+        value.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .take(48)
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    };
+    let registered = usb_manager.bubble_sink_registered();
+    crate::realtime_chat_log::record("", "client_bubble",
+        serde_json::json!({
+            "stage": normalize(&stage),
+            "reason": normalize(&detail),
+            "ok": ok,
+            "count": registered as u64,
+        }));
+}
+#[tauri::command]
+fn usb_bubble_sink_registered(usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>) -> bool {
+    usb_manager.bubble_sink_registered()
+}
 #[tauri::command]
 fn usb_bubble_pixels_ready(
     window: tauri::WebviewWindow,
@@ -7567,15 +7591,25 @@ fn usb_bubble_pixels_ready(
     if window.label() != "main" {
         return Err("Bubble renderer belongs to main window".into());
     }
+    let emit_window = window.clone();
     let sink = if ready {
+        let sink_window = window.clone();
         Some(Arc::new(move |event: serde_json::Value| {
-            let _ = window.emit("usb-bubble-render", event);
+            let _ = sink_window.emit("usb-bubble-render", event);
         }) as Arc<dyn Fn(serde_json::Value) + Send + Sync>)
     } else {
         None
     };
     let changed = usb_manager.set_bubble_renderer(&instance, sink);
     if ready && !changed { return Err("Invalid bubble renderer instance".into()); }
+    if ready {
+        // Warm the device cache immediately instead of waiting for the next
+        // text update: otherwise a reboot leaves every existing bubble on local
+        // glyphs until the device manages to request each text individually.
+        for event in usb_manager.resend_bubble_events() {
+            let _ = emit_window.emit("usb-bubble-render", event);
+        }
+    }
     Ok(())
 }
 #[tauri::command]
@@ -7591,7 +7625,44 @@ async fn usb_send_bubble_pixels(
     let lease = manager.reserve_bubble_worker(&frame)?;
     tauri::async_runtime::spawn_blocking(move || {
         let _lease = lease;
-        manager.send_bubble_pixels(frame)
+        // End-to-end pixel delivery timing, split by card style so title vs body
+        // latency is visible (both must land before the device uses pixels).
+        let started = std::time::Instant::now();
+        let style_tag = format!("style_{}", frame.style);
+        let result = manager.send_bubble_pixels(frame);
+        realtime_chat_log::record(
+            "",
+            "bubble_pixels",
+            serde_json::json!({
+                "stage": "sent",
+                "ok": result.is_ok(),
+                "elapsedMs": started.elapsed().as_millis().min(60000) as u64,
+                "reason": style_tag,
+            }),
+        );
+        if let Err(error) = &result {
+            // Fixed, bounded diagnostic category only; never log payload text.
+            let category = error
+                .strip_prefix("BUBBLE_FALLBACK: ")
+                .or_else(|| error.strip_prefix("BUBBLE_BUSY: "))
+                .unwrap_or("other")
+                .split(';')
+                .next()
+                .unwrap_or("other")
+                .trim();
+            // The log schema only persists lowercase identifier fields, so
+            // normalize the fixed category before recording it as errorKind.
+            let normalized: String = category
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+                .collect();
+            realtime_chat_log::record(
+                "",
+                "bubble_pixels",
+                serde_json::json!({ "stage": "failed", "errorKind": normalized }),
+            );
+        }
+        result
     })
     .await
     .map_err(|_| "BUBBLE_FALLBACK: worker stopped".to_string())?
@@ -7603,6 +7674,25 @@ async fn usb_send_command(
     command: String,
 ) -> Result<(), String> {
     usb_manager.send_command(&command)
+}
+
+#[tauri::command]
+async fn usb_send_topic(
+    usb_manager: tauri::State<'_, usb_serial::UsbSerialManager>,
+    topic: String,
+    payload: serde_json::Value,
+) -> Result<(), String> {
+    let result = usb_manager.send(&topic, &payload);
+    let reason: String = topic
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    realtime_chat_log::record(
+        "",
+        "usb_send_topic",
+        serde_json::json!({ "reason": reason, "ok": result.is_ok() }),
+    );
+    result
 }
 
 #[tauri::command]
@@ -11687,8 +11777,11 @@ pub fn run() {
             usb_send_state,
             usb_send_speech,
             usb_bubble_pixels_ready,
+            usb_bubble_sink_registered,
+            usb_log_client_event,
             usb_send_bubble_pixels,
             usb_send_command,
+            usb_send_topic,
             usb_audio_capture_control,
             usb_get_status,
             usb_device_volume,

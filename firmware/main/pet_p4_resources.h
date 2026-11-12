@@ -38,7 +38,14 @@ typedef enum {
 /* Program/native snapshot work belongs to the same realtime exclusion even
  * while its production quota is zero. Never rely only on delayed audio flags
  * when a future reviewed capability opens those quotas. */
-#define PET_RESOURCE_BACKGROUND_MASK (PET_RESOURCE_DEBUG_MASK | PET_RESOURCE_MASK(PET_RESOURCE_ASSET_PREPARE) | PET_RESOURCE_MASK(PET_RESOURCE_NATIVE_PROBE) | PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK) | PET_RESOURCE_MASK(PET_RESOURCE_PROGRAM) | PET_RESOURCE_MASK(PET_RESOURCE_PERIPHERAL))
+/* Pet-animation decode reads only pinned PSRAM and never touches flash/SD, so
+ * it does not contend with microphone/AEC I/O. Keeping it out of the background
+ * mask lets the animation keep advancing under the mic; otherwise every frame
+ * missed the pet background and translucent cards composited over stale pixels
+ * (visible as an opacity jump). The earlier howling came from AEC failing to
+ * initialise because the internal heap was fragmented by cJSON, which now uses
+ * PSRAM. */
+#define PET_RESOURCE_BACKGROUND_MASK (PET_RESOURCE_DEBUG_MASK | PET_RESOURCE_MASK(PET_RESOURCE_NATIVE_PROBE) | PET_RESOURCE_MASK(PET_RESOURCE_STORAGE_WORK) | PET_RESOURCE_MASK(PET_RESOURCE_PROGRAM) | PET_RESOURCE_MASK(PET_RESOURCE_PERIPHERAL))
 
 typedef enum {
   PET_RESOURCE_OK,
@@ -87,6 +94,10 @@ typedef struct pet_resource_broker {
   uint64_t next_realtime_serial;
   uint64_t realtime[PET_RESOURCE_REALTIME_SLOTS];
   bool realtime_video_ready[PET_RESOURCE_REALTIME_SLOTS];
+  /* Microphone/AEC work is latency-critical; plain audio playback is not. Only
+   * mic participants exclude background I/O, so cached animation keeps running
+   * under status cues and TTS. */
+  bool realtime_mic[PET_RESOURCE_REALTIME_SLOTS];
   uint32_t protected_mask;
   struct {
     uint64_t generation;
@@ -135,5 +146,8 @@ bool pet_resources_realtime_current(const pet_resource_broker_t *broker, pet_res
  * video atomically before its first codec/allocation operation. */
 bool pet_resources_realtime_video_ready(pet_resource_broker_t *broker,
   pet_resource_realtime_t ticket, bool ready);
+/* Marks this realtime actor as owning microphone/AEC processing. */
+bool pet_resources_realtime_mic(pet_resource_broker_t *broker,
+  pet_resource_realtime_t ticket, bool active);
 /* Only after actual realtime work ends; stale/duplicate completion does nothing. */
 bool pet_resources_realtime_finish(pet_resource_broker_t *broker, pet_resource_realtime_t ticket);

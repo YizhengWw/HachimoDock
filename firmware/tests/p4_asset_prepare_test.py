@@ -18,7 +18,7 @@ def test_production_preparer_concurrency_failures_and_generation_switches():
     begin = source.index("typedef struct {\n  uint8_t *bytes;\n  size_t size;")
     end = source.index("typedef struct {\n  uint32_t samples;", begin)
     declarations = source[begin:end]
-    begin = source.index("static bool asset_prepare_audio_busy(void)")
+    begin = source.index("static bool asset_prepare_current(")
     end = source.index("static bool decode_jpeg_frame_hardware_into(", begin)
     production = source[begin:end] + "\n" + function(source, "h264_stream_has_single_slice_access_units")
     harness = (ROOT / "tests/p4_asset_prepare_test.c").read_text()

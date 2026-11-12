@@ -90,8 +90,13 @@ int main(void){
 '''
     run(tmp_path,code,'retire')
     entry=function(text,'pet_p4_renderer_render')
-    assert entry.index('renderer_component_media_frame(NULL)')<entry.index('component_media_idle&&render_asset_pet_frame(')
-    assert 'if(!component_media_idle)g_asset_cache_pending=true;' in entry
+    # The media clip is still polled before the pet frame, but it must no longer
+    # gate it: gating on component_media_idle froze the pet background during
+    # audio and made translucent cards composite over stale pixels.
+    assert entry.index('renderer_component_media_frame(NULL)')<entry.index('render_asset_pet_frame(state, view, now_ms)')
+    assert 'component_media_idle&&render_asset_pet_frame(' not in entry
+    # Overlays stay hidden until the first pet frame exists.
+    assert 'ever_drew_asset' in entry
     app=function(text,'render_miniapp_page')
     assert app.index('renderer_component_media_frame(')<app.index('render_package_app(')
 
@@ -251,8 +256,9 @@ static uint16_t outputs[2][1],*g_native_framebuffers[2]={outputs[0],outputs[1]},
 static unsigned g_native_framebuffer_index,g_render_trace_frame,g_lcd_skipped,g_lcd_submitted;
 static int64_t g_previous_render_ended_us;
 static bool g_main_appearance_ready,g_last_native_valid,g_app_logical_same,g_asset_cache_pending,g_framebuffer_initialized,g_last_realtime_conversation,g_last_approval_visible,g_session_overlay_cache_valid,g_logged_missing_asset;
+static unsigned int g_bubble_opacity_percent=100;
 static unsigned g_last_decode_us,g_last_h264_pack_us,g_last_h264_convert_us;
-static char g_last_render_page[32];static bool worker_idle,init_fail,rotate_fail;static unsigned retire_polls,decoder_starts;
+static char g_last_render_page[32];static bool worker_idle,init_fail,rotate_fail;static unsigned retire_polls,decoder_starts,pet_attempts;
 static bool renderer_component_media_frame(const void*s){assert(!s);retire_polls++;return worker_idle;}
 static int pet_p4_renderer_init(void){return init_fail?7:0;}
 static int64_t esp_timer_get_time(void){static int64_t t;return ++t;}
@@ -269,7 +275,7 @@ static unsigned elapsed_us_clamped(int64_t a,int64_t b){return b-a;}
 #define render_component_center_page(...) ((void)0)
 #define render_touch_test_page(...) ((void)0)
 #define render_miniapp_page(...) ((void)0)
-static bool render_asset_pet_frame(const pet_p4_runtime_state_t*s,const pet_p4_view_model_t*v,uint64_t n){(void)s;(void)v;(void)n;assert(worker_idle);decoder_starts++;return true;}
+static bool render_asset_pet_frame(const pet_p4_runtime_state_t*s,const pet_p4_view_model_t*v,uint64_t n){(void)s;(void)v;(void)n;pet_attempts++;decoder_starts+=worker_idle?1:0;return worker_idle;}
 #define draw_standalone_voice_overlay(...) ((void)0)
 #define pet_compact_underlay_forget(...) ((void)0)
 #define main_compact_underlay_prepare(...) ((void)0)
@@ -291,10 +297,13 @@ static int rotate_landscape_to_panel(void){return rotate_fail?8:0;}
 #define record_render_performance(a,b,c,d,e,f) ((void)(a),(void)(b),(void)(c),(void)(d),(void)(e),(void)(f))
 '''+function(text,'pet_p4_renderer_render')+r'''
 int main(void){pet_p4_runtime_state_t s={0};pet_p4_view_model_t v={.page="main"};
- for(unsigned frame=0;frame<4;frame++){assert(pet_p4_renderer_render(&s,&v,frame)==0);assert(retire_polls==frame+1&&!decoder_starts&&g_asset_cache_pending);}
+ /* The pet frame is attempted on every main-page frame even while a component
+    clip owns the decoder; only the draw result depends on the worker. */
+ for(unsigned frame=0;frame<4;frame++){assert(pet_p4_renderer_render(&s,&v,frame)==0);assert(retire_polls==frame+1&&pet_attempts==frame+1&&!decoder_starts&&g_asset_cache_pending);}
  rotate_fail=true;assert(pet_p4_renderer_render(&s,&v,10)==8&&retire_polls==5&&!decoder_starts);
  init_fail=true;assert(pet_p4_renderer_render(&s,&v,11)==7&&retire_polls==6&&!decoder_starts);init_fail=rotate_fail=false;
- worker_idle=true;assert(pet_p4_renderer_render(&s,&v,12)==0&&retire_polls==7&&decoder_starts==1&&!g_asset_cache_pending);
+ worker_idle=true;assert(pet_p4_renderer_render(&s,&v,12)==0);
+ assert(retire_polls==7);assert(decoder_starts==1);assert(pet_attempts==6);assert(!g_asset_cache_pending);
  v.page="components";worker_idle=false;assert(pet_p4_renderer_render(&s,&v,13)==0&&retire_polls==8&&decoder_starts==1);return 0;}
 '''
     run(tmp_path,code,'render-entry')

@@ -1735,8 +1735,13 @@ def test_p4_rgb565_output_uses_matching_rgb_panel_order():
 def test_p4_renderer_keeps_screen_visible_when_assets_are_unusable():
     renderer = read("main/pet_p4_renderer.c")
 
-    assert "bool drew_asset = component_media_idle&&render_asset_pet_frame(state, view, now_ms);" in renderer
-    assert "if(!component_media_idle)g_asset_cache_pending=true;" in renderer
+    # The pet frame is attempted every main-page frame: gating it on
+    # component_media_idle froze the background during audio and made
+    # translucent cards composite over stale pixels.
+    assert "bool drew_asset = render_asset_pet_frame(state, view, now_ms);" in renderer
+    # Overlays stay hidden until the first pet frame so the boot skeleton is not
+    # covered by a bubble drawn over an empty background.
+    assert "ever_drew_asset" in renderer
     assert "if (!drew_asset && !g_asset_cache_pending)" in renderer
     assert "g_asset_decode_blocked_until_ms" in renderer
     assert "PET_P4_ASSET_DECODE_BACKOFF_MS 500ULL" in renderer

@@ -133,6 +133,12 @@ bool pet_resources_device_realtime_current(pet_resource_realtime_t ticket) {
   portEXIT_CRITICAL(&resource_mux);
   return current;
 }
+bool pet_resources_device_realtime_mic(pet_resource_realtime_t ticket,bool active){
+  portENTER_CRITICAL(&resource_mux);
+  bool current=pet_resources_realtime_mic(&broker,ticket,active);
+  portEXIT_CRITICAL(&resource_mux);
+  return current;
+}
 bool pet_resources_device_realtime_video_ready(pet_resource_realtime_t ticket,bool ready){
   portENTER_CRITICAL(&resource_mux);
   bool current=pet_resources_realtime_video_ready(&broker,ticket,ready);

@@ -32,7 +32,7 @@ typedef struct {struct{uint8_t *buffer;uint32_t len;}raw_data;uint32_t consume;}
 typedef struct {uint8_t *outbuf;uint32_t out_size;}esp_h264_dec_out_frame_t;
 typedef struct {int frames,width,height;}pet_p4_asset_selection_t;
 static unsigned critical,notifications,codec_calls,codec_frees,freed_buffers;
-static unsigned hook;static bool fail_new,fail_decode,fail_pack,playback_busy;
+static unsigned hook;static bool fail_new,fail_decode,fail_pack;
 static uint64_t now_us=100000;static pet_resource_broker_t broker;
 static uint8_t decoded[16*16*3/2],packed_pixels[sizeof(decoded)];
 static uint16_t framebuffer[640*480],*g_framebuffer=framebuffer,expected_pixel;
@@ -44,16 +44,13 @@ static void leave(void){assert(critical==1);critical--;}
 #define portENTER_CRITICAL(m) ((void)(m),enter())
 #define portEXIT_CRITICAL(m) ((void)(m),leave())
 static void xTaskNotifyGive(TaskHandle_t task){assert(task&&!critical);notifications++;}
+static void vTaskDelay(unsigned ticks){(void)ticks;}
 static int64_t esp_timer_get_time(void){return (int64_t)now_us;}
 static uint64_t renderer_monotonic_ms(void){return now_us/1000;}
 static uint32_t elapsed_us_clamped(int64_t from,int64_t to){return to>=from?(uint32_t)(to-from):0;}
 static uint32_t uxTaskGetStackHighWaterMark(void *task){(void)task;assert(!critical);return 1234;}
 static UBaseType_t uxTaskPriorityGet(void *task){(void)task;return 1;}
 static void vTaskPrioritySet(void *task,UBaseType_t priority){(void)task;(void)priority;assert(!"worker must not impersonate renderer");}
-static bool pet_p4_audio_active(void){return playback_busy;}
-static bool pet_p4_audio_playback_active(void){return false;}
-static bool pet_p4_audio_conversation_active(void){return false;}
-static bool pet_p4_audio_music_active(void){return false;}
 static pet_resource_result_t pet_resources_device_owner_open(uint32_t mask,pet_resource_owner_t *out){assert(!critical);return pet_resources_owner_open(&broker,mask,out);}
 static pet_resource_result_t pet_resources_device_acquire(pet_resource_owner_t owner,pet_resource_kind_t kind,uint32_t units,pet_resource_lease_t *out){assert(!critical);return pet_resources_try_acquire(&broker,owner,kind,units,out);}
 static bool pet_resources_device_current(pet_resource_lease_t lease){assert(!critical);return pet_resources_current(&broker,lease);}
@@ -145,12 +142,11 @@ int main(void){
    assert(codec_calls==calls+(scenario==0||scenario==3?0:1));assert(codec_frees>=frees);
    fail_new=fail_decode=false;fresh_source();
  }
- /* A ready result cannot survive audio authority revocation or be replayed. */
+ /* Plain playback keeps the pinned-PSRAM decode alive (no I/O, no freeze). */
  assert(h264_prefetch_offer(&g_asset_cache[0],"audio",16,16,true,0));
  pet_resource_realtime_t audio={0};assert(pet_resources_realtime_begin(&broker,&audio)==PET_RESOURCE_OK);
- assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_DISCARDED);
+ assert(h264_prefetch_worker());assert(g_h264_prefetch_lifetime.phase==PET_PREFETCH_READY);
  assert(pet_resources_realtime_finish(&broker,audio));fresh_source();
- playback_busy=true;assert(!h264_prefetch_offer(&g_asset_cache[0],"busy",16,16,true,0));playback_busy=false;
  /* A cancellation during the consumer/pack join cannot close decoder memory. */
  assert(!render_h264_asset_frame_async(&asset,"consume",&g_asset_cache[0],300));assert(h264_prefetch_worker());
  hook=2;assert(!render_h264_asset_frame_async(&asset,"consume",&g_asset_cache[0],300));

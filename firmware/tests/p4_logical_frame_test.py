@@ -46,6 +46,7 @@ def test_actual_renderer_tail_retains_index_pointer_reference_failure_and_transf
     text=(ROOT/'main/pet_p4_renderer.c').read_text();render=function(text,'pet_p4_renderer_render')
     prelude=render[render.index('  const uint16_t *previous_native'):render.index('  int64_t render_started_us')]
     tail=render[render.index('  int64_t rotate_started_us'):render.index('  int64_t render_ended_us')]
+    tail += '\n  (void)last_present_ms;(void)ever_drew_asset;\n'
     code=r'''
 #define PET_P4_LOGICAL_COMPARE 1
 #define PET_P4_APP_CACHE_PROGRESSIVE 1
@@ -67,7 +68,7 @@ static bool g_last_native_valid,g_app_logical_same,g_last_compare_valid;
 static uint32_t g_last_compare_us;
 static pet_lcd_observation_t g_last_lcd_observation;
 static struct {uint32_t logical_compare_us,common_overlay_us;}g_render_trace;
-static int64_t now;static int rotate_error,lcd_error;
+static int64_t now;static unsigned long long now_ms;static int rotate_error,lcd_error;
 static int64_t esp_timer_get_time(void){return ++now;}
 static uint32_t elapsed_us_clamped(int64_t a,int64_t b){assert(b>=a);return (uint32_t)(b-a);}
 static esp_err_t rotate_landscape_to_panel(void){

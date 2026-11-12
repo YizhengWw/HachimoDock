@@ -198,7 +198,7 @@ def test_actual_adapter_with_worker_pack_alternates_buffers_never_packs_on_the_r
     declarations+='\nstatic uint8_t *g_h264_ppa_input;static size_t g_h264_ppa_input_capacity;static char g_h264_fs_path[80];\n'
     declarations+=source[source.index('typedef struct {\n  uint8_t *bytes;'):source.index('static bool h264_stream_has_single_slice_access_units(')]
     functions='\n'.join(function(source,name) for name in (
-        'asset_prepare_audio_busy','asset_prepare_current','asset_cache_release','pet_p4_renderer_cancel_asset_preparation',
+        'asset_prepare_current','asset_cache_release','pet_p4_renderer_cancel_asset_preparation',
         'pet_p4_renderer_set_asset_preparation_suspended','reset_h264_decoder','reset_h264_decoder_traced',
         'start_h264_decoder_role','decode_next_h264_frame_role'))
     functions+='\n'+function(source,'pack_h264_i420_rows').replace('pack_h264_i420_rows(','actual_pack_rows(',1)

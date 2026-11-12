@@ -12,3 +12,10 @@ id = "generic-api-key"
   regexTarget = "match"
   paths = ['''^pc/skills/petui/scripts/app_form_v3\.py$''']
   regexes = ['''^NUMERIC_KEYS='0123456789\.-'$''']
+
+  [[rules.allowlists]]
+  description = "localStorage preference key name, not a credential; exact file and assignment only"
+  condition = "AND"
+  regexTarget = "match"
+  paths = ['''^pc/src/lib/bubble-opacity\.js$''']
+  regexes = ['''^BUBBLE_OPACITY_STORAGE_KEY = "[^"]+"$''']

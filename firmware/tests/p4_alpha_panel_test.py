@@ -3,13 +3,14 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from p4_render_trace_test import function as extract_function
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_rounded_alpha_is_single_pass_symmetric_and_clipped():
     source = (ROOT / "main/pet_p4_renderer.c").read_text()
-    function = "static void blend_round_rect(" + source.split(
-        "static void blend_round_rect(", 1)[1].split("static void draw_home_white_panel", 1)[0]
+    rounded = extract_function(source, "blend_round_rect")
     harness = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -47,7 +48,7 @@ int main(void){
  clear();blend_round_rect(2,2,1,1,99,0,0,0,110);assert(alphas[2][2]==110);
  return 0;
 }
-'''.replace("FUNCTION", function)
+'''.replace("FUNCTION", rounded)
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp)
         (path / "test.c").write_text(harness)

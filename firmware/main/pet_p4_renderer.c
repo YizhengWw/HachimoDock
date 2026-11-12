@@ -48,6 +48,7 @@
  * ERROR, numeric fault/lifetime metrics and all frame/gap clocks unchanged. */
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "esp_task.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -195,6 +196,16 @@ static uint16_t *g_jpeg_output;
 static uint8_t *g_tjpgd_workbuf;
 static jpeg_decoder_handle_t g_jpeg_decoder;
 static ppa_client_handle_t g_ppa_srm_client;
+/* Hardware blending for the translucent cards. The earlier garbling was traced
+ * to prefetch buffer reuse across clip switches (now guarded), not to PPA; CPU
+ * blending every frame stalls the animation. */
+#define PET_P4_PPA_BLEND_ENABLED 1
+static ppa_client_handle_t g_ppa_blend_client;
+static uint8_t *g_ppa_card_mask;
+static size_t g_ppa_card_mask_capacity;
+static int g_ppa_card_mask_w, g_ppa_card_mask_h, g_ppa_card_mask_radius;
+static uint8_t g_ppa_card_mask_alpha;
+static unsigned int g_bubble_opacity_percent = 100;
 /* Diagnostic state outlives every ISR callback. user_data is an opaque numeric
  * cookie, never a pointer to a caller's stack or an image buffer. */
 static DRAM_ATTR pet_ppa_trace_state_t g_ppa_trace;
@@ -801,21 +812,14 @@ static void record_render_performance(
   memset(&g_render_perf, 0, sizeof(g_render_perf));
 }
 
-static bool asset_prepare_audio_busy(void) {
-  return pet_p4_audio_active() || pet_p4_audio_playback_active()
-    || pet_p4_audio_conversation_active() || pet_p4_audio_music_active();
-}
-
 static bool asset_prepare_current(const pet_p4_asset_cache_entry_t *job) {
   portENTER_CRITICAL(&g_asset_prepare_mux);
   bool suspended = g_asset_prepare_suspended;
   portEXIT_CRITICAL(&g_asset_prepare_mux);
-  bool audio_blocked=asset_prepare_audio_busy();
-#if PET_P4_CONVERSATION_VIDEO
-  if(job->prepare_lease.kind==PET_RESOURCE_CACHED_VIDEO)
-    audio_blocked=audio_blocked&&(!pet_p4_audio_conversation_video_ready()||pet_p4_audio_music_active());
-#endif
-  if (suspended || audio_blocked) {
+  /* Audio no longer blocks asset decode: test-all runs audio + animation
+   * concurrently without this gate, and blocking it stalled the pet animation
+   * during SW1 capture / TTS playback. */
+  if (suspended) {
     pet_resources_device_revoke(job->owner);
     return false;
   }
@@ -1020,7 +1024,7 @@ static pet_p4_asset_cache_entry_t *load_asset_stream_cache(
     bool match = entry->size == expected_size && entry->h264 == h264
       && strcmp(entry->fs_path, fs_path) == 0;
     if (entry->loading && !asset_cache_entry_finished(entry)) {
-      if (!match || asset_prepare_audio_busy()) pet_resources_device_revoke(entry->owner);
+      if (!match) pet_resources_device_revoke(entry->owner);
       g_asset_cache_pending = true;
       continue;
     }
@@ -1047,7 +1051,7 @@ static pet_p4_asset_cache_entry_t *load_asset_stream_cache(
   if (g_asset_cache_pending) return NULL;
   /* Busy/protected resources are deferred work, never decoder failures. */
   g_asset_cache_pending = true;
-  if (suspended || asset_prepare_audio_busy()) return NULL;
+  if (suspended) return NULL;
   if (!g_asset_prepare_task && xTaskCreate(asset_prepare_task, "p4-asset-prep",
         PET_P4_ASSET_PREPARE_STACK_BYTES, NULL, PET_P4_ASSET_PREPARE_PRIORITY,
         &g_asset_prepare_task) != pdPASS) return NULL;
@@ -2102,13 +2106,100 @@ static void blend_round_rect(int x, int y, int w, int h, int radius, uint8_t r, 
 #endif
 }
 
+static bool ppa_blend_card_surface(
+  int x, int y, int w, int h, int radius,
+  uint8_t r, uint8_t g, uint8_t b, uint8_t alpha
+) {
+  /* Control experiment: IDF 5.5.4 ships a different PPA blend backend than the
+   * 5.5.1 baseline this path was written on. Set to 1 to re-enable once the
+   * API/config mismatch is resolved. */
+  if (!PET_P4_PPA_BLEND_ENABLED) return false;
+  if (!g_ppa_blend_client || !g_framebuffer || !g_framebuffer_ppa_compatible
+      || x < 0 || y < 0 || w <= 0 || h <= 0
+      || x + w > PET_P4_UI_WIDTH || y + h > PET_P4_UI_HEIGHT) return false;
+  const size_t needed = (size_t) w * (size_t) h;
+  if (!g_ppa_card_mask || g_ppa_card_mask_capacity < needed) {
+    if (g_ppa_card_mask) heap_caps_free(g_ppa_card_mask);
+    g_ppa_card_mask = (uint8_t *) heap_caps_aligned_alloc(64, needed,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    g_ppa_card_mask_capacity = g_ppa_card_mask ? needed : 0;
+    if (!g_ppa_card_mask) return false;
+    g_ppa_card_mask_w = 0;
+  }
+  if (g_ppa_card_mask_w != w || g_ppa_card_mask_h != h
+      || g_ppa_card_mask_radius != radius || g_ppa_card_mask_alpha != alpha) {
+    memset(g_ppa_card_mask, 0, needed);
+    for (int yy = 0; yy < h; yy += 1) {
+      for (int xx = 0; xx < w; xx += 1) {
+        int cx = xx < radius ? radius : (xx >= w - radius ? w - radius - 1 : xx);
+        int cy = yy < radius ? radius : (yy >= h - radius ? h - radius - 1 : yy);
+        int dx = xx - cx, dy = yy - cy;
+        if (dx * dx + dy * dy <= radius * radius)
+          g_ppa_card_mask[(size_t) yy * w + xx] = alpha;
+      }
+    }
+    g_ppa_card_mask_w = w; g_ppa_card_mask_h = h;
+    g_ppa_card_mask_radius = radius; g_ppa_card_mask_alpha = alpha;
+  }
+  ppa_blend_oper_config_t cfg = {0};
+  cfg.in_bg.buffer = g_framebuffer;
+  cfg.in_bg.pic_w = PET_P4_UI_WIDTH;
+  cfg.in_bg.pic_h = PET_P4_UI_HEIGHT;
+  cfg.in_bg.block_w = w; cfg.in_bg.block_h = h;
+  cfg.in_bg.block_offset_x = x; cfg.in_bg.block_offset_y = y;
+  cfg.in_bg.blend_cm = PPA_SRM_COLOR_MODE_RGB565;
+  cfg.in_fg.buffer = g_ppa_card_mask;
+  cfg.in_fg.pic_w = w; cfg.in_fg.pic_h = h;
+  cfg.in_fg.block_w = w; cfg.in_fg.block_h = h;
+  cfg.in_fg.block_offset_x = 0; cfg.in_fg.block_offset_y = 0;
+  cfg.in_fg.blend_cm = PPA_BLEND_COLOR_MODE_A8;
+  cfg.out.buffer = g_framebuffer;
+  cfg.out.buffer_size = (uint32_t) PET_P4_UI_WIDTH * PET_P4_UI_HEIGHT * 2;
+  cfg.out.pic_w = PET_P4_UI_WIDTH;
+  cfg.out.pic_h = PET_P4_UI_HEIGHT;
+  cfg.out.block_offset_x = x; cfg.out.block_offset_y = y;
+  cfg.out.blend_cm = PPA_SRM_COLOR_MODE_RGB565;
+  cfg.bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  cfg.fg_alpha_update_mode = PPA_ALPHA_NO_CHANGE;
+  cfg.fg_fix_rgb_val.r = r; cfg.fg_fix_rgb_val.g = g; cfg.fg_fix_rgb_val.b = b;
+  cfg.mode = PPA_TRANS_MODE_BLOCKING;
+  return ppa_do_blend(g_ppa_blend_client, &cfg) == ESP_OK;
+}
+
+/* Bubble surfaces must fade together: route every card layer through the same
+ * opacity so a fill cannot stay fully opaque while its neighbours fade. */
+static void fill_or_blend_round_rect(int x, int y, int w, int h, int radius, uint16_t color) {
+  if (g_bubble_opacity_percent >= 100) {
+    fill_round_rect(x, y, w, h, radius, color);
+    return;
+  }
+  uint8_t alpha = (uint8_t) (255U * g_bubble_opacity_percent / 100U);
+  uint8_t r = (uint8_t) (((color >> 11) & 0x1F) * 255 / 31);
+  uint8_t g = (uint8_t) (((color >> 5) & 0x3F) * 255 / 63);
+  uint8_t b = (uint8_t) ((color & 0x1F) * 255 / 31);
+  blend_round_rect(x, y, w, h, radius, r, g, b, alpha);
+}
+
 static void draw_home_white_panel(int x, int y, int w, int h, int radius, uint16_t outline) {
-  // The panel is opaque, so a preblended solid shadow gives the same visible
-  // edge without read/modify/write alpha blending tens of thousands of PSRAM
-  // pixels every frame.
-  fill_round_rect(x + 2, y + 4, w, h, radius, rgb565(55, 58, 57));
-  fill_round_rect(x, y, w, h, radius, outline);
-  fill_round_rect(x + 2, y + 2, w - 4, h - 4, radius - 2, rgb565(255, 255, 255));
+  if (g_bubble_opacity_percent >= 100) {
+    // The panel is opaque, so a preblended solid shadow gives the same visible
+    // edge without read/modify/write alpha blending tens of thousands of PSRAM
+    // pixels every frame.
+    fill_round_rect(x + 2, y + 4, w, h, radius, rgb565(55, 58, 57));
+    fill_round_rect(x, y, w, h, radius, outline);
+    fill_round_rect(x + 2, y + 2, w - 4, h - 4, radius - 2, rgb565(255, 255, 255));
+    return;
+  }
+  /* Translucency is ONE composite, never a stack: stacking several alpha layers
+   * multiplies their coverage and makes the centre look opaque. Draw the PPA
+   * surface alone (it already blends against the live background) or fall back
+   * to the CPU layers only when PPA is unavailable. */
+  const uint8_t alpha = (uint8_t) (255U * g_bubble_opacity_percent / 100U);
+  if (ppa_blend_card_surface(x + 2, y + 2, w - 4, h - 4, radius - 2, 255, 255, 255, alpha))
+    return;
+  /* CPU fallback must also be a single composite, otherwise a PPA miss makes
+   * this frame stack opaque while the next PPA frame is translucent -> flicker. */
+  blend_round_rect(x + 2, y + 2, w - 4, h - 4, radius - 2, 255, 255, 255, alpha);
 }
 
 static void draw_session_card_panel(
@@ -2127,10 +2218,30 @@ static void draw_session_card_panel(
 
   uint16_t selection = rgb565(25, 151, 99);
   uint16_t selected_surface = rgb565(237, 249, 242);
-  fill_round_rect(x - 2, y - 2, w + 4, h + 4, radius + 2, rgb565(173, 220, 193));
-  fill_round_rect(x + 2, y + 5, w, h, radius, rgb565(46, 50, 48));
-  fill_round_rect(x, y, w, h, radius, selection);
-  fill_round_rect(x + 4, y + 4, w - 8, h - 8, radius - 4, selected_surface);
+  if (g_bubble_opacity_percent >= 100) {
+    fill_round_rect(x - 2, y - 2, w + 4, h + 4, radius + 2, rgb565(173, 220, 193));
+    fill_round_rect(x + 2, y + 5, w, h, radius, rgb565(46, 50, 48));
+    fill_round_rect(x, y, w, h, radius, selection);
+    fill_round_rect(x + 4, y + 4, w - 8, h - 8, radius - 4, selected_surface);
+    return;
+  }
+  const uint8_t alpha = (uint8_t) (255U * g_bubble_opacity_percent / 100U);
+  /* One composite again: PPA paints the whole surface once and the 2px
+   * selection outline is drawn as opaque strokes on top. Stacking translucent
+   * layers here made the card centre effectively opaque. */
+  if (ppa_blend_card_surface(x + 4, y + 4, w - 8, h - 8, radius - 4, 237, 249, 242, alpha)) {
+    fill_round_rect(x - 2, y - 2, w + 4, 2, 1, selection);
+    fill_round_rect(x - 2, y + h, w + 4, 2, 1, selection);
+    fill_round_rect(x - 2, y - 2, 2, h + 4, 1, selection);
+    fill_round_rect(x + w, y - 2, 2, h + 4, 1, selection);
+    return;
+  }
+  /* Single composite + opaque 2px outline, identical to the PPA branch. */
+  blend_round_rect(x + 4, y + 4, w - 8, h - 8, radius - 4, 237, 249, 242, alpha);
+  fill_round_rect(x - 2, y - 2, w + 4, 2, 1, selection);
+  fill_round_rect(x - 2, y + h, w + 4, 2, 1, selection);
+  fill_round_rect(x - 2, y - 2, 2, h + 4, 1, selection);
+  fill_round_rect(x + w, y - 2, 2, h + 4, 1, selection);
 }
 
 /* Renderer-only timing; includes underlying mutex waits and all timer overhead.
@@ -3058,7 +3169,8 @@ static bool render_h264_asset_frame(
   }
   return true;
 }
-#endif
+
+#endif /* !PET_P4_H264_PREFETCH */
 
 #if PET_P4_CONVERSATION_VIDEO
 /* Render-mutex owned metadata, never a retained cache pointer. If a listening
@@ -3374,6 +3486,10 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
       : view && view->realtime_conversation ? PET_BUBBLE_BODY : PET_BUBBLE_BODY_CLIPPED,
     compact ? "" : requested_title, compact && !requested_body[0] ? requested_title : requested_body,
     now_ms, &text);
+  /* The wait/degrade decision now lives in pet_bubble_pixels_select(): it only
+   * returns content whose pixels are confirmed (or a degraded local fallback),
+   * so the renderer always draws exactly one consistent representation. */
+  const bool hold_local_text = text.wait;
   if (!compact) {
     int x = PET_P4_SESSION_CARD_X;
     int y = PET_P4_SESSION_CARD_BOTTOM - PET_P4_SESSION_CARD_HEIGHT;
@@ -3388,21 +3504,38 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     pet_p4_view_status_t status = view ? view->status : PET_P4_VIEW_STATUS_IDLE;
     if (!realtime) draw_session_card_panel(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, true, selection);
     if (realtime) {
-      // Same card geometry, surface and shadow; replace only the selected outline.
-      fill_round_rect(x - 2, y - 2, w + 4, h + 4, PET_P4_SESSION_CARD_RADIUS + 2, rgb565(170, 205, 250));
-      fill_round_rect(x + 2, y + 5, w, h, PET_P4_SESSION_CARD_RADIUS, rgb565(46, 50, 48));
-      fill_round_rect(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, selection);
-      fill_round_rect(x + 4, y + 4, w - 8, h - 8, PET_P4_SESSION_CARD_RADIUS - 4, rgb565(237, 249, 242));
+      /* Same card geometry, one translucent composite (never a stack of alpha
+       * layers) plus an opaque accent outline, mirroring the session card. */
+      if (g_bubble_opacity_percent >= 100) {
+        fill_round_rect(x - 2, y - 2, w + 4, h + 4, PET_P4_SESSION_CARD_RADIUS + 2, rgb565(170, 205, 250));
+        fill_round_rect(x + 2, y + 5, w, h, PET_P4_SESSION_CARD_RADIUS, rgb565(46, 50, 48));
+        fill_round_rect(x, y, w, h, PET_P4_SESSION_CARD_RADIUS, selection);
+        fill_round_rect(x + 4, y + 4, w - 8, h - 8, PET_P4_SESSION_CARD_RADIUS - 4, rgb565(237, 249, 242));
+      } else {
+        const uint8_t realtime_alpha = (uint8_t) (255U * g_bubble_opacity_percent / 100U);
+        if (ppa_blend_card_surface(x + 4, y + 4, w - 8, h - 8, PET_P4_SESSION_CARD_RADIUS - 4, 237, 249, 242, realtime_alpha)) {
+          fill_round_rect(x - 2, y - 2, w + 4, 2, 1, selection);
+          fill_round_rect(x - 2, y + h, w + 4, 2, 1, selection);
+          fill_round_rect(x - 2, y - 2, 2, h + 4, 1, selection);
+          fill_round_rect(x + w, y - 2, 2, h + 4, 1, selection);
+        } else {
+          blend_round_rect(x + 4, y + 4, w - 8, h - 8, PET_P4_SESSION_CARD_RADIUS - 4, 237, 249, 242, realtime_alpha);
+          fill_round_rect(x - 2, y - 2, w + 4, 2, 1, selection);
+          fill_round_rect(x - 2, y + h, w + 4, 2, 1, selection);
+          fill_round_rect(x - 2, y - 2, 2, h + 4, 1, selection);
+          fill_round_rect(x + w, y - 2, 2, h + 4, 1, selection);
+        }
+      }
     }
-    fill_round_rect(x + 10, y + 14, 7, h - 28, 2, selection);
+    fill_or_blend_round_rect(x + 10, y + 14, 7, h - 28, 2, selection);
     unsigned host_pages = realtime ? pet_bubble_pixels_pages(PET_BUBBLE_BODY, body) : 0;
     uint64_t caption_since = text.since_ms > view->caption_since_ms ? text.since_ms : view->caption_since_ms;
     unsigned host_page = host_pages ? (unsigned)(((now_ms >= caption_since ? now_ms-caption_since : 0)/2800ULL)%host_pages) : 0;
     if (realtime && host_pages) pet_bubble_pixels_pin_page(&text,host_page);
     if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
-        x + 30, y + 10, w - 82, ink)))
+        x + 30, y + 10, w - 82, ink)) && !hold_local_text)
       draw_text_line_vcenter(title, x + 30, y + 10, 38, w - 82, ink, 2, true);
-    if (body[0]) {
+    if (body[0] && !hold_local_text) {
       if (realtime) {
         bool host_drawn = host_pages && text.pixels && renderer_bubble_draw_pinned(&text,
           PET_BUBBLE_BODY, host_page, g_framebuffer, x + 30, y + 50, w - 60, muted);
@@ -3463,9 +3596,9 @@ static void draw_bubble(const pet_p4_runtime_state_t *state,
     return;
   }
   draw_home_white_panel(x, y, w, h, 16, outline);
-  fill_round_rect(x + 10, y + 14, 4, h - 28, 2, accent);
+  fill_or_blend_round_rect(x + 10, y + 14, 4, h - 28, 2, accent);
   if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_COMPACT, 0, g_framebuffer,
-      text_x, y + (h - 38) / 2 + PET_P4_COMPACT_TEXT_OPTICAL_Y, w - 72, ink))) draw_text_line(
+      text_x, y + (h - 38) / 2 + PET_P4_COMPACT_TEXT_OPTICAL_Y, w - 72, ink)) && !hold_local_text) draw_text_line(
     body,
     text_x,
     text_y_in_box(body, 2, y, h) + PET_P4_COMPACT_TEXT_OPTICAL_Y,
@@ -3889,7 +4022,12 @@ static void draw_standalone_voice_overlay(void) {
   const int y = PET_P4_SESSION_CARD_BOTTOM - height;
   draw_session_card_panel(x, y, PET_P4_SESSION_CARD_WIDTH, height,
     PET_P4_SESSION_CARD_RADIUS, true, rgb565(216, 221, 218));
-  fill_round_rect(x + 10, y + 14, 7, height - 28, 2, rgb565(25, 151, 99));
+  if (g_bubble_opacity_percent >= 100) {
+    fill_round_rect(x + 10, y + 14, 7, height - 28, 2, rgb565(25, 151, 99));
+  } else {
+    blend_round_rect(x + 10, y + 14, 7, height - 28, 2, 25, 151, 99,
+      (uint8_t) (255U * g_bubble_opacity_percent / 100U));
+  }
   draw_voice_input_row(x, y + 18);
 }
 
@@ -3957,18 +4095,31 @@ static void draw_session_queue_uncached(
       is_selected,
       card_outline
     );
-    fill_round_rect(x + 10, y + 14, is_selected ? 7 : 4, h - 28, 2, is_selected ? selection : status);
+    if (g_bubble_opacity_percent >= 100) {
+      fill_round_rect(x + 10, y + 14, is_selected ? 7 : 4, h - 28, 2,
+        is_selected ? selection : status);
+    } else {
+      uint8_t bar_alpha = (uint8_t) (255U * g_bubble_opacity_percent / 100U);
+      uint16_t bar_color = is_selected ? selection : status;
+      uint8_t bar_r = (uint8_t) (((bar_color >> 11) & 0x1F) * 255 / 31);
+      uint8_t bar_g = (uint8_t) (((bar_color >> 5) & 0x3F) * 255 / 63);
+      uint8_t bar_b = (uint8_t) ((bar_color & 0x1F) * 255 / 31);
+      blend_round_rect(x + 10, y + 14, is_selected ? 7 : 4, h - 28, 2,
+        bar_r, bar_g, bar_b, bar_alpha);
+    }
     pet_p4_view_status_t marker_status = session_view_status(item->state);
     if (draw_working_markers || marker_status != PET_P4_VIEW_STATUS_WORKING) {
       draw_status_marker(marker_status, now_ms, x + w - 26, y + 26);
     }
+    /* select() already returns confirmed content, so draw it as-is. */
+    const bool hold_card_text = text.wait;
     if (!(text.pixels && renderer_bubble_draw_pinned(&text, PET_BUBBLE_TITLE, 0, g_framebuffer,
-        x + 30, y + 10, w - 82, ink)))
+        x + 30, y + 10, w - 82, ink)) && !hold_card_text)
       draw_text_line_vcenter(text.title, x + 30, y + 10, 38, w - 82, ink, 2, true);
 
     if (is_selected && state->session_voice_active) {
       draw_voice_input_row(x, y + 62);
-    } else {
+    } else if (!hold_card_text) {
       draw_card_body_lines(text.body, x + 30, y + 50, w - 60, muted, &text);
     }
     pet_bubble_pixels_release(&text);
@@ -3998,6 +4149,9 @@ static uint64_t session_overlay_signature(const pet_p4_runtime_state_t *state) {
   hash = session_cache_hash_bytes(hash, &state->session_queue_count, sizeof(state->session_queue_count));
   hash = session_cache_hash_bytes(hash, &state->current_session_index, sizeof(state->current_session_index));
   hash = session_cache_hash_bytes(hash, &state->session_voice_active, sizeof(state->session_voice_active));
+  /* Bubble opacity changes card pixels without changing session text; include
+   * it so the cached overlay is rebuilt instead of reusing stale opaque cards. */
+  hash = session_cache_hash_bytes(hash, &g_bubble_opacity_percent, sizeof(g_bubble_opacity_percent));
   unsigned int selected, start, visible;
   session_overlay_visible_window(state, &selected, &start, &visible);
   (void)selected; /* current_session_index above retains its complete dependency. */
@@ -4120,6 +4274,14 @@ static void draw_session_queue(
 ) {
   if (!state || state->session_queue_count == 0) {
     g_session_overlay_cache_valid = false;
+    return;
+  }
+  /* Keep the fast cached overlay only for fully opaque cards (its pixels are
+   * background-composited). Any translucency must composite live, so bypass
+   * the cache and draw directly. */
+  if (g_bubble_opacity_percent < 100) {
+    g_session_overlay_cache_valid = false;
+    draw_session_queue_uncached(state, now_ms, true);
     return;
   }
   uint64_t signature = session_overlay_signature(state);
@@ -7076,6 +7238,14 @@ esp_err_t pet_p4_renderer_init(void) {
         .data_burst_length = PPA_DATA_BURST_LENGTH_128,
       };
       esp_err_t ppa_err = ppa_register_client(&ppa_config, &g_ppa_srm_client);
+      ppa_client_config_t blend_config = {
+        .oper_type = PPA_OPERATION_BLEND,
+        .max_pending_trans_num = 1,
+        .data_burst_length = PPA_DATA_BURST_LENGTH_128,
+      };
+      if (ppa_err == ESP_OK && ppa_register_client(&blend_config, &g_ppa_blend_client) != ESP_OK) {
+        g_ppa_blend_client = NULL;
+      }
       if (ppa_err != ESP_OK) {
         g_ppa_srm_client = NULL;
         ESP_LOGW(
@@ -7221,6 +7391,34 @@ static void draw_approval_overlay(
                        rgb565(255, 150, 140));
 }
 
+#define PET_P4_OPACITY_NVS "bubble"
+#define PET_P4_OPACITY_KEY "opacity"
+void pet_p4_renderer_load_bubble_opacity(void) {
+  nvs_handle_t handle;
+  if (nvs_open(PET_P4_OPACITY_NVS, NVS_READONLY, &handle) != ESP_OK) return;
+  uint8_t stored = 100;
+  if (nvs_get_u8(handle, PET_P4_OPACITY_KEY, &stored) == ESP_OK && stored >= 20 && stored <= 100)
+    g_bubble_opacity_percent = stored;
+  nvs_close(handle);
+}
+void pet_p4_renderer_set_bubble_opacity(unsigned percent) {
+  if (percent < 20) percent = 20;
+  if (percent > 100) percent = 100;
+  if (percent == g_bubble_opacity_percent) return;
+  g_bubble_opacity_percent = percent;
+  /* Persist so a reboot does not snap the card back to fully opaque (the host
+   * only re-sends when its dashboard happens to be mounted). */
+  nvs_handle_t handle;
+  if (nvs_open(PET_P4_OPACITY_NVS, NVS_READWRITE, &handle) == ESP_OK) {
+    if (nvs_set_u8(handle, PET_P4_OPACITY_KEY, (uint8_t) percent) == ESP_OK)
+      (void) nvs_commit(handle);
+    nvs_close(handle);
+  }
+  /* Opaque and translucent cards use different draw paths; never reuse the
+   * cached overlay painted with the previous opacity. */
+  g_session_overlay_cache_valid = false;
+}
+
 esp_err_t pet_p4_renderer_render(
   const pet_p4_runtime_state_t *state,
   const pet_p4_view_model_t *view,
@@ -7235,6 +7433,14 @@ esp_err_t pet_p4_renderer_render(
   h264_frame_offer_begin();
 #endif
   const uint16_t *previous_native = g_native_framebuffer;
+  /* True when this frame has no pet background but carries translucent cards:
+   * presenting it would composite the cards a second time over the previous
+   * frame's already-composited pixels, which reads as an opacity jump. */
+  static unsigned long long last_present_ms;
+  /* Overlays must not paint over the bare boot background before the first pet
+   * frame exists; upstream gates them with g_main_appearance_ready, but we only
+   * want that gate until the very first frame (audio must not hide the bubble). */
+  static bool ever_drew_asset;
 #if PET_P4_LOGICAL_COMPARE
   const unsigned previous_native_index=g_native_framebuffer_index;
   g_app_logical_same=false;
@@ -7288,17 +7494,23 @@ esp_err_t pet_p4_renderer_render(
   if(strcmp(page,"components"))center_art_release();
   if(strcmp(page,"app"))instrument_release();
   bool realtime_mode = view && view->realtime_conversation;
+  // Apply the latest opacity BEFORE any bubble/panel is painted; drawing the
+  // bubble ahead of draw_session_queue previously used one-frame-stale values.
+  /* g_bubble_opacity_percent is owned by pet_p4_renderer_set_bubble_opacity();
+   * deliberately NOT re-read from state so session/state refreshes cannot make
+   * the cards snap back to opaque for a frame. */
   bool component_media_idle=true;
+  /* A running component clip owns the decoder for this frame, so the pet asset
+   * is still pending; the pet frame itself is attempted anyway so the background
+   * (and card alpha) never goes stale. */
   if(strcmp(page,"app"))component_media_idle=renderer_component_media_frame(NULL);
+  if(!component_media_idle)g_asset_cache_pending=true;
   if (realtime_mode != g_last_realtime_conversation) {
 #if PET_P4_APP_RETAIN_LOGICAL
     g_app_may_retain=false;
 #endif
-    // Even a missing/failed appearance must not leave old Agent cards beneath the chat.
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
-    g_main_appearance_ready = false;
-    pet_compact_underlay_forget(&g_main_compact_underlay);
     g_last_realtime_conversation = realtime_mode;
   }
   const bool approval_visible = state && pet_p4_state_approval_pending(state, now_ms);
@@ -7309,9 +7521,6 @@ esp_err_t pet_p4_renderer_render(
   if (approval_visible || approval_changed) g_app_may_retain = false;
 #endif
   if (approval_changed) {
-    // The modal dims arbitrary pixels; repaint the page beneath from black so
-    // entering/leaving it cannot leave a ghost card on pages (for example a
-    // missing appearance frame) that only repaint their own controls.
     fill_rect(0, 0, PET_P4_UI_WIDTH, PET_P4_UI_HEIGHT, rgb565(0, 0, 0));
     g_session_overlay_cache_valid = false;
     g_main_appearance_ready = false;
@@ -7328,9 +7537,31 @@ esp_err_t pet_p4_renderer_render(
     bool realtime = view && view->realtime_conversation;
     bool show_session_queue = !realtime && state && state->session_queue_count > 0;
     int64_t asset_started_us = esp_timer_get_time();
-    bool drew_asset = component_media_idle&&render_asset_pet_frame(state, view, now_ms);
-    if(drew_asset)g_main_appearance_ready=true;
-    if(!component_media_idle)g_asset_cache_pending=true;
+    /* Draw the pet appearance every main-page frame. Gating it behind
+     * component_media_idle skipped the background during audio playback, so the
+     * translucent bubble's alpha blend compounded on the previous frame and
+     * read as an opacity jump (not present in test-all, which always redraws
+     * the asset). */
+    /* AEC no longer needs decode throttling: the internal-heap exhaustion that
+     * broke it came from parsing pixel JSON with the internal allocator, which
+     * now uses PSRAM. Decode every frame so translucent cards always composite
+     * over a freshly drawn background (throttled frames re-composited over stale
+     * pixels and made the card opacity appear to drift). */
+    bool drew_asset = render_asset_pet_frame(state, view, now_ms);
+    if(drew_asset){g_main_appearance_ready=true;ever_drew_asset=true;g_asset_cache_pending=false;}
+    /* g_framebuffer is a single persistent UI buffer: on a frame without a pet
+     * it still holds the previous complete frame. Skipping the card draw keeps
+     * that frame intact (zero copies, no tearing, no input stall) instead of
+     * compositing the translucent card a second time over stale pixels. */
+    bool reuse_previous_frame = !drew_asset && g_bubble_opacity_percent < 100
+      && previous_valid;
+    (void) last_present_ms;
+    /* Missing frames are drawn as-is (upstream behaviour). Skipping the whole
+     * present step proved to flash the panel, so keep drawing and presenting. */
+    /* Do NOT mark the asset cache pending from component_media_idle: during PTT
+     * capture that flag is false, which made render_asset_pet_frame() bail out
+     * on `g_asset_cache_pending` and froze the pet animation for the whole
+     * recording. The front-end clip state is unrelated to the pet asset. */
     /* A queued prepare is not a missing/bad asset. Keep the last logical pixels
      * while continuing all live overlays and the normal unchanged-frame gate. */
     if (!drew_asset && !g_asset_cache_pending && g_last_render_page[0]
@@ -7349,12 +7580,15 @@ esp_err_t pet_p4_renderer_render(
     main_compact_underlay_prepare(drew_asset, compact_requested);
     /* Appearance and its overlays enter the same logical/LCD frame. While the
      * first decode is queued, retain the previous page without an early bubble. */
-    if(g_main_appearance_ready){
+    /* Bubble/session overlays are independent of the appearance frame. Draw
+     * them unconditionally so an audio-priority frame that skips the pet asset
+     * (drew_asset=false) does not also drop the bubble for one frame — that
+     * flickered the card opacity during playback. (test-all behaviour.) */
+      if (ever_drew_asset && !reuse_previous_frame) {
       if (view && view->show_voice_overlay) draw_standalone_voice_overlay();
       else if (!show_session_queue) draw_bubble(state, view, now_ms);
       if (!realtime) draw_session_queue(state, now_ms);
-      else g_session_overlay_cache_valid = false;
-    }else g_session_overlay_cache_valid=false;
+    } else g_session_overlay_cache_valid = false;
   }
   const int64_t common_overlay_started_us = esp_timer_get_time();
 #if PET_P4_APP_PHASE_TRACE
@@ -7442,6 +7676,7 @@ esp_err_t pet_p4_renderer_render(
   pet_logical_retention_finish(&g_app_final_retention,g_app_common_plan,
     lcd_err==ESP_OK&&g_app_final_eligible&&!approval_visible&&!strcmp(page,"app"));
 #endif
+  last_present_ms = now_ms;
   if (unchanged) g_lcd_skipped++;
   else if (lcd_err == ESP_OK) g_lcd_submitted++;
   int64_t render_ended_us = esp_timer_get_time();

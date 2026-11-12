@@ -41,6 +41,7 @@ void pet_resources_device_usage(pet_resource_usage_t *out);
 pet_resource_result_t pet_resources_device_realtime_begin(pet_resource_realtime_t *out);
 bool pet_resources_device_realtime_current(pet_resource_realtime_t ticket);
 bool pet_resources_device_realtime_video_ready(pet_resource_realtime_t ticket,bool ready);
+bool pet_resources_device_realtime_mic(pet_resource_realtime_t ticket,bool active);
 void pet_resources_device_realtime_end(pet_resource_realtime_t *ticket);
 
 /* Trusted native consumers only. Each call holds the same short broker mux;
