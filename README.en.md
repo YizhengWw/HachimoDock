@@ -8,11 +8,11 @@ HachimoDock is a desktop interface for AI Agents. A Windows/macOS manager and an
 
 | Component | Version | Download |
 | --- | --- | --- |
-| Windows x64 | **0.1.217** | [Download installer](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_Windows-x64-setup.exe) |
-| macOS (Apple silicon) | **0.1.217** | [Download installer](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_macOS-arm64.dmg) |
-| Device firmware | **0.7.103-p4-r206** | [WiFi6 and Pico factory flashing kits](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217#设备固件) |
+| Windows x64 | **0.1.230** | [Download installer](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.230/HachimiDock_0.1.230_Windows-x64-setup.exe) |
+| macOS (Apple silicon) | **0.1.230** | [Download installer](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.230/HachimiDock_0.1.230_macOS-arm64.dmg) |
+| Device firmware | **0.7.103-p4-r229** | [WiFi6 and Pico factory flashing kits](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230#设备固件) |
 
-Version 0.1.217 improves real-time conversation recovery after a disconnect and WASM component previews. The desktop client includes OTA firmware for WiFi6 and Pico boards with ESP32-P4 v1 or v3 chips. Verify downloads against `SHA256SUMS` on the [release page](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217). The macOS installer is signed and notarized. Intel Mac and Linux installers are not provided. See the release notes for how the public source relates to the binaries.
+Version 0.1.230 ships the updated PetUI tools. R229 lets WASM components trigger offline sounds on events such as collisions, scoring and countdown completion, and play short effects over background music. Offline audio resources are limited to 512 KiB per component. The desktop client includes OTA firmware for WiFi6 and Pico boards with ESP32-P4 v1 or v3 chips. Verify downloads against `SHA256SUMS` on the [release page](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230). Intel Mac and Linux installers are not provided. See the release notes for how the public source relates to the binaries.
 
 Complete flashing kits are for first installation or factory recovery. Match both the board model and the chip revision; **WiFi6 and Pico, and v1 and v3, are not interchangeable**. A complete flash erases settings, appearances and components. Routine client OTA updates only the application and does not repartition existing devices. See [firmware build and flashing](firmware/BUILD.md).
 
@@ -33,7 +33,7 @@ Public installers do not supply service API keys. Enter your own credentials in 
 
 ## Installation and default controls
 
-The macOS release package is Developer ID-signed and Apple-notarized; the Windows installer is not publisher-signed. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
+This macOS release uses ad hoc signing and has not been notarized by Apple. The Windows installer is unsigned. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
 
 SW1 short press and joystick centre confirm; SW2 short press switches pet/component views; SW3 returns. Joystick directions select sessions/components or perform component actions. These defaults can be changed in the manager. Confirming voice input is separate from approving an Agent's tool permissions.
 

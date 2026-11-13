@@ -1,15 +1,15 @@
 {
   "schemaVersion": 2,
   "product": "HachimiDock",
-  "desktopVersion": "0.1.217",
-  "firmwareVersion": "0.7.103-p4-r206",
-  "releaseTag": "v0.1.217",
-  "releaseUrl": "https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217",
+  "desktopVersion": "0.1.230",
+  "firmwareVersion": "0.7.103-p4-r229",
+  "releaseTag": "v0.1.230",
+  "releaseUrl": "https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230",
   "sourceRef": "refs/heads/main",
   "sourcePublished": false,
   "sourcePublication": {
     "edition": "normal-public",
-    "note": "The v0.1.217 installers and firmware are published separately from the public source baseline."
+    "note": "The v0.1.230 installers and firmware are published separately from the public source baseline."
   },
   "embeddedServiceKeys": false,
   "embeddedInternalCredentials": false,
@@ -22,92 +22,88 @@
   },
   "firmware": [
     {
-      "file": "firmware-pico-v1.bin",
-      "boardModel": "pico",
-      "version": "0.7.103-p4-r206-pico",
-      "sha256": "cd187f17b97b9ba7695697939e2a5f88bf98e8eb2e33db852cb2debdd5f09a83",
+      "file": "firmware.bin",
+      "boardModel": "wifi6",
+      "version": "0.7.103-p4-r229-wifi6",
+      "sha256": "ab3cd38655d23bb81b42058b6e8f14b69bda96f8792db1874b4c8c2a2475968e",
       "minChipRevision": 1,
-      "maxChipRevision": 199,
-      "identity": "0.7.103-p4-r206-pico+unknown"
-    },
-    {
-      "file": "firmware-pico-v3.bin",
-      "boardModel": "pico",
-      "version": "0.7.103-p4-r206-pico",
-      "sha256": "42606df88ad5becd57e2c7d59bd07a90418fd58644e897b048cdd8e8dfb814ba",
-      "minChipRevision": 300,
-      "maxChipRevision": 399,
-      "identity": "0.7.103-p4-r206-pico+unknown"
+      "maxChipRevision": 199
     },
     {
       "file": "firmware-v3.bin",
       "boardModel": "wifi6",
-      "version": "0.7.103-p4-r206-wifi6",
-      "sha256": "e652c8d77eb8bda0fbce855b1e9a00303fbfcce6e956da3c969226e38419693a",
+      "version": "0.7.103-p4-r229-wifi6",
+      "sha256": "b0d9626311029552ea83222230f9f103aeb1f8e84cbda545aac4a72ea5a403f9",
       "minChipRevision": 300,
-      "maxChipRevision": 399,
-      "identity": "0.7.103-p4-r206-wifi6+unknown"
+      "maxChipRevision": 399
     },
     {
-      "file": "firmware.bin",
-      "boardModel": "wifi6",
-      "version": "0.7.103-p4-r206-wifi6",
-      "sha256": "070759a925ff6b79890c85e9bc64ec23aa2854affed7ab41175870a9ec983b54",
+      "file": "firmware-pico-v1.bin",
+      "boardModel": "pico",
+      "version": "0.7.103-p4-r229-pico",
+      "sha256": "79b287ad58043efb2799318dd72fb9c7ae43422bbbd1a95a3cd63eabb7f87ddc",
       "minChipRevision": 1,
-      "maxChipRevision": 199,
-      "identity": "0.7.103-p4-r206-wifi6+unknown"
+      "maxChipRevision": 199
+    },
+    {
+      "file": "firmware-pico-v3.bin",
+      "boardModel": "pico",
+      "version": "0.7.103-p4-r229-pico",
+      "sha256": "4c24791900164bd9c996965c0420e30cdfc260337ba8185b3e098618c72ad967",
+      "minChipRevision": 300,
+      "maxChipRevision": 399
     }
   ],
   "releaseValidation": {
     "installerPayloadsVerified": true,
     "factorySegmentsAndChecksumsVerified": true,
-    "componentCount": 28,
+    "componentCount": 27,
     "physicalDeviceValidationThisPackagingRun": false,
     "windowsRuntimeValidationThisPackagingRun": false,
-    "scope": "Published v0.1.217 macOS and Windows installers and four R206 factory flashing kits. The macOS disk image passed Developer ID, Apple notarization and PetUI checks."
+    "scope": "The macOS and Windows installer payloads and four factory kits were inspected. macOS uses ad hoc signing and is not notarized. The Windows installer is unsigned."
   },
   "artifacts": [
     {
-      "file": "HachimiDock_0.1.217_macOS-arm64.dmg",
+      "file": "HachimiDock_0.1.230_macOS-arm64.dmg",
       "role": "macos",
-      "bytes": 182183203,
-      "sha256": "926424f5612530e3e6d3bc99ad9ea35d159e9344b90e9a48bf3a7784c999abec"
+      "bytes": 178973281,
+      "sha256": "4ac4c65fd3abaa1ca044a4468f399af24e3a13783f730d5ad19571b06896f0f1"
     },
     {
-      "file": "HachimiDock_0.1.217_Windows-x64-setup.exe",
+      "file": "HachimiDock_0.1.230_Windows-x64-setup.exe",
       "role": "windows",
-      "bytes": 136009758,
-      "sha256": "40ba12d138c7b72c064e7b3470068f8104e1a00bc0b2fa5ac939f2fc112a8ac2"
+      "bytes": 136429929,
+      "sha256": "1ac7ac34e2d4fb2ad49d9cedea60c5c4cde867e5238061b01294eee6bdf46cfa"
     },
     {
-      "file": "HachimoDock-P4-v1_0.7.103-p4-r206-pico_Factory-Flasher.zip",
-      "role": "factory-v1-pico",
-      "bytes": 26119408,
-      "sha256": "499289c2aa5dd0914f5cf2bf3fc5690efc8cd0844b81aa03fdfb75b9532b548c"
-    },
-    {
-      "file": "HachimoDock-P4-v1_0.7.103-p4-r206-wifi6_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v1_0.7.103-p4-r229-wifi6_Factory-Flasher.zip",
       "role": "factory-v1",
-      "bytes": 26122566,
-      "sha256": "1017b2adf06aaef987f0f594dd05423ba9ad437a2e686127c34d3c7386c10347"
+      "bytes": 26393009,
+      "sha256": "dbb19192a92d8961cbcacf54390100dfdd2cdd5a6234b6d27aa2df87ee6c18a1"
     },
     {
-      "file": "HachimoDock-P4-v3_0.7.103-p4-r206-pico_Factory-Flasher.zip",
-      "role": "factory-v3-pico",
-      "bytes": 26136327,
-      "sha256": "772e30a14207ddadf2f0913efc4605a0cf41fe002223692aaa2b7f388bc12efd"
-    },
-    {
-      "file": "HachimoDock-P4-v3_0.7.103-p4-r206-wifi6_Factory-Flasher.zip",
+      "file": "HachimoDock-P4-v3_0.7.103-p4-r229-wifi6_Factory-Flasher.zip",
       "role": "factory-v3",
-      "bytes": 26136671,
-      "sha256": "a77304a983e2688f06a93c87a1092295b662625bfd4f66b718967a3a4930c8a7"
+      "bytes": 26414996,
+      "sha256": "7f58603d862c47ce77a7de519b8e57d1add9134102afa58e48e1f9adf1c1e7ad"
+    },
+    {
+      "file": "HachimoDock-P4-v1_0.7.103-p4-r229-pico_Factory-Flasher.zip",
+      "role": "factory-v1-pico",
+      "bytes": 25850280,
+      "sha256": "5b6a58280cd917a92349d503f1b24a9064d45601442f75da8c328620c7ecb4f6"
+    },
+    {
+      "file": "HachimoDock-P4-v3_0.7.103-p4-r229-pico_Factory-Flasher.zip",
+      "role": "factory-v3-pico",
+      "bytes": 25866856,
+      "sha256": "84ba3a900c907134b1b4b4bb89b009409386d131bfce7eaeb335b6fdd51c6507"
     },
     {
       "file": "SHA256SUMS",
       "role": "checksums",
       "bytes": 712,
-      "sha256": "2d635d6d97b9102e412459cad597a70e271aa0aebefbf8bb110d71b01aece3e2"
+      "sha256": "a1dd2dfbd2ff7664eaf92eaa509c51d11e2d2be1dbdfefee4a4f39b2801b7e2e"
     }
   ]
 }

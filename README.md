@@ -40,13 +40,13 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 
 | 项目 | 版本 | 下载 |
 | --- | --- | --- |
-| Windows x64 | **0.1.217** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_Windows-x64-setup.exe) |
-| macOS Apple silicon | **0.1.217** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.217/HachimiDock_0.1.217_macOS-arm64.dmg) |
-| 配套设备固件 | **0.7.103-p4-r206** | [WiFi6 / Pico 完整烧录包](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217#设备固件) |
+| Windows x64 | **0.1.230** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.230/HachimiDock_0.1.230_Windows-x64-setup.exe) |
+| macOS Apple silicon | **0.1.230** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.230/HachimiDock_0.1.230_macOS-arm64.dmg) |
+| 配套设备固件 | **0.7.103-p4-r229** | [WiFi6 / Pico 完整烧录包](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230#设备固件) |
 
-0.1.217 改善实时对话断线后的恢复和 WASM 组件预览。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.217 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217) 的 `SHA256SUMS` 核对下载。
+0.1.230 随包提供新版 PetUI。R229 支持 WASM 组件在碰撞、得分和倒计时结束等事件中触发离线音效，可同时播放背景音乐与短音效。每个组件的离线音频资源上限为 512 KiB。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.230 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230) 的 `SHA256SUMS` 核对下载。
 
-当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。macOS 安装包已签名并通过 Apple 公证。Windows 安装器未做发行者签名。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
+当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。本版 macOS 安装包使用临时签名，未通过 Apple 公证。Windows 安装器未做发行者签名。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
 
 ## 核心能力
 
@@ -110,7 +110,7 @@ macOS 安装受阻时，先检查下载来源和校验值，再按系统“隐�
 
 ### 新设备或恢复出厂
 
-[v0.1.217 Release](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.217#设备固件) 提供 WiFi6 和 Pico 原底板的完整烧录包，两种板型各有 v1、v3 版本。包内包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请同时核对板型和实际芯片修订版；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
+[v0.1.230 Release](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230#设备固件) 提供 WiFi6 和 Pico 原底板的完整烧录包，两种板型各有 v1、v3 版本。包内包含 Bootloader、应用固件、形象、组件及双平台烧录工具。请同时核对板型和实际芯片修订版；微雪 ESP32-P4-WIFI6-M 的 M 不代表芯片版本。同一芯片的固件由 Windows/macOS 共用。完整镜像会覆盖设备现有数据。
 
 **v1 与 v3 烧录包不可互刷，具体版本可以咨询客服进行确认。** 包内脚本需要 Python 3.10+，自动安装 esptool **5.4.0**。屏幕连接 **DSI**，不是 CSI；请断电后插拔排线。详细版本和步骤见 [固件构建与烧录指南](firmware/BUILD.md)。
 
