@@ -1,0 +1,26 @@
+{
+  "name": "@hachimodock/hermes-bridge",
+  "version": "0.1.0",
+  "description": "HachimoDock integration for Hermes Agent: a read-only ~/.hermes/state.db poller that maps the active session's turn/tool events onto the deskpet state vocabulary and posts them to the local bridge's POST /state. No firmware changes, no Hermes-side hook.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "files": [
+    "README.md",
+    "index.js",
+    "hermes-monitor.js",
+    "state-map.js",
+    "identity.js"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "hermes",
+    "hachimodock",
+    "state-bridge"
+  ]
+}
