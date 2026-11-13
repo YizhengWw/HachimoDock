@@ -11,10 +11,6 @@
     "edition": "normal-public",
     "note": "The v0.1.230 installers and firmware are published separately from the public source baseline."
   },
-  "embeddedServiceKeys": false,
-  "embeddedInternalCredentials": false,
-  "embeddedEnterpriseCa": false,
-  "embeddedFixedProxy": false,
   "experimental108FirmwareIncluded": false,
   "flashingTools": {
     "python": "3.10+",

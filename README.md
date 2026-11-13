@@ -44,9 +44,9 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 | macOS Apple silicon | **0.1.230** | [下载安装包](https://github.com/ai-maker-lab/HachimoDock/releases/download/v0.1.230/HachimiDock_0.1.230_macOS-arm64.dmg) |
 | 配套设备固件 | **0.7.103-p4-r229** | [WiFi6 / Pico 完整烧录包](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230#设备固件) |
 
-0.1.230 随包提供新版 PetUI。R229 支持 WASM 组件在碰撞、得分和倒计时结束等事件中触发离线音效，可同时播放背景音乐与短音效。每个组件的离线音频资源上限为 512 KiB。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.230 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230) 的 `SHA256SUMS` 核对下载。
+0.1.230 新增独立设备设置与局域网发现配对，更新 PetUI 创作、WASM 试玩、组件同步与社区发布流程，并加入「想法与待办」和 WASM 离线音频。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.230 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230) 的 `SHA256SUMS` 核对下载。
 
-当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。本版 macOS 安装包使用临时签名，未通过 Apple 公证。Windows 安装器未做发行者签名。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
+当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。本版 macOS 安装包使用临时签名，未通过 Apple 公证。Windows 安装器未做数字签名，首次运行可能出现系统提示。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
 
 ## 核心能力
 
@@ -56,12 +56,12 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 | 语音输入 | 按住语音键录音，松开后识别并追加到目标输入框；确认后才发送。灰色提示文字不属于草稿。 |
 | 实时对话 | 在宠物页面长按 SW2 开始或结束；使用用户配置的识别、对话和语音服务。 |
 | 形象与音效 | 内置西高地形象，支持导入或生成自定义外观、状态视频和提示音；兼容固件支持独立下发音效。 |
-| 组件中心 | 预览、安装和移除游戏、工具及 PC 数据组件；通过 `petui` Skill 创作声明式有界组件。 |
-| 音量与城市 | 首页语音输入模块下方统一调整设备总音量、自动识别城市或搜索并保存手动城市/区县。 |
+| 组件中心 | 预览、安装和移除游戏、工具及 PC 数据组件。可用 PetUI 创作声明式或 WASM 组件。 |
+| 设备设置 | 在桌面端「设置」中管理音量、城市与 Wi-Fi 配对。设备默认长按 SW3 或从组件中心进入系统设置。 |
 | 按键配置 | 配置三个按键与摇杆的操作，组件退出遵循设备全局返回设置。 |
 | USB 协同 | 桌面端负责状态、数据、素材与升级传输；连接状态和回执未知时不会自动重放变更。 |
 
-公开发行版不提供服务 Key。需要语音、对话或内容生成能力时，请在客户端“API 配置”中填写自己的凭据。城市定位可关闭；自动模式通过出口 IP 估算城市，不能代替 GPS。详见[音量与共享城市](pc/docs/shared-device-settings.md)。
+城市定位可关闭；自动模式通过出口 IP 估算城市，不能代替 GPS。详见[音量与共享城市](pc/docs/shared-device-settings.md)。
 
 ### Agent 兼容范围
 
@@ -102,6 +102,7 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 | SW2 短按 | 切换宠物页面与组件中心；组件可绑定自己的动作 |
 | SW2 长按 | 开始或结束实时对话 |
 | SW3 短按 | 返回或取消 |
+| SW3 长按 | 打开设备系统设置 |
 | 摇杆方向 | 选择会话、组件或执行组件映射动作 |
 
 这些是出厂默认值，用户配置优先。语音确认发送不等于批准 Agent 的工具权限请求。WorkBuddy 的操作边界见[专门说明](pc/docs/workbuddy.md)。
@@ -189,7 +190,7 @@ flowchart LR
 
 **设备一定要联网吗？** 设备状态、形象和组件同步走 USB，不要求 ESP32-P4 加入局域网。语音识别、Agent 本身以及 AI 形象或组件生成仍可能需要电脑联网。
 
-**如何反馈？** 使用 [GitHub Issues](https://github.com/YizhengWw/HachimoDock/issues)，附客户端/固件版本、系统和复现步骤。不要公开 Key、完整用户日志、对话正文或设备/个人标识。安全问题请按 [SECURITY.md](SECURITY.md) 私下反馈。
+**如何反馈？** 使用 [GitHub Issues](https://github.com/YizhengWw/HachimoDock/issues)，附客户端/固件版本、系统和复现步骤。提交前请移除日志、对话及设备信息中的个人数据。安全问题请按 [SECURITY.md](SECURITY.md) 私下反馈。
 
 ## 下载完整性
 
