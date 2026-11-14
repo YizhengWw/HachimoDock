@@ -56,14 +56,14 @@
     "componentCount": 27,
     "physicalDeviceValidationThisPackagingRun": false,
     "windowsRuntimeValidationThisPackagingRun": false,
-    "scope": "The macOS and Windows installer payloads and four factory kits were inspected. macOS uses ad hoc signing and is not notarized. The Windows installer is unsigned."
+    "scope": "The macOS and Windows installer payloads and four factory kits were inspected. The macOS disk image and app passed Developer ID and Apple notarization checks. The Windows installer is unsigned."
   },
   "artifacts": [
     {
       "file": "HachimiDock_0.1.230_macOS-arm64.dmg",
       "role": "macos",
-      "bytes": 178973281,
-      "sha256": "4ac4c65fd3abaa1ca044a4468f399af24e3a13783f730d5ad19571b06896f0f1"
+      "bytes": 179880864,
+      "sha256": "91add7c9ea078b8a1f4c1f92085b5187fb38b013c177ddf17ad7b54791e38cc5"
     },
     {
       "file": "HachimiDock_0.1.230_Windows-x64-setup.exe",
@@ -99,7 +99,7 @@
       "file": "SHA256SUMS",
       "role": "checksums",
       "bytes": 712,
-      "sha256": "a1dd2dfbd2ff7664eaf92eaa509c51d11e2d2be1dbdfefee4a4f39b2801b7e2e"
+      "sha256": "aa42298c1e91cc6cb2bcaa43aa4582f3af090a34fd6672184fea0e77c2811d9f"
     }
   ]
 }

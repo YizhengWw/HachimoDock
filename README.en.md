@@ -33,7 +33,7 @@ Online recognition, generation, data providers and Agents may require internet a
 
 ## Installation and default controls
 
-This macOS release uses ad hoc signing and has not been notarized by Apple. The Windows installer is unsigned. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
+The macOS installer is Developer ID signed and notarized by Apple. The Windows installer is unsigned. Verify its source and checksum before following the operating system's security prompts. Do not disable Gatekeeper or remove protections from unknown downloads. On macOS, allow the client under **System Settings → Privacy & Security → Accessibility** for Agent input.
 
 SW1 short press and joystick centre confirm; SW2 short press switches pet/component views; SW3 short press returns. Long-press SW3 to open device settings. Joystick directions select sessions/components or perform component actions. These defaults can be changed in the manager. Confirming voice input is separate from approving an Agent's tool permissions.
 

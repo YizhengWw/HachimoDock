@@ -46,7 +46,7 @@ HachimoDock（哈基米机）是面向 AI Agent 的桌面交互终端，由 Wind
 
 0.1.230 新增独立设备设置与局域网发现配对，更新 PetUI 创作、WASM 试玩、组件同步与社区发布流程，并加入「想法与待办」和 WASM 离线音频。客户端内置 WiFi6 与 Pico 的 v1、v3 升级固件；完整烧录请同时核对板型和芯片修订版。请按 [v0.1.230 发布页](https://github.com/ai-maker-lab/HachimoDock/releases/tag/v0.1.230) 的 `SHA256SUMS` 核对下载。
 
-当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。本版 macOS 安装包使用临时签名，未通过 Apple 公证。Windows 安装器未做数字签名，首次运行可能出现系统提示。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
+当前预编译客户端支持 Apple silicon Mac 和 Windows x64；不提供 Intel Mac 或 Linux 安装包。本版 macOS 安装包已使用 Developer ID 签名并通过 Apple 公证。Windows 安装器未做数字签名，首次运行可能出现系统提示。公开源码与安装包的对应关系见发布说明；[PC 构建](pc/README.md)和[固件构建](firmware/BUILD.md)文档以当前源码为准。
 
 ## 核心能力
 
